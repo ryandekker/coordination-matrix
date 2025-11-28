@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useSearchParams } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import {
   LayoutDashboard,
@@ -16,19 +16,39 @@ import {
 } from 'lucide-react'
 
 const navigation = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'All Tasks', href: '/tasks', icon: ListTodo },
-  { name: 'Awaiting Review', href: '/tasks?view=awaiting-review', icon: Clock },
-  { name: 'HITL Queue', href: '/tasks?view=hitl', icon: AlertCircle },
-  { name: 'Completed', href: '/tasks?view=completed', icon: CheckCircle2 },
-  { name: 'Workflows', href: '/workflows', icon: Workflow },
-  { name: 'Users', href: '/users', icon: Users },
-  { name: 'Settings', href: '/settings', icon: Settings },
-  { name: 'Field Config', href: '/settings/fields', icon: Cog },
+  { name: 'Dashboard', href: '/', icon: LayoutDashboard, exact: true },
+  { name: 'All Tasks', href: '/tasks', icon: ListTodo, exact: true },
+  { name: 'Awaiting Review', href: '/tasks?view=awaiting-review', icon: Clock, exact: false },
+  { name: 'HITL Queue', href: '/tasks?view=hitl', icon: AlertCircle, exact: false },
+  { name: 'Completed', href: '/tasks?view=completed', icon: CheckCircle2, exact: false },
+  { name: 'Workflows', href: '/workflows', icon: Workflow, exact: true },
+  { name: 'Users', href: '/users', icon: Users, exact: true },
+  { name: 'Settings', href: '/settings', icon: Settings, exact: true },
+  { name: 'Field Config', href: '/settings/fields', icon: Cog, exact: true },
 ]
 
 export function Sidebar() {
   const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const currentView = searchParams.get('view')
+
+  const isItemActive = (item: typeof navigation[0]) => {
+    const [itemPath, itemQuery] = item.href.split('?')
+    const itemView = itemQuery ? new URLSearchParams(itemQuery).get('view') : null
+
+    // For items with query params (view filters)
+    if (itemView) {
+      return pathname === itemPath && currentView === itemView
+    }
+
+    // For exact match items
+    if (item.exact) {
+      return pathname === itemPath && !currentView
+    }
+
+    // For non-exact items without view params
+    return pathname.startsWith(itemPath)
+  }
 
   return (
     <div className="flex h-full w-64 flex-col border-r bg-card">
@@ -42,8 +62,7 @@ export function Sidebar() {
       </div>
       <nav className="flex-1 space-y-1 p-4">
         {navigation.map((item) => {
-          const isActive = pathname === item.href ||
-            (item.href !== '/' && pathname.startsWith(item.href.split('?')[0]))
+          const isActive = isItemActive(item)
           return (
             <Link
               key={item.name}

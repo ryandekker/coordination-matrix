@@ -226,14 +226,14 @@ export function TaskModal({
             <div className="space-y-2">
               <label className="text-sm font-medium">Assignee</label>
               <Select
-                value={watch('assigneeId') || ''}
-                onValueChange={(val) => setValue('assigneeId', val || null)}
+                value={watch('assigneeId') || '_unassigned'}
+                onValueChange={(val) => setValue('assigneeId', val === '_unassigned' ? null : val)}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select assignee" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Unassigned</SelectItem>
+                  <SelectItem value="_unassigned">Unassigned</SelectItem>
                   {users.map((user) => (
                     <SelectItem key={user._id} value={user._id}>
                       {user.displayName}
