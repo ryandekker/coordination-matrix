@@ -992,25 +992,108 @@ const workflows = [
     description: 'Standard workflow for AI-assisted content generation with human review',
     isActive: true,
     steps: [
-      { name: 'Data Collection', type: 'automated', hitlPhase: 'none' },
-      { name: 'AI Analysis', type: 'automated', hitlPhase: 'none' },
-      { name: 'Content Generation', type: 'automated', hitlPhase: 'post_execution' },
-      { name: 'Human Review', type: 'manual', hitlPhase: 'approval_required' },
-      { name: 'Publication', type: 'automated', hitlPhase: 'none' },
+      { id: ObjectId().toString(), name: 'Data Collection', type: 'automated', hitlPhase: 'none' },
+      { id: ObjectId().toString(), name: 'AI Analysis', type: 'automated', hitlPhase: 'none' },
+      { id: ObjectId().toString(), name: 'Content Generation', type: 'automated', hitlPhase: 'post_execution' },
+      { id: ObjectId().toString(), name: 'Human Review', type: 'manual', hitlPhase: 'approval_required' },
+      { id: ObjectId().toString(), name: 'Publication', type: 'automated', hitlPhase: 'none' },
     ],
+    mermaidDiagram: `flowchart TD
+    step0["Data Collection"]
+    step1["AI Analysis"]
+    step2["Content Generation"]:::hitl
+    step3(("Human Review"))
+    step4["Publication"]
+    step0 --> step1
+    step1 --> step2
+    step2 --> step3
+    step3 --> step4
+
+    classDef hitl fill:#8B5CF6,color:#fff
+    classDef manual fill:#EC4899,color:#fff
+    class step3 manual`,
     createdAt: new Date(),
+    updatedAt: new Date(),
   },
   {
     name: 'Data Processing Pipeline',
     description: 'Batch data processing with error handling',
     isActive: true,
     steps: [
-      { name: 'Ingestion', type: 'automated', hitlPhase: 'none' },
-      { name: 'Validation', type: 'automated', hitlPhase: 'on_error' },
-      { name: 'Transformation', type: 'automated', hitlPhase: 'none' },
-      { name: 'Output', type: 'automated', hitlPhase: 'none' },
+      { id: ObjectId().toString(), name: 'Ingestion', type: 'automated', hitlPhase: 'none' },
+      { id: ObjectId().toString(), name: 'Validation', type: 'automated', hitlPhase: 'on_error' },
+      { id: ObjectId().toString(), name: 'Transformation', type: 'automated', hitlPhase: 'none' },
+      { id: ObjectId().toString(), name: 'Output', type: 'automated', hitlPhase: 'none' },
     ],
+    mermaidDiagram: `flowchart TD
+    step0["Ingestion"]
+    step1["Validation"]:::hitl
+    step2["Transformation"]
+    step3["Output"]
+    step0 --> step1
+    step1 --> step2
+    step2 --> step3
+
+    classDef hitl fill:#8B5CF6,color:#fff
+    classDef manual fill:#EC4899,color:#fff`,
     createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    name: 'Customer Support Triage',
+    description: 'AI-assisted customer support with escalation to human agents',
+    isActive: true,
+    steps: [
+      { id: ObjectId().toString(), name: 'Ticket Intake', type: 'automated', hitlPhase: 'none' },
+      { id: ObjectId().toString(), name: 'AI Classification', type: 'automated', hitlPhase: 'none' },
+      { id: ObjectId().toString(), name: 'Auto Response', type: 'automated', hitlPhase: 'pre_execution' },
+      { id: ObjectId().toString(), name: 'Human Escalation', type: 'manual', hitlPhase: 'approval_required' },
+      { id: ObjectId().toString(), name: 'Resolution', type: 'manual', hitlPhase: 'none' },
+    ],
+    mermaidDiagram: `flowchart TD
+    step0["Ticket Intake"]
+    step1["AI Classification"]
+    step2["Auto Response"]:::hitl
+    step3(("Human Escalation"))
+    step4(("Resolution"))
+    step0 --> step1
+    step1 --> step2
+    step2 --> step3
+    step3 --> step4
+
+    classDef hitl fill:#8B5CF6,color:#fff
+    classDef manual fill:#EC4899,color:#fff
+    class step3,step4 manual`,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    name: 'Document Analysis Workflow',
+    description: 'Extract and analyze information from documents with human verification',
+    isActive: false,
+    steps: [
+      { id: ObjectId().toString(), name: 'Document Upload', type: 'automated', hitlPhase: 'none' },
+      { id: ObjectId().toString(), name: 'OCR Processing', type: 'automated', hitlPhase: 'none' },
+      { id: ObjectId().toString(), name: 'Data Extraction', type: 'automated', hitlPhase: 'during_execution' },
+      { id: ObjectId().toString(), name: 'Quality Check', type: 'manual', hitlPhase: 'approval_required' },
+      { id: ObjectId().toString(), name: 'Data Export', type: 'automated', hitlPhase: 'none' },
+    ],
+    mermaidDiagram: `flowchart TD
+    step0["Document Upload"]
+    step1["OCR Processing"]
+    step2["Data Extraction"]:::hitl
+    step3(("Quality Check"))
+    step4["Data Export"]
+    step0 --> step1
+    step1 --> step2
+    step2 --> step3
+    step3 --> step4
+
+    classDef hitl fill:#8B5CF6,color:#fff
+    classDef manual fill:#EC4899,color:#fff
+    class step3 manual`,
+    createdAt: new Date(),
+    updatedAt: new Date(),
   },
 ];
 
