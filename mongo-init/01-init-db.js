@@ -1,0 +1,235 @@
+// MongoDB Initialization Script
+// This script runs when the container is first created
+
+db = db.getSiblingDB('coordination_matrix');
+
+// ============================================================================
+// TASKS COLLECTION - Core task management with nesting support
+// ============================================================================
+db.createCollection('tasks', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['title', 'status', 'createdAt'],
+      properties: {
+        title: {
+          bsonType: 'string',
+          description: 'Task title - required'
+        },
+        description: {
+          bsonType: 'string',
+          description: 'Detailed task description'
+        },
+        status: {
+          bsonType: 'string',
+          enum: ['pending', 'in_progress', 'waiting_review', 'waiting_human', 'completed', 'failed', 'cancelled'],
+          description: 'Current task status'
+        },
+        priority: {
+          bsonType: 'string',
+          enum: ['low', 'medium', 'high', 'critical'],
+          description: 'Task priority level'
+        },
+        parentId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Parent task ID for nested tasks'
+        },
+        rootId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Root task ID for deeply nested hierarchies'
+        },
+        depth: {
+          bsonType: 'int',
+          minimum: 0,
+          description: 'Nesting depth level (0 = root task)'
+        },
+        path: {
+          bsonType: 'array',
+          items: { bsonType: 'objectId' },
+          description: 'Materialized path of ancestor IDs'
+        },
+        childCount: {
+          bsonType: 'int',
+          minimum: 0,
+          description: 'Number of direct children'
+        },
+        // Human-in-the-loop flags
+        hitlRequired: {
+          bsonType: 'bool',
+          description: 'Whether human review is required'
+        },
+        hitlPhase: {
+          bsonType: 'string',
+          enum: ['none', 'pre_execution', 'during_execution', 'post_execution', 'on_error', 'approval_required'],
+          description: 'Which phase requires human intervention'
+        },
+        hitlStatus: {
+          bsonType: 'string',
+          enum: ['not_required', 'pending', 'in_review', 'approved', 'rejected', 'escalated'],
+          description: 'Current HITL review status'
+        },
+        hitlAssigneeId: {
+          bsonType: ['objectId', 'null'],
+          description: 'User assigned to review this task'
+        },
+        hitlNotes: {
+          bsonType: 'string',
+          description: 'Notes from human reviewer'
+        },
+        // Workflow metadata
+        workflowId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Associated workflow definition'
+        },
+        workflowStepIndex: {
+          bsonType: 'int',
+          description: 'Current step in workflow'
+        },
+        // External work tracking
+        externalJobId: {
+          bsonType: 'string',
+          description: 'ID for external job tracking'
+        },
+        externalJobStatus: {
+          bsonType: 'string',
+          description: 'Status from external system'
+        },
+        externalJobResult: {
+          bsonType: 'object',
+          description: 'Result data from external job'
+        },
+        // Assignment and ownership
+        assigneeId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Assigned user ID'
+        },
+        createdById: {
+          bsonType: ['objectId', 'null'],
+          description: 'Creator user ID'
+        },
+        teamId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Owning team ID'
+        },
+        // Custom data
+        metadata: {
+          bsonType: 'object',
+          description: 'Flexible metadata storage'
+        },
+        tags: {
+          bsonType: 'array',
+          items: { bsonType: 'string' },
+          description: 'Task tags for categorization'
+        },
+        // Timestamps
+        createdAt: {
+          bsonType: 'date',
+          description: 'Creation timestamp'
+        },
+        updatedAt: {
+          bsonType: 'date',
+          description: 'Last update timestamp'
+        },
+        startedAt: {
+          bsonType: ['date', 'null'],
+          description: 'When task execution started'
+        },
+        completedAt: {
+          bsonType: ['date', 'null'],
+          description: 'When task was completed'
+        },
+        dueAt: {
+          bsonType: ['date', 'null'],
+          description: 'Due date for the task'
+        }
+      }
+    }
+  }
+});
+
+// Task indexes
+db.tasks.createIndex({ status: 1 });
+db.tasks.createIndex({ parentId: 1 });
+db.tasks.createIndex({ rootId: 1 });
+db.tasks.createIndex({ path: 1 });
+db.tasks.createIndex({ hitlRequired: 1, hitlStatus: 1 });
+db.tasks.createIndex({ assigneeId: 1 });
+db.tasks.createIndex({ workflowId: 1 });
+db.tasks.createIndex({ createdAt: -1 });
+db.tasks.createIndex({ tags: 1 });
+db.tasks.createIndex({ 'metadata.type': 1 });
+db.tasks.createIndex({ title: 'text', description: 'text' });
+
+// ============================================================================
+// FIELD CONFIGURATIONS - Dynamic field definitions
+// ============================================================================
+db.createCollection('field_configs');
+
+db.field_configs.createIndex({ collectionName: 1, fieldPath: 1 }, { unique: true });
+db.field_configs.createIndex({ collectionName: 1, displayOrder: 1 });
+
+// ============================================================================
+// LOOKUP TABLES - For human-readable name resolution
+// ============================================================================
+db.createCollection('lookups');
+
+db.lookups.createIndex({ type: 1, code: 1 }, { unique: true });
+db.lookups.createIndex({ type: 1, isActive: 1 });
+
+// ============================================================================
+// USER PREFERENCES - Per-user column/view configurations
+// ============================================================================
+db.createCollection('user_preferences');
+
+db.user_preferences.createIndex({ userId: 1, viewId: 1 }, { unique: true });
+
+// ============================================================================
+// VIEWS - Saved view configurations
+// ============================================================================
+db.createCollection('views');
+
+db.views.createIndex({ collectionName: 1, isDefault: 1 });
+db.views.createIndex({ createdById: 1 });
+
+// ============================================================================
+// USERS - Basic user management
+// ============================================================================
+db.createCollection('users');
+
+db.users.createIndex({ email: 1 }, { unique: true });
+db.users.createIndex({ isActive: 1 });
+
+// ============================================================================
+// TEAMS - Team management
+// ============================================================================
+db.createCollection('teams');
+
+db.teams.createIndex({ name: 1 }, { unique: true });
+
+// ============================================================================
+// WORKFLOWS - Workflow definitions
+// ============================================================================
+db.createCollection('workflows');
+
+db.workflows.createIndex({ name: 1 });
+db.workflows.createIndex({ isActive: 1 });
+
+// ============================================================================
+// EXTERNAL JOBS - Queue for external work
+// ============================================================================
+db.createCollection('external_jobs');
+
+db.external_jobs.createIndex({ status: 1, createdAt: 1 });
+db.external_jobs.createIndex({ taskId: 1 });
+db.external_jobs.createIndex({ type: 1 });
+
+// ============================================================================
+// AUDIT LOG - Track changes
+// ============================================================================
+db.createCollection('audit_logs');
+
+db.audit_logs.createIndex({ collectionName: 1, documentId: 1 });
+db.audit_logs.createIndex({ userId: 1 });
+db.audit_logs.createIndex({ createdAt: -1 });
+
+print('Database initialization complete!');

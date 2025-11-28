@@ -1,0 +1,703 @@
+// MongoDB Seed Data
+// Initial configurations and sample data
+
+db = db.getSiblingDB('coordination_matrix');
+
+// ============================================================================
+// LOOKUP TABLES - Status codes, priority levels, etc.
+// ============================================================================
+
+const lookups = [
+  // Task statuses
+  { type: 'task_status', code: 'pending', displayName: 'Pending', color: '#6B7280', icon: 'clock', sortOrder: 1, isActive: true },
+  { type: 'task_status', code: 'in_progress', displayName: 'In Progress', color: '#3B82F6', icon: 'play', sortOrder: 2, isActive: true },
+  { type: 'task_status', code: 'waiting_review', displayName: 'Waiting Review', color: '#F59E0B', icon: 'eye', sortOrder: 3, isActive: true },
+  { type: 'task_status', code: 'waiting_human', displayName: 'Awaiting Human Input', color: '#8B5CF6', icon: 'user', sortOrder: 4, isActive: true },
+  { type: 'task_status', code: 'completed', displayName: 'Completed', color: '#10B981', icon: 'check', sortOrder: 5, isActive: true },
+  { type: 'task_status', code: 'failed', displayName: 'Failed', color: '#EF4444', icon: 'x', sortOrder: 6, isActive: true },
+  { type: 'task_status', code: 'cancelled', displayName: 'Cancelled', color: '#9CA3AF', icon: 'ban', sortOrder: 7, isActive: true },
+
+  // Priority levels
+  { type: 'priority', code: 'low', displayName: 'Low', color: '#6B7280', icon: 'arrow-down', sortOrder: 1, isActive: true },
+  { type: 'priority', code: 'medium', displayName: 'Medium', color: '#F59E0B', icon: 'minus', sortOrder: 2, isActive: true },
+  { type: 'priority', code: 'high', displayName: 'High', color: '#F97316', icon: 'arrow-up', sortOrder: 3, isActive: true },
+  { type: 'priority', code: 'critical', displayName: 'Critical', color: '#EF4444', icon: 'alert-triangle', sortOrder: 4, isActive: true },
+
+  // HITL phases
+  { type: 'hitl_phase', code: 'none', displayName: 'No HITL Required', color: '#6B7280', sortOrder: 1, isActive: true },
+  { type: 'hitl_phase', code: 'pre_execution', displayName: 'Before Execution', color: '#3B82F6', sortOrder: 2, isActive: true },
+  { type: 'hitl_phase', code: 'during_execution', displayName: 'During Execution', color: '#F59E0B', sortOrder: 3, isActive: true },
+  { type: 'hitl_phase', code: 'post_execution', displayName: 'After Execution', color: '#10B981', sortOrder: 4, isActive: true },
+  { type: 'hitl_phase', code: 'on_error', displayName: 'On Error Only', color: '#EF4444', sortOrder: 5, isActive: true },
+  { type: 'hitl_phase', code: 'approval_required', displayName: 'Approval Required', color: '#8B5CF6', sortOrder: 6, isActive: true },
+
+  // HITL statuses
+  { type: 'hitl_status', code: 'not_required', displayName: 'Not Required', color: '#6B7280', sortOrder: 1, isActive: true },
+  { type: 'hitl_status', code: 'pending', displayName: 'Pending Review', color: '#F59E0B', sortOrder: 2, isActive: true },
+  { type: 'hitl_status', code: 'in_review', displayName: 'In Review', color: '#3B82F6', sortOrder: 3, isActive: true },
+  { type: 'hitl_status', code: 'approved', displayName: 'Approved', color: '#10B981', sortOrder: 4, isActive: true },
+  { type: 'hitl_status', code: 'rejected', displayName: 'Rejected', color: '#EF4444', sortOrder: 5, isActive: true },
+  { type: 'hitl_status', code: 'escalated', displayName: 'Escalated', color: '#DC2626', sortOrder: 6, isActive: true },
+
+  // External job types
+  { type: 'external_job_type', code: 'ai_generation', displayName: 'AI Content Generation', sortOrder: 1, isActive: true },
+  { type: 'external_job_type', code: 'ai_analysis', displayName: 'AI Analysis', sortOrder: 2, isActive: true },
+  { type: 'external_job_type', code: 'data_processing', displayName: 'Data Processing', sortOrder: 3, isActive: true },
+  { type: 'external_job_type', code: 'integration', displayName: 'External Integration', sortOrder: 4, isActive: true },
+  { type: 'external_job_type', code: 'notification', displayName: 'Notification', sortOrder: 5, isActive: true },
+];
+
+db.lookups.insertMany(lookups);
+
+// ============================================================================
+// FIELD CONFIGURATIONS - Define how fields are displayed and edited
+// ============================================================================
+
+const fieldConfigs = [
+  // Task collection fields
+  {
+    collectionName: 'tasks',
+    fieldPath: 'title',
+    displayName: 'Title',
+    fieldType: 'text',
+    isRequired: true,
+    isEditable: true,
+    isSearchable: true,
+    isSortable: true,
+    isFilterable: true,
+    displayOrder: 1,
+    width: 300,
+    minWidth: 150,
+    validation: { minLength: 1, maxLength: 500 },
+    defaultVisible: true,
+  },
+  {
+    collectionName: 'tasks',
+    fieldPath: 'description',
+    displayName: 'Description',
+    fieldType: 'textarea',
+    isRequired: false,
+    isEditable: true,
+    isSearchable: true,
+    isSortable: false,
+    isFilterable: false,
+    displayOrder: 2,
+    width: 400,
+    defaultVisible: false,
+  },
+  {
+    collectionName: 'tasks',
+    fieldPath: 'status',
+    displayName: 'Status',
+    fieldType: 'select',
+    isRequired: true,
+    isEditable: true,
+    isSearchable: false,
+    isSortable: true,
+    isFilterable: true,
+    displayOrder: 3,
+    width: 150,
+    lookupType: 'task_status',
+    defaultValue: 'pending',
+    defaultVisible: true,
+    renderAs: 'badge',
+  },
+  {
+    collectionName: 'tasks',
+    fieldPath: 'priority',
+    displayName: 'Priority',
+    fieldType: 'select',
+    isRequired: false,
+    isEditable: true,
+    isSearchable: false,
+    isSortable: true,
+    isFilterable: true,
+    displayOrder: 4,
+    width: 120,
+    lookupType: 'priority',
+    defaultValue: 'medium',
+    defaultVisible: true,
+    renderAs: 'badge',
+  },
+  {
+    collectionName: 'tasks',
+    fieldPath: 'assigneeId',
+    displayName: 'Assignee',
+    fieldType: 'reference',
+    isRequired: false,
+    isEditable: true,
+    isSearchable: false,
+    isSortable: true,
+    isFilterable: true,
+    displayOrder: 5,
+    width: 180,
+    referenceCollection: 'users',
+    referenceDisplayField: 'displayName',
+    defaultVisible: true,
+  },
+  {
+    collectionName: 'tasks',
+    fieldPath: 'hitlRequired',
+    displayName: 'HITL Required',
+    fieldType: 'boolean',
+    isRequired: false,
+    isEditable: true,
+    isSearchable: false,
+    isSortable: true,
+    isFilterable: true,
+    displayOrder: 6,
+    width: 120,
+    defaultValue: false,
+    defaultVisible: true,
+  },
+  {
+    collectionName: 'tasks',
+    fieldPath: 'hitlPhase',
+    displayName: 'HITL Phase',
+    fieldType: 'select',
+    isRequired: false,
+    isEditable: true,
+    isSearchable: false,
+    isSortable: true,
+    isFilterable: true,
+    displayOrder: 7,
+    width: 150,
+    lookupType: 'hitl_phase',
+    defaultValue: 'none',
+    defaultVisible: false,
+    renderAs: 'badge',
+  },
+  {
+    collectionName: 'tasks',
+    fieldPath: 'hitlStatus',
+    displayName: 'Review Status',
+    fieldType: 'select',
+    isRequired: false,
+    isEditable: true,
+    isSearchable: false,
+    isSortable: true,
+    isFilterable: true,
+    displayOrder: 8,
+    width: 150,
+    lookupType: 'hitl_status',
+    defaultValue: 'not_required',
+    defaultVisible: true,
+    renderAs: 'badge',
+  },
+  {
+    collectionName: 'tasks',
+    fieldPath: 'hitlAssigneeId',
+    displayName: 'Reviewer',
+    fieldType: 'reference',
+    isRequired: false,
+    isEditable: true,
+    isSearchable: false,
+    isSortable: true,
+    isFilterable: true,
+    displayOrder: 9,
+    width: 180,
+    referenceCollection: 'users',
+    referenceDisplayField: 'displayName',
+    defaultVisible: false,
+  },
+  {
+    collectionName: 'tasks',
+    fieldPath: 'tags',
+    displayName: 'Tags',
+    fieldType: 'tags',
+    isRequired: false,
+    isEditable: true,
+    isSearchable: true,
+    isSortable: false,
+    isFilterable: true,
+    displayOrder: 10,
+    width: 200,
+    defaultVisible: true,
+  },
+  {
+    collectionName: 'tasks',
+    fieldPath: 'dueAt',
+    displayName: 'Due Date',
+    fieldType: 'datetime',
+    isRequired: false,
+    isEditable: true,
+    isSearchable: false,
+    isSortable: true,
+    isFilterable: true,
+    displayOrder: 11,
+    width: 160,
+    defaultVisible: true,
+  },
+  {
+    collectionName: 'tasks',
+    fieldPath: 'createdAt',
+    displayName: 'Created',
+    fieldType: 'datetime',
+    isRequired: false,
+    isEditable: false,
+    isSearchable: false,
+    isSortable: true,
+    isFilterable: true,
+    displayOrder: 12,
+    width: 160,
+    defaultVisible: true,
+  },
+  {
+    collectionName: 'tasks',
+    fieldPath: 'updatedAt',
+    displayName: 'Updated',
+    fieldType: 'datetime',
+    isRequired: false,
+    isEditable: false,
+    isSearchable: false,
+    isSortable: true,
+    isFilterable: true,
+    displayOrder: 13,
+    width: 160,
+    defaultVisible: false,
+  },
+  {
+    collectionName: 'tasks',
+    fieldPath: 'createdById',
+    displayName: 'Created By',
+    fieldType: 'reference',
+    isRequired: false,
+    isEditable: false,
+    isSearchable: false,
+    isSortable: true,
+    isFilterable: true,
+    displayOrder: 14,
+    width: 180,
+    referenceCollection: 'users',
+    referenceDisplayField: 'displayName',
+    defaultVisible: false,
+  },
+  {
+    collectionName: 'tasks',
+    fieldPath: 'teamId',
+    displayName: 'Team',
+    fieldType: 'reference',
+    isRequired: false,
+    isEditable: true,
+    isSearchable: false,
+    isSortable: true,
+    isFilterable: true,
+    displayOrder: 15,
+    width: 180,
+    referenceCollection: 'teams',
+    referenceDisplayField: 'name',
+    defaultVisible: false,
+  },
+  {
+    collectionName: 'tasks',
+    fieldPath: 'childCount',
+    displayName: 'Subtasks',
+    fieldType: 'number',
+    isRequired: false,
+    isEditable: false,
+    isSearchable: false,
+    isSortable: true,
+    isFilterable: false,
+    displayOrder: 16,
+    width: 100,
+    defaultVisible: true,
+  },
+  {
+    collectionName: 'tasks',
+    fieldPath: 'externalJobId',
+    displayName: 'External Job ID',
+    fieldType: 'text',
+    isRequired: false,
+    isEditable: false,
+    isSearchable: true,
+    isSortable: false,
+    isFilterable: false,
+    displayOrder: 17,
+    width: 200,
+    defaultVisible: false,
+  },
+  {
+    collectionName: 'tasks',
+    fieldPath: 'externalJobStatus',
+    displayName: 'External Status',
+    fieldType: 'text',
+    isRequired: false,
+    isEditable: false,
+    isSearchable: false,
+    isSortable: true,
+    isFilterable: true,
+    displayOrder: 18,
+    width: 150,
+    defaultVisible: false,
+  },
+];
+
+db.field_configs.insertMany(fieldConfigs);
+
+// ============================================================================
+// DEFAULT VIEWS
+// ============================================================================
+
+const views = [
+  {
+    name: 'All Tasks',
+    collectionName: 'tasks',
+    isDefault: true,
+    isSystem: true,
+    filters: {},
+    sorting: [{ field: 'createdAt', direction: 'desc' }],
+    visibleColumns: ['title', 'status', 'priority', 'assigneeId', 'hitlRequired', 'hitlStatus', 'dueAt', 'createdAt', 'childCount'],
+    createdAt: new Date(),
+  },
+  {
+    name: 'My Tasks',
+    collectionName: 'tasks',
+    isDefault: false,
+    isSystem: true,
+    filters: { assigneeId: '{{currentUserId}}' },
+    sorting: [{ field: 'priority', direction: 'desc' }, { field: 'dueAt', direction: 'asc' }],
+    visibleColumns: ['title', 'status', 'priority', 'hitlStatus', 'dueAt', 'tags'],
+    createdAt: new Date(),
+  },
+  {
+    name: 'Awaiting Review',
+    collectionName: 'tasks',
+    isDefault: false,
+    isSystem: true,
+    filters: { hitlStatus: { $in: ['pending', 'in_review'] } },
+    sorting: [{ field: 'createdAt', direction: 'asc' }],
+    visibleColumns: ['title', 'status', 'priority', 'hitlPhase', 'hitlStatus', 'hitlAssigneeId', 'createdAt'],
+    createdAt: new Date(),
+  },
+  {
+    name: 'Failed Tasks',
+    collectionName: 'tasks',
+    isDefault: false,
+    isSystem: true,
+    filters: { status: 'failed' },
+    sorting: [{ field: 'updatedAt', direction: 'desc' }],
+    visibleColumns: ['title', 'status', 'priority', 'externalJobStatus', 'updatedAt', 'assigneeId'],
+    createdAt: new Date(),
+  },
+  {
+    name: 'Human in the Loop',
+    collectionName: 'tasks',
+    isDefault: false,
+    isSystem: true,
+    filters: { hitlRequired: true },
+    sorting: [{ field: 'hitlStatus', direction: 'asc' }, { field: 'createdAt', direction: 'asc' }],
+    visibleColumns: ['title', 'status', 'hitlPhase', 'hitlStatus', 'hitlAssigneeId', 'hitlNotes', 'dueAt'],
+    createdAt: new Date(),
+  },
+];
+
+db.views.insertMany(views);
+
+// ============================================================================
+// SAMPLE USERS
+// ============================================================================
+
+const users = [
+  {
+    email: 'admin@example.com',
+    displayName: 'Admin User',
+    role: 'admin',
+    isActive: true,
+    createdAt: new Date(),
+  },
+  {
+    email: 'operator@example.com',
+    displayName: 'AI Operator',
+    role: 'operator',
+    isActive: true,
+    createdAt: new Date(),
+  },
+  {
+    email: 'reviewer@example.com',
+    displayName: 'Human Reviewer',
+    role: 'reviewer',
+    isActive: true,
+    createdAt: new Date(),
+  },
+];
+
+const userResult = db.users.insertMany(users);
+const userIds = Object.values(userResult.insertedIds);
+
+// ============================================================================
+// SAMPLE TEAMS
+// ============================================================================
+
+const teams = [
+  {
+    name: 'AI Operations',
+    description: 'Team managing AI workflow operations',
+    memberIds: userIds,
+    createdAt: new Date(),
+  },
+  {
+    name: 'Content Review',
+    description: 'Human review team for AI-generated content',
+    memberIds: [userIds[2]],
+    createdAt: new Date(),
+  },
+];
+
+const teamResult = db.teams.insertMany(teams);
+const teamIds = Object.values(teamResult.insertedIds);
+
+// ============================================================================
+// SAMPLE TASKS WITH NESTING
+// ============================================================================
+
+const now = new Date();
+const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+// Root task 1
+const rootTask1Id = ObjectId();
+const rootTask1 = {
+  _id: rootTask1Id,
+  title: 'Generate Q4 Marketing Report',
+  description: 'Create comprehensive marketing analysis report for Q4 using AI-assisted data analysis',
+  status: 'in_progress',
+  priority: 'high',
+  parentId: null,
+  rootId: null,
+  depth: 0,
+  path: [],
+  childCount: 3,
+  hitlRequired: true,
+  hitlPhase: 'post_execution',
+  hitlStatus: 'not_required',
+  hitlAssigneeId: userIds[2],
+  workflowId: null,
+  assigneeId: userIds[1],
+  createdById: userIds[0],
+  teamId: teamIds[0],
+  metadata: { reportType: 'quarterly', quarter: 'Q4', year: 2024 },
+  tags: ['marketing', 'report', 'ai-generated'],
+  createdAt: now,
+  updatedAt: now,
+  dueAt: nextWeek,
+};
+
+// Child tasks for root task 1
+const childTask1_1Id = ObjectId();
+const childTask1_1 = {
+  _id: childTask1_1Id,
+  title: 'Gather sales data from CRM',
+  description: 'Extract and aggregate sales metrics from CRM system',
+  status: 'completed',
+  priority: 'high',
+  parentId: rootTask1Id,
+  rootId: rootTask1Id,
+  depth: 1,
+  path: [rootTask1Id],
+  childCount: 0,
+  hitlRequired: false,
+  hitlPhase: 'none',
+  hitlStatus: 'not_required',
+  assigneeId: userIds[1],
+  createdById: userIds[0],
+  teamId: teamIds[0],
+  tags: ['data-extraction'],
+  createdAt: now,
+  updatedAt: now,
+  completedAt: now,
+};
+
+const childTask1_2Id = ObjectId();
+const childTask1_2 = {
+  _id: childTask1_2Id,
+  title: 'Analyze customer engagement metrics',
+  description: 'AI analysis of customer engagement patterns and trends',
+  status: 'in_progress',
+  priority: 'high',
+  parentId: rootTask1Id,
+  rootId: rootTask1Id,
+  depth: 1,
+  path: [rootTask1Id],
+  childCount: 2,
+  hitlRequired: true,
+  hitlPhase: 'during_execution',
+  hitlStatus: 'pending',
+  hitlAssigneeId: userIds[2],
+  assigneeId: userIds[1],
+  createdById: userIds[0],
+  teamId: teamIds[0],
+  tags: ['ai-analysis', 'engagement'],
+  createdAt: now,
+  updatedAt: now,
+  dueAt: tomorrow,
+};
+
+// Nested sub-tasks (depth 2)
+const subTask1_2_1 = {
+  _id: ObjectId(),
+  title: 'Process email campaign data',
+  status: 'waiting_human',
+  priority: 'medium',
+  parentId: childTask1_2Id,
+  rootId: rootTask1Id,
+  depth: 2,
+  path: [rootTask1Id, childTask1_2Id],
+  childCount: 0,
+  hitlRequired: true,
+  hitlPhase: 'approval_required',
+  hitlStatus: 'in_review',
+  hitlAssigneeId: userIds[2],
+  hitlNotes: 'Please verify the data accuracy before proceeding',
+  assigneeId: userIds[1],
+  createdById: userIds[0],
+  teamId: teamIds[0],
+  tags: ['email', 'data'],
+  createdAt: now,
+  updatedAt: now,
+};
+
+const subTask1_2_2 = {
+  _id: ObjectId(),
+  title: 'Analyze social media metrics',
+  status: 'pending',
+  priority: 'medium',
+  parentId: childTask1_2Id,
+  rootId: rootTask1Id,
+  depth: 2,
+  path: [rootTask1Id, childTask1_2Id],
+  childCount: 0,
+  hitlRequired: false,
+  hitlPhase: 'none',
+  hitlStatus: 'not_required',
+  assigneeId: userIds[1],
+  createdById: userIds[0],
+  teamId: teamIds[0],
+  tags: ['social-media', 'metrics'],
+  createdAt: now,
+  updatedAt: now,
+};
+
+const childTask1_3 = {
+  _id: ObjectId(),
+  title: 'Generate report draft',
+  description: 'AI-powered report generation based on analyzed data',
+  status: 'pending',
+  priority: 'high',
+  parentId: rootTask1Id,
+  rootId: rootTask1Id,
+  depth: 1,
+  path: [rootTask1Id],
+  childCount: 0,
+  hitlRequired: true,
+  hitlPhase: 'post_execution',
+  hitlStatus: 'not_required',
+  hitlAssigneeId: userIds[2],
+  assigneeId: userIds[1],
+  createdById: userIds[0],
+  teamId: teamIds[0],
+  tags: ['ai-generation', 'report'],
+  createdAt: now,
+  updatedAt: now,
+  dueAt: nextWeek,
+};
+
+// Root task 2 - Failed example
+const rootTask2 = {
+  _id: ObjectId(),
+  title: 'Process customer feedback batch',
+  description: 'Analyze and categorize incoming customer feedback',
+  status: 'failed',
+  priority: 'medium',
+  parentId: null,
+  rootId: null,
+  depth: 0,
+  path: [],
+  childCount: 0,
+  hitlRequired: true,
+  hitlPhase: 'on_error',
+  hitlStatus: 'escalated',
+  hitlAssigneeId: userIds[2],
+  hitlNotes: 'API rate limit exceeded. Please review and retry.',
+  externalJobId: 'ext-job-12345',
+  externalJobStatus: 'error',
+  externalJobResult: { error: 'Rate limit exceeded', retryAfter: 3600 },
+  assigneeId: userIds[1],
+  createdById: userIds[0],
+  teamId: teamIds[0],
+  tags: ['customer-feedback', 'batch-processing'],
+  createdAt: new Date(now.getTime() - 2 * 60 * 60 * 1000),
+  updatedAt: now,
+};
+
+// Root task 3 - Completed example
+const rootTask3 = {
+  _id: ObjectId(),
+  title: 'Weekly summary email generation',
+  description: 'Generate and send weekly AI summary to stakeholders',
+  status: 'completed',
+  priority: 'low',
+  parentId: null,
+  rootId: null,
+  depth: 0,
+  path: [],
+  childCount: 0,
+  hitlRequired: false,
+  hitlPhase: 'none',
+  hitlStatus: 'not_required',
+  externalJobId: 'ext-job-12300',
+  externalJobStatus: 'completed',
+  assigneeId: userIds[1],
+  createdById: userIds[0],
+  teamId: teamIds[0],
+  tags: ['email', 'summary', 'automated'],
+  createdAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+  updatedAt: new Date(now.getTime() - 23 * 60 * 60 * 1000),
+  completedAt: new Date(now.getTime() - 23 * 60 * 60 * 1000),
+};
+
+db.tasks.insertMany([
+  rootTask1,
+  childTask1_1,
+  childTask1_2,
+  subTask1_2_1,
+  subTask1_2_2,
+  childTask1_3,
+  rootTask2,
+  rootTask3,
+]);
+
+// ============================================================================
+// SAMPLE WORKFLOWS
+// ============================================================================
+
+const workflows = [
+  {
+    name: 'Content Generation Pipeline',
+    description: 'Standard workflow for AI-assisted content generation with human review',
+    isActive: true,
+    steps: [
+      { name: 'Data Collection', type: 'automated', hitlPhase: 'none' },
+      { name: 'AI Analysis', type: 'automated', hitlPhase: 'none' },
+      { name: 'Content Generation', type: 'automated', hitlPhase: 'post_execution' },
+      { name: 'Human Review', type: 'manual', hitlPhase: 'approval_required' },
+      { name: 'Publication', type: 'automated', hitlPhase: 'none' },
+    ],
+    createdAt: new Date(),
+  },
+  {
+    name: 'Data Processing Pipeline',
+    description: 'Batch data processing with error handling',
+    isActive: true,
+    steps: [
+      { name: 'Ingestion', type: 'automated', hitlPhase: 'none' },
+      { name: 'Validation', type: 'automated', hitlPhase: 'on_error' },
+      { name: 'Transformation', type: 'automated', hitlPhase: 'none' },
+      { name: 'Output', type: 'automated', hitlPhase: 'none' },
+    ],
+    createdAt: new Date(),
+  },
+];
+
+db.workflows.insertMany(workflows);
+
+print('Seed data inserted successfully!');

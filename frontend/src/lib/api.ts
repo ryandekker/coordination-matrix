@@ -1,0 +1,366 @@
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
+
+export interface PaginatedResponse<T> {
+  data: T[]
+  pagination: {
+    page: number
+    limit: number
+    total: number
+    totalPages: number
+  }
+}
+
+export interface ApiResponse<T> {
+  data: T
+  success?: boolean
+  message?: string
+}
+
+async function handleResponse<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'An error occurred' }))
+    throw new Error(error.error?.message || error.message || 'Request failed')
+  }
+  return response.json()
+}
+
+// Tasks API
+export const tasksApi = {
+  list: async (params?: Record<string, string | number | boolean>): Promise<PaginatedResponse<Task>> => {
+    const searchParams = new URLSearchParams()
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          searchParams.append(key, String(value))
+        }
+      })
+    }
+    const response = await fetch(`${API_BASE}/tasks?${searchParams}`)
+    return handleResponse(response)
+  },
+
+  get: async (id: string, params?: Record<string, string>): Promise<ApiResponse<Task>> => {
+    const searchParams = new URLSearchParams(params)
+    const response = await fetch(`${API_BASE}/tasks/${id}?${searchParams}`)
+    return handleResponse(response)
+  },
+
+  getTree: async (params?: Record<string, string>): Promise<ApiResponse<Task[]>> => {
+    const searchParams = new URLSearchParams(params)
+    const response = await fetch(`${API_BASE}/tasks/tree?${searchParams}`)
+    return handleResponse(response)
+  },
+
+  getChildren: async (id: string): Promise<ApiResponse<Task[]>> => {
+    const response = await fetch(`${API_BASE}/tasks/${id}/children`)
+    return handleResponse(response)
+  },
+
+  create: async (data: Partial<Task>): Promise<ApiResponse<Task>> => {
+    const response = await fetch(`${API_BASE}/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  update: async (id: string, data: Partial<Task>): Promise<ApiResponse<Task>> => {
+    const response = await fetch(`${API_BASE}/tasks/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  delete: async (id: string, deleteChildren = true): Promise<ApiResponse<void>> => {
+    const response = await fetch(`${API_BASE}/tasks/${id}?deleteChildren=${deleteChildren}`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
+
+  bulkUpdate: async (taskIds: string[], updates: Partial<Task>): Promise<ApiResponse<void>> => {
+    const response = await fetch(`${API_BASE}/tasks/bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operation: 'update', taskIds, updates }),
+    })
+    return handleResponse(response)
+  },
+
+  bulkDelete: async (taskIds: string[]): Promise<ApiResponse<void>> => {
+    const response = await fetch(`${API_BASE}/tasks/bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operation: 'delete', taskIds }),
+    })
+    return handleResponse(response)
+  },
+}
+
+// Lookups API
+export const lookupsApi = {
+  getAll: async (): Promise<ApiResponse<Record<string, LookupValue[]>>> => {
+    const response = await fetch(`${API_BASE}/lookups`)
+    return handleResponse(response)
+  },
+
+  getByType: async (type: string): Promise<ApiResponse<LookupValue[]>> => {
+    const response = await fetch(`${API_BASE}/lookups/${type}`)
+    return handleResponse(response)
+  },
+}
+
+// Field Configs API
+export const fieldConfigsApi = {
+  getForCollection: async (collection: string): Promise<ApiResponse<FieldConfig[]>> => {
+    const response = await fetch(`${API_BASE}/field-configs/${collection}`)
+    return handleResponse(response)
+  },
+
+  update: async (id: string, data: Partial<FieldConfig>): Promise<ApiResponse<FieldConfig>> => {
+    const response = await fetch(`${API_BASE}/field-configs/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+}
+
+// Views API
+export const viewsApi = {
+  list: async (collectionName?: string): Promise<ApiResponse<View[]>> => {
+    const params = collectionName ? `?collectionName=${collectionName}` : ''
+    const response = await fetch(`${API_BASE}/views${params}`)
+    return handleResponse(response)
+  },
+
+  get: async (id: string): Promise<ApiResponse<View>> => {
+    const response = await fetch(`${API_BASE}/views/${id}`)
+    return handleResponse(response)
+  },
+
+  create: async (data: Partial<View>): Promise<ApiResponse<View>> => {
+    const response = await fetch(`${API_BASE}/views`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  update: async (id: string, data: Partial<View>): Promise<ApiResponse<View>> => {
+    const response = await fetch(`${API_BASE}/views/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  delete: async (id: string): Promise<ApiResponse<void>> => {
+    const response = await fetch(`${API_BASE}/views/${id}`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
+
+  savePreferences: async (
+    viewId: string,
+    userId: string,
+    preferences: { visibleColumns?: string[]; columnWidths?: Record<string, number>; columnOrder?: string[] }
+  ): Promise<ApiResponse<void>> => {
+    const response = await fetch(`${API_BASE}/views/${viewId}/preferences`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, ...preferences }),
+    })
+    return handleResponse(response)
+  },
+}
+
+// Users API
+export const usersApi = {
+  list: async (): Promise<ApiResponse<User[]>> => {
+    const response = await fetch(`${API_BASE}/users`)
+    return handleResponse(response)
+  },
+
+  get: async (id: string): Promise<ApiResponse<User>> => {
+    const response = await fetch(`${API_BASE}/users/${id}`)
+    return handleResponse(response)
+  },
+}
+
+// External Jobs API
+export const externalJobsApi = {
+  list: async (params?: Record<string, string>): Promise<PaginatedResponse<ExternalJob>> => {
+    const searchParams = new URLSearchParams(params)
+    const response = await fetch(`${API_BASE}/external-jobs?${searchParams}`)
+    return handleResponse(response)
+  },
+
+  create: async (data: { taskId: string; type: string; payload?: Record<string, unknown> }): Promise<ApiResponse<ExternalJob>> => {
+    const response = await fetch(`${API_BASE}/external-jobs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  claim: async (id: string, workerId?: string): Promise<ApiResponse<ExternalJob>> => {
+    const response = await fetch(`${API_BASE}/external-jobs/${id}/claim`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workerId }),
+    })
+    return handleResponse(response)
+  },
+
+  complete: async (id: string, result?: Record<string, unknown>): Promise<ApiResponse<ExternalJob>> => {
+    const response = await fetch(`${API_BASE}/external-jobs/${id}/complete`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ result }),
+    })
+    return handleResponse(response)
+  },
+
+  fail: async (id: string, error: string, retryAfter?: number): Promise<ApiResponse<ExternalJob>> => {
+    const response = await fetch(`${API_BASE}/external-jobs/${id}/fail`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error, retryAfter }),
+    })
+    return handleResponse(response)
+  },
+
+  getStats: async (): Promise<ApiResponse<{ byStatus: Record<string, number> }>> => {
+    const response = await fetch(`${API_BASE}/external-jobs/stats/summary`)
+    return handleResponse(response)
+  },
+}
+
+// Types
+export interface Task {
+  _id: string
+  title: string
+  description?: string
+  status: string
+  priority?: string
+  parentId: string | null
+  rootId: string | null
+  depth: number
+  path: string[]
+  childCount: number
+  hitlRequired: boolean
+  hitlPhase: string
+  hitlStatus: string
+  hitlAssigneeId?: string | null
+  hitlNotes?: string
+  workflowId?: string | null
+  externalJobId?: string
+  externalJobStatus?: string
+  externalJobResult?: Record<string, unknown>
+  assigneeId?: string | null
+  createdById?: string | null
+  teamId?: string | null
+  metadata?: Record<string, unknown>
+  tags?: string[]
+  createdAt: string
+  updatedAt: string
+  startedAt?: string | null
+  completedAt?: string | null
+  dueAt?: string | null
+  children?: Task[]
+  _resolved?: {
+    assignee?: { displayName: string }
+    createdBy?: { displayName: string }
+    hitlAssignee?: { displayName: string }
+    team?: { name: string }
+    status?: { code: string; displayName: string; color: string }
+    priority?: { code: string; displayName: string; color: string }
+    hitlPhase?: { code: string; displayName: string; color: string }
+    hitlStatus?: { code: string; displayName: string; color: string }
+  }
+}
+
+export interface LookupValue {
+  _id: string
+  type: string
+  code: string
+  displayName: string
+  color?: string
+  icon?: string
+  sortOrder: number
+  isActive: boolean
+}
+
+export interface FieldConfig {
+  _id: string
+  collectionName: string
+  fieldPath: string
+  displayName: string
+  fieldType: string
+  isRequired: boolean
+  isEditable: boolean
+  isSearchable: boolean
+  isSortable: boolean
+  isFilterable: boolean
+  displayOrder: number
+  width?: number
+  minWidth?: number
+  lookupType?: string
+  referenceCollection?: string
+  referenceDisplayField?: string
+  defaultValue?: unknown
+  defaultVisible: boolean
+  renderAs?: string
+}
+
+export interface View {
+  _id: string
+  name: string
+  collectionName: string
+  isDefault: boolean
+  isSystem: boolean
+  filters: Record<string, unknown>
+  sorting: Array<{ field: string; direction: 'asc' | 'desc' }>
+  visibleColumns: string[]
+  columnWidths?: Record<string, number>
+  createdById?: string | null
+  createdAt: string
+  userPreference?: {
+    visibleColumns?: string[]
+    columnWidths?: Record<string, number>
+    columnOrder?: string[]
+  }
+}
+
+export interface User {
+  _id: string
+  email: string
+  displayName: string
+  role: string
+  isActive: boolean
+}
+
+export interface ExternalJob {
+  _id: string
+  taskId: string
+  type: string
+  status: string
+  payload: Record<string, unknown>
+  result?: Record<string, unknown>
+  error?: string
+  attempts: number
+  maxAttempts: number
+  createdAt: string
+  updatedAt: string
+  startedAt?: string | null
+  completedAt?: string | null
+}
