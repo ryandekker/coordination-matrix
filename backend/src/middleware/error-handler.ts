@@ -16,13 +16,17 @@ export function errorHandler(
   const statusCode = err.statusCode || 500;
   const message = err.message || 'Internal Server Error';
 
+  const errorObj: { message: string; stack?: string; details?: unknown } = { message };
+  if (process.env.NODE_ENV === 'development' && err.stack) {
+    errorObj.stack = err.stack;
+  }
+  if (err.details) {
+    errorObj.details = err.details;
+  }
+
   res.status(statusCode).json({
     success: false,
-    error: {
-      message,
-      ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
-      ...(err.details && { details: err.details }),
-    },
+    error: errorObj,
   });
 }
 

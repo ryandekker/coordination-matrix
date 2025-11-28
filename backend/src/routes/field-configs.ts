@@ -7,7 +7,7 @@ import { FieldConfig } from '../types/index.js';
 export const fieldConfigsRouter = Router();
 
 // GET /api/field-configs - Get all field configurations
-fieldConfigsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
+fieldConfigsRouter.get('/', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
     const { collectionName } = req.query;
@@ -32,7 +32,8 @@ fieldConfigsRouter.get('/', async (req: Request, res: Response, next: NextFuncti
         }
         grouped[config.collectionName].push(config);
       }
-      return res.json({ data: grouped });
+      res.json({ data: grouped });
+      return;
     }
 
     res.json({ data: configs });

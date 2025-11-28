@@ -98,11 +98,15 @@ export function EditableCell({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {options.map((opt) => (
-                <SelectItem key={opt.code || (opt as { value: string }).value} value={opt.code || (opt as { value: string }).value}>
-                  {opt.displayName || (opt as { label: string }).label}
-                </SelectItem>
-              ))}
+              {options.map((opt) => {
+                const optValue = 'code' in opt ? opt.code : opt.value
+                const optLabel = 'displayName' in opt ? opt.displayName : opt.label
+                return (
+                  <SelectItem key={optValue} value={optValue}>
+                    {optLabel}
+                  </SelectItem>
+                )
+              })}
             </SelectContent>
           </Select>
           <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleCancel}>

@@ -315,6 +315,7 @@ export interface FieldConfig {
   width?: number
   minWidth?: number
   lookupType?: string
+  options?: Array<{ value: string; label: string } | { code: string; displayName: string }>
   referenceCollection?: string
   referenceDisplayField?: string
   defaultValue?: unknown

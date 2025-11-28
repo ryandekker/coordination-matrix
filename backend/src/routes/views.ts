@@ -7,7 +7,7 @@ import { View, UserPreference } from '../types/index.js';
 export const viewsRouter = Router();
 
 // GET /api/views - Get all views
-viewsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
+viewsRouter.get('/', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
     const { collectionName, userId } = req.query;
@@ -47,7 +47,8 @@ viewsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => 
         return view;
       });
 
-      return res.json({ data: viewsWithPrefs });
+      res.json({ data: viewsWithPrefs });
+      return;
     }
 
     res.json({ data: views });
@@ -57,7 +58,7 @@ viewsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => 
 });
 
 // GET /api/views/:id - Get a specific view
-viewsRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
+viewsRouter.get('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
     const viewId = new ObjectId(req.params.id);
@@ -77,7 +78,7 @@ viewsRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) 
       });
 
       if (userPref) {
-        return res.json({
+        res.json({
           data: {
             ...view,
             userPreference: {
@@ -87,6 +88,7 @@ viewsRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) 
             },
           },
         });
+        return;
       }
     }
 

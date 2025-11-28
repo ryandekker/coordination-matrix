@@ -35,18 +35,18 @@ function buildFilter(query: Record<string, unknown>): Filter<Task> {
   // Status filter
   if (status) {
     if (Array.isArray(status)) {
-      filter.status = { $in: status };
+      (filter as Record<string, unknown>).status = { $in: status };
     } else {
-      filter.status = status as string;
+      (filter as Record<string, unknown>).status = status as string;
     }
   }
 
   // Priority filter
   if (priority) {
     if (Array.isArray(priority)) {
-      filter.priority = { $in: priority };
+      (filter as Record<string, unknown>).priority = { $in: priority };
     } else {
-      filter.priority = priority as string;
+      (filter as Record<string, unknown>).priority = priority as string;
     }
   }
 
@@ -239,7 +239,7 @@ tasksRouter.get('/:id/children', async (req: Request, res: Response, next: NextF
 });
 
 // GET /api/tasks/:id/ancestors - Get all ancestors of a task
-tasksRouter.get('/:id/ancestors', async (req: Request, res: Response, next: NextFunction) => {
+tasksRouter.get('/:id/ancestors', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
     const { resolveReferences = 'true' } = req.query;
@@ -252,7 +252,8 @@ tasksRouter.get('/:id/ancestors', async (req: Request, res: Response, next: Next
     }
 
     if (!task.path || task.path.length === 0) {
-      return res.json({ data: [] });
+      res.json({ data: [] });
+      return;
     }
 
     const ancestors = await db

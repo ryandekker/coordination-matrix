@@ -179,7 +179,7 @@ externalJobsRouter.put('/:id/claim', async (req: Request, res: Response, next: N
   try {
     const db = getDb();
     const jobId = new ObjectId(req.params.id);
-    const { workerId } = req.body;
+    const { workerId: _workerId } = req.body;
 
     const now = new Date();
 
