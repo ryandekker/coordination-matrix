@@ -348,6 +348,7 @@ export interface User {
   displayName: string
   role: string
   isActive: boolean
+  createdAt?: string
 }
 
 export interface ExternalJob {

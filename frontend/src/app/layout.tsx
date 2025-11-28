@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
+import { Suspense } from 'react'
 import './globals.css'
 import { Providers } from './providers'
 import { Sidebar } from '@/components/layout/sidebar'
@@ -22,7 +23,9 @@ export default function RootLayout({
       <body className={inter.className}>
         <Providers>
           <div className="flex h-screen overflow-hidden">
-            <Sidebar />
+            <Suspense fallback={<div className="w-64 border-r bg-card" />}>
+              <Sidebar />
+            </Suspense>
             <div className="flex flex-1 flex-col overflow-hidden">
               <Header />
               <main className="flex-1 overflow-auto p-6">

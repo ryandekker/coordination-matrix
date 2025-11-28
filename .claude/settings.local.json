@@ -4,7 +4,10 @@
       "Bash(docker compose up)",
       "Bash(npm install:*)",
       "Bash(docker compose:*)",
-      "Bash(lsof:*)"
+      "Bash(lsof:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker exec:*)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []

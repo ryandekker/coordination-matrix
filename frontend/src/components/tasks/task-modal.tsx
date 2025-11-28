@@ -234,11 +234,13 @@ export function TaskModal({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="_unassigned">Unassigned</SelectItem>
-                  {users.map((user) => (
-                    <SelectItem key={user._id} value={user._id}>
-                      {user.displayName}
-                    </SelectItem>
-                  ))}
+                  {users
+                    .filter((user) => user._id)
+                    .map((user) => (
+                      <SelectItem key={user._id} value={user._id}>
+                        {user.displayName}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>

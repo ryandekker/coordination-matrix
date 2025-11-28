@@ -85,11 +85,13 @@ export function TaskToolbar({
           <SelectValue placeholder="Select view" />
         </SelectTrigger>
         <SelectContent>
-          {views.map((view) => (
-            <SelectItem key={view._id} value={view._id}>
-              {view.name}
-            </SelectItem>
-          ))}
+          {views
+            .filter((view) => view._id)
+            .map((view) => (
+              <SelectItem key={view._id} value={view._id}>
+                {view.name}
+              </SelectItem>
+            ))}
         </SelectContent>
       </Select>
 
