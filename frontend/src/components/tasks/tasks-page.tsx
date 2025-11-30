@@ -5,7 +5,7 @@ import { TaskDataTable } from './task-data-table'
 import { TaskToolbar } from './task-toolbar'
 import { TaskModal } from './task-modal'
 import { ColumnConfigModal } from './column-config-modal'
-import { useTasks, useLookups, useFieldConfigs, useViews } from '@/hooks/use-tasks'
+import { useTasks, useLookups, useFieldConfigs, useViews, useUsers } from '@/hooks/use-tasks'
 import { Task, View } from '@/lib/api'
 
 export function TasksPage() {
@@ -36,12 +36,14 @@ export function TasksPage() {
   const { data: lookupsData } = useLookups()
   const { data: fieldConfigsData } = useFieldConfigs('tasks')
   const { data: viewsData } = useViews('tasks')
+  const { data: usersData } = useUsers()
 
   const tasks = tasksData?.data || []
   const pagination = tasksData?.pagination
   const lookups = lookupsData?.data || {}
   const fieldConfigs = fieldConfigsData?.data || []
   const views = viewsData?.data || []
+  const users = usersData?.data || []
 
   // Get current view
   const currentView = selectedView
@@ -124,6 +126,7 @@ export function TasksPage() {
         tasks={tasks}
         fieldConfigs={fieldConfigs}
         lookups={lookups}
+        users={users}
         visibleColumns={effectiveVisibleColumns}
         sortBy={sortBy}
         sortOrder={sortOrder}

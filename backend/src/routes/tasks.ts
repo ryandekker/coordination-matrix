@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { ObjectId, Filter, Sort, Document } from 'mongodb';
+import { ObjectId, Filter, Sort, Document, Int32 } from 'mongodb';
 import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
 import { ReferenceResolver } from '../services/reference-resolver.js';
@@ -292,25 +292,47 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
     }
 
     const now = new Date();
-    const newTask: Omit<Task, '_id'> = {
+    let parentId: ObjectId | null = null;
+    let rootId: ObjectId | null = null;
+    let depth = 0;
+    let path: ObjectId[] = [];
+
+    // Handle parent task relationship
+    if (taskData.parentId) {
+      parentId = toObjectId(taskData.parentId);
+      const parent = await db.collection<Task>('tasks').findOne({ _id: parentId });
+
+      if (!parent) {
+        throw createError('Parent task not found', 404);
+      }
+
+      rootId = parent.rootId || parent._id;
+      depth = (typeof parent.depth === 'number' ? parent.depth : 0) + 1;
+      path = [...parent.path, parentId];
+
+      // Increment parent's child count
+      await db.collection('tasks').updateOne(
+        { _id: parentId },
+        { $inc: { childCount: 1 }, $set: { updatedAt: now } }
+      );
+    }
+
+    const newTask: Document = {
       title: taskData.title,
       description: taskData.description || '',
       status: taskData.status || 'pending',
       priority: taskData.priority || 'medium',
-      parentId: null,
-      rootId: null,
-      depth: 0,
-      path: [],
-      childCount: 0,
+      parentId,
+      rootId,
+      depth: new Int32(depth),
+      path,
+      childCount: new Int32(0),
       hitlRequired: taskData.hitlRequired || false,
       hitlPhase: taskData.hitlPhase || 'none',
       hitlStatus: taskData.hitlRequired ? 'pending' : 'not_required',
       hitlAssigneeId: taskData.hitlAssigneeId ? toObjectId(taskData.hitlAssigneeId) : null,
       hitlNotes: taskData.hitlNotes || '',
       workflowId: taskData.workflowId ? toObjectId(taskData.workflowId) : null,
-      workflowStepIndex: taskData.workflowStepIndex,
-      externalJobId: taskData.externalJobId,
-      externalJobStatus: taskData.externalJobStatus,
       assigneeId: taskData.assigneeId ? toObjectId(taskData.assigneeId) : null,
       createdById: taskData.createdById ? toObjectId(taskData.createdById) : null,
       teamId: taskData.teamId ? toObjectId(taskData.teamId) : null,
@@ -321,28 +343,7 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       dueAt: taskData.dueAt ? new Date(taskData.dueAt) : null,
     };
 
-    // Handle parent task relationship
-    if (taskData.parentId) {
-      const parentId = toObjectId(taskData.parentId);
-      const parent = await db.collection<Task>('tasks').findOne({ _id: parentId });
-
-      if (!parent) {
-        throw createError('Parent task not found', 404);
-      }
-
-      newTask.parentId = parentId;
-      newTask.rootId = parent.rootId || parent._id;
-      newTask.depth = parent.depth + 1;
-      newTask.path = [...parent.path, parentId];
-
-      // Increment parent's child count
-      await db.collection('tasks').updateOne(
-        { _id: parentId },
-        { $inc: { childCount: 1 }, $set: { updatedAt: now } }
-      );
-    }
-
-    const result = await db.collection<Task>('tasks').insertOne(newTask as Task);
+    const result = await db.collection('tasks').insertOne(newTask);
     const insertedTask = await db.collection<Task>('tasks').findOne({ _id: result.insertedId });
 
     res.status(201).json({ data: insertedTask });

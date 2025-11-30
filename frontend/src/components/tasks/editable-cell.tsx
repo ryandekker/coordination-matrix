@@ -1,9 +1,8 @@
 'use client'
 
 import { useState, useRef, useEffect, ReactNode } from 'react'
-import { Check, X } from 'lucide-react'
+import { Check, Search } from 'lucide-react'
 import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
 import {
   Select,
   SelectContent,
@@ -11,14 +10,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
 import { Checkbox } from '@/components/ui/checkbox'
-import { FieldConfig, LookupValue } from '@/lib/api'
+import { FieldConfig, LookupValue, User } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 interface EditableCellProps {
   value: unknown
   fieldConfig: FieldConfig
   lookups: Record<string, LookupValue[]>
+  users?: User[]
   onSave: (value: unknown) => void
   children: ReactNode
 }
@@ -27,12 +40,15 @@ export function EditableCell({
   value,
   fieldConfig,
   lookups,
+  users = [],
   onSave,
   children,
 }: EditableCellProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState<unknown>(value)
+  const [searchQuery, setSearchQuery] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -45,14 +61,28 @@ export function EditableCell({
     setEditValue(value)
   }, [value])
 
+  // Handle click outside to save
+  useEffect(() => {
+    if (!isEditing) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        handleSave()
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [isEditing, editValue])
+
   const handleSave = () => {
     onSave(editValue)
     setIsEditing(false)
+    setSearchQuery('')
   }
 
   const handleCancel = () => {
     setEditValue(value)
     setIsEditing(false)
+    setSearchQuery('')
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -66,13 +96,74 @@ export function EditableCell({
   if (!isEditing) {
     return (
       <div
-        className="editable-cell cursor-pointer"
+        className="editable-cell cursor-pointer hover:bg-muted/50 py-0.5 rounded transition-colors truncate"
         onClick={() => setIsEditing(true)}
         onKeyDown={(e) => e.key === 'Enter' && setIsEditing(true)}
         tabIndex={0}
         role="button"
       >
         {children}
+      </div>
+    )
+  }
+
+  const inputClassName = 'h-6 text-sm border-0 bg-muted/30 shadow-none focus-visible:ring-1 focus-visible:ring-primary px-1 rounded-sm'
+
+  // Handle reference fields (user selection)
+  if (fieldConfig.fieldType === 'reference' && fieldConfig.referenceCollection === 'users') {
+    const filteredUsers = users.filter((user) =>
+      user.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      user.email.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+
+    return (
+      <div ref={containerRef} className="absolute left-0 top-0 z-50 bg-popover border rounded-md shadow-lg min-w-[220px]">
+        <Command>
+          <CommandInput
+            placeholder="Search users..."
+            value={searchQuery}
+            onValueChange={setSearchQuery}
+            className="h-8"
+          />
+          <CommandList className="max-h-[200px]">
+            <CommandEmpty>No users found</CommandEmpty>
+            <CommandGroup>
+              <CommandItem
+                value="_unassigned"
+                onSelect={() => {
+                  onSave(null)
+                  setIsEditing(false)
+                  setSearchQuery('')
+                }}
+                className="text-muted-foreground"
+              >
+                Unassigned
+              </CommandItem>
+              {filteredUsers.map((user) => (
+                <CommandItem
+                  key={user._id}
+                  value={user._id}
+                  onSelect={() => {
+                    onSave(user._id)
+                    setIsEditing(false)
+                    setSearchQuery('')
+                  }}
+                >
+                  <Check
+                    className={cn(
+                      'mr-2 h-4 w-4',
+                      editValue === user._id ? 'opacity-100' : 'opacity-0'
+                    )}
+                  />
+                  <div className="flex flex-col">
+                    <span>{user.displayName}</span>
+                    <span className="text-xs text-muted-foreground">{user.email}</span>
+                  </div>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
       </div>
     )
   }
@@ -85,7 +176,7 @@ export function EditableCell({
         : fieldConfig.options || []
 
       return (
-        <div className="flex items-center gap-1">
+        <div ref={containerRef} className="absolute left-0 top-0 z-50 min-w-full">
           <Select
             value={editValue as string}
             onValueChange={(val) => {
@@ -93,8 +184,10 @@ export function EditableCell({
               onSave(val)
               setIsEditing(false)
             }}
+            open={true}
+            onOpenChange={(open) => !open && handleCancel()}
           >
-            <SelectTrigger className="h-8 w-full">
+            <SelectTrigger className="h-6 border-0 bg-muted/50 shadow-none text-sm px-1 min-w-[140px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -114,15 +207,12 @@ export function EditableCell({
                 })}
             </SelectContent>
           </Select>
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleCancel}>
-            <X className="h-4 w-4" />
-          </Button>
         </div>
       )
 
     case 'boolean':
       return (
-        <div className="flex items-center gap-2">
+        <div ref={containerRef} className="flex items-center">
           <Checkbox
             checked={editValue as boolean}
             onCheckedChange={(checked) => {
@@ -131,36 +221,28 @@ export function EditableCell({
               setIsEditing(false)
             }}
           />
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleCancel}>
-            <X className="h-4 w-4" />
-          </Button>
         </div>
       )
 
     case 'number':
       return (
-        <div className="flex items-center gap-1">
+        <div ref={containerRef} className="absolute left-0 top-0 z-50 min-w-full w-max">
           <Input
             ref={inputRef}
             type="number"
             value={editValue as number}
             onChange={(e) => setEditValue(parseFloat(e.target.value) || 0)}
             onKeyDown={handleKeyDown}
-            className="h-8"
+            onBlur={handleSave}
+            className={cn(inputClassName, 'min-w-[120px]')}
           />
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleSave}>
-            <Check className="h-4 w-4" />
-          </Button>
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleCancel}>
-            <X className="h-4 w-4" />
-          </Button>
         </div>
       )
 
     case 'datetime':
     case 'date':
       return (
-        <div className="flex items-center gap-1">
+        <div ref={containerRef} className="absolute left-0 top-0 z-50 min-w-full w-max">
           <Input
             ref={inputRef}
             type={fieldConfig.fieldType === 'datetime' ? 'datetime-local' : 'date'}
@@ -171,20 +253,15 @@ export function EditableCell({
             }
             onChange={(e) => setEditValue(e.target.value ? new Date(e.target.value).toISOString() : null)}
             onKeyDown={handleKeyDown}
-            className="h-8"
+            onBlur={handleSave}
+            className={cn(inputClassName, 'min-w-[180px]')}
           />
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleSave}>
-            <Check className="h-4 w-4" />
-          </Button>
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleCancel}>
-            <X className="h-4 w-4" />
-          </Button>
         </div>
       )
 
     case 'tags':
       return (
-        <div className="flex items-center gap-1">
+        <div ref={containerRef} className="absolute left-0 top-0 z-50 min-w-full w-max">
           <Input
             ref={inputRef}
             value={Array.isArray(editValue) ? (editValue as string[]).join(', ') : ''}
@@ -197,65 +274,45 @@ export function EditableCell({
               )
             }
             onKeyDown={handleKeyDown}
-            placeholder="tag1, tag2, tag3"
-            className="h-8"
+            onBlur={handleSave}
+            placeholder="tag1, tag2"
+            className={cn(inputClassName, 'min-w-[200px]')}
           />
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleSave}>
-            <Check className="h-4 w-4" />
-          </Button>
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleCancel}>
-            <X className="h-4 w-4" />
-          </Button>
         </div>
       )
 
     case 'textarea':
       return (
-        <div className="flex flex-col gap-1">
+        <div ref={containerRef} className="absolute left-0 top-0 z-50 min-w-full w-max">
           <textarea
             ref={inputRef as unknown as React.RefObject<HTMLTextAreaElement>}
             value={editValue as string}
             onChange={(e) => setEditValue(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Escape') handleCancel()
+              if (e.key === 'Enter' && e.metaKey) handleSave()
             }}
+            onBlur={handleSave}
             className={cn(
-              'flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm',
-              'ring-offset-background placeholder:text-muted-foreground',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-              'disabled:cursor-not-allowed disabled:opacity-50'
+              'flex min-h-[60px] min-w-[300px] rounded-sm bg-muted/30 px-1 py-1 text-sm',
+              'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary'
             )}
           />
-          <div className="flex justify-end gap-1">
-            <Button variant="ghost" size="sm" onClick={handleSave}>
-              <Check className="mr-1 h-4 w-4" />
-              Save
-            </Button>
-            <Button variant="ghost" size="sm" onClick={handleCancel}>
-              <X className="mr-1 h-4 w-4" />
-              Cancel
-            </Button>
-          </div>
         </div>
       )
 
     case 'text':
     default:
       return (
-        <div className="flex items-center gap-1">
+        <div ref={containerRef} className="absolute left-0 top-0 z-50 min-w-full w-max">
           <Input
             ref={inputRef}
-            value={editValue as string}
+            value={(editValue as string) || ''}
             onChange={(e) => setEditValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="h-8"
+            onBlur={handleSave}
+            className={cn(inputClassName, 'min-w-[250px] w-auto')}
           />
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleSave}>
-            <Check className="h-4 w-4" />
-          </Button>
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleCancel}>
-            <X className="h-4 w-4" />
-          </Button>
         </div>
       )
   }

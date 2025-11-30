@@ -1,8 +1,9 @@
 'use client'
 
-import { Search, Plus, Filter, Columns, ChevronDown } from 'lucide-react'
+import { Search, Plus, Filter, Columns, ChevronDown, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
 import {
   Select,
   SelectContent,
@@ -77,8 +78,55 @@ export function TaskToolbar({
     })
   }
 
+  const clearAllFilters = () => {
+    onFilterChange({})
+    onSearchChange('')
+  }
+
+  // Build active filter chips
+  const activeFilters: { key: string; label: string; value: string; color?: string }[] = []
+
+  if (search) {
+    activeFilters.push({ key: 'search', label: 'Search', value: search })
+  }
+
+  const statusFilters = (filters.status as string[]) || []
+  statusFilters.forEach((status) => {
+    const opt = statusOptions.find((s) => s.code === status)
+    if (opt) {
+      activeFilters.push({ key: `status-${status}`, label: 'Status', value: opt.displayName, color: opt.color })
+    }
+  })
+
+  const priorityFilters = (filters.priority as string[]) || []
+  priorityFilters.forEach((priority) => {
+    const opt = priorityOptions.find((p) => p.code === priority)
+    if (opt) {
+      activeFilters.push({ key: `priority-${priority}`, label: 'Priority', value: opt.displayName, color: opt.color })
+    }
+  })
+
+  if (filters.hitlPending) {
+    activeFilters.push({ key: 'hitl', label: 'HITL', value: 'Awaiting Review' })
+  }
+
+  const removeFilter = (filterKey: string) => {
+    if (filterKey === 'search') {
+      onSearchChange('')
+    } else if (filterKey.startsWith('status-')) {
+      const status = filterKey.replace('status-', '')
+      handleStatusFilter(status, false)
+    } else if (filterKey.startsWith('priority-')) {
+      const priority = filterKey.replace('priority-', '')
+      handlePriorityFilter(priority, false)
+    } else if (filterKey === 'hitl') {
+      handleHITLFilter(false)
+    }
+  }
+
   return (
-    <div className="flex flex-wrap items-center gap-4">
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-4">
       {/* View Selector */}
       <Select value={currentView?._id} onValueChange={onViewChange}>
         <SelectTrigger className="w-48">
@@ -194,6 +242,44 @@ export function TaskToolbar({
         <Plus className="mr-2 h-4 w-4" />
         New Task
       </Button>
+      </div>
+
+      {/* Active Filters */}
+      {activeFilters.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-muted-foreground">Filters:</span>
+          {activeFilters.map((filter) => (
+            <Badge
+              key={filter.key}
+              variant="secondary"
+              className="flex items-center gap-1 pl-2 pr-1 py-1"
+            >
+              {filter.color && (
+                <span
+                  className="h-2 w-2 rounded-full mr-1"
+                  style={{ backgroundColor: filter.color }}
+                />
+              )}
+              <span className="text-xs text-muted-foreground">{filter.label}:</span>
+              <span className="text-xs font-medium">{filter.value}</span>
+              <button
+                onClick={() => removeFilter(filter.key)}
+                className="ml-1 hover:bg-muted rounded p-0.5"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ))}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={clearAllFilters}
+            className="h-6 text-xs text-muted-foreground"
+          >
+            Clear all
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

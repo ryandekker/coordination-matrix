@@ -32,7 +32,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { EditableCell } from './editable-cell'
-import { Task, FieldConfig, LookupValue } from '@/lib/api'
+import { Task, FieldConfig, LookupValue, User } from '@/lib/api'
 import { useTaskChildren, useUpdateTask, useDeleteTask } from '@/hooks/use-tasks'
 import { formatDateTime, cn } from '@/lib/utils'
 
@@ -40,6 +40,7 @@ interface TaskDataTableProps {
   tasks: Task[]
   fieldConfigs: FieldConfig[]
   lookups: Record<string, LookupValue[]>
+  users: User[]
   visibleColumns: string[]
   sortBy: string
   sortOrder: 'asc' | 'desc'
@@ -59,6 +60,7 @@ export function TaskDataTable({
   tasks,
   fieldConfigs,
   lookups,
+  users,
   visibleColumns,
   sortBy,
   sortOrder,
@@ -150,11 +152,19 @@ export function TaskDataTable({
 
     // Handle reference fields (user, team)
     if (fieldConfig.fieldType === 'reference') {
+      // Try the field path directly first (e.g., assigneeId -> assignee)
       const fieldName = fieldConfig.fieldPath.replace('Id', '')
-      const ref = task._resolved?.[fieldName as keyof typeof task._resolved] as
+      // Also try looking up directly by the field path
+      const ref = (task._resolved?.[fieldName as keyof typeof task._resolved] ||
+        task._resolved?.[fieldConfig.fieldPath as keyof typeof task._resolved]) as
         | { displayName?: string; name?: string }
         | undefined
-      return ref?.displayName || ref?.name || '-'
+      if (ref?.displayName || ref?.name) {
+        return ref.displayName || ref.name
+      }
+      // If no resolved value, show dash
+      const rawValue = task[fieldConfig.fieldPath as keyof Task]
+      return rawValue ? '-' : '-'
     }
 
     // Handle boolean fields
@@ -247,6 +257,7 @@ export function TaskDataTable({
                   task={task}
                   fieldConfigs={visibleFieldConfigs}
                   lookups={lookups}
+                  users={users}
                   depth={0}
                   isExpanded={expandedRows.has(task._id)}
                   isSelected={selectedRows.has(task._id)}
@@ -303,6 +314,7 @@ function TaskRow({
   task,
   fieldConfigs,
   lookups,
+  users,
   depth,
   isExpanded,
   isSelected,
@@ -316,6 +328,7 @@ function TaskRow({
   task: Task
   fieldConfigs: FieldConfig[]
   lookups: Record<string, LookupValue[]>
+  users: User[]
   depth: number
   isExpanded: boolean
   isSelected: boolean
@@ -354,13 +367,15 @@ function TaskRow({
         {fieldConfigs.map((fc) => (
           <TableCell
             key={fc.fieldPath}
-            style={{ paddingLeft: fc.fieldPath === 'title' ? depth * 24 + 16 : undefined }}
+            className="relative py-1 px-2"
+            style={{ paddingLeft: fc.fieldPath === 'title' ? depth * 24 + 8 : undefined }}
           >
             {fc.isEditable ? (
               <EditableCell
                 value={task[fc.fieldPath as keyof Task]}
                 fieldConfig={fc}
                 lookups={lookups}
+                users={users}
                 onSave={(value) => onCellUpdate(task._id, fc.fieldPath, value)}
               >
                 {renderCellValue(task, fc)}
@@ -406,6 +421,7 @@ function TaskRow({
             task={child}
             fieldConfigs={fieldConfigs}
             lookups={lookups}
+            users={users}
             depth={depth + 1}
             isExpanded={false}
             isSelected={false}
