@@ -56,6 +56,17 @@ export const tasksApi = {
     return handleResponse(response)
   },
 
+  getDescendants: async (id: string, maxDepth?: number): Promise<ApiResponse<Task[]>> => {
+    const params = maxDepth ? `?maxDepth=${maxDepth}` : ''
+    const response = await fetch(`${API_BASE}/tasks/${id}/descendants${params}`)
+    return handleResponse(response)
+  },
+
+  getAncestors: async (id: string): Promise<ApiResponse<Task[]>> => {
+    const response = await fetch(`${API_BASE}/tasks/${id}/ancestors`)
+    return handleResponse(response)
+  },
+
   create: async (data: Partial<Task>): Promise<ApiResponse<Task>> => {
     const response = await fetch(`${API_BASE}/tasks`, {
       method: 'POST',
@@ -107,8 +118,48 @@ export const lookupsApi = {
     return handleResponse(response)
   },
 
-  getByType: async (type: string): Promise<ApiResponse<LookupValue[]>> => {
-    const response = await fetch(`${API_BASE}/lookups/${type}`)
+  getByType: async (type: string, includeInactive = false): Promise<ApiResponse<LookupValue[]>> => {
+    const params = includeInactive ? '?includeInactive=true' : ''
+    const response = await fetch(`${API_BASE}/lookups/${type}${params}`)
+    return handleResponse(response)
+  },
+
+  getTypes: async (): Promise<ApiResponse<string[]>> => {
+    const response = await fetch(`${API_BASE}/lookups/types`)
+    return handleResponse(response)
+  },
+
+  create: async (data: Omit<LookupValue, '_id'>): Promise<ApiResponse<LookupValue>> => {
+    const response = await fetch(`${API_BASE}/lookups`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  update: async (id: string, data: Partial<LookupValue>): Promise<ApiResponse<LookupValue>> => {
+    const response = await fetch(`${API_BASE}/lookups/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  delete: async (id: string): Promise<ApiResponse<void>> => {
+    const response = await fetch(`${API_BASE}/lookups/${id}`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
+
+  reorder: async (type: string, order: { id: string; sortOrder: number }[]): Promise<ApiResponse<LookupValue[]>> => {
+    const response = await fetch(`${API_BASE}/lookups/${type}/reorder`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order }),
+    })
     return handleResponse(response)
   },
 }
@@ -249,43 +300,30 @@ export const externalJobsApi = {
 export interface Task {
   _id: string
   title: string
-  description?: string
+  summary?: string
+  extraPrompt?: string
+  additionalInfo?: string
   status: string
-  priority?: string
+  urgency?: string
   parentId: string | null
-  rootId: string | null
-  depth: number
-  path: string[]
-  childCount: number
-  hitlRequired: boolean
-  hitlPhase: string
-  hitlStatus: string
-  hitlAssigneeId?: string | null
-  hitlNotes?: string
   workflowId?: string | null
-  externalJobId?: string
-  externalJobStatus?: string
-  externalJobResult?: Record<string, unknown>
+  workflowStage?: string
+  externalId?: string
+  externalHoldDate?: string | null
   assigneeId?: string | null
   createdById?: string | null
-  teamId?: string | null
-  metadata?: Record<string, unknown>
   tags?: string[]
   createdAt: string
   updatedAt: string
-  startedAt?: string | null
-  completedAt?: string | null
   dueAt?: string | null
   children?: Task[]
   _resolved?: {
-    assignee?: { displayName: string }
-    createdBy?: { displayName: string }
-    hitlAssignee?: { displayName: string }
-    team?: { name: string }
+    assignee?: { _id: string; displayName: string }
+    createdBy?: { _id: string; displayName: string }
+    parent?: { _id: string; title: string }
+    workflow?: { _id: string; name: string }
     status?: { code: string; displayName: string; color: string }
-    priority?: { code: string; displayName: string; color: string }
-    hitlPhase?: { code: string; displayName: string; color: string }
-    hitlStatus?: { code: string; displayName: string; color: string }
+    urgency?: { code: string; displayName: string; color: string }
   }
 }
 

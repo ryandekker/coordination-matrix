@@ -344,8 +344,10 @@ function TaskRow({
   onDelete: () => void
   renderCellValue: (task: Task, fc: FieldConfig) => React.ReactNode
 }) {
-  const { data: childrenData } = useTaskChildren(isExpanded && task.childCount > 0 ? task._id : null)
+  // Fetch children when expanded
+  const { data: childrenData } = useTaskChildren(isExpanded ? task._id : null)
   const children = childrenData?.data || []
+  const hasChildren = isExpanded ? children.length > 0 : task.children && task.children.length > 0
 
   return (
     <>
@@ -357,17 +359,14 @@ function TaskRow({
           <Checkbox checked={isSelected} onCheckedChange={onToggleSelect} />
         </TableCell>
         <TableCell>
-          {task.childCount > 0 ? (
-            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={onToggleExpand}>
-              {isExpanded ? (
-                <ChevronDown className="h-4 w-4" />
-              ) : (
-                <ChevronRight className="h-4 w-4" />
-              )}
-            </Button>
-          ) : (
-            <div className="w-6" />
-          )}
+          {/* Show expand button - will be enabled after first check */}
+          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={onToggleExpand}>
+            {isExpanded ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4 opacity-30 hover:opacity-100" />
+            )}
+          </Button>
         </TableCell>
         {fieldConfigs.map((fc) => (
           <TableCell
