@@ -169,7 +169,12 @@ export function TaskDataTable({
 
     // Handle boolean fields
     if (fieldConfig.fieldType === 'boolean') {
-      return value ? 'Yes' : 'No'
+      return (
+        <Checkbox
+          checked={value as boolean}
+          className="pointer-events-none"
+        />
+      )
     }
 
     // Handle date fields

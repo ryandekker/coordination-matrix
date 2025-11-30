@@ -93,10 +93,34 @@ export function EditableCell({
     }
   }
 
-  if (!isEditing) {
+  // Special handling for boolean fields - direct toggle without edit mode
+  if (fieldConfig.fieldType === 'boolean' && !isEditing) {
     return (
       <div
         className="editable-cell cursor-pointer hover:bg-muted/50 py-0.5 rounded transition-colors truncate"
+        onClick={() => {
+          const newValue = !value
+          onSave(newValue)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            const newValue = !value
+            onSave(newValue)
+          }
+        }}
+        tabIndex={0}
+        role="button"
+      >
+        {children}
+      </div>
+    )
+  }
+
+  if (!isEditing) {
+    return (
+      <div
+        className="editable-cell cursor-pointer hover:bg-muted/50 py-0.5 rounded transition-colors truncate min-h-[24px]"
         onClick={() => setIsEditing(true)}
         onKeyDown={(e) => e.key === 'Enter' && setIsEditing(true)}
         tabIndex={0}
@@ -107,7 +131,7 @@ export function EditableCell({
     )
   }
 
-  const inputClassName = 'h-6 text-sm border-0 bg-muted/30 shadow-none focus-visible:ring-1 focus-visible:ring-primary px-1 rounded-sm'
+  const inputClassName = 'h-[24px] text-sm border-0 bg-muted/30 shadow-none focus-visible:ring-1 focus-visible:ring-primary px-1 rounded-sm'
 
   // Handle reference fields (user selection)
   if (fieldConfig.fieldType === 'reference' && fieldConfig.referenceCollection === 'users') {
@@ -211,22 +235,13 @@ export function EditableCell({
       )
 
     case 'boolean':
-      return (
-        <div ref={containerRef} className="flex items-center">
-          <Checkbox
-            checked={editValue as boolean}
-            onCheckedChange={(checked) => {
-              setEditValue(checked)
-              onSave(checked)
-              setIsEditing(false)
-            }}
-          />
-        </div>
-      )
+      // This case should not be reached due to early return above
+      // But keep it for safety
+      return null
 
     case 'number':
       return (
-        <div ref={containerRef} className="absolute left-0 top-0 z-50 min-w-full w-max">
+        <div ref={containerRef} className="relative min-h-[24px]">
           <Input
             ref={inputRef}
             type="number"
@@ -234,7 +249,7 @@ export function EditableCell({
             onChange={(e) => setEditValue(parseFloat(e.target.value) || 0)}
             onKeyDown={handleKeyDown}
             onBlur={handleSave}
-            className={cn(inputClassName, 'min-w-[120px]')}
+            className={cn(inputClassName, 'min-w-[120px] absolute left-0 top-0 z-50')}
           />
         </div>
       )
@@ -242,7 +257,7 @@ export function EditableCell({
     case 'datetime':
     case 'date':
       return (
-        <div ref={containerRef} className="absolute left-0 top-0 z-50 min-w-full w-max">
+        <div ref={containerRef} className="relative min-h-[24px]">
           <Input
             ref={inputRef}
             type={fieldConfig.fieldType === 'datetime' ? 'datetime-local' : 'date'}
@@ -254,14 +269,14 @@ export function EditableCell({
             onChange={(e) => setEditValue(e.target.value ? new Date(e.target.value).toISOString() : null)}
             onKeyDown={handleKeyDown}
             onBlur={handleSave}
-            className={cn(inputClassName, 'min-w-[180px]')}
+            className={cn(inputClassName, 'min-w-[180px] absolute left-0 top-0 z-50')}
           />
         </div>
       )
 
     case 'tags':
       return (
-        <div ref={containerRef} className="absolute left-0 top-0 z-50 min-w-full w-max">
+        <div ref={containerRef} className="relative min-h-[24px]">
           <Input
             ref={inputRef}
             value={Array.isArray(editValue) ? (editValue as string[]).join(', ') : ''}
@@ -276,14 +291,14 @@ export function EditableCell({
             onKeyDown={handleKeyDown}
             onBlur={handleSave}
             placeholder="tag1, tag2"
-            className={cn(inputClassName, 'min-w-[200px]')}
+            className={cn(inputClassName, 'min-w-[200px] absolute left-0 top-0 z-50')}
           />
         </div>
       )
 
     case 'textarea':
       return (
-        <div ref={containerRef} className="absolute left-0 top-0 z-50 min-w-full w-max">
+        <div ref={containerRef} className="relative min-h-[60px]">
           <textarea
             ref={inputRef as unknown as React.RefObject<HTMLTextAreaElement>}
             value={editValue as string}
@@ -294,7 +309,7 @@ export function EditableCell({
             }}
             onBlur={handleSave}
             className={cn(
-              'flex min-h-[60px] min-w-[300px] rounded-sm bg-muted/30 px-1 py-1 text-sm',
+              'flex min-h-[60px] min-w-[300px] rounded-sm bg-muted/30 px-1 py-1 text-sm absolute left-0 top-0 z-50',
               'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary'
             )}
           />
@@ -304,14 +319,14 @@ export function EditableCell({
     case 'text':
     default:
       return (
-        <div ref={containerRef} className="absolute left-0 top-0 z-50 min-w-full w-max">
+        <div ref={containerRef} className="relative min-h-[24px]">
           <Input
             ref={inputRef}
             value={(editValue as string) || ''}
             onChange={(e) => setEditValue(e.target.value)}
             onKeyDown={handleKeyDown}
             onBlur={handleSave}
-            className={cn(inputClassName, 'min-w-[250px] w-auto')}
+            className={cn(inputClassName, 'min-w-[250px] w-auto absolute left-0 top-0 z-50')}
           />
         </div>
       )
