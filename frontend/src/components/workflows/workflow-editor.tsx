@@ -13,7 +13,6 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Select,
@@ -33,7 +32,6 @@ import { cn } from '@/lib/utils'
 import {
   Plus,
   Trash2,
-  GripVertical,
   Bot,
   User,
   FileCode,
@@ -41,26 +39,33 @@ import {
   Upload,
   Download,
   AlertCircle,
+  GitBranch,
+  Repeat,
+  Workflow as WorkflowIcon,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react'
+import type {
+  Workflow,
+  WorkflowStep,
+  WorkflowRegularStep,
+  WorkflowBranchStep,
+  WorkflowForeachStep,
+  WorkflowSubworkflowStep,
+  WorkflowStepType,
+  HITLPhase,
+  LegacyWorkflowStep,
+} from '@/types/workflow'
+import {
+  isRegularStep,
+  isBranchStep,
+  isForeachStep,
+  isSubworkflowStep,
+  normalizeSteps,
+  createStep,
+} from '@/types/workflow'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
-
-interface WorkflowStep {
-  id: string
-  name: string
-  type: 'automated' | 'manual'
-  hitlPhase: string
-  description?: string
-}
-
-interface Workflow {
-  _id?: string
-  name: string
-  description: string
-  isActive: boolean
-  steps: WorkflowStep[]
-  mermaidDiagram?: string
-}
 
 const workflowSchema = z.object({
   name: z.string().min(1, 'Name is required'),
@@ -77,13 +82,20 @@ interface WorkflowEditorProps {
   onSave: (workflow: Workflow) => void
 }
 
-const HITL_PHASES = [
+const HITL_PHASES: Array<{ code: HITLPhase; label: string; color: string }> = [
   { code: 'none', label: 'No HITL', color: '#6B7280' },
   { code: 'pre_execution', label: 'Pre-Execution', color: '#3B82F6' },
   { code: 'during_execution', label: 'During Execution', color: '#F59E0B' },
   { code: 'post_execution', label: 'Post-Execution', color: '#10B981' },
   { code: 'on_error', label: 'On Error', color: '#EF4444' },
   { code: 'approval_required', label: 'Approval Required', color: '#8B5CF6' },
+]
+
+const STEP_TYPES: Array<{ code: WorkflowStepType; label: string; icon: typeof Bot; color: string }> = [
+  { code: 'step', label: 'Step', icon: Bot, color: 'text-blue-500' },
+  { code: 'branch', label: 'Branch', icon: GitBranch, color: 'text-amber-500' },
+  { code: 'foreach', label: 'Foreach', icon: Repeat, color: 'text-green-500' },
+  { code: 'subworkflow', label: 'Subworkflow', icon: WorkflowIcon, color: 'text-cyan-500' },
 ]
 
 export function WorkflowEditor({
@@ -97,6 +109,7 @@ export function WorkflowEditor({
   const [mermaidError, setMermaidError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState('visual')
   const [importing, setImporting] = useState(false)
+  const [entryStepId, setEntryStepId] = useState<string | null>(null)
 
   const {
     register,
@@ -121,7 +134,9 @@ export function WorkflowEditor({
         description: workflow.description || '',
         isActive: workflow.isActive,
       })
-      setSteps(workflow.steps || [])
+      const normalizedSteps = normalizeSteps(workflow.steps || [])
+      setSteps(normalizedSteps)
+      setEntryStepId(workflow.entryStepId || (normalizedSteps.length > 0 ? normalizedSteps[0].id : null))
       setMermaidCode(workflow.mermaidDiagram || '')
     } else {
       reset({
@@ -130,6 +145,7 @@ export function WorkflowEditor({
         isActive: true,
       })
       setSteps([])
+      setEntryStepId(null)
       setMermaidCode('')
     }
   }, [workflow, reset])
@@ -140,7 +156,7 @@ export function WorkflowEditor({
       const response = await fetch(`${API_BASE}/workflows/generate-mermaid`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ steps, name: watch('name') }),
+        body: JSON.stringify({ steps, name: watch('name'), entryStepId }),
       })
       if (response.ok) {
         const data = await response.json()
@@ -159,7 +175,7 @@ export function WorkflowEditor({
     } else {
       setMermaidCode('')
     }
-  }, [steps])
+  }, [steps, entryStepId])
 
   // Parse mermaid diagram to steps
   const parseMermaid = async () => {
@@ -175,6 +191,7 @@ export function WorkflowEditor({
       if (response.ok) {
         const data = await response.json()
         setSteps(data.data.steps)
+        setEntryStepId(data.data.entryStepId)
         setMermaidError(null)
       } else {
         setMermaidError('Failed to parse Mermaid diagram')
@@ -186,24 +203,30 @@ export function WorkflowEditor({
     }
   }
 
-  const addStep = () => {
-    const newStep: WorkflowStep = {
-      id: `step-${Date.now()}`,
-      name: `Step ${steps.length + 1}`,
-      type: 'automated',
-      hitlPhase: 'none',
+  const addStep = (type: WorkflowStepType = 'step') => {
+    const newStep = createStep(type)
+    const newSteps = [...steps, newStep]
+    setSteps(newSteps)
+    if (!entryStepId) {
+      setEntryStepId(newStep.id)
     }
-    setSteps([...steps, newStep])
   }
 
   const updateStep = (index: number, updates: Partial<WorkflowStep>) => {
     const newSteps = [...steps]
-    newSteps[index] = { ...newSteps[index], ...updates }
+    newSteps[index] = { ...newSteps[index], ...updates } as WorkflowStep
     setSteps(newSteps)
   }
 
   const removeStep = (index: number) => {
-    setSteps(steps.filter((_, i) => i !== index))
+    const stepId = steps[index].id
+    const newSteps = steps.filter((_, i) => i !== index)
+    setSteps(newSteps)
+    if (entryStepId === stepId && newSteps.length > 0) {
+      setEntryStepId(newSteps[0].id)
+    } else if (newSteps.length === 0) {
+      setEntryStepId(null)
+    }
   }
 
   const moveStep = (fromIndex: number, toIndex: number) => {
@@ -219,6 +242,7 @@ export function WorkflowEditor({
       ...data,
       _id: workflow?._id,
       steps,
+      entryStepId,
       mermaidDiagram: mermaidCode,
       description: data.description || '',
     }
@@ -248,6 +272,215 @@ export function WorkflowEditor({
       setActiveTab('code')
     }
     reader.readAsText(file)
+  }
+
+  const renderStepEditor = (step: WorkflowStep, index: number) => {
+    const stepTypeInfo = STEP_TYPES.find((t) => t.code === step.stepType) || STEP_TYPES[0]
+    const StepIcon = stepTypeInfo.icon
+
+    return (
+      <div
+        key={step.id}
+        className={cn(
+          'flex flex-col gap-2 p-3 bg-background rounded-lg border',
+          step.stepType === 'branch' && 'border-amber-300 bg-amber-50/30',
+          step.stepType === 'foreach' && 'border-green-300 bg-green-50/30',
+          step.stepType === 'subworkflow' && 'border-cyan-300 bg-cyan-50/30',
+          isRegularStep(step) && step.type === 'manual' && 'border-purple-300 bg-purple-50/30'
+        )}
+      >
+        <div className="flex items-center gap-3">
+          {/* Move buttons */}
+          <div className="flex flex-col gap-0.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-5 w-5 p-0"
+              onClick={() => moveStep(index, index - 1)}
+              disabled={index === 0}
+            >
+              <ChevronUp className="h-3 w-3" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-5 w-5 p-0"
+              onClick={() => moveStep(index, index + 1)}
+              disabled={index === steps.length - 1}
+            >
+              <ChevronDown className="h-3 w-3" />
+            </Button>
+          </div>
+
+          {/* Step number and icon */}
+          <div className="flex items-center gap-2 text-sm text-muted-foreground w-12">
+            <StepIcon className={cn('h-4 w-4', stepTypeInfo.color)} />
+            {index + 1}.
+          </div>
+
+          {/* Step name */}
+          <div className="flex-1">
+            <Input
+              value={step.name}
+              onChange={(e) => updateStep(index, { name: e.target.value })}
+              placeholder="Step name"
+              className="h-8"
+            />
+          </div>
+
+          {/* Step type selector */}
+          <Select
+            value={step.stepType}
+            onValueChange={(val) => {
+              const newStep = createStep(val as WorkflowStepType, step.id)
+              newStep.name = step.name
+              const newSteps = [...steps]
+              newSteps[index] = newStep
+              setSteps(newSteps)
+            }}
+          >
+            <SelectTrigger className="w-[130px] h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {STEP_TYPES.map((type) => (
+                <SelectItem key={type.code} value={type.code}>
+                  <div className="flex items-center gap-2">
+                    <type.icon className={cn('h-4 w-4', type.color)} />
+                    {type.label}
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Delete button */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0 text-destructive"
+            onClick={() => removeStep(index)}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {/* Step-type specific fields */}
+        {isRegularStep(step) && (
+          <div className="flex items-center gap-3 ml-12">
+            <Select
+              value={step.type}
+              onValueChange={(val) =>
+                updateStep(index, { type: val as 'automated' | 'manual' })
+              }
+            >
+              <SelectTrigger className="w-[130px] h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="automated">
+                  <div className="flex items-center gap-2">
+                    <Bot className="h-4 w-4 text-blue-500" />
+                    Automated
+                  </div>
+                </SelectItem>
+                <SelectItem value="manual">
+                  <div className="flex items-center gap-2">
+                    <User className="h-4 w-4 text-purple-500" />
+                    Manual
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={step.hitlPhase}
+              onValueChange={(val) => updateStep(index, { hitlPhase: val as HITLPhase })}
+            >
+              <SelectTrigger className="w-[160px] h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {HITL_PHASES.map((phase) => (
+                  <SelectItem key={phase.code} value={phase.code}>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="h-2 w-2 rounded-full"
+                        style={{ backgroundColor: phase.color }}
+                      />
+                      {phase.label}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        {isBranchStep(step) && (
+          <div className="flex flex-col gap-2 ml-12">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground w-20">Condition:</span>
+              <Input
+                value={step.condition}
+                onChange={(e) => updateStep(index, { condition: e.target.value })}
+                placeholder="e.g., status === 'approved'"
+                className="h-8 flex-1 font-mono text-sm"
+              />
+            </div>
+            <div className="flex gap-4 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <span className="text-green-600">Yes</span> → {step.trueBranchStepId || '(next step)'}
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="text-red-600">No</span> → {step.falseBranchStepId || '(skip)'}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {isForeachStep(step) && (
+          <div className="flex flex-col gap-2 ml-12">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground w-20">Collection:</span>
+              <Input
+                value={step.collection}
+                onChange={(e) => updateStep(index, { collection: e.target.value })}
+                placeholder="e.g., items, users, documents"
+                className="h-8 flex-1 font-mono text-sm"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground w-20">Iterator:</span>
+              <Input
+                value={step.iterator}
+                onChange={(e) => updateStep(index, { iterator: e.target.value })}
+                placeholder="e.g., item, user, doc"
+                className="h-8 w-40 font-mono text-sm"
+              />
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Body steps: {step.bodyStepIds.length > 0 ? step.bodyStepIds.join(', ') : '(define in mermaid)'}
+            </div>
+          </div>
+        )}
+
+        {isSubworkflowStep(step) && (
+          <div className="flex items-center gap-2 ml-12">
+            <span className="text-sm text-muted-foreground w-20">Workflow:</span>
+            <Input
+              value={step.workflowRef}
+              onChange={(e) => updateStep(index, { workflowRef: e.target.value })}
+              placeholder="Workflow ID or name"
+              className="h-8 flex-1 font-mono text-sm"
+            />
+          </div>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -294,7 +527,7 @@ export function WorkflowEditor({
             <div className="flex items-center justify-between mb-2">
               <TabsList>
                 <TabsTrigger value="visual" className="gap-2">
-                  <GripVertical className="h-4 w-4" />
+                  <Bot className="h-4 w-4" />
                   Visual Editor
                 </TabsTrigger>
                 <TabsTrigger value="code" className="gap-2">
@@ -349,120 +582,52 @@ export function WorkflowEditor({
                     <p className="text-sm">Add steps or import a Mermaid diagram.</p>
                   </div>
                 ) : (
-                  steps.map((step, index) => (
-                    <div
-                      key={step.id}
-                      className={cn(
-                        'flex items-center gap-3 p-3 bg-background rounded-lg border',
-                        step.type === 'manual' && 'border-purple-300 bg-purple-50/50'
-                      )}
-                    >
-                      <div className="flex flex-col gap-1">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0"
-                          onClick={() => moveStep(index, index - 1)}
-                          disabled={index === 0}
-                        >
-                          ▲
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0"
-                          onClick={() => moveStep(index, index + 1)}
-                          disabled={index === steps.length - 1}
-                        >
-                          ▼
-                        </Button>
-                      </div>
-
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground w-8">
-                        {index + 1}.
-                      </div>
-
-                      <div className="flex-1">
-                        <Input
-                          value={step.name}
-                          onChange={(e) => updateStep(index, { name: e.target.value })}
-                          placeholder="Step name"
-                          className="h-8"
-                        />
-                      </div>
-
-                      <Select
-                        value={step.type}
-                        onValueChange={(val) =>
-                          updateStep(index, { type: val as 'automated' | 'manual' })
-                        }
-                      >
-                        <SelectTrigger className="w-[140px] h-8">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="automated">
-                            <div className="flex items-center gap-2">
-                              <Bot className="h-4 w-4 text-blue-500" />
-                              Automated
-                            </div>
-                          </SelectItem>
-                          <SelectItem value="manual">
-                            <div className="flex items-center gap-2">
-                              <User className="h-4 w-4 text-purple-500" />
-                              Manual
-                            </div>
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-
-                      <Select
-                        value={step.hitlPhase}
-                        onValueChange={(val) => updateStep(index, { hitlPhase: val })}
-                      >
-                        <SelectTrigger className="w-[160px] h-8">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {HITL_PHASES.map((phase) => (
-                            <SelectItem key={phase.code} value={phase.code}>
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className="h-2 w-2 rounded-full"
-                                  style={{ backgroundColor: phase.color }}
-                                />
-                                {phase.label}
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 w-8 p-0 text-destructive"
-                        onClick={() => removeStep(index)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))
+                  steps.map((step, index) => renderStepEditor(step, index))
                 )}
 
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={addStep}
-                  className="w-full"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Step
-                </Button>
+                {/* Add step buttons */}
+                <div className="flex gap-2 flex-wrap">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => addStep('step')}
+                    className="flex-1"
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Step
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => addStep('branch')}
+                    className="flex-1"
+                  >
+                    <GitBranch className="h-4 w-4 mr-1" />
+                    Add Branch
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => addStep('foreach')}
+                    className="flex-1"
+                  >
+                    <Repeat className="h-4 w-4 mr-1" />
+                    Add Foreach
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => addStep('subworkflow')}
+                    className="flex-1"
+                  >
+                    <WorkflowIcon className="h-4 w-4 mr-1" />
+                    Add Subworkflow
+                  </Button>
+                </div>
               </div>
             </TabsContent>
 
@@ -472,13 +637,28 @@ export function WorkflowEditor({
                 <textarea
                   value={mermaidCode}
                   onChange={(e) => setMermaidCode(e.target.value)}
-                  placeholder="Enter Mermaid flowchart code here...
+                  placeholder={`Enter Mermaid flowchart code here...
 
-Example:
+Example with branching:
 flowchart TD
-    A[Data Collection] --> B[AI Analysis]
-    B --> C((Human Review))
-    C --> D[Publication]"
+    A[Data Collection] --> B{Valid Data?}
+    B -->|Yes| C[Process Data]
+    B -->|No| D[Request Correction]
+    C --> E[Output Results]
+    D --> A
+
+Example with loop:
+flowchart TD
+    subgraph loop1["foreach: items as item"]
+        P1[Process Item]
+        P2((Review Item))
+    end
+    loop1 --> F[Finish]
+
+Example with subworkflow:
+flowchart TD
+    A[Start] --> B(["Data Validation Workflow"])
+    B --> C[Continue]`}
                   className={cn(
                     'flex-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono',
                     'ring-offset-background placeholder:text-muted-foreground',
@@ -503,7 +683,7 @@ flowchart TD
                     </div>
                   )}
                   <p className="text-xs text-muted-foreground ml-auto">
-                    Use [ ] for automated, ( ) for manual steps
+                    [ ] automated | (( )) manual | {'{ }'} branch | ([...]) subworkflow
                   </p>
                 </div>
               </div>
@@ -512,16 +692,10 @@ flowchart TD
             {/* Preview Tab */}
             <TabsContent value="preview" className="flex-1 overflow-auto mt-0">
               <div className="bg-white rounded-lg border p-4 min-h-[300px]">
-                {mermaidCode ? (
-                  <Mermaid
-                    chart={mermaidCode}
-                    onError={(err) => setMermaidError(err)}
-                  />
-                ) : (
-                  <div className="flex items-center justify-center h-full text-muted-foreground">
-                    <p>Add steps or enter Mermaid code to preview the diagram</p>
-                  </div>
-                )}
+                <Mermaid
+                  chart={mermaidCode}
+                  onError={(err) => setMermaidError(err)}
+                />
               </div>
             </TabsContent>
           </Tabs>

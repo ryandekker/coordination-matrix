@@ -288,3 +288,63 @@ export interface QueryParams {
   includeChildren?: boolean;
   resolveReferences?: boolean;
 }
+
+// ============================================================================
+// Workflow Types
+// ============================================================================
+
+export type WorkflowStepType = 'step' | 'branch' | 'foreach' | 'subworkflow';
+
+export interface WorkflowStepBase {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+export interface WorkflowRegularStep extends WorkflowStepBase {
+  stepType: 'step';
+  type: 'automated' | 'manual';
+  hitlPhase: HITLPhase;
+  config?: Record<string, unknown>;
+  nextStepId?: string | null;
+}
+
+export interface WorkflowBranchStep extends WorkflowStepBase {
+  stepType: 'branch';
+  condition: string; // Expression to evaluate (e.g., "status === 'approved'")
+  trueBranchStepId: string | null; // Step ID to go to if condition is true
+  falseBranchStepId: string | null; // Step ID to go to if condition is false
+}
+
+export interface WorkflowForeachStep extends WorkflowStepBase {
+  stepType: 'foreach';
+  collection: string; // Expression for the collection to iterate (e.g., "items")
+  iterator: string; // Variable name for current item (e.g., "item")
+  bodyStepIds: string[]; // Step IDs that form the loop body
+  nextStepId?: string | null; // Step to continue after loop completes
+}
+
+export interface WorkflowSubworkflowStep extends WorkflowStepBase {
+  stepType: 'subworkflow';
+  workflowRef: string; // ID or name of the referenced workflow
+  nextStepId?: string | null;
+}
+
+export type WorkflowStep =
+  | WorkflowRegularStep
+  | WorkflowBranchStep
+  | WorkflowForeachStep
+  | WorkflowSubworkflowStep;
+
+export interface Workflow {
+  _id: ObjectId;
+  name: string;
+  description: string;
+  isActive: boolean;
+  steps: WorkflowStep[];
+  entryStepId?: string | null; // First step to execute
+  mermaidDiagram?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  createdById?: ObjectId | null;
+}

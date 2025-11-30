@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Workflow, Play, Pause, ChevronRight, User, Bot, Plus, Pencil, Trash2, Copy, MoreHorizontal } from 'lucide-react'
+import { Workflow, Play, Pause, ChevronRight, User, Bot, Plus, Pencil, Trash2, Copy, MoreHorizontal, GitBranch, Repeat, Workflow as WorkflowIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -24,24 +24,13 @@ import {
 } from '@/components/ui/alert-dialog'
 import { WorkflowEditor } from '@/components/workflows/workflow-editor'
 import { cn } from '@/lib/utils'
+import type { Workflow as WorkflowType, WorkflowStep } from '@/types/workflow'
+import { isRegularStep, isBranchStep, isForeachStep, isSubworkflowStep, normalizeSteps } from '@/types/workflow'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
-interface WorkflowStep {
-  id: string
-  name: string
-  type: 'automated' | 'manual'
-  hitlPhase: string
-  description?: string
-}
-
-interface WorkflowData {
+interface WorkflowData extends Omit<WorkflowType, '_id' | 'createdAt' | 'updatedAt'> {
   _id: string
-  name: string
-  description: string
-  isActive: boolean
-  steps: WorkflowStep[]
-  mermaidDiagram?: string
   createdAt: string
   updatedAt?: string
 }
@@ -149,11 +138,11 @@ export default function WorkflowsPage() {
     setEditingWorkflow(null)
   }
 
-  const handleSave = (workflow: { _id?: string; name: string; description: string; isActive: boolean; steps: WorkflowStep[]; mermaidDiagram?: string }) => {
+  const handleSave = (workflow: WorkflowType) => {
     if (workflow._id) {
-      updateMutation.mutate({ id: workflow._id, data: workflow })
+      updateMutation.mutate({ id: workflow._id, data: workflow as Partial<WorkflowData> })
     } else {
-      createMutation.mutate(workflow)
+      createMutation.mutate(workflow as Partial<WorkflowData>)
     }
   }
 
@@ -180,6 +169,115 @@ export default function WorkflowsPage() {
     post_execution: '#10B981',
     on_error: '#EF4444',
     approval_required: '#8B5CF6',
+  }
+
+  const renderStepBadge = (step: WorkflowStep, index: number, totalSteps: number) => {
+    const isLastStep = index === totalSteps - 1
+
+    if (isRegularStep(step)) {
+      return (
+        <div key={step.id || index} className="flex items-center">
+          <div
+            className={cn(
+              'flex flex-col items-center gap-1 rounded-lg border p-3 min-w-[140px]',
+              step.type === 'manual' ? 'border-purple-300 bg-purple-50' : 'border-gray-200'
+            )}
+          >
+            <div className="flex items-center gap-2">
+              {step.type === 'automated' ? (
+                <Bot className="h-4 w-4 text-blue-500" />
+              ) : (
+                <User className="h-4 w-4 text-purple-500" />
+              )}
+              <span className="text-sm font-medium">{step.name}</span>
+            </div>
+            {step.hitlPhase !== 'none' && (
+              <Badge
+                variant="outline"
+                className="text-xs"
+                style={{ borderColor: hitlPhaseColors[step.hitlPhase], color: hitlPhaseColors[step.hitlPhase] }}
+              >
+                {hitlPhaseLabels[step.hitlPhase]}
+              </Badge>
+            )}
+          </div>
+          {!isLastStep && (
+            <ChevronRight className="h-5 w-5 text-muted-foreground mx-1 flex-shrink-0" />
+          )}
+        </div>
+      )
+    }
+
+    if (isBranchStep(step)) {
+      return (
+        <div key={step.id || index} className="flex items-center">
+          <div className="flex flex-col items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 p-3 min-w-[140px]">
+            <div className="flex items-center gap-2">
+              <GitBranch className="h-4 w-4 text-amber-500" />
+              <span className="text-sm font-medium">{step.name}</span>
+            </div>
+            <Badge variant="outline" className="text-xs border-amber-400 text-amber-600">
+              Branch
+            </Badge>
+          </div>
+          {!isLastStep && (
+            <ChevronRight className="h-5 w-5 text-muted-foreground mx-1 flex-shrink-0" />
+          )}
+        </div>
+      )
+    }
+
+    if (isForeachStep(step)) {
+      return (
+        <div key={step.id || index} className="flex items-center">
+          <div className="flex flex-col items-center gap-1 rounded-lg border border-green-300 bg-green-50 p-3 min-w-[140px]">
+            <div className="flex items-center gap-2">
+              <Repeat className="h-4 w-4 text-green-500" />
+              <span className="text-sm font-medium">{step.name}</span>
+            </div>
+            <Badge variant="outline" className="text-xs border-green-400 text-green-600">
+              Foreach
+            </Badge>
+          </div>
+          {!isLastStep && (
+            <ChevronRight className="h-5 w-5 text-muted-foreground mx-1 flex-shrink-0" />
+          )}
+        </div>
+      )
+    }
+
+    if (isSubworkflowStep(step)) {
+      return (
+        <div key={step.id || index} className="flex items-center">
+          <div className="flex flex-col items-center gap-1 rounded-lg border border-cyan-300 bg-cyan-50 p-3 min-w-[140px] border-dashed">
+            <div className="flex items-center gap-2">
+              <WorkflowIcon className="h-4 w-4 text-cyan-500" />
+              <span className="text-sm font-medium">{step.name}</span>
+            </div>
+            <Badge variant="outline" className="text-xs border-cyan-400 text-cyan-600">
+              Subworkflow
+            </Badge>
+          </div>
+          {!isLastStep && (
+            <ChevronRight className="h-5 w-5 text-muted-foreground mx-1 flex-shrink-0" />
+          )}
+        </div>
+      )
+    }
+
+    return null
+  }
+
+  const getStepCounts = (steps: WorkflowStep[]) => {
+    const normalizedSteps = normalizeSteps(steps)
+    const regularSteps = normalizedSteps.filter(isRegularStep)
+    const manualCount = regularSteps.filter((s) => s.type === 'manual').length
+    const hitlCount = regularSteps.filter((s) => s.hitlPhase !== 'none').length
+    const branchCount = normalizedSteps.filter(isBranchStep).length
+    const loopCount = normalizedSteps.filter(isForeachStep).length
+    const subworkflowCount = normalizedSteps.filter(isSubworkflowStep).length
+
+    return { total: steps.length, manualCount, hitlCount, branchCount, loopCount, subworkflowCount }
   }
 
   return (
@@ -227,121 +325,95 @@ export default function WorkflowsPage() {
         </div>
       ) : (
         <div className="grid gap-6">
-          {workflows.map((workflow) => (
-            <div
-              key={workflow._id}
-              className="rounded-lg border bg-card p-6 space-y-4"
-            >
-              <div className="flex items-start justify-between">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-3">
-                    <h3 className="text-lg font-semibold">{workflow.name}</h3>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        'cursor-pointer',
-                        workflow.isActive
-                          ? 'text-green-600 border-green-600'
-                          : 'text-gray-500 border-gray-500'
-                      )}
-                      onClick={() => handleToggleActive(workflow)}
-                    >
-                      {workflow.isActive ? (
-                        <>
-                          <Play className="mr-1 h-3 w-3" />
-                          Active
-                        </>
-                      ) : (
-                        <>
-                          <Pause className="mr-1 h-3 w-3" />
-                          Inactive
-                        </>
-                      )}
-                    </Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground">{workflow.description}</p>
-                </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="h-8 w-8 p-0">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => openEditEditor(workflow)}>
-                      <Pencil className="mr-2 h-4 w-4" />
-                      Edit
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => duplicateMutation.mutate(workflow._id)}>
-                      <Copy className="mr-2 h-4 w-4" />
-                      Duplicate
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      className="text-destructive"
-                      onClick={() => setDeleteConfirm(workflow)}
-                    >
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
+          {workflows.map((workflow) => {
+            const normalizedSteps = normalizeSteps(workflow.steps || [])
+            const counts = getStepCounts(workflow.steps || [])
 
-              <div className="flex items-center gap-2 overflow-x-auto pb-2">
-                {workflow.steps.map((step, index) => (
-                  <div key={step.id || index} className="flex items-center">
-                    <div
-                      className={cn(
-                        'flex flex-col items-center gap-1 rounded-lg border p-3 min-w-[140px]',
-                        step.type === 'manual' ? 'border-purple-300 bg-purple-50' : 'border-gray-200'
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        {step.type === 'automated' ? (
-                          <Bot className="h-4 w-4 text-blue-500" />
-                        ) : (
-                          <User className="h-4 w-4 text-purple-500" />
+            return (
+              <div
+                key={workflow._id}
+                className="rounded-lg border bg-card p-6 space-y-4"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-3">
+                      <h3 className="text-lg font-semibold">{workflow.name}</h3>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          'cursor-pointer',
+                          workflow.isActive
+                            ? 'text-green-600 border-green-600'
+                            : 'text-gray-500 border-gray-500'
                         )}
-                        <span className="text-sm font-medium">{step.name}</span>
-                      </div>
-                      {step.hitlPhase !== 'none' && (
-                        <Badge
-                          variant="outline"
-                          className="text-xs"
-                          style={{ borderColor: hitlPhaseColors[step.hitlPhase], color: hitlPhaseColors[step.hitlPhase] }}
-                        >
-                          {hitlPhaseLabels[step.hitlPhase]}
-                        </Badge>
-                      )}
+                        onClick={() => handleToggleActive(workflow)}
+                      >
+                        {workflow.isActive ? (
+                          <>
+                            <Play className="mr-1 h-3 w-3" />
+                            Active
+                          </>
+                        ) : (
+                          <>
+                            <Pause className="mr-1 h-3 w-3" />
+                            Inactive
+                          </>
+                        )}
+                      </Badge>
                     </div>
-                    {index < workflow.steps.length - 1 && (
-                      <ChevronRight className="h-5 w-5 text-muted-foreground mx-1 flex-shrink-0" />
-                    )}
+                    <p className="text-sm text-muted-foreground">{workflow.description}</p>
                   </div>
-                ))}
-                {workflow.steps.length === 0 && (
-                  <p className="text-sm text-muted-foreground italic">No steps defined</p>
-                )}
-              </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm" className="h-8 w-8 p-0">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => openEditEditor(workflow)}>
+                        <Pencil className="mr-2 h-4 w-4" />
+                        Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => duplicateMutation.mutate(workflow._id)}>
+                        <Copy className="mr-2 h-4 w-4" />
+                        Duplicate
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className="text-destructive"
+                        onClick={() => setDeleteConfirm(workflow)}
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
 
-              <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                <span>{workflow.steps.length} steps</span>
-                <span>
-                  {workflow.steps.filter((s) => s.type === 'manual').length} manual checkpoints
-                </span>
-                <span>
-                  {workflow.steps.filter((s) => s.hitlPhase !== 'none').length} HITL points
-                </span>
+                <div className="flex items-center gap-2 overflow-x-auto pb-2">
+                  {normalizedSteps.map((step, index) => renderStepBadge(step, index, normalizedSteps.length))}
+                  {normalizedSteps.length === 0 && (
+                    <p className="text-sm text-muted-foreground italic">No steps defined</p>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
+                  <span>{counts.total} steps</span>
+                  {counts.manualCount > 0 && <span>{counts.manualCount} manual</span>}
+                  {counts.hitlCount > 0 && <span>{counts.hitlCount} HITL</span>}
+                  {counts.branchCount > 0 && <span>{counts.branchCount} branches</span>}
+                  {counts.loopCount > 0 && <span>{counts.loopCount} loops</span>}
+                  {counts.subworkflowCount > 0 && <span>{counts.subworkflowCount} subworkflows</span>}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
       {/* Workflow Editor Modal */}
       <WorkflowEditor
-        workflow={editingWorkflow}
+        workflow={editingWorkflow as WorkflowType | null}
         isOpen={isEditorOpen}
         onClose={closeEditor}
         onSave={handleSave}
