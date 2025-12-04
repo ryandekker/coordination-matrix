@@ -249,23 +249,12 @@ externalJobsRouter.put('/:id/complete', async (req: Request, res: Response, next
     }
 
     // Update task
-    const task = await db.collection<Task>('tasks').findOne({ _id: result.taskId });
-
-    let newTaskStatus = 'completed';
-    if (task?.hitlRequired && task.hitlPhase === 'post_execution') {
-      newTaskStatus = 'waiting_human';
-    }
-
     await db.collection('tasks').updateOne(
       { _id: result.taskId },
       {
         $set: {
-          externalJobStatus: 'completed',
-          externalJobResult: jobResult,
-          status: newTaskStatus,
-          hitlStatus:
-            task?.hitlRequired && task.hitlPhase === 'post_execution' ? 'pending' : task?.hitlStatus,
-          completedAt: newTaskStatus === 'completed' ? now : null,
+          status: 'completed',
+          completedAt: now,
           updatedAt: now,
         },
       }
@@ -311,21 +300,11 @@ externalJobsRouter.put('/:id/fail', async (req: Request, res: Response, next: Ne
 
     // Update task if job has finally failed
     if (!canRetry) {
-      const task = await db.collection<Task>('tasks').findOne({ _id: job.taskId });
-
-      let newTaskStatus = 'failed';
-      if (task?.hitlRequired && task.hitlPhase === 'on_error') {
-        newTaskStatus = 'waiting_human';
-      }
-
       await db.collection('tasks').updateOne(
         { _id: job.taskId },
         {
           $set: {
-            externalJobStatus: 'failed',
-            status: newTaskStatus,
-            hitlStatus:
-              task?.hitlRequired && task.hitlPhase === 'on_error' ? 'escalated' : task?.hitlStatus,
+            status: 'failed',
             updatedAt: now,
           },
         }

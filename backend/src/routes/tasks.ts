@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { ObjectId, Filter, Sort, Document, Int32 } from 'mongodb';
+import { ObjectId, Filter, Sort, Document, WithId } from 'mongodb';
 import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
 import { ReferenceResolver } from '../services/reference-resolver.js';
@@ -20,7 +20,7 @@ function toObjectId(id: string): ObjectId {
 // Helper to build filter from query params
 function buildFilter(query: Record<string, unknown>): Filter<Task> {
   const filter: Filter<Task> = {};
-  const { search, filters, parentId, rootOnly, hitlPending, status, priority, assigneeId, tags } = query;
+  const { search, filters, parentId, rootOnly, status, urgency, assigneeId, tags } = query;
 
   // Text search
   if (search && typeof search === 'string') {
@@ -43,19 +43,13 @@ function buildFilter(query: Record<string, unknown>): Filter<Task> {
     }
   }
 
-  // Priority filter
-  if (priority) {
-    if (Array.isArray(priority)) {
-      (filter as Record<string, unknown>).priority = { $in: priority };
+  // Urgency filter
+  if (urgency) {
+    if (Array.isArray(urgency)) {
+      (filter as Record<string, unknown>).urgency = { $in: urgency };
     } else {
-      (filter as Record<string, unknown>).priority = priority as string;
+      (filter as Record<string, unknown>).urgency = urgency as string;
     }
-  }
-
-  // HITL pending filter
-  if (hitlPending === 'true' || hitlPending === true) {
-    filter.hitlRequired = true;
-    filter.hitlStatus = { $in: ['pending', 'in_review'] };
   }
 
   // Assignee filter
@@ -142,20 +136,18 @@ tasksRouter.get('/tree', async (req: Request, res: Response, next: NextFunction)
     let filter: Filter<Task> = {};
 
     if (rootId) {
-      // Get specific tree
+      // Get all descendants of this task
       const rootOid = toObjectId(rootId as string);
+      const descendants = await getDescendantIds(db, rootOid);
       filter = {
-        $or: [{ _id: rootOid }, { rootId: rootOid }],
+        _id: { $in: [rootOid, ...descendants] },
       };
-    } else {
-      // Get all root tasks and their children
-      filter = {}; // Get all tasks, build tree in memory
     }
 
     const tasks = await db
       .collection<Task>('tasks')
       .find(filter)
-      .sort({ depth: 1, createdAt: 1 })
+      .sort({ createdAt: 1 })
       .toArray();
 
     let resolvedTasks = tasks;
@@ -174,6 +166,27 @@ tasksRouter.get('/tree', async (req: Request, res: Response, next: NextFunction)
     next(error);
   }
 });
+
+// Helper to get all descendant IDs recursively
+async function getDescendantIds(db: ReturnType<typeof getDb>, parentId: ObjectId, maxDepth = 10, currentDepth = 0): Promise<ObjectId[]> {
+  if (currentDepth >= maxDepth) return [];
+
+  const children = await db
+    .collection<Task>('tasks')
+    .find({ parentId })
+    .project({ _id: 1 })
+    .toArray();
+
+  const childIds = children.map(c => c._id);
+  const grandchildIds: ObjectId[] = [];
+
+  for (const childId of childIds) {
+    const descendants = await getDescendantIds(db, childId, maxDepth, currentDepth + 1);
+    grandchildIds.push(...descendants);
+  }
+
+  return [...childIds, ...grandchildIds];
+}
 
 // GET /api/tasks/:id - Get a single task
 tasksRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
@@ -240,7 +253,7 @@ tasksRouter.get('/:id/children', async (req: Request, res: Response, next: NextF
   }
 });
 
-// GET /api/tasks/:id/ancestors - Get all ancestors of a task
+// GET /api/tasks/:id/ancestors - Get all ancestors of a task (walks up the parent chain)
 tasksRouter.get('/:id/ancestors', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
@@ -253,21 +266,19 @@ tasksRouter.get('/:id/ancestors', async (req: Request, res: Response, next: Next
       throw createError('Task not found', 404);
     }
 
-    if (!task.path || task.path.length === 0) {
-      res.json({ data: [] });
-      return;
+    // Walk up the parent chain to find all ancestors
+    const ancestors: Task[] = [];
+    let currentParentId = task.parentId;
+
+    while (currentParentId) {
+      const parent = await db.collection<Task>('tasks').findOne({ _id: currentParentId });
+      if (!parent) break;
+      ancestors.push(parent);
+      currentParentId = parent.parentId;
     }
 
-    const ancestors = await db
-      .collection<Task>('tasks')
-      .find({ _id: { $in: task.path } })
-      .toArray();
-
-    // Sort by path order
-    const pathOrder = new Map(task.path.map((id, index) => [id.toString(), index]));
-    ancestors.sort((a, b) => {
-      return (pathOrder.get(a._id.toString()) || 0) - (pathOrder.get(b._id.toString()) || 0);
-    });
+    // Reverse so root is first
+    ancestors.reverse();
 
     let resolvedAncestors = ancestors;
     if (resolveReferences === 'true') {
@@ -277,6 +288,41 @@ tasksRouter.get('/:id/ancestors', async (req: Request, res: Response, next: Next
     }
 
     res.json({ data: resolvedAncestors });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/tasks/:id/descendants - Get all descendants of a task (all children, grandchildren, etc.)
+tasksRouter.get('/:id/descendants', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const db = getDb();
+    const { resolveReferences = 'true', maxDepth = '10' } = req.query;
+
+    const taskId = toObjectId(req.params.id);
+    const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
+
+    if (!task) {
+      throw createError('Task not found', 404);
+    }
+
+    const maxDepthNum = parseInt(maxDepth as string, 10) || 10;
+    const descendantIds = await getDescendantIds(db, taskId, maxDepthNum);
+
+    const descendants = await db
+      .collection<Task>('tasks')
+      .find({ _id: { $in: descendantIds } })
+      .sort({ createdAt: 1 })
+      .toArray();
+
+    let resolvedDescendants = descendants;
+    if (resolveReferences === 'true') {
+      const resolver = new ReferenceResolver();
+      await resolver.loadFieldConfigs('tasks');
+      resolvedDescendants = await resolver.resolveDocuments(descendants);
+    }
+
+    res.json({ data: resolvedDescendants });
   } catch (error) {
     next(error);
   }
@@ -297,9 +343,6 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
 
     const now = new Date();
     let parentId: ObjectId | null = null;
-    let rootId: ObjectId | null = null;
-    let depth = 0;
-    let path: ObjectId[] = [];
 
     // Handle parent task relationship
     if (taskData.parentId) {
@@ -309,38 +352,22 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       if (!parent) {
         throw createError('Parent task not found', 404);
       }
-
-      rootId = parent.rootId || parent._id;
-      depth = (typeof parent.depth === 'number' ? parent.depth : 0) + 1;
-      path = [...parent.path, parentId];
-
-      // Increment parent's child count
-      await db.collection('tasks').updateOne(
-        { _id: parentId },
-        { $inc: { childCount: 1 }, $set: { updatedAt: now } }
-      );
     }
 
     const newTask: Document = {
       title: taskData.title,
-      description: taskData.description || '',
+      summary: taskData.summary || '',
+      extraPrompt: taskData.extraPrompt || '',
+      additionalInfo: taskData.additionalInfo || '',
       status: taskData.status || 'pending',
-      priority: taskData.priority || 'medium',
+      urgency: taskData.urgency || 'normal',
       parentId,
-      rootId,
-      depth: new Int32(depth),
-      path,
-      childCount: new Int32(0),
-      hitlRequired: taskData.hitlRequired || false,
-      hitlPhase: taskData.hitlPhase || 'none',
-      hitlStatus: taskData.hitlRequired ? 'pending' : 'not_required',
-      hitlAssigneeId: taskData.hitlAssigneeId ? toObjectId(taskData.hitlAssigneeId) : null,
-      hitlNotes: taskData.hitlNotes || '',
       workflowId: taskData.workflowId ? toObjectId(taskData.workflowId) : null,
+      workflowStage: taskData.workflowStage || '',
+      externalId: taskData.externalId || '',
+      externalHoldDate: taskData.externalHoldDate ? new Date(taskData.externalHoldDate) : null,
       assigneeId: taskData.assigneeId ? toObjectId(taskData.assigneeId) : null,
       createdById: taskData.createdById ? toObjectId(taskData.createdById) : null,
-      teamId: taskData.teamId ? toObjectId(taskData.teamId) : null,
-      metadata: taskData.metadata || {},
       tags: taskData.tags || [],
       createdAt: now,
       updatedAt: now,
@@ -386,13 +413,9 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     // Remove fields that shouldn't be updated directly
     delete updates._id;
     delete updates.createdAt;
-    delete updates.path;
-    delete updates.depth;
-    delete updates.rootId;
-    delete updates.childCount;
 
     // Convert ID fields
-    const idFields = ['parentId', 'assigneeId', 'createdById', 'teamId', 'hitlAssigneeId', 'workflowId'];
+    const idFields = ['parentId', 'assigneeId', 'createdById', 'workflowId'];
     for (const field of idFields) {
       if (updates[field] !== undefined) {
         updates[field] = updates[field] ? toObjectId(updates[field]) : null;
@@ -400,7 +423,7 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     }
 
     // Convert date fields
-    const dateFields = ['dueAt', 'startedAt', 'completedAt'];
+    const dateFields = ['dueAt', 'externalHoldDate'];
     for (const field of dateFields) {
       if (updates[field] !== undefined) {
         updates[field] = updates[field] ? new Date(updates[field]) : null;
@@ -408,18 +431,6 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     }
 
     updates.updatedAt = new Date();
-
-    // Handle HITL status changes
-    if (updates.hitlRequired === false) {
-      updates.hitlStatus = 'not_required';
-    }
-
-    // Handle status changes
-    if (updates.status === 'completed') {
-      updates.completedAt = updates.completedAt || new Date();
-    } else if (updates.status === 'in_progress' && !updates.startedAt) {
-      updates.startedAt = new Date();
-    }
 
     const result = await db.collection<Task>('tasks').findOneAndUpdate(
       { _id: taskId },
@@ -449,7 +460,7 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
             changes: changes.filter(c => {
               if (eventType === 'task.status.changed') return c.field === 'status';
               if (eventType === 'task.assignee.changed') return c.field === 'assigneeId';
-              if (eventType === 'task.priority.changed') return c.field === 'priority';
+              if (eventType === 'task.priority.changed') return c.field === 'urgency';
               return false;
             }),
             actorId,
@@ -480,84 +491,37 @@ tasksRouter.put('/:id/move', async (req: Request, res: Response, next: NextFunct
 
     const oldParentId = task.parentId;
     const now = new Date();
-    let newPath: ObjectId[] = [];
-    let newDepth = 0;
-    let newRootId: ObjectId | null = null;
     let newParent: Task | null = null;
 
     if (newParentId) {
       const parentOid = toObjectId(newParentId);
 
-      // Check for circular reference
-      if (task.path && task.path.some((id) => id.equals(parentOid))) {
-        throw createError('Cannot move task to one of its descendants', 400);
+      // Check for circular reference - walk up the parent chain from the new parent
+      let currentParentId: ObjectId | null = parentOid;
+      while (currentParentId) {
+        if (currentParentId.equals(taskId)) {
+          throw createError('Cannot move task to one of its descendants', 400);
+        }
+        const ancestor: WithId<Task> | null = await db.collection<Task>('tasks').findOne({ _id: currentParentId });
+        currentParentId = ancestor?.parentId || null;
       }
 
       newParent = await db.collection<Task>('tasks').findOne({ _id: parentOid });
       if (!newParent) {
         throw createError('New parent task not found', 404);
       }
-
-      newPath = [...newParent.path, parentOid];
-      newDepth = newParent.depth + 1;
-      newRootId = newParent.rootId || newParent._id;
     }
 
-    // Update old parent's child count
-    if (task.parentId) {
-      await db.collection('tasks').updateOne(
-        { _id: task.parentId },
-        { $inc: { childCount: -1 }, $set: { updatedAt: now } }
-      );
-    }
-
-    // Update new parent's child count
-    if (newParent) {
-      await db.collection('tasks').updateOne(
-        { _id: newParent._id },
-        { $inc: { childCount: 1 }, $set: { updatedAt: now } }
-      );
-    }
-
-    // Update the task itself
+    // Update the task's parent
     await db.collection('tasks').updateOne(
       { _id: taskId },
       {
         $set: {
           parentId: newParent ? newParent._id : null,
-          path: newPath,
-          depth: newDepth,
-          rootId: newRootId,
           updatedAt: now,
         },
       }
     );
-
-    // Update all descendants' paths
-    if (task.childCount > 0) {
-      const descendants = await db
-        .collection<Task>('tasks')
-        .find({ path: taskId })
-        .toArray();
-
-      for (const desc of descendants) {
-        const taskIndex = desc.path.findIndex((id) => id.equals(taskId));
-        const newDescPath = [...newPath, taskId, ...desc.path.slice(taskIndex + 1)];
-        const newDescDepth = newDepth + (desc.depth - task.depth);
-
-        await db.collection('tasks').updateOne(
-          { _id: desc._id },
-          {
-            $set: {
-              path: newDescPath,
-              depth: newDescDepth,
-              rootId: newRootId || taskId,
-              updatedAt: now,
-            },
-          }
-        );
-      }
-    }
 
     const updatedTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
 
@@ -596,43 +560,24 @@ tasksRouter.delete('/:id', async (req: Request, res: Response, next: NextFunctio
     const now = new Date();
     const deletedTaskIds: ObjectId[] = [taskId];
 
-    // Update parent's child count
-    if (task.parentId) {
-      await db.collection('tasks').updateOne(
-        { _id: task.parentId },
-        { $inc: { childCount: -1 }, $set: { updatedAt: now } }
-      );
-    }
-
-    if (deleteChildren === 'true' && task.childCount > 0) {
-      // Get all descendant IDs before deleting
-      const descendants = await db.collection<Task>('tasks').find({ path: taskId }).toArray();
-      deletedTaskIds.push(...descendants.map(d => d._id));
-
-      // Delete all descendants
-      await db.collection('tasks').deleteMany({ path: taskId });
-    } else if (task.childCount > 0) {
+    if (deleteChildren === 'true') {
+      // Delete all descendants recursively
+      const descendantIds = await getDescendantIds(db, taskId);
+      if (descendantIds.length > 0) {
+        deletedTaskIds.push(...descendantIds);
+        await db.collection('tasks').deleteMany({ _id: { $in: descendantIds } });
+      }
+    } else {
       // Move children up to parent
       await db.collection('tasks').updateMany(
         { parentId: taskId },
         {
           $set: {
             parentId: task.parentId,
-            depth: task.depth,
-            path: task.path,
-            rootId: task.parentId ? task.rootId : null,
             updatedAt: now,
           },
         }
       );
-
-      // Update parent's child count with new children
-      if (task.parentId) {
-        await db.collection('tasks').updateOne(
-          { _id: task.parentId },
-          { $inc: { childCount: task.childCount } }
-        );
-      }
     }
 
     // Delete the task
@@ -689,34 +634,18 @@ tasksRouter.post('/bulk', async (req: Request, res: Response, next: NextFunction
         break;
 
       case 'delete':
-        // First, get all tasks to update parent counts
-        const tasksToDelete = await db
-          .collection<Task>('tasks')
-          .find({ _id: { $in: objectIds } })
-          .toArray();
+        // Get all descendant IDs for all tasks being deleted
+        const allIdsToDelete = new Set<string>(objectIds.map(id => id.toString()));
 
-        // Update parent counts
-        const parentUpdates = new Map<string, number>();
-        for (const task of tasksToDelete) {
-          if (task.parentId) {
-            const key = task.parentId.toString();
-            parentUpdates.set(key, (parentUpdates.get(key) || 0) - 1);
-          }
+        for (const taskId of objectIds) {
+          const descendantIds = await getDescendantIds(db, taskId);
+          descendantIds.forEach(id => allIdsToDelete.add(id.toString()));
         }
 
-        for (const [parentId, delta] of parentUpdates) {
-          await db.collection('tasks').updateOne(
-            { _id: new ObjectId(parentId) },
-            { $inc: { childCount: delta }, $set: { updatedAt: now } }
-          );
-        }
+        const deleteObjectIds = Array.from(allIdsToDelete).map(id => new ObjectId(id));
+        await db.collection('tasks').deleteMany({ _id: { $in: deleteObjectIds } });
 
-        // Also delete children
-        await db.collection('tasks').deleteMany({
-          $or: [{ _id: { $in: objectIds } }, { path: { $in: objectIds } }],
-        });
-
-        result = { deletedCount: tasksToDelete.length };
+        result = { deletedCount: deleteObjectIds.length };
         break;
 
       default:
@@ -730,7 +659,7 @@ tasksRouter.post('/bulk', async (req: Request, res: Response, next: NextFunction
 });
 
 // Helper function to build tree structure
-function buildTaskTree(tasks: Task[], maxDepth: number): TaskWithChildren[] {
+function buildTaskTree(tasks: Task[], _maxDepth: number, _currentDepth = 0): TaskWithChildren[] {
   const taskMap = new Map<string, TaskWithChildren>();
   const roots: TaskWithChildren[] = [];
 
@@ -743,7 +672,7 @@ function buildTaskTree(tasks: Task[], maxDepth: number): TaskWithChildren[] {
   for (const task of tasks) {
     const taskNode = taskMap.get(task._id.toString())!;
 
-    if (task.parentId && task.depth <= maxDepth) {
+    if (task.parentId) {
       const parent = taskMap.get(task.parentId.toString());
       if (parent) {
         parent.children = parent.children || [];
@@ -752,7 +681,7 @@ function buildTaskTree(tasks: Task[], maxDepth: number): TaskWithChildren[] {
         // Parent not in current result set, treat as root
         roots.push(taskNode);
       }
-    } else if (!task.parentId) {
+    } else {
       roots.push(taskNode);
     }
   }

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { TaskDataTable } from './task-data-table'
 import { TaskToolbar } from './task-toolbar'
 import { TaskModal } from './task-modal'
@@ -9,6 +10,9 @@ import { useTasks, useLookups, useFieldConfigs, useViews, useUsers } from '@/hoo
 import { Task, View } from '@/lib/api'
 
 export function TasksPage() {
+  const searchParams = useSearchParams()
+  const viewParam = searchParams.get('view')
+  
   const [selectedView, setSelectedView] = useState<string | null>(null)
   const [filters, setFilters] = useState<Record<string, unknown>>({})
   const [search, setSearch] = useState('')
@@ -17,6 +21,7 @@ export function TasksPage() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [parentTask, setParentTask] = useState<Task | null>(null)
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false)
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState<string[]>([])
@@ -44,6 +49,24 @@ export function TasksPage() {
   const fieldConfigs = fieldConfigsData?.data || []
   const views = viewsData?.data || []
   const users = usersData?.data || []
+
+  // Map URL view param to view names
+  const viewNameMap: Record<string, string> = {
+    'awaiting-review': 'Awaiting Review',
+    'hitl': 'Human in the Loop',
+    'completed': 'Completed Tasks'
+  }
+
+  // Initialize view from URL param
+  useEffect(() => {
+    if (viewParam && views.length > 0) {
+      const viewName = viewNameMap[viewParam]
+      const view = views.find((v: View) => v.name === viewName)
+      if (view && view._id) {
+        handleViewChange(view._id)
+      }
+    }
+  }, [viewParam, views])
 
   // Get current view
   const currentView = selectedView
@@ -85,11 +108,19 @@ export function TasksPage() {
 
   const handleCreateTask = () => {
     setSelectedTask(null)
+    setParentTask(null)
     setIsTaskModalOpen(true)
   }
 
   const handleEditTask = (task: Task) => {
     setSelectedTask(task)
+    setParentTask(null)
+    setIsTaskModalOpen(true)
+  }
+
+  const handleCreateSubtask = (parent: Task) => {
+    setSelectedTask(null)
+    setParentTask(parent)
     setIsTaskModalOpen(true)
   }
 
@@ -134,6 +165,7 @@ export function TasksPage() {
         pagination={pagination}
         onSort={handleSort}
         onEditTask={handleEditTask}
+        onCreateSubtask={handleCreateSubtask}
         onPageChange={setPage}
       />
 
@@ -142,7 +174,11 @@ export function TasksPage() {
         isOpen={isTaskModalOpen}
         fieldConfigs={fieldConfigs}
         lookups={lookups}
-        onClose={() => setIsTaskModalOpen(false)}
+        parentTask={parentTask}
+        onClose={() => {
+          setIsTaskModalOpen(false)
+          setParentTask(null)
+        }}
       />
 
       <ColumnConfigModal
