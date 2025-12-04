@@ -7,74 +7,42 @@ import { ObjectId } from 'mongodb';
 export type TaskStatus =
   | 'pending'
   | 'in_progress'
-  | 'waiting_review'
-  | 'waiting_human'
+  | 'on_hold'
   | 'completed'
-  | 'failed'
   | 'cancelled';
 
-export type Priority = 'low' | 'medium' | 'high' | 'critical';
-
-export type HITLPhase =
-  | 'none'
-  | 'pre_execution'
-  | 'during_execution'
-  | 'post_execution'
-  | 'on_error'
-  | 'approval_required';
-
-export type HITLStatus =
-  | 'not_required'
-  | 'pending'
-  | 'in_review'
-  | 'approved'
-  | 'rejected'
-  | 'escalated';
+export type Urgency = 'low' | 'normal' | 'high' | 'urgent';
 
 export interface Task {
   _id: ObjectId;
   title: string;
-  description?: string;
+  summary?: string;
+  extraPrompt?: string;
+  additionalInfo?: string;
   status: TaskStatus;
-  priority?: Priority;
+  urgency?: Urgency;
 
-  // Hierarchy
+  // Hierarchy - simplified to just parent reference
   parentId: ObjectId | null;
-  rootId: ObjectId | null;
-  depth: number;
-  path: ObjectId[];
-  childCount: number;
-
-  // HITL
-  hitlRequired: boolean;
-  hitlPhase: HITLPhase;
-  hitlStatus: HITLStatus;
-  hitlAssigneeId?: ObjectId | null;
-  hitlNotes?: string;
 
   // Workflow
   workflowId?: ObjectId | null;
-  workflowStepIndex?: number;
+  workflowStage?: string;
 
-  // External job tracking
-  externalJobId?: string;
-  externalJobStatus?: string;
-  externalJobResult?: Record<string, unknown>;
+  // External tracking
+  externalId?: string;
+  externalHoldDate?: Date | null;
 
   // Assignment
   assigneeId?: ObjectId | null;
   createdById?: ObjectId | null;
-  teamId?: ObjectId | null;
 
-  // Metadata
-  metadata?: Record<string, unknown>;
+  // Tags
   tags?: string[];
 
   // Timestamps
   createdAt: Date;
   updatedAt: Date;
-  startedAt?: Date | null;
-  completedAt?: Date | null;
   dueAt?: Date | null;
 }
 
@@ -84,14 +52,12 @@ export interface TaskWithChildren extends Task {
 
 export interface TaskWithResolved extends Task {
   _resolved?: {
-    assignee?: { displayName: string };
-    createdBy?: { displayName: string };
-    hitlAssignee?: { displayName: string };
-    team?: { name: string };
+    assignee?: { _id: string; displayName: string };
+    createdBy?: { _id: string; displayName: string };
+    parent?: { _id: string; title: string };
+    workflow?: { _id: string; name: string };
     status?: LookupValue;
-    priority?: LookupValue;
-    hitlPhase?: LookupValue;
-    hitlStatus?: LookupValue;
+    urgency?: LookupValue;
   };
 }
 
