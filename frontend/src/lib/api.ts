@@ -366,3 +366,175 @@ export interface ExternalJob {
   startedAt?: string | null
   completedAt?: string | null
 }
+
+// Activity Log Types
+export interface FieldChange {
+  field: string
+  oldValue: unknown
+  newValue: unknown
+}
+
+export interface ActivityLogEntry {
+  _id: string
+  taskId: string
+  eventType: string
+  actorId?: string | null
+  actorType: 'user' | 'system' | 'daemon'
+  changes?: FieldChange[]
+  comment?: string
+  timestamp: string
+  metadata?: Record<string, unknown>
+}
+
+// Webhook Types
+export interface Webhook {
+  _id: string
+  name: string
+  url: string
+  secret: string
+  triggers: string[]
+  savedSearchId?: string | null
+  filterQuery?: string
+  isActive: boolean
+  createdById?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WebhookDelivery {
+  _id: string
+  webhookId: string
+  eventId: string
+  eventType: string
+  payload: Record<string, unknown>
+  status: 'pending' | 'success' | 'failed' | 'retrying'
+  statusCode?: number
+  responseBody?: string
+  error?: string
+  attempts: number
+  maxAttempts: number
+  nextRetryAt?: string | null
+  createdAt: string
+  completedAt?: string | null
+}
+
+// Activity Logs API
+export const activityLogsApi = {
+  getTaskActivity: async (
+    taskId: string,
+    params?: { limit?: number; offset?: number; eventTypes?: string[] }
+  ): Promise<{ data: ActivityLogEntry[]; pagination: { limit: number; offset: number; total: number } }> => {
+    const searchParams = new URLSearchParams()
+    if (params?.limit) searchParams.append('limit', String(params.limit))
+    if (params?.offset) searchParams.append('offset', String(params.offset))
+    if (params?.eventTypes) {
+      params.eventTypes.forEach(t => searchParams.append('eventTypes', t))
+    }
+    const response = await fetch(`${API_BASE}/activity-logs/task/${taskId}?${searchParams}`)
+    return handleResponse(response)
+  },
+
+  getRecentActivity: async (
+    params?: { limit?: number; offset?: number; eventTypes?: string[]; actorId?: string }
+  ): Promise<{ data: ActivityLogEntry[]; pagination: { limit: number; offset: number; total: number } }> => {
+    const searchParams = new URLSearchParams()
+    if (params?.limit) searchParams.append('limit', String(params.limit))
+    if (params?.offset) searchParams.append('offset', String(params.offset))
+    if (params?.actorId) searchParams.append('actorId', params.actorId)
+    if (params?.eventTypes) {
+      params.eventTypes.forEach(t => searchParams.append('eventTypes', t))
+    }
+    const response = await fetch(`${API_BASE}/activity-logs/recent?${searchParams}`)
+    return handleResponse(response)
+  },
+
+  addComment: async (
+    taskId: string,
+    comment: string,
+    actorId?: string
+  ): Promise<ApiResponse<ActivityLogEntry>> => {
+    const response = await fetch(`${API_BASE}/activity-logs/task/${taskId}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ comment, actorId }),
+    })
+    return handleResponse(response)
+  },
+}
+
+// Webhooks API
+export const webhooksApi = {
+  list: async (params?: { isActive?: boolean; limit?: number; offset?: number }): Promise<{
+    data: Webhook[]
+    pagination: { limit: number; offset: number; total: number }
+  }> => {
+    const searchParams = new URLSearchParams()
+    if (params?.isActive !== undefined) searchParams.append('isActive', String(params.isActive))
+    if (params?.limit) searchParams.append('limit', String(params.limit))
+    if (params?.offset) searchParams.append('offset', String(params.offset))
+    const response = await fetch(`${API_BASE}/webhooks?${searchParams}`)
+    return handleResponse(response)
+  },
+
+  get: async (id: string): Promise<ApiResponse<Webhook>> => {
+    const response = await fetch(`${API_BASE}/webhooks/${id}`)
+    return handleResponse(response)
+  },
+
+  create: async (data: Partial<Webhook>): Promise<ApiResponse<Webhook>> => {
+    const response = await fetch(`${API_BASE}/webhooks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  update: async (id: string, data: Partial<Webhook>): Promise<ApiResponse<Webhook>> => {
+    const response = await fetch(`${API_BASE}/webhooks/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  delete: async (id: string): Promise<ApiResponse<void>> => {
+    const response = await fetch(`${API_BASE}/webhooks/${id}`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
+
+  rotateSecret: async (id: string): Promise<ApiResponse<{ secret: string }>> => {
+    const response = await fetch(`${API_BASE}/webhooks/${id}/rotate-secret`, {
+      method: 'POST',
+    })
+    return handleResponse(response)
+  },
+
+  test: async (id: string): Promise<ApiResponse<void>> => {
+    const response = await fetch(`${API_BASE}/webhooks/${id}/test`, {
+      method: 'POST',
+    })
+    return handleResponse(response)
+  },
+
+  getDeliveries: async (
+    webhookId: string,
+    params?: { limit?: number; offset?: number }
+  ): Promise<{ data: WebhookDelivery[]; pagination: { limit: number; offset: number; total: number } }> => {
+    const searchParams = new URLSearchParams()
+    if (params?.limit) searchParams.append('limit', String(params.limit))
+    if (params?.offset) searchParams.append('offset', String(params.offset))
+    const response = await fetch(`${API_BASE}/webhooks/${webhookId}/deliveries?${searchParams}`)
+    return handleResponse(response)
+  },
+
+  retryDelivery: async (deliveryId: string): Promise<ApiResponse<void>> => {
+    const response = await fetch(`${API_BASE}/webhooks/deliveries/${deliveryId}/retry`, {
+      method: 'POST',
+    })
+    return handleResponse(response)
+  },
+}

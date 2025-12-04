@@ -224,12 +224,265 @@ db.external_jobs.createIndex({ taskId: 1 });
 db.external_jobs.createIndex({ type: 1 });
 
 // ============================================================================
-// AUDIT LOG - Track changes
+// ACTIVITY LOGS - Task activity/comment history
 // ============================================================================
-db.createCollection('audit_logs');
+db.createCollection('activity_logs', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['taskId', 'eventType', 'actorType', 'timestamp'],
+      properties: {
+        taskId: {
+          bsonType: 'objectId',
+          description: 'Task this activity relates to - required'
+        },
+        eventType: {
+          bsonType: 'string',
+          enum: ['task.created', 'task.updated', 'task.deleted', 'task.status.changed',
+                 'task.assignee.changed', 'task.priority.changed', 'task.moved', 'task.comment.added'],
+          description: 'Type of event'
+        },
+        actorId: {
+          bsonType: ['objectId', 'null'],
+          description: 'User or system that triggered the event'
+        },
+        actorType: {
+          bsonType: 'string',
+          enum: ['user', 'system', 'daemon'],
+          description: 'Type of actor'
+        },
+        changes: {
+          bsonType: 'array',
+          items: {
+            bsonType: 'object',
+            properties: {
+              field: { bsonType: 'string' },
+              oldValue: { },
+              newValue: { }
+            }
+          },
+          description: 'Field changes made'
+        },
+        comment: {
+          bsonType: 'string',
+          description: 'Optional comment or note'
+        },
+        timestamp: {
+          bsonType: 'date',
+          description: 'When the event occurred'
+        },
+        metadata: {
+          bsonType: 'object',
+          description: 'Additional event metadata'
+        }
+      }
+    }
+  }
+});
 
-db.audit_logs.createIndex({ collectionName: 1, documentId: 1 });
-db.audit_logs.createIndex({ userId: 1 });
-db.audit_logs.createIndex({ createdAt: -1 });
+db.activity_logs.createIndex({ taskId: 1, timestamp: -1 });
+db.activity_logs.createIndex({ actorId: 1 });
+db.activity_logs.createIndex({ eventType: 1 });
+db.activity_logs.createIndex({ timestamp: -1 });
+
+// ============================================================================
+// WEBHOOKS - Outbound webhook configurations
+// ============================================================================
+db.createCollection('webhooks', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['name', 'url', 'secret', 'triggers', 'isActive', 'createdAt'],
+      properties: {
+        name: {
+          bsonType: 'string',
+          description: 'Webhook name - required'
+        },
+        url: {
+          bsonType: 'string',
+          description: 'Target URL - required'
+        },
+        secret: {
+          bsonType: 'string',
+          description: 'Secret key for authentication - required'
+        },
+        triggers: {
+          bsonType: 'array',
+          items: {
+            bsonType: 'string',
+            enum: ['task.created', 'task.updated', 'task.deleted', 'task.status.changed',
+                   'task.assignee.changed', 'task.priority.changed', 'task.entered_filter']
+          },
+          description: 'Event types that trigger this webhook'
+        },
+        savedSearchId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Optional saved search for filter-based triggers'
+        },
+        filterQuery: {
+          bsonType: 'string',
+          description: 'Optional filter query string'
+        },
+        isActive: {
+          bsonType: 'bool',
+          description: 'Whether the webhook is active'
+        },
+        createdById: {
+          bsonType: ['objectId', 'null'],
+          description: 'User who created this webhook'
+        },
+        createdAt: {
+          bsonType: 'date',
+          description: 'Creation timestamp'
+        },
+        updatedAt: {
+          bsonType: 'date',
+          description: 'Last update timestamp'
+        }
+      }
+    }
+  }
+});
+
+db.webhooks.createIndex({ isActive: 1 });
+db.webhooks.createIndex({ triggers: 1 });
+db.webhooks.createIndex({ savedSearchId: 1 });
+
+// ============================================================================
+// WEBHOOK DELIVERIES - Track webhook delivery attempts
+// ============================================================================
+db.createCollection('webhook_deliveries', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['webhookId', 'eventId', 'eventType', 'payload', 'status', 'attempts', 'createdAt'],
+      properties: {
+        webhookId: {
+          bsonType: 'objectId',
+          description: 'Webhook this delivery belongs to'
+        },
+        eventId: {
+          bsonType: 'string',
+          description: 'Event ID being delivered'
+        },
+        eventType: {
+          bsonType: 'string',
+          description: 'Type of event'
+        },
+        payload: {
+          bsonType: 'object',
+          description: 'Payload sent to webhook'
+        },
+        status: {
+          bsonType: 'string',
+          enum: ['pending', 'success', 'failed', 'retrying'],
+          description: 'Delivery status'
+        },
+        statusCode: {
+          bsonType: 'int',
+          description: 'HTTP status code from response'
+        },
+        responseBody: {
+          bsonType: 'string',
+          description: 'Response body (truncated)'
+        },
+        error: {
+          bsonType: 'string',
+          description: 'Error message if failed'
+        },
+        attempts: {
+          bsonType: 'int',
+          minimum: 0,
+          description: 'Number of delivery attempts'
+        },
+        maxAttempts: {
+          bsonType: 'int',
+          minimum: 1,
+          description: 'Maximum retry attempts'
+        },
+        nextRetryAt: {
+          bsonType: ['date', 'null'],
+          description: 'Scheduled retry time'
+        },
+        createdAt: {
+          bsonType: 'date',
+          description: 'When delivery was created'
+        },
+        completedAt: {
+          bsonType: ['date', 'null'],
+          description: 'When delivery completed'
+        }
+      }
+    }
+  }
+});
+
+db.webhook_deliveries.createIndex({ webhookId: 1, createdAt: -1 });
+db.webhook_deliveries.createIndex({ status: 1, nextRetryAt: 1 });
+db.webhook_deliveries.createIndex({ eventId: 1 });
+
+// ============================================================================
+// DAEMON EXECUTIONS - Track automation daemon executions
+// ============================================================================
+db.createCollection('daemon_executions', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['ruleName', 'taskId', 'eventId', 'command', 'status', 'createdAt'],
+      properties: {
+        ruleName: {
+          bsonType: 'string',
+          description: 'Name of the daemon rule'
+        },
+        taskId: {
+          bsonType: 'objectId',
+          description: 'Task that triggered the execution'
+        },
+        eventId: {
+          bsonType: 'string',
+          description: 'Event that triggered the execution'
+        },
+        command: {
+          bsonType: 'string',
+          description: 'Command that was executed'
+        },
+        status: {
+          bsonType: 'string',
+          enum: ['pending', 'running', 'completed', 'failed'],
+          description: 'Execution status'
+        },
+        output: {
+          bsonType: 'string',
+          description: 'Command output'
+        },
+        error: {
+          bsonType: 'string',
+          description: 'Error message if failed'
+        },
+        updatedFields: {
+          bsonType: 'object',
+          description: 'Fields updated based on result'
+        },
+        startedAt: {
+          bsonType: ['date', 'null'],
+          description: 'When execution started'
+        },
+        completedAt: {
+          bsonType: ['date', 'null'],
+          description: 'When execution completed'
+        },
+        createdAt: {
+          bsonType: 'date',
+          description: 'When execution was created'
+        }
+      }
+    }
+  }
+});
+
+db.daemon_executions.createIndex({ ruleName: 1, createdAt: -1 });
+db.daemon_executions.createIndex({ taskId: 1 });
+db.daemon_executions.createIndex({ status: 1 });
+db.daemon_executions.createIndex({ createdAt: -1 });
 
 print('Database initialization complete!');

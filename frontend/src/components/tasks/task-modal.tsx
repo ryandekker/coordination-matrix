@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -21,9 +21,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Task, FieldConfig, LookupValue } from '@/lib/api'
 import { useCreateTask, useUpdateTask, useUsers } from '@/hooks/use-tasks'
 import { cn } from '@/lib/utils'
+import { TaskActivity } from './task-activity'
 
 const taskSchema = z.object({
   title: z.string().min(1, 'Title is required'),
@@ -137,179 +139,211 @@ export function TaskModal({
 
   const hitlRequired = watch('hitlRequired')
 
+  const formContent = (
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      {/* Title */}
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Title *</label>
+        <Input {...register('title')} placeholder="Enter task title" />
+        {errors.title && (
+          <p className="text-sm text-destructive">{errors.title.message}</p>
+        )}
+      </div>
+
+      {/* Description */}
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Description</label>
+        <textarea
+          {...register('description')}
+          placeholder="Enter task description"
+          className={cn(
+            'flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm',
+            'ring-offset-background placeholder:text-muted-foreground',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+          )}
+        />
+      </div>
+
+      {/* Status and Priority */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Status</label>
+          <Select
+            value={watch('status')}
+            onValueChange={(val) => setValue('status', val)}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {statusOptions.map((opt) => (
+                <SelectItem key={opt.code} value={opt.code}>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: opt.color }}
+                    />
+                    {opt.displayName}
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Priority</label>
+          <Select
+            value={watch('priority')}
+            onValueChange={(val) => setValue('priority', val)}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {priorityOptions.map((opt) => (
+                <SelectItem key={opt.code} value={opt.code}>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: opt.color }}
+                    />
+                    {opt.displayName}
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Assignee and Due Date */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Assignee</label>
+          <Select
+            value={watch('assigneeId') || '_unassigned'}
+            onValueChange={(val) => setValue('assigneeId', val === '_unassigned' ? null : val)}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select assignee" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_unassigned">Unassigned</SelectItem>
+              {users
+                .filter((user) => user._id)
+                .map((user) => (
+                  <SelectItem key={user._id} value={user._id}>
+                    {user.displayName}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Due Date</label>
+          <Input
+            type="datetime-local"
+            {...register('dueAt')}
+          />
+        </div>
+      </div>
+
+      {/* HITL Settings */}
+      <div className="space-y-4 rounded-lg border p-4">
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="hitlRequired"
+            checked={hitlRequired}
+            onCheckedChange={(checked) => setValue('hitlRequired', !!checked)}
+          />
+          <label htmlFor="hitlRequired" className="text-sm font-medium">
+            Human-in-the-Loop Required
+          </label>
+        </div>
+
+        {hitlRequired && (
+          <div className="space-y-2">
+            <label className="text-sm font-medium">HITL Phase</label>
+            <Select
+              value={watch('hitlPhase')}
+              onValueChange={(val) => setValue('hitlPhase', val)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {hitlPhaseOptions.map((opt) => (
+                  <SelectItem key={opt.code} value={opt.code}>
+                    {opt.displayName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+      </div>
+
+      {/* Tags */}
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Tags</label>
+        <Input
+          {...register('tags')}
+          placeholder="Enter tags separated by commas"
+        />
+        <p className="text-xs text-muted-foreground">
+          Separate multiple tags with commas
+        </p>
+      </div>
+
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={isSubmitting}>
+          {isSubmitting ? 'Saving...' : task ? 'Update Task' : 'Create Task'}
+        </Button>
+      </DialogFooter>
+    </form>
+  )
+
+  // For new tasks, show just the form
+  if (!task) {
+    return (
+      <Dialog open={isOpen} onOpenChange={onClose}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Create New Task</DialogTitle>
+          </DialogHeader>
+          {formContent}
+        </DialogContent>
+      </Dialog>
+    )
+  }
+
+  // For existing tasks, show tabs with form and activity
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
-          <DialogTitle>{task ? 'Edit Task' : 'Create New Task'}</DialogTitle>
+          <DialogTitle>Edit Task</DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          {/* Title */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Title *</label>
-            <Input {...register('title')} placeholder="Enter task title" />
-            {errors.title && (
-              <p className="text-sm text-destructive">{errors.title.message}</p>
-            )}
-          </div>
+        <Tabs defaultValue="details" className="flex-1 overflow-hidden flex flex-col">
+          <TabsList className="w-full justify-start">
+            <TabsTrigger value="details">Details</TabsTrigger>
+            <TabsTrigger value="activity">Activity</TabsTrigger>
+          </TabsList>
 
-          {/* Description */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Description</label>
-            <textarea
-              {...register('description')}
-              placeholder="Enter task description"
-              className={cn(
-                'flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm',
-                'ring-offset-background placeholder:text-muted-foreground',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
-              )}
-            />
-          </div>
+          <TabsContent value="details" className="flex-1 overflow-y-auto mt-4">
+            {formContent}
+          </TabsContent>
 
-          {/* Status and Priority */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Status</label>
-              <Select
-                value={watch('status')}
-                onValueChange={(val) => setValue('status', val)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {statusOptions.map((opt) => (
-                    <SelectItem key={opt.code} value={opt.code}>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="h-2 w-2 rounded-full"
-                          style={{ backgroundColor: opt.color }}
-                        />
-                        {opt.displayName}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Priority</label>
-              <Select
-                value={watch('priority')}
-                onValueChange={(val) => setValue('priority', val)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {priorityOptions.map((opt) => (
-                    <SelectItem key={opt.code} value={opt.code}>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="h-2 w-2 rounded-full"
-                          style={{ backgroundColor: opt.color }}
-                        />
-                        {opt.displayName}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Assignee and Due Date */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Assignee</label>
-              <Select
-                value={watch('assigneeId') || '_unassigned'}
-                onValueChange={(val) => setValue('assigneeId', val === '_unassigned' ? null : val)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select assignee" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="_unassigned">Unassigned</SelectItem>
-                  {users
-                    .filter((user) => user._id)
-                    .map((user) => (
-                      <SelectItem key={user._id} value={user._id}>
-                        {user.displayName}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Due Date</label>
-              <Input
-                type="datetime-local"
-                {...register('dueAt')}
-              />
-            </div>
-          </div>
-
-          {/* HITL Settings */}
-          <div className="space-y-4 rounded-lg border p-4">
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="hitlRequired"
-                checked={hitlRequired}
-                onCheckedChange={(checked) => setValue('hitlRequired', !!checked)}
-              />
-              <label htmlFor="hitlRequired" className="text-sm font-medium">
-                Human-in-the-Loop Required
-              </label>
-            </div>
-
-            {hitlRequired && (
-              <div className="space-y-2">
-                <label className="text-sm font-medium">HITL Phase</label>
-                <Select
-                  value={watch('hitlPhase')}
-                  onValueChange={(val) => setValue('hitlPhase', val)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {hitlPhaseOptions.map((opt) => (
-                      <SelectItem key={opt.code} value={opt.code}>
-                        {opt.displayName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-          </div>
-
-          {/* Tags */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Tags</label>
-            <Input
-              {...register('tags')}
-              placeholder="Enter tags separated by commas"
-            />
-            <p className="text-xs text-muted-foreground">
-              Separate multiple tags with commas
-            </p>
-          </div>
-
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving...' : task ? 'Update Task' : 'Create Task'}
-            </Button>
-          </DialogFooter>
-        </form>
+          <TabsContent value="activity" className="flex-1 overflow-hidden mt-4">
+            <TaskActivity taskId={task._id} className="h-full" />
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   )
