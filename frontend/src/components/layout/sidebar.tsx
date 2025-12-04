@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { cn } from '@/lib/utils'
@@ -14,10 +14,10 @@ import {
   Bookmark,
   ChevronDown,
   ChevronRight,
+  Trash2,
 } from 'lucide-react'
 import { View } from '@/lib/api'
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
+import { useViews, useDeleteView } from '@/hooks/use-tasks'
 
 interface NavItem {
   name: string
@@ -42,24 +42,21 @@ export function Sidebar() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const currentViewId = searchParams.get('viewId')
-  const [views, setViews] = useState<View[]>([])
   const [savedSearchesExpanded, setSavedSearchesExpanded] = useState(true)
 
-  useEffect(() => {
-    async function fetchViews() {
-      try {
-        const response = await fetch(`${API_BASE}/views?collectionName=tasks`)
-        if (response.ok) {
-          const data = await response.json()
-          // Filter out the default "All Tasks" view since we have that as a static nav item
-          setViews(data.data.filter((v: View) => v.name !== 'All Tasks'))
-        }
-      } catch (error) {
-        console.error('Failed to fetch views:', error)
-      }
+  const { data: viewsData } = useViews('tasks')
+  const deleteViewMutation = useDeleteView()
+
+  // Filter out the default "All Tasks" view since we have that as a static nav item
+  const views = (viewsData?.data || []).filter((v: View) => v.name !== 'All Tasks')
+
+  const handleDeleteView = async (e: React.MouseEvent, viewId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (confirm('Are you sure you want to delete this saved search?')) {
+      await deleteViewMutation.mutateAsync(viewId)
     }
-    fetchViews()
-  }, [])
+  }
 
   const isStaticItemActive = (item: NavItem) => {
     const [itemPath] = item.href.split('?')
@@ -126,22 +123,37 @@ export function Sidebar() {
                 {views.map((view) => {
                   const isActive = isViewActive(view)
                   return (
-                    <Link
-                      key={view._id}
-                      href={`/tasks?viewId=${view._id}`}
-                      className={cn(
-                        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                        isActive
-                          ? 'bg-primary text-primary-foreground'
-                          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    <div key={view._id} className="group relative">
+                      <Link
+                        href={`/tasks?viewId=${view._id}`}
+                        className={cn(
+                          'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                          isActive
+                            ? 'bg-primary text-primary-foreground'
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                        )}
+                      >
+                        <Bookmark className="h-4 w-4" />
+                        <span className="truncate flex-1">{view.name}</span>
+                        {view.isSystem && (
+                          <span className="text-xs opacity-50">System</span>
+                        )}
+                      </Link>
+                      {!view.isSystem && (
+                        <button
+                          onClick={(e) => handleDeleteView(e, view._id)}
+                          className={cn(
+                            'absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity',
+                            isActive
+                              ? 'hover:bg-primary-foreground/20 text-primary-foreground'
+                              : 'hover:bg-destructive/20 text-destructive'
+                          )}
+                          title="Delete saved search"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
                       )}
-                    >
-                      <Bookmark className="h-4 w-4" />
-                      <span className="truncate">{view.name}</span>
-                      {view.isSystem && (
-                        <span className="ml-auto text-xs opacity-50">System</span>
-                      )}
-                    </Link>
+                    </div>
                   )
                 })}
               </div>

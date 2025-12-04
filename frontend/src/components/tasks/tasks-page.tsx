@@ -183,6 +183,7 @@ export function TasksPage() {
         views={views}
         currentView={currentView}
         lookups={lookups}
+        users={users}
         filters={filters}
         search={search}
         sorting={currentSorting}

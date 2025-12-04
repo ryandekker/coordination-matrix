@@ -28,12 +28,13 @@ import {
   DialogFooter,
   DialogDescription,
 } from '@/components/ui/dialog'
-import { View, LookupValue } from '@/lib/api'
+import { View, LookupValue, User } from '@/lib/api'
 
 interface TaskToolbarProps {
   views: View[]
   currentView?: View
   lookups: Record<string, LookupValue[]>
+  users: User[]
   filters: Record<string, unknown>
   search: string
   sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>
@@ -49,6 +50,7 @@ export function TaskToolbar({
   views,
   currentView,
   lookups,
+  users,
   filters,
   search,
   sorting,
@@ -64,7 +66,7 @@ export function TaskToolbar({
   const [isSaving, setIsSaving] = useState(false)
 
   const statusOptions = lookups.task_status || []
-  const priorityOptions = lookups.priority || []
+  const urgencyOptions = lookups.urgency || []
 
   const hasActiveFilters = Object.keys(filters).length > 0 || search.length > 0
 
@@ -96,21 +98,25 @@ export function TaskToolbar({
     })
   }
 
-  const handlePriorityFilter = (priority: string, checked: boolean) => {
-    const currentPriorities = (filters.priority as string[]) || []
-    const newPriorities = checked
-      ? [...currentPriorities, priority]
-      : currentPriorities.filter((p) => p !== priority)
+  const handleUrgencyFilter = (urgency: string, checked: boolean) => {
+    const currentUrgencies = (filters.urgency as string[]) || []
+    const newUrgencies = checked
+      ? [...currentUrgencies, urgency]
+      : currentUrgencies.filter((u) => u !== urgency)
     onFilterChange({
       ...filters,
-      priority: newPriorities.length > 0 ? newPriorities : undefined,
+      urgency: newUrgencies.length > 0 ? newUrgencies : undefined,
     })
   }
 
-  const handleHITLFilter = (checked: boolean) => {
+  const handleAssigneeFilter = (assigneeId: string, checked: boolean) => {
+    const currentAssignees = (filters.assigneeId as string[]) || []
+    const newAssignees = checked
+      ? [...currentAssignees, assigneeId]
+      : currentAssignees.filter((a) => a !== assigneeId)
     onFilterChange({
       ...filters,
-      hitlPending: checked || undefined,
+      assigneeId: newAssignees.length > 0 ? newAssignees : undefined,
     })
   }
 
@@ -134,17 +140,21 @@ export function TaskToolbar({
     }
   })
 
-  const priorityFilters = (filters.priority as string[]) || []
-  priorityFilters.forEach((priority) => {
-    const opt = priorityOptions.find((p) => p.code === priority)
+  const urgencyFilters = (filters.urgency as string[]) || []
+  urgencyFilters.forEach((urgency) => {
+    const opt = urgencyOptions.find((u) => u.code === urgency)
     if (opt) {
-      activeFilters.push({ key: `priority-${priority}`, label: 'Priority', value: opt.displayName, color: opt.color })
+      activeFilters.push({ key: `urgency-${urgency}`, label: 'Urgency', value: opt.displayName, color: opt.color })
     }
   })
 
-  if (filters.hitlPending) {
-    activeFilters.push({ key: 'hitl', label: 'HITL', value: 'Awaiting Review' })
-  }
+  const assigneeFilters = (filters.assigneeId as string[]) || []
+  assigneeFilters.forEach((assigneeId) => {
+    const user = users.find((u) => u._id === assigneeId)
+    if (user) {
+      activeFilters.push({ key: `assignee-${assigneeId}`, label: 'Assignee', value: user.displayName })
+    }
+  })
 
   const removeFilter = (filterKey: string) => {
     if (filterKey === 'search') {
@@ -152,11 +162,12 @@ export function TaskToolbar({
     } else if (filterKey.startsWith('status-')) {
       const status = filterKey.replace('status-', '')
       handleStatusFilter(status, false)
-    } else if (filterKey.startsWith('priority-')) {
-      const priority = filterKey.replace('priority-', '')
-      handlePriorityFilter(priority, false)
-    } else if (filterKey === 'hitl') {
-      handleHITLFilter(false)
+    } else if (filterKey.startsWith('urgency-')) {
+      const urgency = filterKey.replace('urgency-', '')
+      handleUrgencyFilter(urgency, false)
+    } else if (filterKey.startsWith('assignee-')) {
+      const assigneeId = filterKey.replace('assignee-', '')
+      handleAssigneeFilter(assigneeId, false)
     }
   }
 
@@ -218,50 +229,55 @@ export function TaskToolbar({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {/* Priority Filter */}
+      {/* Urgency Filter */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="outline" size="sm">
             <Filter className="mr-2 h-4 w-4" />
-            Priority
+            Urgency
             <ChevronDown className="ml-2 h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-48">
-          <DropdownMenuLabel>Filter by Priority</DropdownMenuLabel>
+          <DropdownMenuLabel>Filter by Urgency</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          {priorityOptions.map((priority) => (
+          {urgencyOptions.map((urgency) => (
             <DropdownMenuCheckboxItem
-              key={priority.code}
-              checked={((filters.priority as string[]) || []).includes(priority.code)}
-              onCheckedChange={(checked) => handlePriorityFilter(priority.code, checked)}
+              key={urgency.code}
+              checked={((filters.urgency as string[]) || []).includes(urgency.code)}
+              onCheckedChange={(checked) => handleUrgencyFilter(urgency.code, checked)}
             >
               <span
                 className="mr-2 h-2 w-2 rounded-full"
-                style={{ backgroundColor: priority.color }}
+                style={{ backgroundColor: urgency.color }}
               />
-              {priority.displayName}
+              {urgency.displayName}
             </DropdownMenuCheckboxItem>
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {/* HITL Filter */}
+      {/* Assignee Filter */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="outline" size="sm">
             <Filter className="mr-2 h-4 w-4" />
-            HITL
+            Assignee
             <ChevronDown className="ml-2 h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-48">
-          <DropdownMenuCheckboxItem
-            checked={!!filters.hitlPending}
-            onCheckedChange={handleHITLFilter}
-          >
-            Awaiting Review
-          </DropdownMenuCheckboxItem>
+        <DropdownMenuContent align="start" className="w-56 max-h-64 overflow-y-auto">
+          <DropdownMenuLabel>Filter by Assignee</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {users.filter(u => u.isActive).map((user) => (
+            <DropdownMenuCheckboxItem
+              key={user._id}
+              checked={((filters.assigneeId as string[]) || []).includes(user._id)}
+              onCheckedChange={(checked) => handleAssigneeFilter(user._id, checked)}
+            >
+              {user.displayName}
+            </DropdownMenuCheckboxItem>
+          ))}
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -340,7 +356,7 @@ export function TaskToolbar({
               <Input
                 value={saveName}
                 onChange={(e) => setSaveName(e.target.value)}
-                placeholder="e.g., High Priority Pending"
+                placeholder="e.g., Urgent Pending Tasks"
                 autoFocus
               />
             </div>

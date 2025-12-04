@@ -146,6 +146,17 @@ export function useUpdateView() {
   })
 }
 
+export function useDeleteView() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: viewsApi.delete,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['views'] })
+    },
+  })
+}
+
 // Users
 export function useUsers() {
   return useQuery({
