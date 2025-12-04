@@ -23,7 +23,8 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(docker system:*)",
-      "Bash(docker volume rm:*)"
+      "Bash(docker volume rm:*)",
+      "mcp__playwright__browser_close"
     ],
     "deny": [],
     "ask": []
