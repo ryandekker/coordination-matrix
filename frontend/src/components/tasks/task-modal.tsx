@@ -33,6 +33,7 @@ const taskSchema = z.object({
   hitlRequired: z.boolean().default(false),
   hitlPhase: z.string().default('none'),
   assigneeId: z.string().optional().nullable(),
+  parentId: z.string().optional().nullable(),
   dueAt: z.string().optional().nullable(),
   tags: z.string().optional(),
 })
@@ -44,6 +45,7 @@ interface TaskModalProps {
   isOpen: boolean
   fieldConfigs: FieldConfig[]
   lookups: Record<string, LookupValue[]>
+  parentTask?: Task | null
   onClose: () => void
 }
 
@@ -52,6 +54,7 @@ export function TaskModal({
   isOpen,
   fieldConfigs,
   lookups,
+  parentTask = null,
   onClose,
 }: TaskModalProps) {
   const createTask = useCreateTask()
@@ -76,6 +79,7 @@ export function TaskModal({
       hitlRequired: false,
       hitlPhase: 'none',
       assigneeId: null,
+      parentId: null,
       dueAt: null,
       tags: '',
     },
@@ -91,6 +95,7 @@ export function TaskModal({
         hitlRequired: task.hitlRequired,
         hitlPhase: task.hitlPhase || 'none',
         assigneeId: task.assigneeId || null,
+        parentId: task.parentId?.toString() || null,
         dueAt: task.dueAt ? new Date(task.dueAt).toISOString().slice(0, 16) : null,
         tags: task.tags?.join(', ') || '',
       })
@@ -103,15 +108,21 @@ export function TaskModal({
         hitlRequired: false,
         hitlPhase: 'none',
         assigneeId: null,
+        parentId: parentTask?._id.toString() || null,
         dueAt: null,
         tags: '',
       })
     }
-  }, [task, reset])
+  }, [task, parentTask, reset])
 
   const onSubmit = async (data: TaskFormData) => {
-    const taskData = {
-      ...data,
+    const taskData: any = {
+      title: data.title,
+      description: data.description || '',
+      status: data.status,
+      priority: data.priority,
+      hitlRequired: data.hitlRequired,
+      hitlPhase: data.hitlPhase,
       tags: data.tags
         ? data.tags
             .split(',')
@@ -120,6 +131,11 @@ export function TaskModal({
         : [],
       dueAt: data.dueAt ? new Date(data.dueAt).toISOString() : null,
       assigneeId: data.assigneeId || null,
+    }
+
+    // Only include parentId if we're creating a subtask
+    if (!task && parentTask) {
+      taskData.parentId = parentTask._id
     }
 
     if (task) {
@@ -139,12 +155,12 @@ export function TaskModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>{task ? 'Edit Task' : 'Create New Task'}</DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 overflow-y-auto flex-1 px-1">
           {/* Title */}
           <div className="space-y-2">
             <label className="text-sm font-medium">Title *</label>
@@ -220,6 +236,24 @@ export function TaskModal({
               </Select>
             </div>
           </div>
+
+          {/* Parent Task (for creating subtasks) */}
+          {!task && (
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Parent Task (Optional)</label>
+              <Input
+                value={parentTask?.title || ''}
+                disabled
+                placeholder="This will be a root task"
+                className="bg-muted"
+              />
+              {parentTask && (
+                <p className="text-xs text-muted-foreground">
+                  Creating subtask under: {parentTask.title}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Assignee and Due Date */}
           <div className="grid grid-cols-2 gap-4">
