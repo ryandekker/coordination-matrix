@@ -13,7 +13,6 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Checkbox } from '@/components/ui/checkbox'
 import {
   Select,
   SelectContent,
@@ -27,11 +26,9 @@ import { cn } from '@/lib/utils'
 
 const taskSchema = z.object({
   title: z.string().min(1, 'Title is required'),
-  description: z.string().optional(),
+  summary: z.string().optional(),
   status: z.string().default('pending'),
-  priority: z.string().default('medium'),
-  hitlRequired: z.boolean().default(false),
-  hitlPhase: z.string().default('none'),
+  urgency: z.string().default('normal'),
   assigneeId: z.string().optional().nullable(),
   parentId: z.string().optional().nullable(),
   dueAt: z.string().optional().nullable(),
@@ -73,11 +70,9 @@ export function TaskModal({
     resolver: zodResolver(taskSchema),
     defaultValues: {
       title: '',
-      description: '',
+      summary: '',
       status: 'pending',
-      priority: 'medium',
-      hitlRequired: false,
-      hitlPhase: 'none',
+      urgency: 'normal',
       assigneeId: null,
       parentId: null,
       dueAt: null,
@@ -89,11 +84,9 @@ export function TaskModal({
     if (task) {
       reset({
         title: task.title,
-        description: task.description || '',
+        summary: task.summary || '',
         status: task.status,
-        priority: task.priority || 'medium',
-        hitlRequired: task.hitlRequired,
-        hitlPhase: task.hitlPhase || 'none',
+        urgency: task.urgency || 'normal',
         assigneeId: task.assigneeId || null,
         parentId: task.parentId?.toString() || null,
         dueAt: task.dueAt ? new Date(task.dueAt).toISOString().slice(0, 16) : null,
@@ -102,11 +95,9 @@ export function TaskModal({
     } else {
       reset({
         title: '',
-        description: '',
+        summary: '',
         status: 'pending',
-        priority: 'medium',
-        hitlRequired: false,
-        hitlPhase: 'none',
+        urgency: 'normal',
         assigneeId: null,
         parentId: parentTask?._id.toString() || null,
         dueAt: null,
@@ -116,13 +107,11 @@ export function TaskModal({
   }, [task, parentTask, reset])
 
   const onSubmit = async (data: TaskFormData) => {
-    const taskData: any = {
+    const taskData: Partial<Task> = {
       title: data.title,
-      description: data.description || '',
+      summary: data.summary || '',
       status: data.status,
-      priority: data.priority,
-      hitlRequired: data.hitlRequired,
-      hitlPhase: data.hitlPhase,
+      urgency: data.urgency,
       tags: data.tags
         ? data.tags
             .split(',')
@@ -148,10 +137,7 @@ export function TaskModal({
   }
 
   const statusOptions = lookups.task_status || []
-  const priorityOptions = lookups.priority || []
-  const hitlPhaseOptions = lookups.hitl_phase || []
-
-  const hitlRequired = watch('hitlRequired')
+  const urgencyOptions = lookups.urgency || []
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -170,12 +156,12 @@ export function TaskModal({
             )}
           </div>
 
-          {/* Description */}
+          {/* Summary */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">Description</label>
+            <label className="text-sm font-medium">Summary</label>
             <textarea
-              {...register('description')}
-              placeholder="Enter task description"
+              {...register('summary')}
+              placeholder="Enter task summary"
               className={cn(
                 'flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm',
                 'ring-offset-background placeholder:text-muted-foreground',
@@ -184,7 +170,7 @@ export function TaskModal({
             />
           </div>
 
-          {/* Status and Priority */}
+          {/* Status and Urgency */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Status</label>
@@ -212,16 +198,16 @@ export function TaskModal({
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">Priority</label>
+              <label className="text-sm font-medium">Urgency</label>
               <Select
-                value={watch('priority')}
-                onValueChange={(val) => setValue('priority', val)}
+                value={watch('urgency')}
+                onValueChange={(val) => setValue('urgency', val)}
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {priorityOptions.map((opt) => (
+                  {urgencyOptions.map((opt) => (
                     <SelectItem key={opt.code} value={opt.code}>
                       <div className="flex items-center gap-2">
                         <span
@@ -286,41 +272,6 @@ export function TaskModal({
                 {...register('dueAt')}
               />
             </div>
-          </div>
-
-          {/* HITL Settings */}
-          <div className="space-y-4 rounded-lg border p-4">
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="hitlRequired"
-                checked={hitlRequired}
-                onCheckedChange={(checked) => setValue('hitlRequired', !!checked)}
-              />
-              <label htmlFor="hitlRequired" className="text-sm font-medium">
-                Human-in-the-Loop Required
-              </label>
-            </div>
-
-            {hitlRequired && (
-              <div className="space-y-2">
-                <label className="text-sm font-medium">HITL Phase</label>
-                <Select
-                  value={watch('hitlPhase')}
-                  onValueChange={(val) => setValue('hitlPhase', val)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {hitlPhaseOptions.map((opt) => (
-                      <SelectItem key={opt.code} value={opt.code}>
-                        {opt.displayName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
           </div>
 
           {/* Tags */}

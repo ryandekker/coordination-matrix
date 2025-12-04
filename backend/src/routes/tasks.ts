@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { ObjectId, Filter, Sort, Document } from 'mongodb';
+import { ObjectId, Filter, Sort, Document, WithId } from 'mongodb';
 import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
 import { ReferenceResolver } from '../services/reference-resolver.js';
@@ -448,8 +448,8 @@ tasksRouter.put('/:id/move', async (req: Request, res: Response, next: NextFunct
         if (currentParentId.equals(taskId)) {
           throw createError('Cannot move task to one of its descendants', 400);
         }
-        const current = await db.collection<Task>('tasks').findOne({ _id: currentParentId });
-        currentParentId = current?.parentId || null;
+        const ancestor: WithId<Task> | null = await db.collection<Task>('tasks').findOne({ _id: currentParentId });
+        currentParentId = ancestor?.parentId || null;
       }
 
       newParent = await db.collection<Task>('tasks').findOne({ _id: parentOid });
@@ -574,7 +574,7 @@ tasksRouter.post('/bulk', async (req: Request, res: Response, next: NextFunction
 });
 
 // Helper function to build tree structure
-function buildTaskTree(tasks: Task[], maxDepth: number, currentDepth = 0): TaskWithChildren[] {
+function buildTaskTree(tasks: Task[], _maxDepth: number, _currentDepth = 0): TaskWithChildren[] {
   const taskMap = new Map<string, TaskWithChildren>();
   const roots: TaskWithChildren[] = [];
 

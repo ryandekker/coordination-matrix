@@ -445,7 +445,7 @@ function ParentTaskSelector({
       if (searchQuery) {
         params.search = searchQuery
       }
-      return tasksApi.getAll(params)
+      return tasksApi.list(params)
     },
   })
 

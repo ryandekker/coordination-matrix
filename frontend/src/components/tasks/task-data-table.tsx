@@ -175,7 +175,7 @@ export function TaskDataTable({
     if (fieldConfig.fieldType === 'boolean') {
       return (
         <Checkbox
-          checked={value as boolean}
+          checked={Boolean(value)}
           className="pointer-events-none"
         />
       )
@@ -381,7 +381,7 @@ function TitleCell({
 
   return (
     <div style={{ paddingLeft: depth * 16 }} className="flex items-center gap-1 group">
-      {task.childCount > 0 ? (
+      {(task.children && task.children.length > 0) ? (
         <Button variant="ghost" size="sm" className="h-6 w-6 p-0 flex-shrink-0" onClick={onToggleExpand}>
           {isExpanded ? (
             <ChevronDown className="h-4 w-4" />

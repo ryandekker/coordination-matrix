@@ -21,7 +21,9 @@
       "Bash(git merge:*)",
       "Bash(cat:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(docker system:*)",
+      "Bash(docker volume rm:*)"
     ],
     "deny": [],
     "ask": []
