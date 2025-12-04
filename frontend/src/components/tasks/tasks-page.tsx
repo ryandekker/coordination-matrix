@@ -1,15 +1,20 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { TaskDataTable } from './task-data-table'
 import { TaskToolbar } from './task-toolbar'
 import { TaskModal } from './task-modal'
 import { ColumnConfigModal } from './column-config-modal'
-import { useTasks, useLookups, useFieldConfigs, useViews, useUsers } from '@/hooks/use-tasks'
+import { useTasks, useLookups, useFieldConfigs, useViews, useUsers, useCreateView } from '@/hooks/use-tasks'
 import { Task, View } from '@/lib/api'
 
 export function TasksPage() {
-  const [selectedView, setSelectedView] = useState<string | null>(null)
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const viewIdFromUrl = searchParams.get('viewId')
+
+  const [selectedView, setSelectedView] = useState<string | null>(viewIdFromUrl)
   const [filters, setFilters] = useState<Record<string, unknown>>({})
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -35,8 +40,9 @@ export function TasksPage() {
 
   const { data: lookupsData } = useLookups()
   const { data: fieldConfigsData } = useFieldConfigs('tasks')
-  const { data: viewsData } = useViews('tasks')
+  const { data: viewsData, refetch: refetchViews } = useViews('tasks')
   const { data: usersData } = useUsers()
+  const createViewMutation = useCreateView()
 
   const tasks = tasksData?.data || []
   const pagination = tasksData?.pagination
@@ -45,10 +51,35 @@ export function TasksPage() {
   const views = viewsData?.data || []
   const users = usersData?.data || []
 
+  // Sync view from URL
+  useEffect(() => {
+    if (viewIdFromUrl && viewIdFromUrl !== selectedView) {
+      setSelectedView(viewIdFromUrl)
+      const view = views.find((v: View) => v._id === viewIdFromUrl)
+      if (view) {
+        setFilters(view.filters || {})
+        if (view.sorting && view.sorting.length > 0) {
+          setSortBy(view.sorting[0].field)
+          setSortOrder(view.sorting[0].direction)
+        }
+        setVisibleColumns(view.visibleColumns || [])
+        // Extract search from filters if present
+        if (view.filters?.search) {
+          setSearch(view.filters.search as string)
+        }
+      }
+    }
+  }, [viewIdFromUrl, views, selectedView])
+
   // Get current view
   const currentView = selectedView
     ? views.find((v: View) => v._id === selectedView)
     : views.find((v: View) => v.isDefault) || views[0]
+
+  // Current sorting for toolbar
+  const currentSorting: Array<{ field: string; direction: 'asc' | 'desc' }> = [
+    { field: sortBy, direction: sortOrder }
+  ]
 
   // Initialize visible columns from view
   const effectiveVisibleColumns =
@@ -58,6 +89,8 @@ export function TasksPage() {
 
   const handleViewChange = (viewId: string) => {
     setSelectedView(viewId)
+    // Update URL with viewId
+    router.push(`/tasks?viewId=${viewId}`)
     const view = views.find((v: View) => v._id === viewId)
     if (view) {
       setFilters(view.filters || {})
@@ -66,6 +99,34 @@ export function TasksPage() {
         setSortOrder(view.sorting[0].direction)
       }
       setVisibleColumns(view.visibleColumns || [])
+      // Extract search from filters if present
+      if (view.filters?.search) {
+        setSearch(view.filters.search as string)
+      } else {
+        setSearch('')
+      }
+    }
+  }
+
+  const handleSaveSearch = async (
+    name: string,
+    filtersToSave: Record<string, unknown>,
+    sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>
+  ) => {
+    const newView = await createViewMutation.mutateAsync({
+      name,
+      collectionName: 'tasks',
+      filters: filtersToSave,
+      sorting: sorting || currentSorting,
+      visibleColumns: effectiveVisibleColumns,
+    })
+
+    // Refetch views to update sidebar
+    await refetchViews()
+
+    // Navigate to the new view
+    if (newView?.data?._id) {
+      router.push(`/tasks?viewId=${newView.data._id}`)
     }
   }
 
@@ -115,11 +176,13 @@ export function TasksPage() {
         lookups={lookups}
         filters={filters}
         search={search}
+        sorting={currentSorting}
         onViewChange={handleViewChange}
         onFilterChange={handleFilterChange}
         onSearchChange={setSearch}
         onCreateTask={handleCreateTask}
         onOpenColumnConfig={() => setIsColumnConfigOpen(true)}
+        onSaveSearch={handleSaveSearch}
       />
 
       <TaskDataTable

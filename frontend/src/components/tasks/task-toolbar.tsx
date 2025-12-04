@@ -1,6 +1,7 @@
 'use client'
 
-import { Search, Plus, Filter, Columns, ChevronDown, X } from 'lucide-react'
+import { useState } from 'react'
+import { Search, Plus, Filter, Columns, ChevronDown, X, Bookmark } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -19,6 +20,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import { View, LookupValue } from '@/lib/api'
 
 interface TaskToolbarProps {
@@ -27,11 +36,13 @@ interface TaskToolbarProps {
   lookups: Record<string, LookupValue[]>
   filters: Record<string, unknown>
   search: string
+  sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>
   onViewChange: (viewId: string) => void
   onFilterChange: (filters: Record<string, unknown>) => void
   onSearchChange: (search: string) => void
   onCreateTask: () => void
   onOpenColumnConfig: () => void
+  onSaveSearch?: (name: string, filters: Record<string, unknown>, sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>) => Promise<void>
 }
 
 export function TaskToolbar({
@@ -40,14 +51,39 @@ export function TaskToolbar({
   lookups,
   filters,
   search,
+  sorting,
   onViewChange,
   onFilterChange,
   onSearchChange,
   onCreateTask,
   onOpenColumnConfig,
+  onSaveSearch,
 }: TaskToolbarProps) {
+  const [isSaveModalOpen, setIsSaveModalOpen] = useState(false)
+  const [saveName, setSaveName] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+
   const statusOptions = lookups.task_status || []
   const priorityOptions = lookups.priority || []
+
+  const hasActiveFilters = Object.keys(filters).length > 0 || search.length > 0
+
+  const handleSaveSearch = async () => {
+    if (!saveName.trim() || !onSaveSearch) return
+    setIsSaving(true)
+    try {
+      // Combine search with filters
+      const filtersToSave = { ...filters }
+      if (search) {
+        filtersToSave.search = search
+      }
+      await onSaveSearch(saveName.trim(), filtersToSave, sorting)
+      setIsSaveModalOpen(false)
+      setSaveName('')
+    } finally {
+      setIsSaving(false)
+    }
+  }
 
   const handleStatusFilter = (status: string, checked: boolean) => {
     const currentStatuses = (filters.status as string[]) || []
@@ -231,6 +267,14 @@ export function TaskToolbar({
 
       <div className="flex-1" />
 
+      {/* Save Search */}
+      {onSaveSearch && hasActiveFilters && (
+        <Button variant="outline" size="sm" onClick={() => setIsSaveModalOpen(true)}>
+          <Bookmark className="mr-2 h-4 w-4" />
+          Save Search
+        </Button>
+      )}
+
       {/* Column Config */}
       <Button variant="outline" size="sm" onClick={onOpenColumnConfig}>
         <Columns className="mr-2 h-4 w-4" />
@@ -280,6 +324,49 @@ export function TaskToolbar({
           </Button>
         </div>
       )}
+
+      {/* Save Search Modal */}
+      <Dialog open={isSaveModalOpen} onOpenChange={setIsSaveModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Save Current Search</DialogTitle>
+            <DialogDescription>
+              Save your current filters as a reusable search. It will appear in the sidebar.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Name *</label>
+              <Input
+                value={saveName}
+                onChange={(e) => setSaveName(e.target.value)}
+                placeholder="e.g., High Priority Pending"
+                autoFocus
+              />
+            </div>
+            {activeFilters.length > 0 && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-muted-foreground">Current Filters</label>
+                <div className="flex flex-wrap gap-1">
+                  {activeFilters.map((filter) => (
+                    <Badge key={filter.key} variant="secondary" className="text-xs">
+                      {filter.label}: {filter.value}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsSaveModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveSearch} disabled={isSaving || !saveName.trim()}>
+              {isSaving ? 'Saving...' : 'Save Search'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -10,6 +10,7 @@ import { viewsRouter } from './routes/views.js';
 import { usersRouter } from './routes/users.js';
 import { externalJobsRouter } from './routes/external-jobs.js';
 import { workflowsRouter } from './routes/workflows.js';
+import { apiKeysRouter } from './routes/api-keys.js';
 import { errorHandler } from './middleware/error-handler.js';
 
 const app = express();
@@ -37,6 +38,7 @@ app.use('/api/views', viewsRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/external-jobs', externalJobsRouter);
 app.use('/api/workflows', workflowsRouter);
+app.use('/api/auth/api-keys', apiKeysRouter);
 
 // Error handling
 app.use(errorHandler);
