@@ -34,6 +34,7 @@ interface EditableCellProps {
   users?: User[]
   onSave: (value: unknown) => void
   children: ReactNode
+  isTitle?: boolean
 }
 
 export function EditableCell({
@@ -43,6 +44,7 @@ export function EditableCell({
   users = [],
   onSave,
   children,
+  isTitle = false,
 }: EditableCellProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState<unknown>(value)
@@ -365,6 +367,15 @@ export function EditableCell({
 
     case 'text':
     default:
+      // For title fields, don't render as input (click will open modal)
+      if (isTitle) {
+        return (
+          <div className="truncate w-full">
+            {children}
+          </div>
+        )
+      }
+      
       // Always render as input, looks like text until focused
       return (
         <div

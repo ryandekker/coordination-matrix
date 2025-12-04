@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import {
   ChevronDown,
   ChevronRight,
@@ -23,6 +23,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -325,6 +326,106 @@ export function TaskDataTable({
   )
 }
 
+// Title cell component with special edit behavior
+function TitleCell({
+  task,
+  fieldConfig,
+  lookups,
+  users,
+  depth,
+  isExpanded,
+  onToggleExpand,
+  onCellUpdate,
+  onEdit,
+  renderCellValue,
+}: {
+  task: Task
+  fieldConfig: FieldConfig
+  lookups: Record<string, LookupValue[]>
+  users: User[]
+  depth: number
+  isExpanded: boolean
+  onToggleExpand: () => void
+  onCellUpdate: (taskId: string, field: string, value: unknown) => void
+  onEdit: () => void
+  renderCellValue: (task: Task, fc: FieldConfig) => React.ReactNode
+}) {
+  const [isInlineEditing, setIsInlineEditing] = useState(false)
+  const [editValue, setEditValue] = useState(task.title || '')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (isInlineEditing && inputRef.current) {
+      inputRef.current.focus()
+      inputRef.current.select()
+    }
+  }, [isInlineEditing])
+
+  const handleSave = () => {
+    onCellUpdate(task._id, 'title', editValue)
+    setIsInlineEditing(false)
+  }
+
+  const handleCancel = () => {
+    setEditValue(task.title || '')
+    setIsInlineEditing(false)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSave()
+    } else if (e.key === 'Escape') {
+      handleCancel()
+    }
+  }
+
+  return (
+    <div style={{ paddingLeft: depth * 16 }} className="flex items-center gap-1 group">
+      {task.childCount > 0 ? (
+        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 flex-shrink-0" onClick={onToggleExpand}>
+          {isExpanded ? (
+            <ChevronDown className="h-4 w-4" />
+          ) : (
+            <ChevronRight className="h-4 w-4" />
+          )}
+        </Button>
+      ) : (
+        <div className="w-6 flex-shrink-0" />
+      )}
+      {isInlineEditing ? (
+        <Input
+          ref={inputRef}
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onBlur={handleSave}
+          className="h-[20px] text-sm border-0 bg-transparent shadow-none focus-visible:ring-1 focus-visible:ring-primary px-1 rounded w-full"
+        />
+      ) : (
+        <>
+          <div
+            className="flex-1 min-w-0 cursor-pointer hover:underline truncate"
+            onClick={onEdit}
+          >
+            {renderCellValue(task, fieldConfig)}
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 w-5 p-0 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+            onClick={(e) => {
+              e.stopPropagation()
+              setIsInlineEditing(true)
+            }}
+          >
+            <Pencil className="h-3 w-3" />
+          </Button>
+        </>
+      )}
+    </div>
+  )
+}
+
 // Recursive row component for nested tasks
 function TaskRow({
   task,
@@ -389,34 +490,18 @@ function TaskRow({
             className="relative py-0.5 px-1"
           >
             {fc.fieldPath === 'title' ? (
-              <div style={{ paddingLeft: depth * 16 }} className="flex items-center gap-1">
-                {task.childCount > 0 ? (
-                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0 flex-shrink-0" onClick={onToggleExpand}>
-                    {isExpanded ? (
-                      <ChevronDown className="h-4 w-4" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4" />
-                    )}
-                  </Button>
-                ) : (
-                  <div className="w-6 flex-shrink-0" />
-                )}
-                <div className="flex-1 min-w-0">
-                  {fc.isEditable ? (
-                    <EditableCell
-                      value={task[fc.fieldPath as keyof Task]}
-                      fieldConfig={fc}
-                      lookups={lookups}
-                      users={users}
-                      onSave={(value) => onCellUpdate(task._id, fc.fieldPath, value)}
-                    >
-                      {renderCellValue(task, fc)}
-                    </EditableCell>
-                  ) : (
-                    renderCellValue(task, fc)
-                  )}
-                </div>
-              </div>
+              <TitleCell
+                task={task}
+                fieldConfig={fc}
+                lookups={lookups}
+                users={users}
+                depth={depth}
+                isExpanded={isExpanded}
+                onToggleExpand={onToggleExpand}
+                onCellUpdate={onCellUpdate}
+                onEdit={onEdit}
+                renderCellValue={renderCellValue}
+              />
             ) : (
               <>
                 {fc.isEditable ? (

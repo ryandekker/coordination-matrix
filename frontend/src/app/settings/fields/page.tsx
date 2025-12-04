@@ -378,20 +378,20 @@ export default function FieldSettingsPage() {
                     <div className="col-span-2">Field Path</div>
                     <div className="col-span-2">Display Name</div>
                     <div className="col-span-1">Type</div>
-                    <div className="col-span-1 text-center">
-                      <Eye className="h-3 w-3 inline" title="Default Visible" />
+                    <div className="col-span-1 text-center" title="Default Visible">
+                      <Eye className="h-3 w-3 inline" />
                     </div>
-                    <div className="col-span-1 text-center">
-                      <Pencil className="h-3 w-3 inline" title="Editable" />
+                    <div className="col-span-1 text-center" title="Editable">
+                      <Pencil className="h-3 w-3 inline" />
                     </div>
-                    <div className="col-span-1 text-center">
-                      <Search className="h-3 w-3 inline" title="Searchable" />
+                    <div className="col-span-1 text-center" title="Searchable">
+                      <Search className="h-3 w-3 inline" />
                     </div>
-                    <div className="col-span-1 text-center">
-                      <SortAsc className="h-3 w-3 inline" title="Sortable" />
+                    <div className="col-span-1 text-center" title="Sortable">
+                      <SortAsc className="h-3 w-3 inline" />
                     </div>
-                    <div className="col-span-1 text-center">
-                      <Filter className="h-3 w-3 inline" title="Filterable" />
+                    <div className="col-span-1 text-center" title="Filterable">
+                      <Filter className="h-3 w-3 inline" />
                     </div>
                     <div className="col-span-1"></div>
                   </div>
