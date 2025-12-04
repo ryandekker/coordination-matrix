@@ -223,7 +223,7 @@ apiKeysRouter.post('/:id/regenerate', async (req: Request, res: Response, next: 
 });
 
 // Middleware to validate API key (can be used by other routes)
-export async function validateApiKey(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function validateApiKey(req: Request, _res: Response, next: NextFunction): Promise<void> {
   try {
     const authHeader = req.headers.authorization;
 
