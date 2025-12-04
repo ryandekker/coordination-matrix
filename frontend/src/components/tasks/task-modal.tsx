@@ -221,14 +221,14 @@ export function TaskModal({
                     {options.map((opt) => {
                       const code = 'code' in opt ? opt.code : opt.value
                       const label = 'displayName' in opt ? opt.displayName : opt.label
-                      const color = 'color' in opt ? opt.color : undefined
+                      const color: string | undefined = 'color' in opt ? (opt.color as string) : undefined
                       return (
                         <SelectItem key={code} value={code}>
                           <div className="flex items-center gap-2">
                             {color && (
                               <span
                                 className="h-2 w-2 rounded-full"
-                                style={{ backgroundColor: color as string }}
+                                style={{ backgroundColor: color }}
                               />
                             )}
                             {label}
