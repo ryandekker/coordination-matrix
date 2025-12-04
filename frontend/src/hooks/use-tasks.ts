@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { tasksApi, lookupsApi, fieldConfigsApi, viewsApi, usersApi, Task } from '@/lib/api'
+import { tasksApi, lookupsApi, fieldConfigsApi, viewsApi, usersApi, workflowsApi, Task } from '@/lib/api'
 
 export function useTasks(params?: Record<string, string | number | boolean>) {
   return useQuery({
@@ -151,6 +151,15 @@ export function useUsers() {
   return useQuery({
     queryKey: ['users'],
     queryFn: () => usersApi.list(),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  })
+}
+
+// Workflows
+export function useWorkflows() {
+  return useQuery({
+    queryKey: ['workflows'],
+    queryFn: () => workflowsApi.list(),
     staleTime: 5 * 60 * 1000, // 5 minutes
   })
 }

@@ -200,6 +200,19 @@ export const usersApi = {
   },
 }
 
+// Workflows API
+export const workflowsApi = {
+  list: async (): Promise<ApiResponse<Workflow[]>> => {
+    const response = await fetch(`${API_BASE}/workflows`)
+    return handleResponse(response)
+  },
+
+  get: async (id: string): Promise<ApiResponse<Workflow>> => {
+    const response = await fetch(`${API_BASE}/workflows/${id}`)
+    return handleResponse(response)
+  },
+}
+
 // External Jobs API
 export const externalJobsApi = {
   list: async (params?: Record<string, string>): Promise<PaginatedResponse<ExternalJob>> => {
@@ -254,43 +267,30 @@ export const externalJobsApi = {
 export interface Task {
   _id: string
   title: string
-  description?: string
+  summary?: string
+  extraPrompt?: string
+  additionalInfo?: string
   status: string
-  priority?: string
+  urgency?: string
   parentId: string | null
-  rootId: string | null
-  depth: number
-  path: string[]
-  childCount: number
-  hitlRequired: boolean
-  hitlPhase: string
-  hitlStatus: string
-  hitlAssigneeId?: string | null
-  hitlNotes?: string
   workflowId?: string | null
-  externalJobId?: string
-  externalJobStatus?: string
-  externalJobResult?: Record<string, unknown>
+  workflowStage?: string
+  externalId?: string
+  externalHoldDate?: string | null
   assigneeId?: string | null
   createdById?: string | null
-  teamId?: string | null
-  metadata?: Record<string, unknown>
   tags?: string[]
   createdAt: string
   updatedAt: string
-  startedAt?: string | null
-  completedAt?: string | null
   dueAt?: string | null
   children?: Task[]
   _resolved?: {
-    assignee?: { displayName: string }
-    createdBy?: { displayName: string }
-    hitlAssignee?: { displayName: string }
-    team?: { name: string }
+    assignee?: { _id: string; displayName: string }
+    createdBy?: { _id: string; displayName: string }
+    parent?: { _id: string; title: string }
+    workflow?: { _id: string; name: string }
     status?: { code: string; displayName: string; color: string }
-    priority?: { code: string; displayName: string; color: string }
-    hitlPhase?: { code: string; displayName: string; color: string }
-    hitlStatus?: { code: string; displayName: string; color: string }
+    urgency?: { code: string; displayName: string; color: string }
   }
 }
 
@@ -370,4 +370,14 @@ export interface ExternalJob {
   updatedAt: string
   startedAt?: string | null
   completedAt?: string | null
+}
+
+export interface Workflow {
+  _id: string
+  name: string
+  description?: string
+  stages: string[]
+  isActive: boolean
+  createdAt: string
+  updatedAt?: string
 }
