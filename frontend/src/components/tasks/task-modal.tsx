@@ -198,7 +198,7 @@ export function TaskModal({
           </div>
         )
 
-      case 'select':
+      case 'select': {
         const options = fc.lookupType ? lookups[fc.lookupType] || [] : fc.options || []
         return (
           <div key={fieldKey} className="space-y-2">
@@ -228,7 +228,7 @@ export function TaskModal({
                             {color && (
                               <span
                                 className="h-2 w-2 rounded-full"
-                                style={{ backgroundColor: color }}
+                                style={{ backgroundColor: color as string }}
                               />
                             )}
                             {label}
@@ -242,6 +242,7 @@ export function TaskModal({
             />
           </div>
         )
+      }
 
       case 'reference':
         return (

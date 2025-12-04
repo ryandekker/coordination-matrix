@@ -472,9 +472,10 @@ function TaskRow({
   handleEditTask: (task: Task) => void
   handleCreateSubtask: (task: Task) => void
 }) {
-  const hasChildren = task.children && task.children.length > 0
-  const { data: childrenData } = useTaskChildren(isExpanded && hasChildren ? task._id : null)
+  // Fetch children when expanded
+  const { data: childrenData } = useTaskChildren(isExpanded ? task._id : null)
   const children = childrenData?.data || []
+  const hasChildren = isExpanded ? children.length > 0 : task.children && task.children.length > 0
 
   return (
     <>

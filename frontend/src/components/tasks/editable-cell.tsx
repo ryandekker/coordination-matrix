@@ -24,8 +24,9 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { Checkbox } from '@/components/ui/checkbox'
-import { FieldConfig, LookupValue, User } from '@/lib/api'
+import { FieldConfig, LookupValue, User, Task, tasksApi } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { useQuery } from '@tanstack/react-query'
 
 interface EditableCellProps {
   value: unknown
@@ -182,6 +183,27 @@ export function EditableCell({
           </Command>
         </div>
       </div>
+    )
+  }
+
+  // Handle parent task reference fields
+  if (fieldConfig.fieldType === 'reference' && fieldConfig.referenceCollection === 'tasks') {
+    return (
+      <ParentTaskSelector
+        containerRef={containerRef}
+        currentValue={editValue as string | null}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        onSelect={(taskId) => {
+          onSave(taskId)
+          setIsEditing(false)
+          setSearchQuery('')
+        }}
+        onCancel={() => {
+          setIsEditing(false)
+          setSearchQuery('')
+        }}
+      />
     )
   }
 
@@ -394,4 +416,97 @@ export function EditableCell({
         </div>
       )
   }
+}
+
+// Parent Task Selector Component
+function ParentTaskSelector({
+  containerRef,
+  currentValue,
+  searchQuery,
+  onSearchChange,
+  onSelect,
+  onCancel,
+}: {
+  containerRef: React.RefObject<HTMLDivElement>
+  currentValue: string | null
+  searchQuery: string
+  onSearchChange: (query: string) => void
+  onSelect: (taskId: string | null) => void
+  onCancel: () => void
+}) {
+  // Fetch tasks for selection - debounce search
+  const { data: tasksData, isLoading } = useQuery({
+    queryKey: ['tasks-search', searchQuery],
+    queryFn: async () => {
+      const params: Record<string, string> = {
+        limit: '20',
+        resolveReferences: 'false',
+      }
+      if (searchQuery) {
+        params.search = searchQuery
+      }
+      return tasksApi.list(params)
+    },
+  })
+
+  const tasks = tasksData?.data || []
+
+  return (
+    <div ref={containerRef} className="absolute left-0 top-0 z-50 bg-popover border rounded-md shadow-lg min-w-[280px]">
+      <Command>
+        <CommandInput
+          placeholder="Search tasks..."
+          value={searchQuery}
+          onValueChange={onSearchChange}
+          className="h-8"
+        />
+        <CommandList className="max-h-[250px]">
+          {isLoading ? (
+            <div className="p-2 text-center text-sm text-muted-foreground">
+              Loading...
+            </div>
+          ) : (
+            <>
+              <CommandEmpty>No tasks found</CommandEmpty>
+              <CommandGroup>
+                <CommandItem
+                  value="_none"
+                  onSelect={() => onSelect(null)}
+                  className="text-muted-foreground"
+                >
+                  <Check
+                    className={cn(
+                      'mr-2 h-4 w-4',
+                      currentValue === null ? 'opacity-100' : 'opacity-0'
+                    )}
+                  />
+                  No parent (root task)
+                </CommandItem>
+                {tasks.map((task: Task) => (
+                  <CommandItem
+                    key={task._id}
+                    value={task._id}
+                    onSelect={() => onSelect(task._id)}
+                  >
+                    <Check
+                      className={cn(
+                        'mr-2 h-4 w-4',
+                        currentValue === task._id ? 'opacity-100' : 'opacity-0'
+                      )}
+                    />
+                    <div className="flex flex-col overflow-hidden">
+                      <span className="truncate">{task.title}</span>
+                      <span className="text-xs text-muted-foreground truncate">
+                        {task.status} • {task._id.slice(-6)}
+                      </span>
+                    </div>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </>
+          )}
+        </CommandList>
+      </Command>
+    </div>
+  )
 }
