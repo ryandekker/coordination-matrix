@@ -17,6 +17,7 @@ export function TasksPage() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [parentTask, setParentTask] = useState<Task | null>(null)
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false)
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState<string[]>([])
@@ -85,11 +86,19 @@ export function TasksPage() {
 
   const handleCreateTask = () => {
     setSelectedTask(null)
+    setParentTask(null)
     setIsTaskModalOpen(true)
   }
 
   const handleEditTask = (task: Task) => {
     setSelectedTask(task)
+    setParentTask(null)
+    setIsTaskModalOpen(true)
+  }
+
+  const handleCreateSubtask = (parent: Task) => {
+    setSelectedTask(null)
+    setParentTask(parent)
     setIsTaskModalOpen(true)
   }
 
@@ -134,6 +143,7 @@ export function TasksPage() {
         pagination={pagination}
         onSort={handleSort}
         onEditTask={handleEditTask}
+        onCreateSubtask={handleCreateSubtask}
         onPageChange={setPage}
       />
 
@@ -142,7 +152,11 @@ export function TasksPage() {
         isOpen={isTaskModalOpen}
         fieldConfigs={fieldConfigs}
         lookups={lookups}
-        onClose={() => setIsTaskModalOpen(false)}
+        parentTask={parentTask}
+        onClose={() => {
+          setIsTaskModalOpen(false)
+          setParentTask(null)
+        }}
       />
 
       <ColumnConfigModal

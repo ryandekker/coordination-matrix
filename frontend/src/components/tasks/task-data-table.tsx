@@ -12,6 +12,7 @@ import {
   Trash2,
   Copy,
   ExternalLink,
+  Plus,
 } from 'lucide-react'
 import {
   Table,
@@ -53,6 +54,7 @@ interface TaskDataTableProps {
   }
   onSort: (field: string) => void
   onEditTask: (task: Task) => void
+  onCreateSubtask: (parentTask: Task) => void
   onPageChange: (page: number) => void
 }
 
@@ -68,6 +70,7 @@ export function TaskDataTable({
   pagination,
   onSort,
   onEditTask,
+  onCreateSubtask,
   onPageChange,
 }: TaskDataTableProps) {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
@@ -222,13 +225,13 @@ export function TaskDataTable({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-12">
+              <TableHead className="w-12 text-center">
                 <Checkbox
                   checked={selectedRows.size === tasks.length && tasks.length > 0}
                   onCheckedChange={toggleAllSelection}
+                  className="h-5 w-5"
                 />
               </TableHead>
-              <TableHead className="w-12" />
               {visibleFieldConfigs.map((fc) => (
                 <TableHead
                   key={fc.fieldPath}
@@ -271,7 +274,15 @@ export function TaskDataTable({
                   onCellUpdate={handleCellUpdate}
                   onEdit={() => onEditTask(task)}
                   onDelete={() => handleDeleteTask(task._id)}
+                  onCreateSubtask={() => onCreateSubtask(task)}
                   renderCellValue={renderCellValue}
+                  expandedRows={expandedRows}
+                  selectedRows={selectedRows}
+                  toggleRowExpansion={toggleRowExpansion}
+                  toggleRowSelection={toggleRowSelection}
+                  handleDeleteTask={handleDeleteTask}
+                  handleEditTask={onEditTask}
+                  handleCreateSubtask={onCreateSubtask}
                 />
               ))
             )}
@@ -328,7 +339,15 @@ function TaskRow({
   onCellUpdate,
   onEdit,
   onDelete,
+  onCreateSubtask,
   renderCellValue,
+  expandedRows,
+  selectedRows,
+  toggleRowExpansion,
+  toggleRowSelection,
+  handleDeleteTask,
+  handleEditTask,
+  handleCreateSubtask,
 }: {
   task: Task
   fieldConfigs: FieldConfig[]
@@ -342,7 +361,15 @@ function TaskRow({
   onCellUpdate: (taskId: string, field: string, value: unknown) => void
   onEdit: () => void
   onDelete: () => void
+  onCreateSubtask: () => void
   renderCellValue: (task: Task, fc: FieldConfig) => React.ReactNode
+  expandedRows: Set<string>
+  selectedRows: Set<string>
+  toggleRowExpansion: (taskId: string) => void
+  toggleRowSelection: (taskId: string) => void
+  handleDeleteTask: (taskId: string) => void
+  handleEditTask: (task: Task) => void
+  handleCreateSubtask: (task: Task) => void
 }) {
   const { data: childrenData } = useTaskChildren(isExpanded && task.childCount > 0 ? task._id : null)
   const children = childrenData?.data || []
@@ -353,40 +380,59 @@ function TaskRow({
         className={cn(depth > 0 && 'bg-muted/30')}
         data-state={isSelected ? 'selected' : undefined}
       >
-        <TableCell>
-          <Checkbox checked={isSelected} onCheckedChange={onToggleSelect} />
-        </TableCell>
-        <TableCell>
-          {task.childCount > 0 ? (
-            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={onToggleExpand}>
-              {isExpanded ? (
-                <ChevronDown className="h-4 w-4" />
-              ) : (
-                <ChevronRight className="h-4 w-4" />
-              )}
-            </Button>
-          ) : (
-            <div className="w-6" />
-          )}
+        <TableCell className="text-center">
+          <Checkbox checked={isSelected} onCheckedChange={onToggleSelect} className="h-5 w-5" />
         </TableCell>
         {fieldConfigs.map((fc) => (
           <TableCell
             key={fc.fieldPath}
-            className="relative py-1 px-2"
-            style={{ paddingLeft: fc.fieldPath === 'title' ? depth * 24 + 8 : undefined }}
+            className="relative py-0.5 px-1"
           >
-            {fc.isEditable ? (
-              <EditableCell
-                value={task[fc.fieldPath as keyof Task]}
-                fieldConfig={fc}
-                lookups={lookups}
-                users={users}
-                onSave={(value) => onCellUpdate(task._id, fc.fieldPath, value)}
-              >
-                {renderCellValue(task, fc)}
-              </EditableCell>
+            {fc.fieldPath === 'title' ? (
+              <div style={{ paddingLeft: depth * 16 }} className="flex items-center gap-1">
+                {task.childCount > 0 ? (
+                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0 flex-shrink-0" onClick={onToggleExpand}>
+                    {isExpanded ? (
+                      <ChevronDown className="h-4 w-4" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4" />
+                    )}
+                  </Button>
+                ) : (
+                  <div className="w-6 flex-shrink-0" />
+                )}
+                <div className="flex-1 min-w-0">
+                  {fc.isEditable ? (
+                    <EditableCell
+                      value={task[fc.fieldPath as keyof Task]}
+                      fieldConfig={fc}
+                      lookups={lookups}
+                      users={users}
+                      onSave={(value) => onCellUpdate(task._id, fc.fieldPath, value)}
+                    >
+                      {renderCellValue(task, fc)}
+                    </EditableCell>
+                  ) : (
+                    renderCellValue(task, fc)
+                  )}
+                </div>
+              </div>
             ) : (
-              renderCellValue(task, fc)
+              <>
+                {fc.isEditable ? (
+                  <EditableCell
+                    value={task[fc.fieldPath as keyof Task]}
+                    fieldConfig={fc}
+                    lookups={lookups}
+                    users={users}
+                    onSave={(value) => onCellUpdate(task._id, fc.fieldPath, value)}
+                  >
+                    {renderCellValue(task, fc)}
+                  </EditableCell>
+                ) : (
+                  renderCellValue(task, fc)
+                )}
+              </>
             )}
           </TableCell>
         ))}
@@ -401,6 +447,10 @@ function TaskRow({
               <DropdownMenuItem onClick={onEdit}>
                 <Pencil className="mr-2 h-4 w-4" />
                 Edit
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onCreateSubtask}>
+                <Plus className="mr-2 h-4 w-4" />
+                Create Subtask
               </DropdownMenuItem>
               <DropdownMenuItem>
                 <Copy className="mr-2 h-4 w-4" />
@@ -428,14 +478,22 @@ function TaskRow({
             lookups={lookups}
             users={users}
             depth={depth + 1}
-            isExpanded={false}
-            isSelected={false}
-            onToggleExpand={() => {}}
-            onToggleSelect={() => {}}
+            isExpanded={expandedRows.has(child._id)}
+            isSelected={selectedRows.has(child._id)}
+            onToggleExpand={() => toggleRowExpansion(child._id)}
+            onToggleSelect={() => toggleRowSelection(child._id)}
             onCellUpdate={onCellUpdate}
-            onEdit={() => {}}
-            onDelete={() => {}}
+            onEdit={() => handleEditTask(child)}
+            onDelete={() => handleDeleteTask(child._id)}
+            onCreateSubtask={() => handleCreateSubtask(child)}
             renderCellValue={renderCellValue}
+            expandedRows={expandedRows}
+            selectedRows={selectedRows}
+            toggleRowExpansion={toggleRowExpansion}
+            toggleRowSelection={toggleRowSelection}
+            handleDeleteTask={handleDeleteTask}
+            handleEditTask={handleEditTask}
+            handleCreateSubtask={handleCreateSubtask}
           />
         ))}
     </>

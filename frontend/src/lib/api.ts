@@ -26,12 +26,17 @@ async function handleResponse<T>(response: Response): Promise<T> {
 
 // Tasks API
 export const tasksApi = {
-  list: async (params?: Record<string, string | number | boolean>): Promise<PaginatedResponse<Task>> => {
+  list: async (params?: Record<string, string | number | boolean | string[]>): Promise<PaginatedResponse<Task>> => {
     const searchParams = new URLSearchParams()
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
         if (value !== undefined && value !== null && value !== '') {
-          searchParams.append(key, String(value))
+          // Handle arrays - append each value separately
+          if (Array.isArray(value)) {
+            value.forEach((v) => searchParams.append(key, String(v)))
+          } else {
+            searchParams.append(key, String(value))
+          }
         }
       })
     }

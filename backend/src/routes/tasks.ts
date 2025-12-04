@@ -18,7 +18,27 @@ function toObjectId(id: string): ObjectId {
 // Helper to build filter from query params
 function buildFilter(query: Record<string, unknown>): Filter<Task> {
   const filter: Filter<Task> = {};
-  const { search, filters, parentId, rootOnly, hitlPending, status, priority, assigneeId, tags } = query;
+  
+  // Extract query params - req.query may have arrays for repeated params
+  const search = query.search;
+  const filters = query.filters;
+  const parentId = query.parentId;
+  const rootOnly = query.rootOnly;
+  const hitlPending = query.hitlPending;
+  const assigneeId = query.assigneeId;
+  const tags = query.tags;
+  
+  // Handle status - may be string or array
+  let status = query.status;
+  if (typeof status === 'string') {
+    status = [status];
+  }
+  
+  // Handle priority - may be string or array
+  let priority = query.priority;
+  if (typeof priority === 'string') {
+    priority = [priority];
+  }
 
   // Text search
   if (search && typeof search === 'string') {
@@ -32,22 +52,14 @@ function buildFilter(query: Record<string, unknown>): Filter<Task> {
     filter.parentId = toObjectId(parentId as string);
   }
 
-  // Status filter
-  if (status) {
-    if (Array.isArray(status)) {
-      (filter as Record<string, unknown>).status = { $in: status };
-    } else {
-      (filter as Record<string, unknown>).status = status as string;
-    }
+  // Status filter - multiple statuses are ORed (using $in)
+  if (status && Array.isArray(status) && status.length > 0) {
+    (filter as Record<string, unknown>).status = { $in: status };
   }
 
-  // Priority filter
-  if (priority) {
-    if (Array.isArray(priority)) {
-      (filter as Record<string, unknown>).priority = { $in: priority };
-    } else {
-      (filter as Record<string, unknown>).priority = priority as string;
-    }
+  // Priority filter - multiple priorities are ORed (using $in)
+  if (priority && Array.isArray(priority) && priority.length > 0) {
+    (filter as Record<string, unknown>).priority = { $in: priority };
   }
 
   // HITL pending filter
