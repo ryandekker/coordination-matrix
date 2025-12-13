@@ -217,13 +217,11 @@ export function TaskModal({
                   color: currentStatusOption.color,
                 } : undefined}
               >
-                {currentStatusOption && (
-                  <span
-                    className="h-2 w-2 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: currentStatusOption.color }}
-                  />
-                )}
-                <SelectValue placeholder="Status" />
+                <span
+                  className="h-2 w-2 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: currentStatusOption?.color || '#888' }}
+                />
+                <span>{currentStatusOption?.displayName || 'Status'}</span>
               </SelectTrigger>
               <SelectContent>
                 {statusOptions.map((opt) => (
@@ -255,13 +253,11 @@ export function TaskModal({
                   color: currentUrgencyOption.color,
                 } : undefined}
               >
-                {currentUrgencyOption && (
-                  <span
-                    className="h-2 w-2 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: currentUrgencyOption.color }}
-                  />
-                )}
-                <SelectValue placeholder="Urgency" />
+                <span
+                  className="h-2 w-2 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: currentUrgencyOption?.color || '#888' }}
+                />
+                <span>{currentUrgencyOption?.displayName || 'Urgency'}</span>
               </SelectTrigger>
               <SelectContent>
                 {urgencyOptions.map((opt) => (
@@ -352,6 +348,36 @@ export function TaskModal({
           <textarea
             {...register('summary')}
             placeholder="Brief description..."
+            rows={2}
+            className={cn(
+              'flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm',
+              'ring-offset-background placeholder:text-muted-foreground resize-none',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1'
+            )}
+          />
+        </div>
+
+        {/* Extra Prompt */}
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">Extra Prompt</label>
+          <textarea
+            {...register('extraPrompt')}
+            placeholder="Additional prompt context..."
+            rows={2}
+            className={cn(
+              'flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm',
+              'ring-offset-background placeholder:text-muted-foreground resize-none',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1'
+            )}
+          />
+        </div>
+
+        {/* Additional Info */}
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">Additional Info</label>
+          <textarea
+            {...register('additionalInfo')}
+            placeholder="Any other relevant information..."
             rows={2}
             className={cn(
               'flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm',

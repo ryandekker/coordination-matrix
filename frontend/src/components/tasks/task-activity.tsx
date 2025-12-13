@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import { useTaskActivity, useAddComment } from '@/hooks/use-activity-logs'
 import { ActivityLogEntry, FieldChange } from '@/lib/api'
@@ -130,37 +130,55 @@ function ActivityEntry({ entry, compact, isNew }: { entry: ActivityLogEntry; com
 export function TaskActivity({ taskId, className, compact = false, pollInterval = 5000 }: TaskActivityProps) {
   const [newComment, setNewComment] = useState('')
   const [newEntryIds, setNewEntryIds] = useState<Set<string>>(new Set())
-  const prevEntriesRef = useRef<string[]>([])
+  const prevEntryIdsRef = useRef<Set<string>>(new Set())
+  const isInitialLoadRef = useRef(true)
 
-  const { data, isLoading, error, dataUpdatedAt } = useTaskActivity(taskId, {
+  const { data, isLoading, error } = useTaskActivity(taskId, {
     refetchInterval: pollInterval,
     refetchOnMount: 'always',
   })
   const addComment = useAddComment()
 
-  const entries = data?.data || []
+  // Deduplicate entries by _id (in case of any duplicates from backend/cache)
+  const entries = useMemo(() => {
+    const rawEntries = data?.data || []
+    const seen = new Set<string>()
+    return rawEntries.filter(entry => {
+      if (seen.has(entry._id)) return false
+      seen.add(entry._id)
+      return true
+    })
+  }, [data?.data])
 
   // Track new entries for highlight effect
   useEffect(() => {
     if (entries.length > 0) {
-      const currentIds = entries.map(e => e._id)
-      const prevIds = prevEntriesRef.current
+      const currentIds = new Set(entries.map(e => e._id))
 
-      if (prevIds.length > 0) {
-        const newIds = currentIds.filter(id => !prevIds.includes(id))
+      // Skip highlighting on initial load
+      if (!isInitialLoadRef.current) {
+        const newIds: string[] = []
+        currentIds.forEach(id => {
+          if (!prevEntryIdsRef.current.has(id)) {
+            newIds.push(id)
+          }
+        })
+
         if (newIds.length > 0) {
           setNewEntryIds(new Set(newIds))
           // Clear highlight after animation
-          setTimeout(() => setNewEntryIds(new Set()), 2000)
+          const timer = setTimeout(() => setNewEntryIds(new Set()), 2000)
+          return () => clearTimeout(timer)
         }
       }
 
-      prevEntriesRef.current = currentIds
+      isInitialLoadRef.current = false
+      prevEntryIdsRef.current = currentIds
     }
   }, [entries])
 
   const handleSubmitComment = async () => {
-    if (!newComment.trim()) return
+    if (!newComment.trim() || addComment.isPending) return
 
     try {
       await addComment.mutateAsync({ taskId, comment: newComment.trim() })
@@ -190,13 +208,13 @@ export function TaskActivity({ taskId, className, compact = false, pollInterval 
     return (
       <div className={cn('flex flex-col h-full', className)}>
         {/* Compact comment input */}
-        <div className="px-3 py-2 border-b border-border/50">
+        <div className="px-3 py-2 border-b border-border/50 flex-shrink-0">
           <div className="flex gap-1.5">
             <input
               type="text"
               value={newComment}
               onChange={(e) => setNewComment(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSubmitComment()}
+              onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSubmitComment()}
               placeholder="Add comment..."
               className={cn(
                 'flex-1 px-2 py-1 text-xs rounded border border-input bg-background',
@@ -236,7 +254,7 @@ export function TaskActivity({ taskId, className, compact = false, pollInterval 
         </div>
 
         {/* Entry count + live indicator */}
-        <div className="px-3 py-1.5 border-t border-border/50 flex items-center justify-between">
+        <div className="px-3 py-1.5 border-t border-border/50 flex items-center justify-between flex-shrink-0">
           <span className="text-[10px] text-muted-foreground">
             {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
           </span>
@@ -268,7 +286,7 @@ export function TaskActivity({ taskId, className, compact = false, pollInterval 
           type="text"
           value={newComment}
           onChange={(e) => setNewComment(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSubmitComment()}
+          onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSubmitComment()}
           placeholder="Add a comment..."
           className={cn(
             'flex-1 px-3 py-1.5 text-sm rounded-md border border-input bg-background',
