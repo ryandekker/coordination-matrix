@@ -5,13 +5,53 @@ import { createError } from '../middleware/error-handler.js';
 
 export const workflowsRouter = Router();
 
+// Step types for workflow routing
+type WorkflowStepType = 'task' | 'decision' | 'foreach' | 'join' | 'subflow';
+
+// Execution mode (only applicable to 'task' type)
+type ExecutionMode = 'automated' | 'manual';
+
+// Decision branch for routing
+interface DecisionBranch {
+  condition: string | null;       // null = default branch
+  targetStepId: string;
+}
+
 interface WorkflowStep {
   id: string;
   name: string;
-  type: 'automated' | 'manual';
+
+  // Step classification
+  stepType?: WorkflowStepType;    // What kind of step (default: 'task')
+  execution?: ExecutionMode;      // Execution mode for task steps
+
+  // Legacy field (kept for compatibility)
+  type?: 'automated' | 'manual';  // DEPRECATED: Use execution instead
   hitlPhase: string;
   description?: string;
   config?: Record<string, unknown>;
+
+  // Prompt field for AI execution
+  prompt?: string;
+
+  // Default assignee for this step
+  defaultAssigneeId?: string;
+
+  // Decision routing (only for stepType='decision')
+  branches?: DecisionBranch[];
+  defaultBranch?: string;
+
+  // ForEach configuration (only for stepType='foreach')
+  itemsPath?: string;             // JSONPath to array in output
+  itemVariable?: string;          // Template variable name
+  maxItems?: number;              // Limit to prevent runaway (default: 100)
+
+  // Join configuration (only for stepType='join')
+  awaitTag?: string;              // Tag pattern: "foreach:{{parentId}}"
+
+  // Subflow configuration (only for stepType='subflow')
+  subflowId?: string;
+  inputMapping?: Record<string, string>;
 }
 
 interface Workflow {

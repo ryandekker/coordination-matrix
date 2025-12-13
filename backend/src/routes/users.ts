@@ -41,6 +41,68 @@ usersRouter.get('/', async (req: Request, res: Response, next: NextFunction) => 
   }
 });
 
+// GET /api/users/agents - Get all agent users
+usersRouter.get('/agents', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const agents = await db
+      .collection<User>('users')
+      .find({ isAgent: true, isActive: true })
+      .sort({ displayName: 1 })
+      .toArray();
+
+    res.json({ data: agents });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/users/agents/ensure/:agentId - Get or create a default agent by ID
+// Used by workflows to reference agents that may not exist yet
+usersRouter.post('/agents/ensure/:agentId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { agentId } = req.params;
+
+    // Try to find existing agent by ID or displayName
+    let agent = await db.collection<User>('users').findOne({
+      $or: [
+        { _id: ObjectId.isValid(agentId) ? new ObjectId(agentId) : null },
+        { displayName: agentId, isAgent: true },
+      ],
+    });
+
+    if (!agent) {
+      // Create default agent
+      // Convert agentId to display name: "code-reviewer" -> "Code Reviewer"
+      const displayName = agentId
+        .split(/[-_]/)
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+
+      const now = new Date();
+      const newAgent: Omit<User, '_id'> = {
+        displayName,
+        role: 'operator',
+        isActive: true,
+        isAgent: true,
+        agentPrompt: '', // Empty - uses base daemon prompt only
+        teamIds: [],
+        preferences: {},
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const result = await db.collection<User>('users').insertOne(newAgent as User);
+      agent = await db.collection<User>('users').findOne({ _id: result.insertedId });
+    }
+
+    res.json({ data: agent });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/users/:id - Get a specific user
 usersRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -63,21 +125,27 @@ usersRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) 
 usersRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { email, displayName, role } = req.body;
+    const { email, displayName, role, isAgent, agentPrompt } = req.body;
 
-    if (!email || !displayName) {
-      throw createError('email and displayName are required', 400);
+    if (!displayName) {
+      throw createError('displayName is required', 400);
     }
 
-    // Check for duplicate email
-    const existing = await db.collection('users').findOne({ email });
-    if (existing) {
-      throw createError('User with this email already exists', 409);
+    // Email is required for non-agent users
+    if (!isAgent && !email) {
+      throw createError('email is required for non-agent users', 400);
+    }
+
+    // Check for duplicate email (only if email provided)
+    if (email) {
+      const existing = await db.collection('users').findOne({ email });
+      if (existing) {
+        throw createError('User with this email already exists', 409);
+      }
     }
 
     const now = new Date();
     const newUser: Omit<User, '_id'> = {
-      email,
       displayName,
       role: role || 'viewer',
       isActive: true,
@@ -86,6 +154,19 @@ usersRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       createdAt: now,
       updatedAt: now,
     };
+
+    // Only set email if provided
+    if (email) {
+      newUser.email = email;
+    }
+
+    // Set agent fields if this is an agent user
+    if (isAgent) {
+      newUser.isAgent = true;
+      if (agentPrompt) {
+        newUser.agentPrompt = agentPrompt;
+      }
+    }
 
     const result = await db.collection<User>('users').insertOne(newUser as User);
     const inserted = await db.collection<User>('users').findOne({ _id: result.insertedId });
@@ -104,9 +185,16 @@ usersRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     const updates = req.body;
 
     delete updates._id;
-    delete updates.email; // Email shouldn't be changed
+    delete updates.email; // Email shouldn't be changed after creation
     delete updates.createdAt;
     updates.updatedAt = new Date();
+
+    // Handle agent-specific fields
+    // isAgent and agentPrompt can be updated
+    // If isAgent is being set to false/undefined, clear agentPrompt
+    if (updates.isAgent === false) {
+      updates.agentPrompt = null;
+    }
 
     const result = await db.collection<User>('users').findOneAndUpdate(
       { _id: userId },

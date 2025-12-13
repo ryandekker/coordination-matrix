@@ -249,6 +249,36 @@ export const usersApi = {
     const response = await fetch(`${API_BASE}/users/${id}`)
     return handleResponse(response)
   },
+
+  create: async (data: Partial<User>): Promise<ApiResponse<User>> => {
+    const response = await fetch(`${API_BASE}/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  update: async (id: string, data: Partial<User>): Promise<ApiResponse<User>> => {
+    const response = await fetch(`${API_BASE}/users/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  listAgents: async (): Promise<ApiResponse<User[]>> => {
+    const response = await fetch(`${API_BASE}/users/agents`)
+    return handleResponse(response)
+  },
+
+  ensureAgent: async (agentId: string): Promise<ApiResponse<User>> => {
+    const response = await fetch(`${API_BASE}/users/agents/ensure/${agentId}`, {
+      method: 'POST',
+    })
+    return handleResponse(response)
+  },
 }
 
 // Workflows API
@@ -400,11 +430,14 @@ export interface View {
 
 export interface User {
   _id: string
-  email: string
+  email?: string                  // Optional for agent users
   displayName: string
   role: string
   isActive: boolean
+  isAgent?: boolean               // Is this user an AI agent?
+  agentPrompt?: string            // Agent's base prompt/persona
   createdAt?: string
+  updatedAt?: string
 }
 
 export interface ExternalJob {
@@ -423,11 +456,42 @@ export interface ExternalJob {
   completedAt?: string | null
 }
 
+// Workflow step types
+export type WorkflowStepType = 'task' | 'decision' | 'foreach' | 'join' | 'subflow'
+export type ExecutionMode = 'automated' | 'manual'
+
+export interface DecisionBranch {
+  condition: string | null        // null = default branch
+  targetStepId: string
+}
+
+export interface WorkflowStep {
+  id: string
+  name: string
+  stepType?: WorkflowStepType     // What kind of step (default: 'task')
+  execution?: ExecutionMode       // Execution mode for task steps
+  type?: 'automated' | 'manual'   // DEPRECATED: Use execution instead
+  hitlPhase: string
+  description?: string
+  config?: Record<string, unknown>
+  prompt?: string                 // Prompt for AI execution
+  defaultAssigneeId?: string      // Default assignee for this step
+  branches?: DecisionBranch[]     // Decision routing
+  defaultBranch?: string
+  itemsPath?: string              // ForEach: JSONPath to array
+  itemVariable?: string           // ForEach: Template variable name
+  maxItems?: number               // ForEach: Limit (default: 100)
+  awaitTag?: string               // Join: Tag pattern
+  subflowId?: string              // Subflow: Target workflow ID
+  inputMapping?: Record<string, string>  // Subflow: Input mapping
+}
+
 export interface Workflow {
   _id: string
   name: string
   description?: string
-  stages: string[]
+  steps: WorkflowStep[]
+  mermaidDiagram?: string
   isActive: boolean
   createdAt: string
   updatedAt?: string
