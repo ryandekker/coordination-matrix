@@ -65,11 +65,14 @@ usersRouter.post('/agents/ensure/:agentId', async (req: Request, res: Response, 
     const { agentId } = req.params;
 
     // Try to find existing agent by ID or displayName
+    const orConditions: Record<string, unknown>[] = [
+      { displayName: agentId, isAgent: true },
+    ];
+    if (ObjectId.isValid(agentId)) {
+      orConditions.unshift({ _id: new ObjectId(agentId) });
+    }
     let agent = await db.collection<User>('users').findOne({
-      $or: [
-        { _id: ObjectId.isValid(agentId) ? new ObjectId(agentId) : null },
-        { displayName: agentId, isAgent: true },
-      ],
+      $or: orConditions,
     });
 
     if (!agent) {

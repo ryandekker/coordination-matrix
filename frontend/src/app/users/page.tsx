@@ -122,7 +122,7 @@ export default function UsersPage() {
   const openEditModal = (user: User) => {
     setEditingUser(user)
     setFormData({
-      email: user.email,
+      email: user.email || '',
       displayName: user.displayName,
       role: user.role,
     })

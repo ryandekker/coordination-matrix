@@ -128,7 +128,7 @@ export function EditableCell({
   if (fieldConfig.fieldType === 'reference' && fieldConfig.referenceCollection === 'users' && isEditing) {
     const filteredUsers = users.filter((user) =>
       user.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchQuery.toLowerCase())
+      (user.email && user.email.toLowerCase().includes(searchQuery.toLowerCase()))
     )
 
     return (
