@@ -3,7 +3,8 @@
  * Task Retrieval Daemon
  *
  * Polls a saved search (view), retrieves tasks, and executes them with Claude (or a custom command).
- * Updates task status based on the command result.
+ * Assembles prompts from multiple sources: base prompt + agent prompt + workflow step prompt + task prompt.
+ * Parses JSON responses and handles stage transitions.
  *
  * Usage:
  *   node scripts/task-daemon.mjs --view <viewId> [options]
@@ -26,10 +27,40 @@
  */
 
 import { parseArgs } from 'node:util';
-import { spawn, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+// ============================================================================
+// Base Daemon Prompt - Ensures JSON responses
+// ============================================================================
+
+const BASE_DAEMON_PROMPT = `You are a task automation agent. You MUST respond with valid JSON only - no markdown, no explanation, just the JSON object.
+
+Response schema:
+{
+  "status": "SUCCESS" | "PARTIAL" | "BLOCKED" | "FAILED",
+  "summary": "1-2 sentence summary",
+  "output": "The actual work product (string, can contain newlines)",
+  "nextAction": "COMPLETE" | "CONTINUE" | "ESCALATE" | "HOLD",
+  "nextActionReason": "Optional: reason for CONTINUE/ESCALATE/HOLD",
+  "metadata": {
+    "confidence": 0.0-1.0,
+    "suggestedTags": [],
+    "suggestedNextStage": null
+  }
+}
+
+Rules:
+- status: SUCCESS if task fully completed, PARTIAL if partially done, BLOCKED if cannot proceed, FAILED if error
+- nextAction: COMPLETE to finish, CONTINUE to spawn follow-up, ESCALATE for human help, HOLD to pause
+- output: Put your actual work here (code, analysis, etc.) - escape newlines as \\n in JSON string
+- Respond with ONLY the JSON object, nothing else`;
+
+// ============================================================================
+// Configuration
+// ============================================================================
 
 function parseConfig() {
   const { values } = parseArgs({
@@ -52,7 +83,8 @@ function parseConfig() {
 Task Retrieval Daemon
 
 Polls a saved search (view), retrieves tasks, and executes them with Claude.
-Updates task status based on the command result.
+Assembles prompts from: base + agent + workflow step + task context.
+Parses JSON responses and handles workflow stage transitions.
 
 Usage:
   node scripts/task-daemon.mjs --view <viewId> [options]
@@ -68,17 +100,20 @@ Options:
   --no-update, -n       Don't update task status after execution
   --help, -h            Show this help message
 
-Task Status Updates:
-  - Before execution: status -> "in_progress"
-  - On success (exit 0): status -> "completed"
-  - On failure (exit non-0): status -> "on_hold", additionalInfo updated with error
+Prompt Assembly (layered):
+  1. Base daemon prompt (ensures JSON response)
+  2. Agent prompt (from assignee user if isAgent=true)
+  3. Workflow step prompt (from workflow step if task has workflowStage)
+  4. Task prompt (extraPrompt + task context)
 
-Prompt Format:
-  The task is passed to the command as a prompt combining:
-  - Title
-  - Summary
-  - Extra prompt instructions (if any)
-  - Additional info (if any)
+Response Handling:
+  - Parses JSON response from AI
+  - Updates task status based on nextAction:
+    - COMPLETE: status -> "completed"
+    - CONTINUE: status -> "completed", creates follow-up task
+    - ESCALATE: status -> "on_hold"
+    - HOLD: status -> "on_hold"
+  - Stores response output in additionalInfo
 
 Examples:
   # Process tasks continuously with Claude (default)
@@ -87,14 +122,8 @@ Examples:
   # Process just one task and exit
   node scripts/task-daemon.mjs --view <viewId> --once
 
-  # Use a custom command
-  node scripts/task-daemon.mjs --view <viewId> --exec "my-agent"
-
-  # Dry run to see what would happen
+  # Dry run to see assembled prompts
   node scripts/task-daemon.mjs --view <viewId> --once --dry-run
-
-  # Wait 30 seconds between checks when queue is empty
-  node scripts/task-daemon.mjs --view <viewId> --interval 30000
 `);
     process.exit(0);
   }
@@ -122,23 +151,24 @@ Examples:
   };
 }
 
+// ============================================================================
+// API Helpers
+// ============================================================================
+
+function getHeaders(config) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (config.apiKey) {
+    headers['X-API-Key'] = config.apiKey;
+  }
+  return headers;
+}
+
 async function fetchNextTask(config) {
   const url = `${config.apiUrl}/views/${config.viewId}/tasks?limit=1&resolveReferences=true`;
   console.log(`[DEBUG] Fetching next task from: ${url}`);
 
-  const headers = {
-    'Content-Type': 'application/json',
-  };
-
-  if (config.apiKey) {
-    headers['X-API-Key'] = config.apiKey;
-  }
-
   try {
-    console.log(`[DEBUG] Making API request...`);
-    const response = await fetch(url, { headers });
-    console.log(`[DEBUG] Response status: ${response.status}`);
-
+    const response = await fetch(url, { headers: getHeaders(config) });
     if (!response.ok) {
       const error = await response.text();
       console.error(`API Error (${response.status}): ${error}`);
@@ -146,8 +176,6 @@ async function fetchNextTask(config) {
     }
 
     const result = await response.json();
-    console.log(`[DEBUG] Got ${result.data?.length || 0} tasks from API`);
-
     if (result.data && result.data.length > 0) {
       console.log(`[DEBUG] Next task: "${result.data[0].title}" (${result.data[0]._id})`);
       return result.data[0];
@@ -157,7 +185,36 @@ async function fetchNextTask(config) {
     return null;
   } catch (error) {
     console.error('Fetch error:', error.message || error);
-    console.error('[DEBUG] Full error:', error);
+    return null;
+  }
+}
+
+async function fetchUser(config, userId) {
+  if (!userId) return null;
+
+  try {
+    const response = await fetch(`${config.apiUrl}/users/${userId}`, {
+      headers: getHeaders(config),
+    });
+    if (!response.ok) return null;
+    const result = await response.json();
+    return result.data;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchWorkflow(config, workflowId) {
+  if (!workflowId) return null;
+
+  try {
+    const response = await fetch(`${config.apiUrl}/workflows/${workflowId}`, {
+      headers: getHeaders(config),
+    });
+    if (!response.ok) return null;
+    const result = await response.json();
+    return result.data;
+  } catch {
     return null;
   }
 }
@@ -168,123 +225,164 @@ async function updateTask(config, taskId, updates) {
     return true;
   }
 
-  const url = `${config.apiUrl}/tasks/${taskId}`;
-  console.log(`[DEBUG] Updating task ${taskId} at ${url}`);
-
   // Truncate additionalInfo if too long (keep under 100KB)
   if (updates.additionalInfo && updates.additionalInfo.length > 100000) {
     console.log(`[DEBUG] Truncating additionalInfo from ${updates.additionalInfo.length} to 100000 chars`);
     updates.additionalInfo = updates.additionalInfo.substring(0, 100000) + '\n\n[truncated]';
   }
 
-  const headers = {
-    'Content-Type': 'application/json',
-  };
-
-  if (config.apiKey) {
-    headers['X-API-Key'] = config.apiKey;
-  }
-
-  const body = JSON.stringify(updates);
-  console.log(`[DEBUG] Update body size: ${body.length} bytes`);
-
   try {
-    const response = await fetch(url, {
+    const response = await fetch(`${config.apiUrl}/tasks/${taskId}`, {
       method: 'PATCH',
-      headers,
-      body,
+      headers: getHeaders(config),
+      body: JSON.stringify(updates),
     });
-
-    console.log(`[DEBUG] Update response status: ${response.status}`);
 
     if (!response.ok) {
       const error = await response.text();
       console.error(`Failed to update task (${response.status}): ${error}`);
       return false;
     }
-
-    console.log(`[DEBUG] Task updated successfully`);
     return true;
   } catch (error) {
     console.error('Update error:', error.message || error);
-    console.error('[DEBUG] Full error:', error);
     return false;
   }
 }
 
-function buildPrompt(task) {
-  // If extraPrompt exists, use it as the main prompt with task context
-  if (task.extraPrompt) {
-    const parts = [];
-    parts.push(task.extraPrompt);
-    parts.push('');
-    parts.push('---');
-    parts.push('## Task Context');
-    parts.push(`**Title:** ${task.title}`);
-    if (task.summary) {
-      parts.push(`**Summary:** ${task.summary}`);
+async function createTask(config, taskData) {
+  try {
+    const response = await fetch(`${config.apiUrl}/tasks`, {
+      method: 'POST',
+      headers: getHeaders(config),
+      body: JSON.stringify(taskData),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`Failed to create task (${response.status}): ${error}`);
+      return null;
     }
-    if (task.tags && task.tags.length > 0) {
-      parts.push(`**Tags:** ${task.tags.join(', ')}`);
-    }
-    if (task.additionalInfo) {
-      parts.push('');
-      parts.push('**Additional Info:**');
-      parts.push(task.additionalInfo);
-    }
-    return parts.join('\n');
+    const result = await response.json();
+    return result.data;
+  } catch (error) {
+    console.error('Create task error:', error.message || error);
+    return null;
+  }
+}
+
+// ============================================================================
+// Prompt Assembly
+// ============================================================================
+
+function assemblePrompt(task, agent, workflowStep) {
+  const sections = [];
+
+  // 1. Base daemon prompt (ensures JSON output)
+  sections.push(BASE_DAEMON_PROMPT);
+
+  // 2. Agent prompt (persona, capabilities)
+  if (agent?.isAgent && agent?.agentPrompt) {
+    sections.push(`## Agent Role\n${agent.agentPrompt}`);
   }
 
-  // Fallback: build prompt from title and summary
-  const parts = [];
-  parts.push(`# ${task.title}`);
-  parts.push('');
-  if (task.summary) {
-    parts.push(task.summary);
-    parts.push('');
+  // 3. Workflow step prompt (stage-specific instructions)
+  if (workflowStep?.prompt) {
+    sections.push(`## Workflow Step: ${workflowStep.name}\n${workflowStep.prompt}`);
   }
-  if (task.tags && task.tags.length > 0) {
-    parts.push(`Tags: ${task.tags.join(', ')}`);
+
+  // 4. Task-specific prompt
+  if (task.extraPrompt) {
+    sections.push(`## Task Instructions\n${task.extraPrompt}`);
   }
-  if (task.additionalInfo) {
-    parts.push('');
-    parts.push('Additional context:');
-    parts.push(task.additionalInfo);
-  }
-  return parts.join('\n');
+
+  // 5. Task context as structured data
+  const context = {
+    title: task.title,
+    summary: task.summary || null,
+    tags: task.tags || [],
+    additionalInfo: task.additionalInfo || null,
+    workflowStage: task.workflowStage || null,
+  };
+  sections.push(`## Task Context\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\``);
+
+  return sections.join('\n\n---\n\n');
 }
+
+// ============================================================================
+// Response Parsing
+// ============================================================================
+
+function parseResponse(responseText) {
+  // Try to parse as JSON
+  try {
+    // Sometimes the response might have markdown code blocks, try to extract JSON
+    let jsonStr = responseText.trim();
+
+    // Remove markdown code blocks if present
+    const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) {
+      jsonStr = jsonMatch[1];
+    }
+
+    const parsed = JSON.parse(jsonStr);
+
+    // Validate required fields
+    if (!parsed.status || !parsed.nextAction) {
+      return {
+        success: false,
+        error: 'Missing required fields (status, nextAction)',
+        raw: responseText,
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        status: parsed.status,
+        summary: parsed.summary || '',
+        output: parsed.output || '',
+        nextAction: parsed.nextAction,
+        nextActionReason: parsed.nextActionReason || '',
+        metadata: parsed.metadata || {},
+      },
+    };
+  } catch (e) {
+    return {
+      success: false,
+      error: `Failed to parse JSON: ${e.message}`,
+      raw: responseText,
+    };
+  }
+}
+
+// ============================================================================
+// Command Execution
+// ============================================================================
 
 function executeCommand(cmd, prompt) {
   console.log(`[DEBUG] Executing command: ${cmd}`);
-  console.log(`[DEBUG] Prompt preview: ${prompt.substring(0, 200)}${prompt.length > 200 ? '...' : ''}`);
+  console.log(`[DEBUG] Prompt preview: ${prompt.substring(0, 300)}${prompt.length > 300 ? '...' : ''}`);
 
   // Write prompt to a temp file to avoid shell escaping issues
   const tmpFile = join(tmpdir(), `task-daemon-${Date.now()}.txt`);
   writeFileSync(tmpFile, prompt);
-
-  console.log(`[DEBUG] Wrote prompt to: ${tmpFile}`);
 
   // For claude, use: claude --print "$(cat tmpfile)"
   const fullCmd = cmd === 'claude'
     ? `claude --print "$(cat '${tmpFile}')"`
     : `${cmd} "$(cat '${tmpFile}')"`;
 
-  console.log(`[DEBUG] Full command: ${fullCmd}`);
   console.log(`[DEBUG] Running (this may take a while)...`);
 
   try {
-    // Use execSync to run and capture output
     const stdout = execSync(fullCmd, {
       encoding: 'utf8',
       maxBuffer: 10 * 1024 * 1024, // 10MB buffer
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    // Clean up temp file
     try { unlinkSync(tmpFile); } catch {}
-
-    // Print output to terminal
-    console.log(stdout);
 
     return {
       exitCode: 0,
@@ -292,10 +390,7 @@ function executeCommand(cmd, prompt) {
       stderr: '',
     };
   } catch (error) {
-    // Clean up temp file
     try { unlinkSync(tmpFile); } catch {}
-
-    console.error('[DEBUG] Command failed:', error.message);
 
     return {
       exitCode: error.status || 1,
@@ -305,18 +400,119 @@ function executeCommand(cmd, prompt) {
   }
 }
 
+// ============================================================================
+// Stage Transition Logic
+// ============================================================================
+
+function getNextWorkflowStep(workflow, currentStageId) {
+  if (!workflow?.steps || !currentStageId) return null;
+
+  const currentIndex = workflow.steps.findIndex(s => s.id === currentStageId);
+  if (currentIndex === -1 || currentIndex >= workflow.steps.length - 1) {
+    return null;
+  }
+
+  return workflow.steps[currentIndex + 1];
+}
+
+async function handleStageTransition(config, task, workflow, parsedResponse) {
+  const nextAction = parsedResponse.data.nextAction;
+  const suggestedNextStage = parsedResponse.data.metadata?.suggestedNextStage;
+
+  // If task is part of a workflow and completed, check for next step
+  if (nextAction === 'COMPLETE' && workflow && task.workflowStage) {
+    let nextStep = null;
+
+    // Use suggested stage if provided, otherwise use sequential next
+    if (suggestedNextStage) {
+      nextStep = workflow.steps.find(s => s.id === suggestedNextStage);
+    }
+    if (!nextStep) {
+      nextStep = getNextWorkflowStep(workflow, task.workflowStage);
+    }
+
+    if (nextStep) {
+      console.log(`[WORKFLOW] Creating next task for step: ${nextStep.name}`);
+
+      const newTask = await createTask(config, {
+        title: `${workflow.name}: ${nextStep.name}`,
+        workflowId: task.workflowId,
+        workflowStage: nextStep.id,
+        parentId: task._id,
+        assigneeId: nextStep.defaultAssigneeId || task.assigneeId,
+        extraPrompt: nextStep.prompt || '',
+        status: 'pending',
+        additionalInfo: `Previous step output:\n${parsedResponse.data.output}`,
+        tags: task.tags || [],
+      });
+
+      if (newTask) {
+        console.log(`[WORKFLOW] Created task: ${newTask._id}`);
+      }
+    } else {
+      console.log(`[WORKFLOW] No more steps in workflow`);
+    }
+  }
+
+  // If CONTINUE, create a follow-up task
+  if (nextAction === 'CONTINUE' && parsedResponse.data.nextActionReason) {
+    console.log(`[CONTINUE] Creating follow-up task`);
+
+    const newTask = await createTask(config, {
+      title: `Follow-up: ${task.title}`,
+      workflowId: task.workflowId,
+      workflowStage: task.workflowStage,
+      parentId: task._id,
+      assigneeId: task.assigneeId,
+      extraPrompt: parsedResponse.data.nextActionReason,
+      status: 'pending',
+      additionalInfo: `Previous output:\n${parsedResponse.data.output}`,
+      tags: task.tags || [],
+    });
+
+    if (newTask) {
+      console.log(`[CONTINUE] Created task: ${newTask._id}`);
+    }
+  }
+}
+
+// ============================================================================
+// Task Processing
+// ============================================================================
+
 async function processTask(config, task) {
   console.log(`\n${'='.repeat(60)}`);
   console.log(`Processing task: ${task.title}`);
   console.log(`  ID: ${task._id}`);
   console.log(`  Status: ${task.status}`);
-  console.log(`  Urgency: ${task.urgency}`);
+  console.log(`  Workflow: ${task.workflowId || 'none'}`);
+  console.log(`  Stage: ${task.workflowStage || 'none'}`);
   console.log(`${'='.repeat(60)}\n`);
 
-  const prompt = buildPrompt(task);
+  // Fetch agent (assignee) if exists
+  const agent = await fetchUser(config, task.assigneeId);
+  if (agent?.isAgent) {
+    console.log(`[DEBUG] Using agent: ${agent.displayName}`);
+  }
+
+  // Fetch workflow and step if exists
+  let workflow = null;
+  let workflowStep = null;
+  if (task.workflowId) {
+    workflow = await fetchWorkflow(config, task.workflowId);
+    if (workflow && task.workflowStage) {
+      workflowStep = workflow.steps?.find(s => s.id === task.workflowStage);
+      if (workflowStep) {
+        console.log(`[DEBUG] Using workflow step: ${workflowStep.name}`);
+      }
+    }
+  }
+
+  // Assemble the prompt
+  const prompt = assemblePrompt(task, agent, workflowStep);
 
   if (config.dryRun) {
-    console.log('[Dry Run] Would execute with prompt:');
+    console.log('[Dry Run] Assembled prompt:');
     console.log('-'.repeat(40));
     console.log(prompt);
     console.log('-'.repeat(40));
@@ -337,56 +533,117 @@ async function processTask(config, task) {
   console.log('-'.repeat(40));
 
   const startTime = Date.now();
-  const result = await executeCommand(config.exec, prompt);
+  const result = executeCommand(config.exec, prompt);
   const duration = ((Date.now() - startTime) / 1000).toFixed(1);
 
   console.log('-'.repeat(40));
   console.log(`\nCommand completed in ${duration}s with exit code: ${result.exitCode}`);
 
-  // Update task status based on result
-  // Valid statuses: pending, in_progress, on_hold, completed, cancelled
   const timestamp = new Date().toISOString();
 
-  if (result.exitCode === 0) {
-    console.log(`Setting task status to 'completed'...`);
-
-    // Save Claude's response to additionalInfo
-    const response = result.stdout.trim();
-    const newInfo = [
-      task.additionalInfo || '',
-      '',
-      '---',
-      `## Response (${timestamp})`,
-      `Processed in ${duration}s`,
-      '',
-      response,
-    ].filter(Boolean).join('\n');
-
-    await updateTask(config, task._id, {
-      status: 'completed',
-      additionalInfo: newInfo,
-    });
-  } else {
-    // Use 'on_hold' for failures since there's no 'failed' status
-    console.log(`Setting task status to 'on_hold' (command failed)...`);
+  if (result.exitCode !== 0) {
+    // Command failed - set to failed status
+    console.log(`Setting task status to 'failed'...`);
     const errorInfo = result.stderr || `Exit code: ${result.exitCode}`;
 
-    const newInfo = [
-      task.additionalInfo || '',
-      '',
-      '---',
-      `## Failed (${timestamp})`,
-      `Exit code: ${result.exitCode}`,
-      '',
-      errorInfo.substring(0, 1000),
-    ].filter(Boolean).join('\n');
-
     await updateTask(config, task._id, {
-      status: 'on_hold',
-      additionalInfo: newInfo,
+      status: 'failed',
+      additionalInfo: [
+        task.additionalInfo || '',
+        '',
+        '---',
+        `## Execution Failed (${timestamp})`,
+        `Exit code: ${result.exitCode}`,
+        '',
+        errorInfo.substring(0, 1000),
+      ].filter(Boolean).join('\n'),
     });
+    return;
   }
+
+  // Parse the response
+  const parsedResponse = parseResponse(result.stdout);
+
+  if (!parsedResponse.success) {
+    console.log(`[WARN] Failed to parse JSON response: ${parsedResponse.error}`);
+    console.log(`[WARN] Raw response saved to additionalInfo`);
+
+    // Still mark as completed but note the parsing failure
+    await updateTask(config, task._id, {
+      status: 'completed',
+      additionalInfo: [
+        task.additionalInfo || '',
+        '',
+        '---',
+        `## Response (${timestamp}) - Parse Error`,
+        `Error: ${parsedResponse.error}`,
+        '',
+        'Raw output:',
+        parsedResponse.raw?.substring(0, 5000) || '',
+      ].filter(Boolean).join('\n'),
+    });
+    return;
+  }
+
+  console.log(`[DEBUG] Parsed response:`);
+  console.log(`  Status: ${parsedResponse.data.status}`);
+  console.log(`  Next Action: ${parsedResponse.data.nextAction}`);
+  console.log(`  Summary: ${parsedResponse.data.summary}`);
+
+  // Determine task status based on nextAction
+  let newStatus;
+  switch (parsedResponse.data.nextAction) {
+    case 'COMPLETE':
+    case 'CONTINUE':
+      newStatus = 'completed';
+      break;
+    case 'ESCALATE':
+    case 'HOLD':
+      newStatus = 'on_hold';
+      break;
+    default:
+      newStatus = 'completed';
+  }
+
+  console.log(`Setting task status to '${newStatus}'...`);
+
+  // Update task with response
+  const newInfo = [
+    task.additionalInfo || '',
+    '',
+    '---',
+    `## Response (${timestamp})`,
+    `Status: ${parsedResponse.data.status}`,
+    `Action: ${parsedResponse.data.nextAction}`,
+    parsedResponse.data.nextActionReason ? `Reason: ${parsedResponse.data.nextActionReason}` : '',
+    '',
+    `Summary: ${parsedResponse.data.summary}`,
+    '',
+    'Output:',
+    parsedResponse.data.output,
+  ].filter(Boolean).join('\n');
+
+  // Merge suggested tags if provided
+  let tagsUpdate = undefined;
+  if (parsedResponse.data.metadata?.suggestedTags?.length > 0) {
+    const existingTags = new Set(task.tags || []);
+    parsedResponse.data.metadata.suggestedTags.forEach(t => existingTags.add(t));
+    tagsUpdate = Array.from(existingTags);
+  }
+
+  await updateTask(config, task._id, {
+    status: newStatus,
+    additionalInfo: newInfo,
+    ...(tagsUpdate && { tags: tagsUpdate }),
+  });
+
+  // Handle stage transitions for workflows
+  await handleStageTransition(config, task, workflow, parsedResponse);
 }
+
+// ============================================================================
+// Main Daemon Loop
+// ============================================================================
 
 async function runDaemon(config) {
   console.log(`Task Daemon started`);
@@ -415,28 +672,24 @@ async function runDaemon(config) {
 
     if (task) {
       await processTask(config, task);
-      return true; // Processed a task
+      return true;
     }
-    return false; // No task available
+    return false;
   };
 
   if (config.once) {
-    // Run once mode - process one task and exit
     const hadTask = await processNextTask();
     if (!hadTask) {
       console.log('No tasks found in queue.');
     }
   } else {
-    // Continuous mode - keep processing tasks until queue is empty, then wait
     while (!shuttingDown) {
       const hadTask = await processNextTask();
 
       if (!hadTask) {
-        // No tasks available, wait before checking again
         console.log(`[${new Date().toISOString()}] No tasks available, waiting ${config.interval}ms...`);
         await new Promise((resolve) => setTimeout(resolve, config.interval));
       }
-      // If we processed a task, immediately check for next one (no delay)
     }
     console.log('Shutdown complete.');
   }

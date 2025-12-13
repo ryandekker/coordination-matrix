@@ -2,7 +2,23 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Workflow, Play, Pause, ChevronRight, User, Bot, Plus, Pencil, Trash2, Copy, MoreHorizontal } from 'lucide-react'
+import {
+  Workflow,
+  Play,
+  Pause,
+  ChevronRight,
+  User,
+  Bot,
+  Plus,
+  Pencil,
+  Trash2,
+  Copy,
+  MoreHorizontal,
+  GitBranch,
+  Repeat,
+  Merge,
+  FileText,
+} from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -27,11 +43,16 @@ import { cn } from '@/lib/utils'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
+type WorkflowStepType = 'task' | 'decision' | 'foreach' | 'join' | 'subflow'
+type ExecutionMode = 'automated' | 'manual'
+
 interface WorkflowStep {
   id: string
   name: string
-  type: 'automated' | 'manual'
-  hitlPhase: string
+  stepType?: WorkflowStepType
+  execution?: ExecutionMode
+  type?: 'automated' | 'manual' // Legacy
+  prompt?: string
   description?: string
 }
 
@@ -88,6 +109,50 @@ async function duplicateWorkflow(id: string): Promise<{ data: WorkflowData }> {
   })
   if (!response.ok) throw new Error('Failed to duplicate workflow')
   return response.json()
+}
+
+// Get icon for step type
+function getStepIcon(step: WorkflowStep) {
+  const stepType = step.stepType || 'task'
+  const execution = step.execution || step.type || 'automated'
+
+  switch (stepType) {
+    case 'decision':
+      return <GitBranch className="h-4 w-4 text-amber-500" />
+    case 'foreach':
+      return <Repeat className="h-4 w-4 text-green-500" />
+    case 'join':
+      return <Merge className="h-4 w-4 text-purple-500" />
+    case 'subflow':
+      return <Workflow className="h-4 w-4 text-pink-500" />
+    case 'task':
+    default:
+      return execution === 'manual' ? (
+        <User className="h-4 w-4 text-purple-500" />
+      ) : (
+        <Bot className="h-4 w-4 text-blue-500" />
+      )
+  }
+}
+
+// Get step type label
+function getStepTypeLabel(step: WorkflowStep): string {
+  const stepType = step.stepType || 'task'
+  const execution = step.execution || step.type || 'automated'
+
+  switch (stepType) {
+    case 'decision':
+      return 'Decision'
+    case 'foreach':
+      return 'ForEach'
+    case 'join':
+      return 'Join'
+    case 'subflow':
+      return 'Subflow'
+    case 'task':
+    default:
+      return execution === 'manual' ? 'Manual' : 'Automated'
+  }
 }
 
 export default function WorkflowsPage() {
@@ -160,7 +225,14 @@ export default function WorkflowsPage() {
     setEditingWorkflow(null)
   }
 
-  const handleSave = (workflow: { _id?: string; name: string; description: string; isActive: boolean; steps?: WorkflowStep[]; mermaidDiagram?: string }) => {
+  const handleSave = (workflow: {
+    _id?: string
+    name: string
+    description: string
+    isActive: boolean
+    steps: WorkflowStep[]
+    mermaidDiagram?: string
+  }) => {
     if (workflow._id) {
       updateMutation.mutate({ id: workflow._id, data: workflow })
     } else {
@@ -175,31 +247,13 @@ export default function WorkflowsPage() {
     })
   }
 
-  const hitlPhaseLabels: Record<string, string> = {
-    none: 'No HITL',
-    pre_execution: 'Pre-Execution',
-    during_execution: 'During',
-    post_execution: 'Post-Execution',
-    on_error: 'On Error',
-    approval_required: 'Approval',
-  }
-
-  const hitlPhaseColors: Record<string, string> = {
-    none: '#6B7280',
-    pre_execution: '#3B82F6',
-    during_execution: '#F59E0B',
-    post_execution: '#10B981',
-    on_error: '#EF4444',
-    approval_required: '#8B5CF6',
-  }
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Workflows</h1>
           <p className="text-muted-foreground">
-            Define and manage AI workflow pipelines with human-in-the-loop checkpoints
+            Define and manage AI workflow pipelines with automated and manual steps
           </p>
         </div>
         <Button onClick={openCreateEditor}>
@@ -229,7 +283,7 @@ export default function WorkflowsPage() {
           <Workflow className="mx-auto h-12 w-12 text-muted-foreground" />
           <h3 className="mt-4 text-lg font-semibold">No workflows yet</h3>
           <p className="mt-2 text-sm text-muted-foreground">
-            Create your first workflow to define AI task pipelines with HITL checkpoints.
+            Create your first workflow to define AI task pipelines with prompts for each stage.
           </p>
           <Button className="mt-4" onClick={openCreateEditor}>
             <Plus className="mr-2 h-4 w-4" />
@@ -238,115 +292,127 @@ export default function WorkflowsPage() {
         </div>
       ) : (
         <div className="grid gap-6">
-          {workflows.map((workflow) => (
-            <div
-              key={workflow._id}
-              className="rounded-lg border bg-card p-6 space-y-4"
-            >
-              <div className="flex items-start justify-between">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-3">
-                    <h3 className="text-lg font-semibold">{workflow.name}</h3>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        'cursor-pointer',
-                        workflow.isActive
-                          ? 'text-green-600 border-green-600'
-                          : 'text-gray-500 border-gray-500'
-                      )}
-                      onClick={() => handleToggleActive(workflow)}
-                    >
-                      {workflow.isActive ? (
-                        <>
-                          <Play className="mr-1 h-3 w-3" />
-                          Active
-                        </>
-                      ) : (
-                        <>
-                          <Pause className="mr-1 h-3 w-3" />
-                          Inactive
-                        </>
-                      )}
-                    </Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground">{workflow.description}</p>
-                </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="h-8 w-8 p-0">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => openEditEditor(workflow)}>
-                      <Pencil className="mr-2 h-4 w-4" />
-                      Edit
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => duplicateMutation.mutate(workflow._id)}>
-                      <Copy className="mr-2 h-4 w-4" />
-                      Duplicate
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      className="text-destructive"
-                      onClick={() => setDeleteConfirm(workflow)}
-                    >
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
+          {workflows.map((workflow) => {
+            const automatedCount = workflow.steps.filter(
+              (s) => (s.stepType || 'task') === 'task' && (s.execution || s.type) !== 'manual'
+            ).length
+            const manualCount = workflow.steps.filter(
+              (s) => (s.stepType || 'task') === 'task' && (s.execution || s.type) === 'manual'
+            ).length
+            const promptCount = workflow.steps.filter((s) => s.prompt).length
 
-              <div className="flex items-center gap-2 overflow-x-auto pb-2">
-                {workflow.steps.map((step, index) => (
-                  <div key={step.id || index} className="flex items-center">
-                    <div
-                      className={cn(
-                        'flex flex-col items-center gap-1 rounded-lg border p-3 min-w-[140px]',
-                        step.type === 'manual' ? 'border-purple-300 bg-purple-50' : 'border-gray-200'
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        {step.type === 'automated' ? (
-                          <Bot className="h-4 w-4 text-blue-500" />
-                        ) : (
-                          <User className="h-4 w-4 text-purple-500" />
+            return (
+              <div
+                key={workflow._id}
+                className="rounded-lg border bg-card p-6 space-y-4"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-3">
+                      <h3 className="text-lg font-semibold">{workflow.name}</h3>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          'cursor-pointer',
+                          workflow.isActive
+                            ? 'text-green-600 border-green-600'
+                            : 'text-gray-500 border-gray-500'
                         )}
-                        <span className="text-sm font-medium">{step.name}</span>
+                        onClick={() => handleToggleActive(workflow)}
+                      >
+                        {workflow.isActive ? (
+                          <>
+                            <Play className="mr-1 h-3 w-3" />
+                            Active
+                          </>
+                        ) : (
+                          <>
+                            <Pause className="mr-1 h-3 w-3" />
+                            Inactive
+                          </>
+                        )}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground">{workflow.description}</p>
+                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm" className="h-8 w-8 p-0">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => openEditEditor(workflow)}>
+                        <Pencil className="mr-2 h-4 w-4" />
+                        Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => duplicateMutation.mutate(workflow._id)}>
+                        <Copy className="mr-2 h-4 w-4" />
+                        Duplicate
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className="text-destructive"
+                        onClick={() => setDeleteConfirm(workflow)}
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+
+                {/* Step visualization */}
+                <div className="flex items-center gap-2 overflow-x-auto pb-2">
+                  {workflow.steps.map((step, index) => (
+                    <div key={step.id || index} className="flex items-center">
+                      <div
+                        className={cn(
+                          'flex flex-col items-center gap-1 rounded-lg border p-3 min-w-[140px]',
+                          (step.execution || step.type) === 'manual'
+                            ? 'border-purple-300 bg-purple-50'
+                            : step.stepType === 'decision'
+                            ? 'border-amber-300 bg-amber-50'
+                            : step.stepType === 'foreach' || step.stepType === 'join'
+                            ? 'border-green-300 bg-green-50'
+                            : 'border-gray-200'
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          {getStepIcon(step)}
+                          <span className="text-sm font-medium">{step.name}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Badge variant="outline" className="text-xs">
+                            {getStepTypeLabel(step)}
+                          </Badge>
+                          {step.prompt && (
+                            <FileText className="h-3 w-3 text-muted-foreground" title="Has prompt" />
+                          )}
+                        </div>
                       </div>
-                      {step.hitlPhase !== 'none' && (
-                        <Badge
-                          variant="outline"
-                          className="text-xs"
-                          style={{ borderColor: hitlPhaseColors[step.hitlPhase], color: hitlPhaseColors[step.hitlPhase] }}
-                        >
-                          {hitlPhaseLabels[step.hitlPhase]}
-                        </Badge>
+                      {index < workflow.steps.length - 1 && (
+                        <ChevronRight className="h-5 w-5 text-muted-foreground mx-1 flex-shrink-0" />
                       )}
                     </div>
-                    {index < workflow.steps.length - 1 && (
-                      <ChevronRight className="h-5 w-5 text-muted-foreground mx-1 flex-shrink-0" />
-                    )}
-                  </div>
-                ))}
-                {workflow.steps.length === 0 && (
-                  <p className="text-sm text-muted-foreground italic">No steps defined</p>
-                )}
-              </div>
+                  ))}
+                  {workflow.steps.length === 0 && (
+                    <p className="text-sm text-muted-foreground italic">No steps defined</p>
+                  )}
+                </div>
 
-              <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                <span>{workflow.steps.length} steps</span>
-                <span>
-                  {workflow.steps.filter((s) => s.type === 'manual').length} manual checkpoints
-                </span>
-                <span>
-                  {workflow.steps.filter((s) => s.hitlPhase !== 'none').length} HITL points
-                </span>
+                {/* Stats */}
+                <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                  <span>{workflow.steps.length} steps</span>
+                  <span>{automatedCount} automated</span>
+                  <span>{manualCount} manual</span>
+                  {promptCount > 0 && (
+                    <span className="text-blue-600">{promptCount} with prompts</span>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
@@ -364,7 +430,8 @@ export default function WorkflowsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Workflow</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete &ldquo;{deleteConfirm?.name}&rdquo;? This action cannot be undone.
+              Are you sure you want to delete &ldquo;{deleteConfirm?.name}&rdquo;? This action
+              cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

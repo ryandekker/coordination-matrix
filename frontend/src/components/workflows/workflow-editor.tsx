@@ -13,8 +13,8 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
   SelectContent,
@@ -22,6 +22,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { Mermaid } from '@/components/ui/mermaid'
 import {
   Tabs,
@@ -41,16 +46,40 @@ import {
   Upload,
   Download,
   AlertCircle,
+  ChevronDown,
+  ChevronRight,
+  GitBranch,
+  Repeat,
+  Merge,
+  Workflow as WorkflowIcon,
 } from 'lucide-react'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
+// Step types for workflow routing
+type WorkflowStepType = 'task' | 'decision' | 'foreach' | 'join' | 'subflow'
+type ExecutionMode = 'automated' | 'manual'
+
 interface WorkflowStep {
   id: string
   name: string
-  type: 'automated' | 'manual'
-  hitlPhase: string
+  stepType: WorkflowStepType
+  execution?: ExecutionMode
+  prompt?: string
   description?: string
+  defaultAssigneeId?: string
+  // Decision fields
+  branches?: { condition: string | null; targetStepId: string }[]
+  defaultBranch?: string
+  // ForEach fields
+  itemsPath?: string
+  itemVariable?: string
+  maxItems?: number
+  // Join fields
+  awaitTag?: string
+  // Subflow fields
+  subflowId?: string
+  inputMapping?: Record<string, string>
 }
 
 interface Workflow {
@@ -78,14 +107,62 @@ interface WorkflowEditorProps {
   onSave: (workflow: Workflow) => void
 }
 
-const HITL_PHASES = [
-  { code: 'none', label: 'No HITL', color: '#6B7280' },
-  { code: 'pre_execution', label: 'Pre-Execution', color: '#3B82F6' },
-  { code: 'during_execution', label: 'During Execution', color: '#F59E0B' },
-  { code: 'post_execution', label: 'Post-Execution', color: '#10B981' },
-  { code: 'on_error', label: 'On Error', color: '#EF4444' },
-  { code: 'approval_required', label: 'Approval Required', color: '#8B5CF6' },
+const STEP_TYPES: { type: WorkflowStepType; label: string; icon: React.ElementType; color: string }[] = [
+  { type: 'task', label: 'Task', icon: Bot, color: 'text-blue-500' },
+  { type: 'decision', label: 'Decision', icon: GitBranch, color: 'text-amber-500' },
+  { type: 'foreach', label: 'ForEach', icon: Repeat, color: 'text-green-500' },
+  { type: 'join', label: 'Join', icon: Merge, color: 'text-purple-500' },
+  { type: 'subflow', label: 'Subflow', icon: WorkflowIcon, color: 'text-pink-500' },
 ]
+
+function generateMermaidFromSteps(steps: WorkflowStep[], name?: string): string {
+  if (steps.length === 0) return ''
+
+  const lines: string[] = ['flowchart TD']
+
+  // Generate node definitions
+  steps.forEach((step, i) => {
+    const nodeId = step.id || `step${i}`
+    const label = step.name.replace(/"/g, "'")
+
+    switch (step.stepType) {
+      case 'decision':
+        lines.push(`    ${nodeId}{${label}}`)
+        break
+      case 'foreach':
+        lines.push(`    ${nodeId}[["Each: ${label}"]]`)
+        break
+      case 'join':
+        lines.push(`    ${nodeId}[["Join: ${label}"]]`)
+        break
+      case 'subflow':
+        lines.push(`    ${nodeId}[["Run: ${label}"]]`)
+        break
+      case 'task':
+      default:
+        if (step.execution === 'manual') {
+          lines.push(`    ${nodeId}(${label})`)
+        } else {
+          lines.push(`    ${nodeId}[${label}]`)
+        }
+    }
+  })
+
+  // Generate connections (simple linear for now)
+  for (let i = 0; i < steps.length - 1; i++) {
+    const fromId = steps[i].id || `step${i}`
+    const toId = steps[i + 1].id || `step${i + 1}`
+    lines.push(`    ${fromId} --> ${toId}`)
+  }
+
+  // Add styling
+  lines.push('')
+  lines.push('    classDef automated fill:#3B82F6,color:#fff')
+  lines.push('    classDef manual fill:#8B5CF6,color:#fff')
+  lines.push('    classDef decision fill:#F59E0B,color:#fff')
+
+  return lines.join('\n')
+}
 
 export function WorkflowEditor({
   workflow,
@@ -97,7 +174,7 @@ export function WorkflowEditor({
   const [mermaidCode, setMermaidCode] = useState('')
   const [mermaidError, setMermaidError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState('visual')
-  const [importing, setImporting] = useState(false)
+  const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
 
   const {
     register,
@@ -123,12 +200,19 @@ export function WorkflowEditor({
         isActive: workflow.isActive,
       })
       // Support both 'steps' (new format) and 'stages' (legacy format)
-      const normalizedSteps = workflow.steps || (workflow.stages?.map((name, i) => ({
-        id: `stage-${i}`,
-        name,
-        type: 'manual' as const,
-        hitlPhase: 'none',
-      })) || [])
+      // Also normalize stepType and execution for all steps
+      const normalizedSteps = workflow.steps
+        ? workflow.steps.map(step => ({
+            ...step,
+            stepType: step.stepType || 'task',
+            execution: step.execution || (step as any).type || 'automated',
+          }))
+        : (workflow.stages?.map((name, i) => ({
+            id: `stage-${i}`,
+            name,
+            stepType: 'task' as const,
+            execution: 'manual' as const,
+          })) || [])
       setSteps(normalizedSteps)
       setMermaidCode(workflow.mermaidDiagram || '')
     } else {
@@ -142,66 +226,40 @@ export function WorkflowEditor({
     }
   }, [workflow, reset])
 
-  // Generate mermaid diagram from steps
-  const generateMermaid = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/workflows/generate-mermaid`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ steps, name: watch('name') }),
-      })
-      if (response.ok) {
-        const data = await response.json()
-        setMermaidCode(data.data.mermaidDiagram)
-        setMermaidError(null)
-      }
-    } catch (error) {
-      console.error('Failed to generate mermaid:', error)
-    }
-  }
-
   // Update mermaid when steps change
   useEffect(() => {
     if (steps.length > 0) {
-      generateMermaid()
+      const diagram = generateMermaidFromSteps(steps, watch('name'))
+      setMermaidCode(diagram)
+      setMermaidError(null)
     } else {
       setMermaidCode('')
     }
-  }, [steps])
+  }, [steps, watch])
 
-  // Parse mermaid diagram to steps
-  const parseMermaid = async () => {
-    if (!mermaidCode.trim()) return
-
-    setImporting(true)
-    try {
-      const response = await fetch(`${API_BASE}/workflows/parse-mermaid`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mermaidDiagram: mermaidCode }),
-      })
-      if (response.ok) {
-        const data = await response.json()
-        setSteps(data.data.steps)
-        setMermaidError(null)
+  const toggleStepExpanded = (stepId: string) => {
+    setExpandedSteps(prev => {
+      const next = new Set(prev)
+      if (next.has(stepId)) {
+        next.delete(stepId)
       } else {
-        setMermaidError('Failed to parse Mermaid diagram')
+        next.add(stepId)
       }
-    } catch (error) {
-      setMermaidError('Failed to parse Mermaid diagram')
-    } finally {
-      setImporting(false)
-    }
+      return next
+    })
   }
 
   const addStep = () => {
     const newStep: WorkflowStep = {
       id: `step-${Date.now()}`,
       name: `Step ${steps.length + 1}`,
-      type: 'automated',
-      hitlPhase: 'none',
+      stepType: 'task',
+      execution: 'automated',
+      prompt: '',
     }
     setSteps([...steps, newStep])
+    // Auto-expand new step
+    setExpandedSteps(prev => new Set(prev).add(newStep.id))
   }
 
   const updateStep = (index: number, updates: Partial<WorkflowStep>) => {
@@ -258,6 +316,10 @@ export function WorkflowEditor({
     reader.readAsText(file)
   }
 
+  const getStepTypeInfo = (stepType: WorkflowStepType) => {
+    return STEP_TYPES.find(st => st.type === stepType) || STEP_TYPES[0]
+  }
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
@@ -303,11 +365,11 @@ export function WorkflowEditor({
               <TabsList>
                 <TabsTrigger value="visual" className="gap-2">
                   <GripVertical className="h-4 w-4" />
-                  Visual Editor
+                  Steps
                 </TabsTrigger>
                 <TabsTrigger value="code" className="gap-2">
                   <FileCode className="h-4 w-4" />
-                  Mermaid Code
+                  Mermaid
                 </TabsTrigger>
                 <TabsTrigger value="preview" className="gap-2">
                   <Eye className="h-4 w-4" />
@@ -354,111 +416,268 @@ export function WorkflowEditor({
                 {steps.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
                     <p>No steps defined yet.</p>
-                    <p className="text-sm">Add steps or import a Mermaid diagram.</p>
+                    <p className="text-sm">Add steps to build your workflow.</p>
                   </div>
                 ) : (
-                  steps.map((step, index) => (
-                    <div
-                      key={step.id}
-                      className={cn(
-                        'flex items-center gap-3 p-3 bg-background rounded-lg border',
-                        step.type === 'manual' && 'border-purple-300 bg-purple-50/50'
-                      )}
-                    >
-                      <div className="flex flex-col gap-1">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0"
-                          onClick={() => moveStep(index, index - 1)}
-                          disabled={index === 0}
-                        >
-                          ▲
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0"
-                          onClick={() => moveStep(index, index + 1)}
-                          disabled={index === steps.length - 1}
-                        >
-                          ▼
-                        </Button>
-                      </div>
+                  steps.map((step, index) => {
+                    const typeInfo = getStepTypeInfo(step.stepType)
+                    const TypeIcon = typeInfo.icon
+                    const isExpanded = expandedSteps.has(step.id)
 
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground w-8">
-                        {index + 1}.
-                      </div>
-
-                      <div className="flex-1">
-                        <Input
-                          value={step.name}
-                          onChange={(e) => updateStep(index, { name: e.target.value })}
-                          placeholder="Step name"
-                          className="h-8"
-                        />
-                      </div>
-
-                      <Select
-                        value={step.type}
-                        onValueChange={(val) =>
-                          updateStep(index, { type: val as 'automated' | 'manual' })
-                        }
+                    return (
+                      <Collapsible
+                        key={step.id}
+                        open={isExpanded}
+                        onOpenChange={() => toggleStepExpanded(step.id)}
                       >
-                        <SelectTrigger className="w-[140px] h-8">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="automated">
-                            <div className="flex items-center gap-2">
-                              <Bot className="h-4 w-4 text-blue-500" />
-                              Automated
+                        <div
+                          className={cn(
+                            'bg-background rounded-lg border',
+                            step.execution === 'manual' && 'border-purple-300'
+                          )}
+                        >
+                          {/* Step Header */}
+                          <div className="flex items-center gap-3 p-3">
+                            <div className="flex flex-col gap-1">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-5 w-5 p-0"
+                                onClick={(e) => { e.stopPropagation(); moveStep(index, index - 1) }}
+                                disabled={index === 0}
+                              >
+                                ▲
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-5 w-5 p-0"
+                                onClick={(e) => { e.stopPropagation(); moveStep(index, index + 1) }}
+                                disabled={index === steps.length - 1}
+                              >
+                                ▼
+                              </Button>
                             </div>
-                          </SelectItem>
-                          <SelectItem value="manual">
-                            <div className="flex items-center gap-2">
-                              <User className="h-4 w-4 text-purple-500" />
-                              Manual
-                            </div>
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
 
-                      <Select
-                        value={step.hitlPhase}
-                        onValueChange={(val) => updateStep(index, { hitlPhase: val })}
-                      >
-                        <SelectTrigger className="w-[160px] h-8">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {HITL_PHASES.map((phase) => (
-                            <SelectItem key={phase.code} value={phase.code}>
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className="h-2 w-2 rounded-full"
-                                  style={{ backgroundColor: phase.color }}
+                            <CollapsibleTrigger asChild>
+                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+                                {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                              </Button>
+                            </CollapsibleTrigger>
+
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground w-8">
+                              {index + 1}.
+                            </div>
+
+                            <TypeIcon className={cn('h-4 w-4', typeInfo.color)} />
+
+                            <div className="flex-1">
+                              <Input
+                                value={step.name}
+                                onChange={(e) => updateStep(index, { name: e.target.value })}
+                                onClick={(e) => e.stopPropagation()}
+                                placeholder="Step name"
+                                className="h-8"
+                              />
+                            </div>
+
+                            <Select
+                              value={step.stepType}
+                              onValueChange={(val) => updateStep(index, { stepType: val as WorkflowStepType })}
+                            >
+                              <SelectTrigger className="w-[130px] h-8" onClick={(e) => e.stopPropagation()}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {STEP_TYPES.map((st) => (
+                                  <SelectItem key={st.type} value={st.type}>
+                                    <div className="flex items-center gap-2">
+                                      <st.icon className={cn('h-4 w-4', st.color)} />
+                                      {st.label}
+                                    </div>
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+
+                            {step.stepType === 'task' && (
+                              <Select
+                                value={step.execution || 'automated'}
+                                onValueChange={(val) => updateStep(index, { execution: val as ExecutionMode })}
+                              >
+                                <SelectTrigger className="w-[130px] h-8" onClick={(e) => e.stopPropagation()}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="automated">
+                                    <div className="flex items-center gap-2">
+                                      <Bot className="h-4 w-4 text-blue-500" />
+                                      Automated
+                                    </div>
+                                  </SelectItem>
+                                  <SelectItem value="manual">
+                                    <div className="flex items-center gap-2">
+                                      <User className="h-4 w-4 text-purple-500" />
+                                      Manual
+                                    </div>
+                                  </SelectItem>
+                                </SelectContent>
+                              </Select>
+                            )}
+
+                            {step.prompt && (
+                              <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
+                                has prompt
+                              </span>
+                            )}
+
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-destructive"
+                              onClick={(e) => { e.stopPropagation(); removeStep(index) }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+
+                          {/* Step Details (Expanded) */}
+                          <CollapsibleContent>
+                            <div className="border-t px-4 py-3 space-y-3 bg-muted/20">
+                              {/* Prompt - for task steps */}
+                              {step.stepType === 'task' && (
+                                <div className="space-y-1">
+                                  <label className="text-sm font-medium">AI Prompt</label>
+                                  <Textarea
+                                    value={step.prompt || ''}
+                                    onChange={(e) => updateStep(index, { prompt: e.target.value })}
+                                    placeholder="Instructions for the AI when processing this step...&#10;&#10;Use {{variable}} syntax to reference data from previous steps."
+                                    className="min-h-[100px] font-mono text-sm"
+                                  />
+                                  <p className="text-xs text-muted-foreground">
+                                    This prompt will be included when the daemon processes tasks at this stage.
+                                  </p>
+                                </div>
+                              )}
+
+                              {/* ForEach configuration */}
+                              {step.stepType === 'foreach' && (
+                                <>
+                                  <div className="grid grid-cols-2 gap-3">
+                                    <div className="space-y-1">
+                                      <label className="text-sm font-medium">Items Path</label>
+                                      <Input
+                                        value={step.itemsPath || ''}
+                                        onChange={(e) => updateStep(index, { itemsPath: e.target.value })}
+                                        placeholder="output.files"
+                                        className="font-mono text-sm"
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-sm font-medium">Item Variable</label>
+                                      <Input
+                                        value={step.itemVariable || ''}
+                                        onChange={(e) => updateStep(index, { itemVariable: e.target.value })}
+                                        placeholder="file"
+                                        className="font-mono text-sm"
+                                      />
+                                    </div>
+                                  </div>
+                                  <div className="space-y-1">
+                                    <label className="text-sm font-medium">Prompt (per item)</label>
+                                    <Textarea
+                                      value={step.prompt || ''}
+                                      onChange={(e) => updateStep(index, { prompt: e.target.value })}
+                                      placeholder="Process {{file.name}}..."
+                                      className="min-h-[80px] font-mono text-sm"
+                                    />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <label className="text-sm font-medium">Max Items (default: 100)</label>
+                                    <Input
+                                      type="number"
+                                      value={step.maxItems || ''}
+                                      onChange={(e) => updateStep(index, { maxItems: parseInt(e.target.value) || undefined })}
+                                      placeholder="100"
+                                      className="w-32"
+                                    />
+                                  </div>
+                                </>
+                              )}
+
+                              {/* Join configuration */}
+                              {step.stepType === 'join' && (
+                                <>
+                                  <div className="space-y-1">
+                                    <label className="text-sm font-medium">Await Tag</label>
+                                    <Input
+                                      value={step.awaitTag || ''}
+                                      onChange={(e) => updateStep(index, { awaitTag: e.target.value })}
+                                      placeholder="foreach:{{parentId}}"
+                                      className="font-mono text-sm"
+                                    />
+                                    <p className="text-xs text-muted-foreground">
+                                      Tag pattern to wait for. Uses {"{{parentId}}"} to reference the foreach parent.
+                                    </p>
+                                  </div>
+                                  <div className="space-y-1">
+                                    <label className="text-sm font-medium">Aggregation Prompt</label>
+                                    <Textarea
+                                      value={step.prompt || ''}
+                                      onChange={(e) => updateStep(index, { prompt: e.target.value })}
+                                      placeholder="Aggregate the results from all items..."
+                                      className="min-h-[80px] font-mono text-sm"
+                                    />
+                                  </div>
+                                </>
+                              )}
+
+                              {/* Decision - branches would need more complex UI */}
+                              {step.stepType === 'decision' && (
+                                <div className="space-y-1">
+                                  <p className="text-sm text-muted-foreground">
+                                    Decision branches are defined in the Mermaid diagram using edge labels.
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    Example: A --&gt;|"output.score &gt;= 80"| B
+                                  </p>
+                                </div>
+                              )}
+
+                              {/* Subflow configuration */}
+                              {step.stepType === 'subflow' && (
+                                <div className="space-y-1">
+                                  <label className="text-sm font-medium">Subflow ID</label>
+                                  <Input
+                                    value={step.subflowId || ''}
+                                    onChange={(e) => updateStep(index, { subflowId: e.target.value })}
+                                    placeholder="workflow-id"
+                                    className="font-mono text-sm"
+                                  />
+                                  <p className="text-xs text-muted-foreground">
+                                    The ID of the workflow to delegate to.
+                                  </p>
+                                </div>
+                              )}
+
+                              {/* Description - for all types */}
+                              <div className="space-y-1">
+                                <label className="text-sm font-medium">Description</label>
+                                <Input
+                                  value={step.description || ''}
+                                  onChange={(e) => updateStep(index, { description: e.target.value })}
+                                  placeholder="Optional description for documentation"
                                 />
-                                {phase.label}
                               </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 w-8 p-0 text-destructive"
-                        onClick={() => removeStep(index)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))
+                            </div>
+                          </CollapsibleContent>
+                        </div>
+                      </Collapsible>
+                    )
+                  })
                 )}
 
                 <Button
@@ -480,13 +699,15 @@ export function WorkflowEditor({
                 <textarea
                   value={mermaidCode}
                   onChange={(e) => setMermaidCode(e.target.value)}
-                  placeholder="Enter Mermaid flowchart code here...
+                  placeholder={`Enter Mermaid flowchart code here...
 
 Example:
 flowchart TD
-    A[Data Collection] --> B[AI Analysis]
-    B --> C((Human Review))
-    C --> D[Publication]"
+    A[Fetch Data] --> B{Validate}
+    B -->|"valid"| C[Process]
+    B -->|"invalid"| D[Reject]
+    C --> E[[Each: Review Item]]
+    E --> F[[Join: Summarize]]`}
                   className={cn(
                     'flex-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono',
                     'ring-offset-background placeholder:text-muted-foreground',
@@ -495,15 +716,6 @@ flowchart TD
                   )}
                 />
                 <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={parseMermaid}
-                    disabled={importing || !mermaidCode.trim()}
-                  >
-                    {importing ? 'Parsing...' : 'Parse to Steps'}
-                  </Button>
                   {mermaidError && (
                     <div className="flex items-center gap-1 text-sm text-destructive">
                       <AlertCircle className="h-4 w-4" />
@@ -511,7 +723,7 @@ flowchart TD
                     </div>
                   )}
                   <p className="text-xs text-muted-foreground ml-auto">
-                    Use [ ] for automated, ( ) for manual steps
+                    [ ] = automated task, ( ) = manual task, {"{ }"} = decision, [[ ]] = foreach/join/subflow
                   </p>
                 </div>
               </div>
