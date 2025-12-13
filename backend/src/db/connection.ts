@@ -6,7 +6,7 @@ let db: Db | null = null;
 export async function connectToDatabase(): Promise<Db> {
   if (db) return db;
 
-  const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/coordination_matrix';
+  const uri = process.env.MONGODB_URI || 'mongodb://admin:adminpassword@localhost:27017/coordination_matrix?authSource=admin';
 
   client = new MongoClient(uri);
   await client.connect();
