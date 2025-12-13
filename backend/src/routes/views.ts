@@ -1,8 +1,9 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { ObjectId } from 'mongodb';
+import { ObjectId, Filter, Sort } from 'mongodb';
 import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
-import { View, UserPreference } from '../types/index.js';
+import { View, UserPreference, Task } from '../types/index.js';
+import { ReferenceResolver } from '../services/reference-resolver.js';
 
 export const viewsRouter = Router();
 
@@ -52,6 +53,100 @@ viewsRouter.get('/', async (req: Request, res: Response, next: NextFunction): Pr
     }
 
     res.json({ data: views });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/views/:id/tasks - Get tasks matching a saved search/view's filters
+viewsRouter.get('/:id/tasks', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const db = getDb();
+    const viewId = new ObjectId(req.params.id);
+    const {
+      page = 1,
+      limit = 50,
+      resolveReferences = 'true',
+    } = req.query;
+
+    // Get the view
+    const view = await db.collection<View>('views').findOne({ _id: viewId });
+    if (!view) {
+      throw createError('View not found', 404);
+    }
+
+    // Only allow task views
+    if (view.collectionName !== 'tasks') {
+      throw createError('This endpoint only supports task views', 400);
+    }
+
+    const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
+    const limitNum = Math.min(200, Math.max(1, parseInt(limit as string, 10) || 50));
+    const skip = (pageNum - 1) * limitNum;
+
+    // Build filter from view's saved filters
+    const filter: Filter<Task> = {};
+
+    if (view.filters) {
+      for (const [key, value] of Object.entries(view.filters)) {
+        if (value === undefined || value === null || value === '') continue;
+
+        // Handle array values (for $in queries)
+        if (Array.isArray(value)) {
+          if (key.endsWith('Id')) {
+            // Convert string IDs to ObjectIds
+            (filter as Record<string, unknown>)[key] = {
+              $in: value.map((v: string) => ObjectId.isValid(v) ? new ObjectId(v) : v)
+            };
+          } else {
+            (filter as Record<string, unknown>)[key] = { $in: value };
+          }
+        } else if (key.endsWith('Id') && typeof value === 'string' && ObjectId.isValid(value)) {
+          // Convert single ID strings to ObjectId
+          (filter as Record<string, unknown>)[key] = new ObjectId(value);
+        } else {
+          (filter as Record<string, unknown>)[key] = value;
+        }
+      }
+    }
+
+    // Build sort from view's sorting config
+    const sort: Sort = {};
+    if (view.sorting && view.sorting.length > 0) {
+      for (const s of view.sorting) {
+        sort[s.field] = s.direction === 'asc' ? 1 : -1;
+      }
+    } else {
+      sort.createdAt = -1; // Default sort
+    }
+
+    // Execute query
+    const [tasks, total] = await Promise.all([
+      db.collection<Task>('tasks').find(filter).sort(sort).skip(skip).limit(limitNum).toArray(),
+      db.collection<Task>('tasks').countDocuments(filter),
+    ]);
+
+    // Resolve references if requested
+    let resolvedTasks = tasks;
+    if (resolveReferences === 'true') {
+      const resolver = new ReferenceResolver();
+      await resolver.loadFieldConfigs('tasks');
+      resolvedTasks = await resolver.resolveDocuments(tasks);
+    }
+
+    res.json({
+      data: resolvedTasks,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+      },
+      savedSearch: {
+        id: view._id,
+        name: view.name,
+      },
+    });
   } catch (error) {
     next(error);
   }
