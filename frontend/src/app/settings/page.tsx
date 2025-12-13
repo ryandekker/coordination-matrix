@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Settings, Database, Palette, Bell, Shield, Cog } from 'lucide-react'
+import { Database, Palette, Bell, Shield, Webhook, Activity } from 'lucide-react'
 
 const settingsItems = [
   {
@@ -9,6 +9,19 @@ const settingsItems = [
     description: 'Configure which fields are displayed, editable, and searchable',
     href: '/settings/fields',
     icon: Database,
+  },
+  {
+    name: 'Webhooks',
+    description: 'Configure webhooks to notify external services of task events',
+    href: '/settings/webhooks',
+    icon: Webhook,
+  },
+  {
+    name: 'Activity Tracking',
+    description: 'Configure which fields trigger activity log entries',
+    href: '/settings/activity',
+    icon: Activity,
+    disabled: true,
   },
   {
     name: 'Appearance',

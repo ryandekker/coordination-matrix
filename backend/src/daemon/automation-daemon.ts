@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn } from 'child_process';
 import { ObjectId } from 'mongodb';
 import * as fs from 'fs';
 import * as yaml from 'yaml';
@@ -7,7 +7,6 @@ import { eventBus } from '../services/event-bus.js';
 import {
   Task,
   TaskEvent,
-  TaskEventType,
   DaemonConfig,
   DaemonRule,
   DaemonExecution,
@@ -129,7 +128,7 @@ class AutomationDaemon {
       const [, field, value] = match;
 
       if (field === 'status' && task.status !== value) return false;
-      if (field === 'priority' && task.priority !== value) return false;
+      if ((field === 'priority' || field === 'urgency') && task.urgency !== value) return false;
       if (field === 'label' || field === 'tag') {
         if (!task.tags || !task.tags.includes(value)) return false;
       }
@@ -246,7 +245,7 @@ class AutomationDaemon {
     // Replace {{task.*}} variables
     const taskVarRegex = /\{\{task\.(\w+)\}\}/g;
     result = result.replace(taskVarRegex, (_, field) => {
-      const value = (event.task as Record<string, unknown>)[field];
+      const value = (event.task as unknown as Record<string, unknown>)[field];
       if (value === null || value === undefined) return '';
       if (typeof value === 'object') return JSON.stringify(value);
       return String(value);
@@ -255,7 +254,7 @@ class AutomationDaemon {
     // Replace {{event.*}} variables
     const eventVarRegex = /\{\{event\.(\w+)\}\}/g;
     result = result.replace(eventVarRegex, (_, field) => {
-      const value = (event as Record<string, unknown>)[field];
+      const value = (event as unknown as Record<string, unknown>)[field];
       if (value === null || value === undefined) return '';
       if (typeof value === 'object') return JSON.stringify(value);
       return String(value);
@@ -270,22 +269,30 @@ class AutomationDaemon {
   private runCommand(command: string, timeout: number): Promise<string> {
     return new Promise((resolve, reject) => {
       const child = spawn('sh', ['-c', command], {
-        timeout,
-        maxBuffer: 10 * 1024 * 1024, // 10MB
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
 
       let stdout = '';
       let stderr = '';
+      let timeoutId: NodeJS.Timeout | null = null;
 
-      child.stdout?.on('data', (data: Buffer) => {
+      if (timeout > 0) {
+        timeoutId = setTimeout(() => {
+          child.kill('SIGTERM');
+          reject(new Error(`Command timed out after ${timeout}ms`));
+        }, timeout);
+      }
+
+      child.stdout.on('data', (data: Buffer) => {
         stdout += data.toString();
       });
 
-      child.stderr?.on('data', (data: Buffer) => {
+      child.stderr.on('data', (data: Buffer) => {
         stderr += data.toString();
       });
 
       child.on('close', (code: number | null) => {
+        if (timeoutId) clearTimeout(timeoutId);
         if (code === 0) {
           resolve(stdout);
         } else {
@@ -294,6 +301,7 @@ class AutomationDaemon {
       });
 
       child.on('error', (error: Error) => {
+        if (timeoutId) clearTimeout(timeoutId);
         reject(error);
       });
     });
@@ -325,7 +333,7 @@ class AutomationDaemon {
       if (template.startsWith('+')) {
         // Append to array (e.g., "+triaged" adds "triaged" to tags)
         const valueToAdd = template.slice(1);
-        const existingArray = (task as Record<string, unknown>)[field];
+        const existingArray = (task as unknown as Record<string, unknown>)[field];
         if (Array.isArray(existingArray)) {
           if (!existingArray.includes(valueToAdd)) {
             value = [...existingArray, valueToAdd];
@@ -336,7 +344,7 @@ class AutomationDaemon {
       } else if (template.startsWith('-')) {
         // Remove from array
         const valueToRemove = template.slice(1);
-        const existingArray = (task as Record<string, unknown>)[field];
+        const existingArray = (task as unknown as Record<string, unknown>)[field];
         if (Array.isArray(existingArray)) {
           value = existingArray.filter(v => v !== valueToRemove);
         }
@@ -363,8 +371,6 @@ class AutomationDaemon {
    * Update a task with new field values
    */
   private async updateTask(taskId: ObjectId, updates: Record<string, unknown>): Promise<void> {
-    const db = getDb();
-
     // Add actorType to indicate this is from the daemon
     const response = await fetch(`${process.env.API_URL || 'http://localhost:3001/api'}/tasks/${taskId}`, {
       method: 'PATCH',

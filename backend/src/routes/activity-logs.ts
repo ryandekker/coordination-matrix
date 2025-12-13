@@ -115,7 +115,7 @@ activityLogsRouter.post(
 // POST /api/activity-logs/cleanup - Trigger cleanup of orphaned logs
 activityLogsRouter.post(
   '/cleanup',
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (_req: Request, res: Response, next: NextFunction) => {
     try {
       const deletedCount = await activityLogService.cleanupOrphanedLogs();
       res.json({

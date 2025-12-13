@@ -3,7 +3,6 @@ import { getDb } from '../db/connection.js';
 import { eventBus } from './event-bus.js';
 import {
   TaskEvent,
-  TaskEventType,
   Webhook,
   WebhookDelivery,
   WebhookTrigger,
@@ -74,7 +73,7 @@ class WebhookService {
     if (webhook.triggers.includes(event.type as WebhookTrigger)) {
       // If there's a filter query, check if task matches
       if (webhook.filterQuery) {
-        return this.taskMatchesFilter(event.task, webhook.filterQuery);
+        return this.taskMatchesFilter(event.task as unknown as Record<string, unknown>, webhook.filterQuery);
       }
       return true;
     }
@@ -83,7 +82,7 @@ class WebhookService {
     if (webhook.triggers.includes('task.entered_filter') && webhook.filterQuery) {
       // Check if task now matches filter when it didn't before
       if (event.type === 'task.updated' || event.type === 'task.created') {
-        return this.taskMatchesFilter(event.task, webhook.filterQuery);
+        return this.taskMatchesFilter(event.task as unknown as Record<string, unknown>, webhook.filterQuery);
       }
     }
 
@@ -92,7 +91,7 @@ class WebhookService {
 
   /**
    * Simple filter matching for task
-   * Supports: status:value, priority:value, label:value, AND
+   * Supports: status:value, priority/urgency:value, label:value, AND
    */
   private taskMatchesFilter(task: Record<string, unknown>, filterQuery: string): boolean {
     const conditions = filterQuery.split(/\s+AND\s+/i);
@@ -104,7 +103,7 @@ class WebhookService {
       const [, field, value] = match;
 
       if (field === 'status' && task.status !== value) return false;
-      if (field === 'priority' && task.priority !== value) return false;
+      if ((field === 'priority' || field === 'urgency') && task.urgency !== value) return false;
       if (field === 'label' || field === 'tag') {
         const tags = task.tags as string[] | undefined;
         if (!tags || !tags.includes(value)) return false;

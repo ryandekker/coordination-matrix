@@ -119,11 +119,11 @@ export const eventBus = new EventBus();
  */
 export function computeChanges(oldTask: Partial<Task>, newTask: Partial<Task>): FieldChange[] {
   const changes: FieldChange[] = [];
+  // Track all actual Task fields from the schema
   const trackedFields = [
-    'title', 'description', 'status', 'priority', 'assigneeId', 'teamId',
-    'hitlRequired', 'hitlPhase', 'hitlStatus', 'hitlAssigneeId', 'hitlNotes',
-    'workflowId', 'workflowStepIndex', 'externalJobId', 'externalJobStatus',
-    'tags', 'dueAt', 'parentId', 'metadata'
+    'title', 'summary', 'extraPrompt', 'additionalInfo', 'status', 'urgency',
+    'parentId', 'workflowId', 'workflowStage', 'externalId', 'externalHoldDate',
+    'assigneeId', 'createdById', 'tags', 'dueAt'
   ];
 
   for (const field of trackedFields) {
@@ -160,7 +160,7 @@ export function getSpecificEventTypes(changes: FieldChange[]): TaskEventType[] {
       case 'assigneeId':
         types.push('task.assignee.changed');
         break;
-      case 'priority':
+      case 'urgency':
         types.push('task.priority.changed');
         break;
     }
