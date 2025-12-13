@@ -23,7 +23,11 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(docker system:*)",
-      "Bash(docker volume rm:*)"
+      "Bash(docker volume rm:*)",
+      "mcp__playwright__browser_console_messages",
+      "mcp__playwright__browser_hover",
+      "Bash(npx ts-node:*)",
+      "Bash(node /Users/ryandekker/src/coordination-matrix/scripts/task-daemon.mjs:*)"
     ],
     "deny": [],
     "ask": []
