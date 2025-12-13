@@ -113,7 +113,7 @@ export function Mermaid({ chart, className = '', onError }: MermaidProps) {
   return (
     <div
       ref={containerRef}
-      className={`mermaid-container overflow-auto ${className}`}
+      className={`mermaid-container overflow-auto flex items-center justify-center ${className}`}
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   )

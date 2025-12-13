@@ -28,6 +28,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { Mermaid } from '@/components/ui/mermaid'
+import { MermaidLiveEditor } from '@/components/ui/mermaid-live-editor'
 import {
   Tabs,
   TabsContent,
@@ -52,6 +53,10 @@ import {
   Repeat,
   Merge,
   Workflow as WorkflowIcon,
+  Sparkles,
+  Info,
+  MessageSquare,
+  Lightbulb,
 } from 'lucide-react'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
@@ -371,45 +376,13 @@ export function WorkflowEditor({
                 </TabsTrigger>
                 <TabsTrigger value="code" className="gap-2">
                   <FileCode className="h-4 w-4" />
-                  Mermaid
+                  Diagram Editor
                 </TabsTrigger>
                 <TabsTrigger value="preview" className="gap-2">
                   <Eye className="h-4 w-4" />
-                  Preview
+                  Full Preview
                 </TabsTrigger>
               </TabsList>
-
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={exportMermaid}
-                  disabled={!mermaidCode}
-                >
-                  <Download className="h-4 w-4 mr-1" />
-                  Export
-                </Button>
-                <label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    asChild
-                  >
-                    <span>
-                      <Upload className="h-4 w-4 mr-1" />
-                      Import
-                    </span>
-                  </Button>
-                  <input
-                    type="file"
-                    accept=".mmd,.txt"
-                    className="hidden"
-                    onChange={importMermaidFile}
-                  />
-                </label>
-              </div>
             </div>
 
             {/* Visual Editor Tab */}
@@ -551,61 +524,157 @@ export function WorkflowEditor({
                             <div className="border-t px-4 py-3 space-y-3 bg-muted/20">
                               {/* Prompt - for task steps */}
                               {step.stepType === 'task' && (
-                                <div className="space-y-1">
-                                  <label className="text-sm font-medium">AI Prompt</label>
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <label className="text-sm font-medium flex items-center gap-2">
+                                      <Sparkles className="h-4 w-4 text-amber-500" />
+                                      AI Prompt Instructions
+                                      {step.execution === 'automated' && (
+                                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                                          Required for automation
+                                        </span>
+                                      )}
+                                    </label>
+                                    {step.prompt && (
+                                      <span className="text-xs text-green-600 flex items-center gap-1">
+                                        <MessageSquare className="h-3 w-3" />
+                                        Configured
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
+                                    <div className="flex items-start gap-2">
+                                      <Lightbulb className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                                      <div className="text-amber-800 space-y-1">
+                                        <p className="font-medium">What should the AI do at this step?</p>
+                                        <p className="text-xs">
+                                          Write clear instructions for the AI agent. Be specific about:
+                                        </p>
+                                        <ul className="text-xs list-disc list-inside space-y-0.5 ml-2">
+                                          <li>What action to take (review, analyze, generate, etc.)</li>
+                                          <li>What inputs to use (files, previous outputs, task data)</li>
+                                          <li>What output format to produce</li>
+                                        </ul>
+                                      </div>
+                                    </div>
+                                  </div>
+
                                   <Textarea
                                     value={step.prompt || ''}
                                     onChange={(e) => updateStep(index, { prompt: e.target.value })}
-                                    placeholder="Instructions for the AI when processing this step...&#10;&#10;Use {{variable}} syntax to reference data from previous steps."
-                                    className="min-h-[100px] font-mono text-sm"
+                                    placeholder={`Example prompts for "${step.name}":
+
+• "Review the code changes in {{task.metadata.files}} and provide feedback on code quality, potential bugs, and suggestions for improvement."
+
+• "Analyze the test results from the previous step. If all tests pass, approve for merge. If any fail, create a detailed report of failures."
+
+• "Generate a summary of changes made in this PR, including affected components and any breaking changes."
+
+Use {{variable}} to reference:
+- {{task.title}} - Task title
+- {{task.description}} - Task description
+- {{task.metadata.X}} - Custom metadata
+- {{previousStep.output}} - Output from prior step`}
+                                    className={cn(
+                                      "min-h-[140px] font-mono text-sm",
+                                      !step.prompt && step.execution === 'automated' && "border-amber-300 bg-amber-50/30"
+                                    )}
                                   />
-                                  <p className="text-xs text-muted-foreground">
-                                    This prompt will be included when the daemon processes tasks at this stage.
-                                  </p>
+
+                                  <div className="flex items-center justify-between text-xs">
+                                    <p className="text-muted-foreground flex items-center gap-1">
+                                      <Info className="h-3 w-3" />
+                                      This prompt guides the AI daemon when it processes tasks at this workflow stage.
+                                    </p>
+                                    {!step.prompt && step.execution === 'automated' && (
+                                      <span className="text-amber-600 font-medium">
+                                        ⚠ No prompt configured
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               )}
 
                               {/* ForEach configuration */}
                               {step.stepType === 'foreach' && (
                                 <>
+                                  <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm">
+                                    <div className="flex items-start gap-2">
+                                      <Repeat className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+                                      <div className="text-green-800">
+                                        <p className="font-medium">Loop Configuration</p>
+                                        <p className="text-xs mt-1">
+                                          This step will iterate over a collection and create a subtask for each item.
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+
                                   <div className="grid grid-cols-2 gap-3">
                                     <div className="space-y-1">
-                                      <label className="text-sm font-medium">Items Path</label>
+                                      <label className="text-sm font-medium flex items-center gap-1">
+                                        Items Path
+                                        <span className="text-xs text-muted-foreground">(JSONPath)</span>
+                                      </label>
                                       <Input
                                         value={step.itemsPath || ''}
                                         onChange={(e) => updateStep(index, { itemsPath: e.target.value })}
-                                        placeholder="output.files"
+                                        placeholder="e.g., output.files or results.items"
                                         className="font-mono text-sm"
                                       />
+                                      <p className="text-xs text-muted-foreground">
+                                        Path to the array in the previous step&apos;s output
+                                      </p>
                                     </div>
                                     <div className="space-y-1">
-                                      <label className="text-sm font-medium">Item Variable</label>
+                                      <label className="text-sm font-medium flex items-center gap-1">
+                                        Item Variable Name
+                                      </label>
                                       <Input
                                         value={step.itemVariable || ''}
                                         onChange={(e) => updateStep(index, { itemVariable: e.target.value })}
-                                        placeholder="file"
+                                        placeholder="e.g., file, item, record"
                                         className="font-mono text-sm"
                                       />
+                                      <p className="text-xs text-muted-foreground">
+                                        Use as {"{{variable}}"} in prompt below
+                                      </p>
                                     </div>
                                   </div>
-                                  <div className="space-y-1">
-                                    <label className="text-sm font-medium">Prompt (per item)</label>
+
+                                  <div className="space-y-2">
+                                    <label className="text-sm font-medium flex items-center gap-2">
+                                      <Sparkles className="h-4 w-4 text-amber-500" />
+                                      Per-Item Prompt
+                                    </label>
                                     <Textarea
                                       value={step.prompt || ''}
                                       onChange={(e) => updateStep(index, { prompt: e.target.value })}
-                                      placeholder="Process {{file.name}}..."
-                                      className="min-h-[80px] font-mono text-sm"
+                                      placeholder={`This prompt runs for EACH item in the collection.
+
+Example: "Review the file {{file.path}} and check for:
+- Code style consistency
+- Potential bugs
+- Security vulnerabilities
+
+Provide a structured report with severity levels."`}
+                                      className="min-h-[100px] font-mono text-sm"
                                     />
                                   </div>
+
                                   <div className="space-y-1">
-                                    <label className="text-sm font-medium">Max Items (default: 100)</label>
+                                    <label className="text-sm font-medium">Max Items</label>
                                     <Input
                                       type="number"
                                       value={step.maxItems || ''}
                                       onChange={(e) => updateStep(index, { maxItems: parseInt(e.target.value) || undefined })}
-                                      placeholder="100"
-                                      className="w-32"
+                                      placeholder="100 (default)"
+                                      className="w-40"
                                     />
+                                    <p className="text-xs text-muted-foreground">
+                                      Safety limit to prevent runaway loops
+                                    </p>
                                   </div>
                                 </>
                               )}
@@ -613,25 +682,51 @@ export function WorkflowEditor({
                               {/* Join configuration */}
                               {step.stepType === 'join' && (
                                 <>
+                                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-sm">
+                                    <div className="flex items-start gap-2">
+                                      <Merge className="h-4 w-4 text-purple-600 mt-0.5 flex-shrink-0" />
+                                      <div className="text-purple-800">
+                                        <p className="font-medium">Join / Aggregation Point</p>
+                                        <p className="text-xs mt-1">
+                                          This step waits for all parallel tasks to complete, then aggregates results.
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+
                                   <div className="space-y-1">
-                                    <label className="text-sm font-medium">Await Tag</label>
+                                    <label className="text-sm font-medium flex items-center gap-1">
+                                      Await Tag Pattern
+                                    </label>
                                     <Input
                                       value={step.awaitTag || ''}
                                       onChange={(e) => updateStep(index, { awaitTag: e.target.value })}
-                                      placeholder="foreach:{{parentId}}"
+                                      placeholder="e.g., foreach:{{parentId}}"
                                       className="font-mono text-sm"
                                     />
                                     <p className="text-xs text-muted-foreground">
-                                      Tag pattern to wait for. Uses {"{{parentId}}"} to reference the foreach parent.
+                                      Pattern to match tasks to wait for. Use {"{{parentId}}"} to reference the loop&apos;s parent task.
                                     </p>
                                   </div>
-                                  <div className="space-y-1">
-                                    <label className="text-sm font-medium">Aggregation Prompt</label>
+
+                                  <div className="space-y-2">
+                                    <label className="text-sm font-medium flex items-center gap-2">
+                                      <Sparkles className="h-4 w-4 text-amber-500" />
+                                      Aggregation Prompt
+                                    </label>
                                     <Textarea
                                       value={step.prompt || ''}
                                       onChange={(e) => updateStep(index, { prompt: e.target.value })}
-                                      placeholder="Aggregate the results from all items..."
-                                      className="min-h-[80px] font-mono text-sm"
+                                      placeholder={`Combine the results from all completed subtasks.
+
+Example: "Review all the individual file reviews completed by the foreach step. Create a consolidated report that:
+
+1. Summarizes the overall code quality
+2. Lists critical issues by priority
+3. Provides a final recommendation (approve/request changes)
+
+The results from each subtask are available in {{subtasks}}."`}
+                                      className="min-h-[120px] font-mono text-sm"
                                     />
                                   </div>
                                 </>
@@ -695,56 +790,28 @@ export function WorkflowEditor({
               </div>
             </TabsContent>
 
-            {/* Mermaid Code Tab */}
+            {/* Combined Mermaid Editor with Live Preview */}
             <TabsContent value="code" className="flex-1 flex flex-col overflow-hidden mt-0">
-              <div className="flex-1 flex flex-col gap-2">
-                <textarea
-                  value={mermaidCode}
-                  onChange={(e) => setMermaidCode(e.target.value)}
-                  placeholder={`Enter Mermaid flowchart code here...
-
-Example:
-flowchart TD
-    A[Fetch Data] --> B{Validate}
-    B -->|"valid"| C[Process]
-    B -->|"invalid"| D[Reject]
-    C --> E[[Each: Review Item]]
-    E --> F[[Join: Summarize]]`}
-                  className={cn(
-                    'flex-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono',
-                    'ring-offset-background placeholder:text-muted-foreground',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-                    'resize-none min-h-[200px]'
-                  )}
-                />
-                <div className="flex items-center gap-2">
-                  {mermaidError && (
-                    <div className="flex items-center gap-1 text-sm text-destructive">
-                      <AlertCircle className="h-4 w-4" />
-                      {mermaidError}
-                    </div>
-                  )}
-                  <p className="text-xs text-muted-foreground ml-auto">
-                    [ ] = automated task, ( ) = manual task, {"{ }"} = decision, [[ ]] = foreach/join/subflow
-                  </p>
-                </div>
-              </div>
+              <MermaidLiveEditor
+                value={mermaidCode}
+                onChange={setMermaidCode}
+                onError={setMermaidError}
+                className="flex-1"
+                minHeight="350px"
+                initialLayout="split"
+              />
             </TabsContent>
 
-            {/* Preview Tab */}
+            {/* Preview Tab - Full Preview */}
             <TabsContent value="preview" className="flex-1 overflow-auto mt-0">
-              <div className="bg-white rounded-lg border p-4 min-h-[300px]">
-                {mermaidCode ? (
-                  <Mermaid
-                    chart={mermaidCode}
-                    onError={(err) => setMermaidError(err)}
-                  />
-                ) : (
-                  <div className="flex items-center justify-center h-full text-muted-foreground">
-                    <p>Add steps or enter Mermaid code to preview the diagram</p>
-                  </div>
-                )}
-              </div>
+              <MermaidLiveEditor
+                value={mermaidCode}
+                onChange={setMermaidCode}
+                onError={setMermaidError}
+                className="flex-1"
+                minHeight="350px"
+                initialLayout="preview"
+              />
             </TabsContent>
           </Tabs>
 
