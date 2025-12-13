@@ -13,8 +13,6 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Badge } from '@/components/ui/badge'
 import {
   Select,
   SelectContent,
@@ -35,8 +33,6 @@ interface TaskModalProps {
   parentTask?: Task | null
   onClose: () => void
 }
-
-type FormValues = Record<string, unknown>
 
 export function TaskModal({
   task,
@@ -65,7 +61,6 @@ export function TaskModal({
   // Invalidate activity cache when modal opens to ensure fresh data
   useEffect(() => {
     if (isOpen && !prevIsOpenRef.current && task?._id) {
-      // Modal just opened - invalidate activity logs to force fresh fetch
       queryClient.invalidateQueries({ queryKey: ['activity-logs', 'task', task._id] })
     }
     prevIsOpenRef.current = isOpen
@@ -194,53 +189,142 @@ export function TaskModal({
     onClose()
   }
 
-  // Get resolved values for display
-  const resolvedStatus = task?._resolved?.status
-  const resolvedUrgency = task?._resolved?.urgency
-  const resolvedAssignee = task?._resolved?.assignee
-  const resolvedWorkflow = task?._resolved?.workflow
+  // Get current selected values for header display
+  const currentStatus = watch('status') as string
+  const currentUrgency = watch('urgency') as string
+  const currentAssigneeId = watch('assigneeId') as string | null
 
-  // Metadata header for existing tasks
-  const MetadataHeader = () => {
+  const currentStatusOption = statusOptions.find(s => s.code === currentStatus)
+  const currentUrgencyOption = urgencyOptions.find(u => u.code === currentUrgency)
+  const currentAssignee = users.find(u => u._id === currentAssigneeId)
+
+  // Editable header with key fields for existing tasks
+  const EditableHeader = () => {
     if (!task) return null
 
     return (
-      <div className="flex flex-wrap items-center gap-3 pb-3 mb-3 border-b border-border">
-        {/* Status Badge */}
-        {resolvedStatus && (
-          <Badge color={resolvedStatus.color} className="text-xs">
-            {resolvedStatus.displayName}
-          </Badge>
-        )}
+      <div className="flex flex-wrap items-center gap-2 pb-3 border-b border-border">
+        {/* Status - inline select */}
+        <Controller
+          name="status"
+          control={control}
+          render={({ field }) => (
+            <Select value={field.value as string || ''} onValueChange={field.onChange}>
+              <SelectTrigger
+                className="h-7 w-auto gap-1.5 px-2 text-xs border-0 bg-transparent hover:bg-muted"
+                style={currentStatusOption?.color ? {
+                  backgroundColor: `${currentStatusOption.color}20`,
+                  color: currentStatusOption.color,
+                } : undefined}
+              >
+                {currentStatusOption && (
+                  <span
+                    className="h-2 w-2 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: currentStatusOption.color }}
+                  />
+                )}
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                {statusOptions.map((opt) => (
+                  <SelectItem key={opt.code} value={opt.code}>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="h-2 w-2 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: opt.color }}
+                      />
+                      {opt.displayName}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        />
 
-        {/* Urgency Badge */}
-        {resolvedUrgency && (
-          <Badge color={resolvedUrgency.color} className="text-xs">
-            {resolvedUrgency.displayName}
-          </Badge>
-        )}
+        {/* Urgency - inline select */}
+        <Controller
+          name="urgency"
+          control={control}
+          render={({ field }) => (
+            <Select value={field.value as string || ''} onValueChange={field.onChange}>
+              <SelectTrigger
+                className="h-7 w-auto gap-1.5 px-2 text-xs border-0 bg-transparent hover:bg-muted"
+                style={currentUrgencyOption?.color ? {
+                  backgroundColor: `${currentUrgencyOption.color}20`,
+                  color: currentUrgencyOption.color,
+                } : undefined}
+              >
+                {currentUrgencyOption && (
+                  <span
+                    className="h-2 w-2 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: currentUrgencyOption.color }}
+                  />
+                )}
+                <SelectValue placeholder="Urgency" />
+              </SelectTrigger>
+              <SelectContent>
+                {urgencyOptions.map((opt) => (
+                  <SelectItem key={opt.code} value={opt.code}>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="h-2 w-2 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: opt.color }}
+                      />
+                      {opt.displayName}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        />
 
-        {/* Workflow Badge */}
-        {resolvedWorkflow && (
-          <Badge variant="outline" className="text-xs">
-            {resolvedWorkflow.name}
-            {task.workflowStage && <span className="ml-1 opacity-70">/ {task.workflowStage}</span>}
-          </Badge>
-        )}
+        {/* Assignee - inline select */}
+        <Controller
+          name="assigneeId"
+          control={control}
+          render={({ field }) => (
+            <Select
+              value={field.value as string || '_unassigned'}
+              onValueChange={(val) => field.onChange(val === '_unassigned' ? null : val)}
+            >
+              <SelectTrigger className="h-7 w-auto gap-1.5 px-2 text-xs border-0 bg-transparent hover:bg-muted">
+                {currentAssignee ? (
+                  <>
+                    <span className="w-4 h-4 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-medium">
+                      {currentAssignee.displayName.charAt(0).toUpperCase()}
+                    </span>
+                    <span>{currentAssignee.displayName}</span>
+                  </>
+                ) : (
+                  <span className="text-muted-foreground">Unassigned</span>
+                )}
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_unassigned">Unassigned</SelectItem>
+                {users
+                  .filter((user) => user._id && user.isActive)
+                  .map((user) => (
+                    <SelectItem key={user._id} value={user._id}>
+                      <div className="flex items-center gap-2">
+                        <span className="w-4 h-4 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-medium">
+                          {user.displayName.charAt(0).toUpperCase()}
+                        </span>
+                        {user.displayName}
+                      </div>
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          )}
+        />
 
-        {/* Assignee */}
-        {resolvedAssignee && (
-          <span className="text-xs text-muted-foreground flex items-center gap-1">
-            <span className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-medium">
-              {resolvedAssignee.displayName.charAt(0).toUpperCase()}
-            </span>
-            {resolvedAssignee.displayName}
-          </span>
-        )}
-
-        {/* Timestamps */}
+        {/* Spacer */}
         <div className="flex-1" />
-        <div className="flex gap-4 text-xs text-muted-foreground">
+
+        {/* Timestamps - read only */}
+        <div className="flex gap-3 text-[11px] text-muted-foreground">
           <span title={format(new Date(task.createdAt), 'PPpp')}>
             Created {formatDistanceToNow(new Date(task.createdAt), { addSuffix: true })}
           </span>
@@ -252,216 +336,232 @@ export function TaskModal({
     )
   }
 
-  // Compact form content
-  const FormContent = ({ showFooter = true }: { showFooter?: boolean }) => (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
-      {/* Title */}
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground">Title *</label>
-        <Input {...register('title')} placeholder="Task title" className="h-8 text-sm" />
-      </div>
-
-      {/* Summary - smaller textarea */}
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground">Summary</label>
-        <textarea
-          {...register('summary')}
-          placeholder="Brief description..."
-          rows={2}
-          className={cn(
-            'flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm',
-            'ring-offset-background placeholder:text-muted-foreground resize-none',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1'
-          )}
-        />
-      </div>
-
-      {/* Status & Urgency - compact row */}
-      <div className="grid grid-cols-2 gap-2">
+  // Form content - without the fields that are now in the header
+  const FormContent = ({ isEditMode = false }: { isEditMode?: boolean }) => (
+    <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col h-full">
+      <div className="flex-1 space-y-3 overflow-y-auto pr-1">
+        {/* Title */}
         <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Status</label>
-          <Select
-            value={watch('status') as string}
-            onValueChange={(val) => setValue('status', val)}
-          >
-            <SelectTrigger className="h-8 text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {statusOptions.map((opt) => (
-                <SelectItem key={opt.code} value={opt.code}>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="h-2 w-2 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: opt.color }}
-                    />
-                    <span className="text-sm">{opt.displayName}</span>
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <label className="text-xs font-medium text-muted-foreground">Title *</label>
+          <Input {...register('title')} placeholder="Task title" className="h-8 text-sm" />
         </div>
 
+        {/* Summary */}
         <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Urgency</label>
-          <Select
-            value={watch('urgency') as string}
-            onValueChange={(val) => setValue('urgency', val)}
-          >
-            <SelectTrigger className="h-8 text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {urgencyOptions.map((opt) => (
-                <SelectItem key={opt.code} value={opt.code}>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="h-2 w-2 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: opt.color }}
-                    />
-                    <span className="text-sm">{opt.displayName}</span>
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <label className="text-xs font-medium text-muted-foreground">Summary</label>
+          <textarea
+            {...register('summary')}
+            placeholder="Brief description..."
+            rows={2}
+            className={cn(
+              'flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm',
+              'ring-offset-background placeholder:text-muted-foreground resize-none',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1'
+            )}
+          />
         </div>
-      </div>
 
-      {/* Workflow & Stage - compact row */}
-      <div className="grid grid-cols-2 gap-2">
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Workflow</label>
-          <Controller
-            name="workflowId"
-            control={control}
-            render={({ field }) => (
-              <Select
-                value={field.value as string || '_none'}
-                onValueChange={(val) => {
-                  field.onChange(val === '_none' ? null : val)
-                  // Reset stage when workflow changes
-                  if (val === '_none') {
-                    setValue('workflowStage', '')
-                  }
-                }}
-              >
-                <SelectTrigger className="h-8 text-sm">
-                  <SelectValue placeholder="Select workflow" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="_none">None</SelectItem>
-                  {workflows
-                    .filter((wf) => wf.isActive)
-                    .map((wf) => (
-                      <SelectItem key={wf._id} value={wf._id}>
-                        {wf.name}
+        {/* Status & Urgency - only show in create mode */}
+        {!isEditMode && (
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Status</label>
+              <Controller
+                name="status"
+                control={control}
+                render={({ field }) => (
+                  <Select value={field.value as string || ''} onValueChange={field.onChange}>
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {statusOptions.map((opt) => (
+                        <SelectItem key={opt.code} value={opt.code}>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="h-2 w-2 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: opt.color }}
+                            />
+                            {opt.displayName}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Urgency</label>
+              <Controller
+                name="urgency"
+                control={control}
+                render={({ field }) => (
+                  <Select value={field.value as string || ''} onValueChange={field.onChange}>
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Select urgency" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {urgencyOptions.map((opt) => (
+                        <SelectItem key={opt.code} value={opt.code}>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="h-2 w-2 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: opt.color }}
+                            />
+                            {opt.displayName}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Workflow & Stage */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Workflow</label>
+            <Controller
+              name="workflowId"
+              control={control}
+              render={({ field }) => (
+                <Select
+                  value={field.value as string || '_none'}
+                  onValueChange={(val) => {
+                    field.onChange(val === '_none' ? null : val)
+                    if (val === '_none') {
+                      setValue('workflowStage', '')
+                    }
+                  }}
+                >
+                  <SelectTrigger className="h-8 text-sm">
+                    <SelectValue placeholder="Select workflow" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none">None</SelectItem>
+                    {workflows
+                      .filter((wf) => wf.isActive)
+                      .map((wf) => (
+                        <SelectItem key={wf._id} value={wf._id}>
+                          {wf.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Stage</label>
+            <Controller
+              name="workflowStage"
+              control={control}
+              render={({ field }) => (
+                <Select
+                  value={field.value as string || '_none'}
+                  onValueChange={(val) => field.onChange(val === '_none' ? '' : val)}
+                  disabled={!selectedWorkflowId || workflowStages.length === 0}
+                >
+                  <SelectTrigger className="h-8 text-sm">
+                    <SelectValue placeholder={selectedWorkflowId ? 'Select stage' : 'Select workflow first'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none">None</SelectItem>
+                    {workflowStages.map((stage) => (
+                      <SelectItem key={stage} value={stage}>
+                        {stage}
                       </SelectItem>
                     ))}
-                </SelectContent>
-              </Select>
-            )}
-          />
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </div>
         </div>
 
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Stage</label>
-          <Controller
-            name="workflowStage"
-            control={control}
-            render={({ field }) => (
-              <Select
-                value={field.value as string || '_none'}
-                onValueChange={(val) => field.onChange(val === '_none' ? '' : val)}
-                disabled={!selectedWorkflowId || workflowStages.length === 0}
-              >
-                <SelectTrigger className="h-8 text-sm">
-                  <SelectValue placeholder={selectedWorkflowId ? 'Select stage' : 'Select workflow first'} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="_none">None</SelectItem>
-                  {workflowStages.map((stage) => (
-                    <SelectItem key={stage} value={stage}>
-                      {stage}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          />
-        </div>
-      </div>
+        {/* Assignee & Due Date - only show assignee in create mode */}
+        <div className="grid grid-cols-2 gap-2">
+          {!isEditMode && (
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Assignee</label>
+              <Controller
+                name="assigneeId"
+                control={control}
+                render={({ field }) => (
+                  <Select
+                    value={field.value as string || '_unassigned'}
+                    onValueChange={(val) => field.onChange(val === '_unassigned' ? null : val)}
+                  >
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Unassigned" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_unassigned">Unassigned</SelectItem>
+                      {users
+                        .filter((user) => user._id && user.isActive)
+                        .map((user) => (
+                          <SelectItem key={user._id} value={user._id}>
+                            <div className="flex items-center gap-2">
+                              <span className="w-4 h-4 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-medium">
+                                {user.displayName.charAt(0).toUpperCase()}
+                              </span>
+                              {user.displayName}
+                            </div>
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            </div>
+          )}
 
-      {/* Assignee & Due Date - compact row */}
-      <div className="grid grid-cols-2 gap-2">
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Assignee</label>
-          <Select
-            value={(watch('assigneeId') as string) || '_unassigned'}
-            onValueChange={(val) => setValue('assigneeId', val === '_unassigned' ? null : val)}
-          >
-            <SelectTrigger className="h-8 text-sm">
-              <SelectValue placeholder="Unassigned" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="_unassigned">Unassigned</SelectItem>
-              {users
-                .filter((user) => user._id && user.isActive)
-                .map((user) => (
-                  <SelectItem key={user._id} value={user._id}>
-                    <div className="flex items-center gap-2">
-                      <span className="w-4 h-4 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-medium">
-                        {user.displayName.charAt(0).toUpperCase()}
-                      </span>
-                      {user.displayName}
-                    </div>
-                  </SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
+          <div className={cn('space-y-1', isEditMode && 'col-span-2')}>
+            <label className="text-xs font-medium text-muted-foreground">Due Date</label>
+            <Input
+              type="datetime-local"
+              {...register('dueAt')}
+              className="h-8 text-sm"
+            />
+          </div>
         </div>
 
+        {/* Tags */}
         <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Due Date</label>
+          <label className="text-xs font-medium text-muted-foreground">Tags</label>
           <Input
-            type="datetime-local"
-            {...register('dueAt')}
+            {...register('tags')}
+            placeholder="tag1, tag2, tag3"
             className="h-8 text-sm"
           />
         </div>
-      </div>
 
-      {/* Tags - compact */}
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground">Tags</label>
-        <Input
-          {...register('tags')}
-          placeholder="tag1, tag2, tag3"
-          className="h-8 text-sm"
-        />
-      </div>
-
-      {/* Parent Task (for subtask creation) */}
-      {!task && parentTask && (
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Parent Task</label>
-          <div className="px-3 py-1.5 text-sm bg-muted rounded-md border">
-            {parentTask.title}
+        {/* Parent Task (for subtask creation) */}
+        {!task && parentTask && (
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Parent Task</label>
+            <div className="px-3 py-1.5 text-sm bg-muted rounded-md border">
+              {parentTask.title}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {showFooter && (
-        <DialogFooter className="pt-3">
-          <Button type="button" variant="outline" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" size="sm" disabled={isSubmitting}>
-            {isSubmitting ? 'Saving...' : task ? 'Update' : 'Create'}
-          </Button>
-        </DialogFooter>
-      )}
+      {/* Footer - sticky at bottom */}
+      <DialogFooter className="pt-3 mt-3 border-t flex-shrink-0">
+        <Button type="button" variant="outline" size="sm" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button type="submit" size="sm" disabled={isSubmitting}>
+          {isSubmitting ? 'Saving...' : task ? 'Update' : 'Create'}
+        </Button>
+      </DialogFooter>
     </form>
   )
 
@@ -469,8 +569,8 @@ export function TaskModal({
   if (!task) {
     return (
       <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader className="pb-2">
+        <DialogContent className="max-w-lg max-h-[85vh] flex flex-col">
+          <DialogHeader className="pb-2 flex-shrink-0">
             <DialogTitle className="text-base">
               {parentTask ? `New Subtask` : 'New Task'}
             </DialogTitle>
@@ -480,7 +580,9 @@ export function TaskModal({
               </p>
             )}
           </DialogHeader>
-          <FormContent />
+          <div className="flex-1 min-h-0">
+            <FormContent isEditMode={false} />
+          </div>
         </DialogContent>
       </Dialog>
     )
@@ -489,30 +591,30 @@ export function TaskModal({
   // Edit mode - two column layout with integrated activity
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[85vh] p-0 gap-0 overflow-hidden">
-        {/* Header */}
-        <div className="px-5 pt-5 pb-0">
+      <DialogContent className="max-w-4xl h-[85vh] p-0 gap-0 flex flex-col">
+        {/* Header - fixed */}
+        <div className="px-5 pt-5 pb-3 flex-shrink-0">
           <DialogHeader className="pb-3">
             <DialogTitle className="text-base font-semibold truncate pr-8">
               {task.title}
             </DialogTitle>
           </DialogHeader>
-          <MetadataHeader />
+          <EditableHeader />
         </div>
 
-        {/* Two-column content */}
-        <div className="flex flex-1 min-h-0 overflow-hidden">
+        {/* Two-column content - both scrollable */}
+        <div className="flex flex-1 min-h-0">
           {/* Left column - Form */}
-          <div className="flex-1 px-5 pb-5 overflow-y-auto border-r border-border">
-            <FormContent showFooter={true} />
+          <div className="flex-1 px-5 pb-5 flex flex-col min-h-0 border-r border-border">
+            <FormContent isEditMode={true} />
           </div>
 
           {/* Right column - Activity Feed */}
           <div className="w-80 flex flex-col min-h-0 bg-muted/30">
-            <div className="px-4 py-3 border-b border-border bg-background/50">
+            <div className="px-4 py-2 border-b border-border bg-background/50 flex-shrink-0">
               <h3 className="text-sm font-medium">Activity</h3>
             </div>
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 min-h-0 overflow-hidden">
               <TaskActivity taskId={task._id} className="h-full" compact />
             </div>
           </div>
@@ -520,45 +622,4 @@ export function TaskModal({
       </DialogContent>
     </Dialog>
   )
-}
-
-// Helper to render reference options based on the collection
-function renderReferenceOptions(
-  fc: FieldConfig,
-  users: User[],
-  workflows: Workflow[],
-  allTasks: Task[],
-  currentTask: Task | null
-) {
-  switch (fc.referenceCollection) {
-    case 'users':
-      return users
-        .filter((user) => user._id && user.isActive)
-        .map((user) => (
-          <SelectItem key={user._id} value={user._id}>
-            {user.displayName}
-          </SelectItem>
-        ))
-
-    case 'workflows':
-      return workflows
-        .filter((wf) => wf._id && wf.isActive)
-        .map((wf) => (
-          <SelectItem key={wf._id} value={wf._id}>
-            {wf.name}
-          </SelectItem>
-        ))
-
-    case 'tasks':
-      return allTasks
-        .filter((t) => t._id !== currentTask?._id)
-        .map((t) => (
-          <SelectItem key={t._id} value={t._id}>
-            {t.title}
-          </SelectItem>
-        ))
-
-    default:
-      return null
-  }
 }
