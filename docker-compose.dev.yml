@@ -1,0 +1,52 @@
+# Development-only Docker Compose
+# Runs only MongoDB - backend and frontend run locally with hot reload
+#
+# Usage:
+#   npm run db:start    - Start MongoDB
+#   npm run db:stop     - Stop MongoDB
+#   npm run db:reset    - Reset MongoDB (clears all data)
+#   npm run db:logs     - View MongoDB logs
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: coordination-mongodb-dev
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-adminpassword}
+      MONGO_INITDB_DATABASE: coordination_matrix
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_dev_data:/data/db
+      - ./mongo-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: MongoDB Express for database management UI
+  # Start with: docker compose -f docker-compose.dev.yml --profile tools up -d
+  mongo-express:
+    image: mongo-express:1.0.2
+    container_name: coordination-mongo-express-dev
+    restart: unless-stopped
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_ROOT_USER:-admin}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_ROOT_PASSWORD:-adminpassword}
+      ME_CONFIG_MONGODB_URL: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-adminpassword}@mongodb:27017/
+      ME_CONFIG_BASICAUTH_USERNAME: ${MONGOEXPRESS_USER:-admin}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGOEXPRESS_PASSWORD:-admin}
+    ports:
+      - "8081:8081"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    profiles:
+      - tools
+
+volumes:
+  mongodb_dev_data:
+    driver: local
