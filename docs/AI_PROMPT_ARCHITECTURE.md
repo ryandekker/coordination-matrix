@@ -1,27 +1,230 @@
 # AI Prompt Architecture & Pipeline Automation
 
-This document explores options for structuring AI prompts and automating task progression through workflows.
+This document explores options for structuring AI prompts, automating task progression through workflows, and handling complex branching scenarios.
 
-## Current State
+---
 
-### Existing Prompt Fields
-- **`extraPrompt`** (Task): Primary instruction field for AI tasks
-- **`summary`** (Task): Short task description used as context
-- **`additionalInfo`** (Task): Context storage, also receives AI responses
+## Current State (As Implemented)
 
-### Current Daemon Behavior
-The task daemon builds prompts by:
-1. Using `extraPrompt` as the main instruction (if present)
-2. Appending task context (title, summary, tags, additionalInfo)
-3. Executing Claude and storing results in `additionalInfo`
+### Existing Types
+
+**TaskStatus** (`backend/src/types/index.ts:7-12`):
+```typescript
+export type TaskStatus = 'pending' | 'in_progress' | 'on_hold' | 'completed' | 'cancelled';
+```
+
+**Task** (`backend/src/types/index.ts:16-47`):
+```typescript
+export interface Task {
+  _id: ObjectId;
+  title: string;
+  summary?: string;
+  extraPrompt?: string;           // Primary AI instruction field
+  additionalInfo?: string;        // Context storage, receives AI responses
+  status: TaskStatus;
+  urgency?: Urgency;
+  parentId: ObjectId | null;
+  workflowId?: ObjectId | null;
+  workflowStage?: string;
+  assigneeId?: ObjectId | null;
+  tags?: string[];
+  // ... timestamps
+}
+```
+
+**User** (`backend/src/types/index.ts:183-195`):
+```typescript
+export type UserRole = 'admin' | 'operator' | 'reviewer' | 'viewer';
+
+export interface User {
+  _id: ObjectId;
+  email: string;
+  displayName: string;
+  role: UserRole;
+  isActive: boolean;
+  teamIds?: ObjectId[];
+  preferences?: Record<string, unknown>;
+  // ... timestamps
+}
+```
+
+**WorkflowStep** (`backend/src/routes/workflows.ts:8-15`):
+```typescript
+interface WorkflowStep {
+  id: string;
+  name: string;
+  type: 'automated' | 'manual';   // Execution mode (human vs AI)
+  hitlPhase: string;
+  description?: string;
+  config?: Record<string, unknown>;
+}
+```
+
+### Current Daemon Behavior (`scripts/task-daemon.mjs`)
+
+The daemon currently:
+1. Polls a saved view for pending tasks
+2. Uses `extraPrompt` as main instruction (if present)
+3. Appends task context (title, summary, tags, additionalInfo)
+4. Executes Claude and stores results in `additionalInfo`
+5. Sets status to `completed` on success, `on_hold` on failure
 
 ---
 
 ## Proposed Architecture
 
-### 1. Prompt Layering System
+### Core Principle
 
-We propose a **layered prompt architecture** where prompts are assembled from multiple sources:
+**AI produces structured output → Daemon routes deterministically**
+
+Decision nodes are not tasks. They are pure routing constructs evaluated synchronously by the daemon after a task completes. The AI never "chooses a branch"—it does work and produces output, then conditions on that output determine the path forward.
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   Task Node     │────▶│  Decision Node  │────▶│   Task Node     │
+│   (AI runs)     │     │  (pure routing) │     │   (AI runs)     │
+│                 │     │                 │     │                 │
+│  Produces JSON  │     │  Evaluates      │     │                 │
+│  output         │     │  conditions     │     │                 │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+                              │
+                              ▼
+                        No task created here
+                        Just routing logic
+```
+
+---
+
+## Schema Changes Required
+
+### 1. TaskStatus (Add `waiting` and `failed`)
+
+```typescript
+// backend/src/types/index.ts
+export type TaskStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'waiting'        // NEW: Waiting for child tasks (foreach, subflow)
+  | 'on_hold'
+  | 'completed'
+  | 'failed'         // NEW: Execution failed (distinct from on_hold)
+  | 'cancelled';
+```
+
+**Status Transitions:**
+```
+pending ──▶ in_progress ──▶ completed
+                │                │
+                ▼                ▼
+            waiting ◀────── [spawn children]
+                │
+                ▼
+          [children complete]
+                │
+                ▼
+            completed
+
+in_progress ──▶ failed (on error)
+in_progress ──▶ on_hold (needs human intervention)
+```
+
+### 2. User (Add Agent Fields)
+
+```typescript
+// backend/src/types/index.ts
+export interface User {
+  _id: ObjectId;
+  email: string;
+  displayName: string;
+  role: UserRole;
+  isActive: boolean;
+  isAgent?: boolean;              // NEW: Is this user an AI agent?
+  agentPrompt?: string;           // NEW: Agent's base prompt/persona
+  teamIds?: ObjectId[];
+  preferences?: Record<string, unknown>;
+  createdAt: Date;
+  updatedAt?: Date;
+}
+```
+
+**UI Changes:**
+- Add "Is Agent" checkbox in user form
+- Show `agentPrompt` textarea when `isAgent` is checked
+- Agent users can be assigned to tasks like regular users
+
+**Use Cases:**
+- Different agents for different domains (code review, documentation, testing)
+- Agent personas with specific expertise or constraints
+- Easy to swap agents on workflows
+
+### 3. WorkflowStep (Extended Schema)
+
+```typescript
+// backend/src/routes/workflows.ts
+
+// Step types for workflow routing
+type WorkflowStepType = 'task' | 'decision' | 'foreach' | 'join' | 'subflow';
+
+// Execution mode (only applicable to 'task' type)
+type ExecutionMode = 'automated' | 'manual';
+
+interface DecisionBranch {
+  condition: string | null;       // null = default branch
+  targetStepId: string;
+}
+
+interface WorkflowStep {
+  id: string;
+  name: string;
+
+  // Step classification
+  stepType: WorkflowStepType;     // NEW: What kind of step
+  execution?: ExecutionMode;      // Replaces old 'type' field, only for stepType='task'
+
+  // Existing fields (kept for compatibility)
+  type?: 'automated' | 'manual';  // DEPRECATED: Use execution instead
+  hitlPhase: string;
+  description?: string;
+  config?: Record<string, unknown>;
+
+  // NEW: Prompt field for AI execution
+  prompt?: string;
+
+  // NEW: Default assignee for this step
+  defaultAssigneeId?: string;
+
+  // NEW: Decision routing (only for stepType='decision')
+  branches?: DecisionBranch[];
+  defaultBranch?: string;
+
+  // NEW: ForEach configuration (only for stepType='foreach')
+  itemsPath?: string;             // JSONPath to array in output: "output.files"
+  itemVariable?: string;          // Template variable name: "file"
+
+  // NEW: Join configuration (only for stepType='join')
+  awaitTag?: string;              // Tag pattern: "foreach:{{parentId}}"
+
+  // NEW: Subflow configuration (only for stepType='subflow')
+  subflowId?: string;
+  inputMapping?: Record<string, string>;
+}
+```
+
+**Step Types:**
+
+| Type | Creates Task? | Purpose |
+|------|---------------|---------|
+| `task` | Yes | AI or human performs work |
+| `decision` | No | Routes based on previous output |
+| `foreach` | Yes (multiple) | Spawns a task per item in array |
+| `join` | Yes | Waits for parallel tasks, aggregates results |
+| `subflow` | Yes | Delegates to another workflow |
+
+---
+
+## Prompt Layering System
+
+Prompts are assembled from multiple sources in this order:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -45,7 +248,7 @@ We propose a **layered prompt architecture** where prompts are assembled from mu
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 2. Base Daemon Prompt
+### Base Daemon Prompt
 
 **Purpose:** Ensure consistent, parsable responses that can be saved automatically.
 
@@ -72,9 +275,8 @@ You are a task automation agent. Your response MUST follow this exact format:
 ```json
 {
   "confidence": 0.0-1.0,
-  "tokens_used": number,
   "suggested_tags": ["tag1", "tag2"],
-  "suggested_next_stage": "stage_name" | null
+  "suggested_next_stage": "stage_name_or_null"
 }
 ```
 ```
@@ -85,231 +287,35 @@ You are a task automation agent. Your response MUST follow this exact format:
 - Track confidence for human review thresholds
 - Structured data for analytics
 
----
+### Prompt Assembly Implementation
 
-### 3. Agent Users (Role + Prompt)
-
-**Schema Changes:**
 ```typescript
-interface User {
-  // ... existing fields ...
-  isAgent: boolean;           // NEW: Is this user an AI agent?
-  agentPrompt?: string;       // NEW: Agent's base prompt/persona
-}
-```
+// scripts/task-daemon.mjs - Updated buildPrompt function
 
-**UI Changes:**
-- Add "Is Agent" checkbox in user form
-- Show `agentPrompt` textarea when `isAgent` is checked
-- Agent users can be assigned to tasks like regular users
+const BASE_DAEMON_PROMPT = `You are a task automation agent. Your response MUST follow this exact format:
 
-**Use Cases:**
-- Different agents for different domains (code review, documentation, testing)
-- Agent personas with specific expertise or constraints
-- Easy to swap agents on workflows
+## Status
+[SUCCESS | PARTIAL | BLOCKED | FAILED]
 
----
+## Summary
+[1-2 sentence summary of what was accomplished]
 
-### 4. Workflow Step Prompts
+## Output
+[Main response content - the actual work product]
 
-**Schema Changes:**
-```typescript
-interface WorkflowStep {
-  id: string;
-  name: string;
-  type: 'automated' | 'manual';
-  hitlPhase: string;
-  description?: string;
-  config?: Record<string, unknown>;
-  prompt?: string;              // NEW: Step-specific prompt
-}
-```
+## Next Action
+[COMPLETE | CONTINUE | ESCALATE | HOLD]
 
-**Mermaid Integration Options:**
-
-#### Option A: Store in Node Config (Hidden from Diagram)
-```
-graph TD
-    A[Review Code]:::automated
-    B(Human Approval):::manual
-```
-- Prompts stored in workflow `steps[]` array, not in mermaid
-- Mermaid diagram remains clean and readable
-- **Recommended approach**
-
-#### Option B: Mermaid Comments (Exportable but Verbose)
-```
-graph TD
-    %% prompt:A: Review the code for security issues
-    A[Review Code]:::automated
-    %% prompt:B: Approve or reject the changes
-    B(Human Approval):::manual
-```
-- Prompts embedded as comments
-- Exports with diagram but clutters the mermaid
-- Requires custom parser
-
-#### Option C: Mermaid Subgraph Descriptions
-```
-graph TD
-    subgraph A_config[" "]
-        A_prompt["prompt: Review code"]
-    end
-    A[Review Code]
-```
-- Very verbose, not recommended
-
-**Recommendation:** Use **Option A** - keep prompts in the workflow JSON, export/import them alongside the mermaid but separately.
-
----
-
-## Task Pipeline Automation
-
-### How Should Tasks Move Forward?
-
-#### Option 1: Daemon-Driven Progression
-The daemon (running for an agent) handles all movement:
-
-```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│  Pending    │───▶│ In Progress │───▶│  Completed  │
-└─────────────┘    └─────────────┘    └─────────────┘
-                         │
-                         ▼
-              ┌─────────────────────┐
-              │  Create Next Task   │
-              │  (if workflow step) │
-              └─────────────────────┘
-```
-
-**Flow:**
-1. Daemon picks up task from view (filtered by status, assignee, etc.)
-2. Assembles prompt: base + agent + workflow step + task
-3. Executes and parses response
-4. Based on response `Next Action`:
-   - `COMPLETE`: Mark done, optionally create next workflow task
-   - `CONTINUE`: Create follow-up task with context
-   - `ESCALATE`: Set to `on_hold`, notify human
-   - `HOLD`: Set to `on_hold` with reason
-
-**Pros:**
-- Simple daemon logic
-- Clear ownership (agent owns the view)
-- Easy to debug
-
-**Cons:**
-- Requires daemon to understand workflow structure
-- Manual next-task creation logic
-
----
-
-#### Option 2: Workflow Engine (Centralized)
-A separate workflow engine manages task creation and progression:
-
-```
-┌──────────────────┐
-│  Workflow Engine │
-├──────────────────┤
-│ - Task created   │
-│ - On completion  │
-│   ▶ Check workflow │
-│   ▶ Create next task │
-│   ▶ Assign to agent │
-└──────────────────┘
-```
-
-**Flow:**
-1. When task completes, webhook/trigger fires
-2. Workflow engine looks up workflow step
-3. Creates next task(s) based on workflow definition
-4. Assigns to appropriate agent/user
-
-**Pros:**
-- Centralized workflow logic
-- Daemon stays simple (just execute tasks)
-- Supports complex branching
-
-**Cons:**
-- More infrastructure
-- Additional service to maintain
-
----
-
-#### Option 3: Task-Creates-Task (Self-Propagating)
-AI response includes next task definition:
-
-```json
+## Metadata
+\`\`\`json
 {
-  "next_action": "CONTINUE",
-  "next_task": {
-    "title": "Deploy to staging",
-    "workflowStage": "deploy",
-    "extraPrompt": "Deploy the reviewed code to staging environment"
-  }
+  "confidence": 0.0-1.0,
+  "suggested_tags": [],
+  "suggested_next_stage": null
 }
-```
+\`\`\`
+`;
 
-**Flow:**
-1. AI completes task, suggests next task in response
-2. Daemon parses response and creates next task
-3. New task inherits workflow, parent reference
-
-**Pros:**
-- AI can make intelligent decisions about next steps
-- Flexible, adapts to context
-- No separate workflow engine needed
-
-**Cons:**
-- AI might hallucinate wrong next steps
-- Need validation against workflow definition
-- Less predictable
-
----
-
-### Recommendation: Hybrid Approach
-
-Combine **Option 1 (Daemon-Driven)** with **Option 3 (Task-Creates-Task)** validation:
-
-1. **Daemon assembles prompt** with workflow context
-2. **AI response includes** suggested next action and stage
-3. **Daemon validates** against workflow definition
-4. **If valid**, create next task and assign to workflow's designated agent
-5. **If invalid**, fall back to workflow default or set to `on_hold`
-
-```typescript
-// Pseudo-code for daemon task completion
-async function completeTask(task, response) {
-  const parsed = parseAIResponse(response);
-
-  if (parsed.nextAction === 'COMPLETE' && task.workflowId) {
-    const workflow = await getWorkflow(task.workflowId);
-    const currentStep = workflow.steps.find(s => s.id === task.workflowStage);
-    const nextStep = getNextStep(workflow, currentStep, parsed.suggestedNextStage);
-
-    if (nextStep) {
-      await createTask({
-        title: `${workflow.name}: ${nextStep.name}`,
-        workflowId: task.workflowId,
-        workflowStage: nextStep.id,
-        parentId: task._id,
-        extraPrompt: nextStep.prompt,  // Step prompt becomes task prompt
-        assigneeId: nextStep.defaultAssignee,
-        additionalInfo: parsed.output,  // Carry forward context
-      });
-    }
-  }
-
-  await updateTask(task._id, { status: 'completed' });
-}
-```
-
----
-
-## Prompt Assembly Order
-
-When the daemon processes a task:
-
-```typescript
 function assemblePrompt(task, agent, workflowStep) {
   const parts = [];
 
@@ -344,42 +350,391 @@ function assemblePrompt(task, agent, workflowStep) {
 
 ---
 
+## Mermaid Visualization & Configuration
+
+### Node Shapes by Type
+
+| Step Type | Mermaid Syntax | Example |
+|-----------|----------------|---------|
+| Automated Task | `[Square brackets]` | `A[Analyze Code]` |
+| Manual Task | `(Parentheses)` | `B(Human Review)` |
+| Decision | `{Curly braces}` | `C{Quality Gate}` |
+| ForEach | `[[Double brackets]]` | `D[[Each: Process File]]` |
+| Join | `[Square]` with join label | `E[Join Results]` |
+| Subflow | `[[Run: Name]]` | `F[[Run: Security Scan]]` |
+
+### Edge Labels as Conditions
+
+Decision branches are expressed directly in mermaid edge labels:
+
+```mermaid
+graph TD
+    A[Analyze] --> B{Score Check}
+    B -->|"output.score >= 80"| C[Approve]
+    B -->|"output.score >= 50"| D(Human Review)
+    B -->|default| E[Reject]
+```
+
+### Comment Block Configuration Format
+
+Workflow configuration is stored in a comment block at the bottom of the mermaid diagram. This keeps the visual diagram clean while embedding all execution details.
+
+**Format:**
+```
+%% === WORKFLOW_CONFIG ===
+%% @STEP_ID: {
+%%   "key": "value"
+%% }
+%% === END_CONFIG ===
+```
+
+**Rules:**
+1. Each step config starts with `%% @STEP_ID:`
+2. JSON spans multiple lines, each prefixed with `%%`
+3. Step IDs must match node IDs in the diagram
+4. Decision nodes only need `{"stepType": "decision"}` — branches come from edge labels
+
+### Complete Example: PR Review Workflow
+
+```mermaid
+graph TD
+    A[Fetch PR Details] --> B[Get Changed Files]
+    B --> C[[Each: Review File]]
+    C --> D[Join Reviews]
+    D --> E{Quality Gate}
+    E -->|"output.score >= 80"| F[Auto Approve]
+    E -->|"output.score >= 50"| G(Human Review)
+    E -->|default| H[Request Changes]
+    F --> I[Merge PR]
+    G --> I
+    H --> J{Retry?}
+    J -->|"output.shouldRetry"| A
+    J -->|default| K[Close PR]
+
+%% === WORKFLOW_CONFIG ===
+%% @A: {
+%%   "stepType": "task",
+%%   "execution": "automated",
+%%   "prompt": "Fetch PR #{{input.prNumber}} metadata from GitHub. Output: {title, author, baseBranch, headBranch}"
+%% }
+%% @B: {
+%%   "stepType": "task",
+%%   "execution": "automated",
+%%   "prompt": "Get list of changed files for this PR. Output: {files: [{path, additions, deletions, status}]}"
+%% }
+%% @C: {
+%%   "stepType": "foreach",
+%%   "itemsPath": "output.files",
+%%   "itemVariable": "file",
+%%   "prompt": "Review {{file.path}} for code style, bugs, security, and performance.\n\nOutput: {score: 0-100, issues: [{severity, line, message}]}"
+%% }
+%% @D: {
+%%   "stepType": "join",
+%%   "awaitTag": "foreach:{{parentId}}",
+%%   "prompt": "Aggregate all file reviews into overall assessment.\n\nOutput: {score: 0-100, summary: string, criticalIssues: [], warnings: []}"
+%% }
+%% @E: { "stepType": "decision" }
+%% @F: {
+%%   "stepType": "task",
+%%   "execution": "automated",
+%%   "prompt": "Generate approval comment highlighting code strengths."
+%% }
+%% @G: {
+%%   "stepType": "task",
+%%   "execution": "manual",
+%%   "prompt": "Review automated analysis. Score: {{input.score}}/100. Approve, request changes, or reject."
+%% }
+%% @H: {
+%%   "stepType": "task",
+%%   "execution": "automated",
+%%   "prompt": "Generate constructive feedback requesting changes."
+%% }
+%% @I: {
+%%   "stepType": "task",
+%%   "execution": "automated",
+%%   "prompt": "Merge the PR and post success comment."
+%% }
+%% @J: { "stepType": "decision" }
+%% @K: {
+%%   "stepType": "task",
+%%   "execution": "automated",
+%%   "prompt": "Close the PR with a summary of why it wasn't merged."
+%% }
+%% === END_CONFIG ===
+```
+
+---
+
+## Daemon Execution Logic
+
+### Main Task Completion Handler
+
+```typescript
+// Pseudo-code for daemon workflow routing
+
+async function onTaskComplete(task: Task): Promise<void> {
+  const workflow = await getWorkflow(task.workflowId);
+  if (!workflow) return; // Not part of a workflow
+
+  const currentStep = findStep(workflow, task.workflowStage);
+  const nextStepId = getNextStepFromDiagram(workflow, currentStep.id);
+
+  if (!nextStepId) {
+    // End of workflow
+    return;
+  }
+
+  const nextStep = findStep(workflow, nextStepId);
+  await routeToStep(workflow, nextStep, task);
+}
+
+async function routeToStep(
+  workflow: Workflow,
+  step: WorkflowStep,
+  previousTask: Task
+): Promise<void> {
+  const output = parseTaskOutput(previousTask);
+
+  switch (step.stepType) {
+    case 'task':
+      await createWorkflowTask(workflow, step, previousTask, output);
+      break;
+
+    case 'decision':
+      // Evaluate immediately, no task created
+      const targetId = evaluateDecision(workflow, step, output);
+      const targetStep = findStep(workflow, targetId);
+      await routeToStep(workflow, targetStep, previousTask);
+      break;
+
+    case 'foreach':
+      await spawnForeachTasks(workflow, step, previousTask, output);
+      break;
+
+    case 'join':
+      await checkJoinCondition(workflow, step, previousTask);
+      break;
+
+    case 'subflow':
+      await startSubflow(workflow, step, previousTask, output);
+      break;
+  }
+}
+```
+
+### Decision Evaluation
+
+```typescript
+function evaluateDecision(
+  workflow: Workflow,
+  decision: WorkflowStep,
+  context: Record<string, unknown>
+): string {
+  const branches = decision.branches || parseBranchesFromMermaid(workflow, decision.id);
+
+  for (const branch of branches) {
+    if (branch.condition === null) continue; // Skip default
+    if (evaluateCondition(branch.condition, context)) {
+      return branch.targetStepId;
+    }
+  }
+
+  // Return default branch
+  const defaultBranch = branches.find(b => b.condition === null);
+  if (defaultBranch) {
+    return defaultBranch.targetStepId;
+  }
+
+  throw new Error(`Decision ${decision.id}: No matching branch and no default`);
+}
+
+function evaluateCondition(expr: string, context: Record<string, unknown>): boolean {
+  // Simple expression parser for patterns like:
+  //   "output.score >= 80"
+  //   "output.status === 'approved'"
+  //   "output.items.length > 0"
+
+  const operators: Record<string, (a: any, b: any) => boolean> = {
+    '>=': (a, b) => a >= b,
+    '<=': (a, b) => a <= b,
+    '>':  (a, b) => a > b,
+    '<':  (a, b) => a < b,
+    '===': (a, b) => a === b,
+    '!==': (a, b) => a !== b,
+  };
+
+  const match = expr.match(/^([\w.[\]]+)\s*(>=|<=|>|<|===|!==)\s*(.+)$/);
+  if (!match) {
+    // Boolean path: "output.isValid"
+    return Boolean(getValueByPath(context, expr));
+  }
+
+  const [, path, op, rawValue] = match;
+  const actualValue = getValueByPath(context, path);
+  const compareValue = JSON.parse(rawValue);
+
+  return operators[op](actualValue, compareValue);
+}
+```
+
+### ForEach Execution
+
+```typescript
+async function spawnForeachTasks(
+  workflow: Workflow,
+  step: WorkflowStep,
+  parentTask: Task,
+  output: Record<string, unknown>
+): Promise<void> {
+  const items = getValueByPath(output, step.itemsPath!) as unknown[];
+
+  if (!Array.isArray(items) || items.length === 0) {
+    // No items - skip to next step
+    const nextStepId = getNextStepFromDiagram(workflow, step.id);
+    if (nextStepId) {
+      const nextStep = findStep(workflow, nextStepId);
+      await routeToStep(workflow, nextStep, parentTask);
+    }
+    return;
+  }
+
+  const foreachTag = `foreach:${parentTask._id}`;
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const prompt = interpolateTemplate(step.prompt!, {
+      [step.itemVariable!]: item,
+      index: i,
+      total: items.length,
+    });
+
+    await createTask({
+      title: `${workflow.name}: ${step.name} [${i + 1}/${items.length}]`,
+      workflowId: workflow._id,
+      workflowStage: step.id,
+      parentId: parentTask._id,
+      extraPrompt: prompt,
+      status: 'pending',
+      tags: [foreachTag],
+    });
+  }
+
+  // Mark parent as waiting
+  await updateTask(parentTask._id, {
+    status: 'waiting',
+    additionalInfo: JSON.stringify({
+      ...output,
+      foreachSpawned: items.length,
+      foreachTag,
+    }),
+  });
+}
+```
+
+### Join Execution
+
+```typescript
+async function checkJoinCondition(
+  workflow: Workflow,
+  joinStep: WorkflowStep,
+  triggeringTask: Task
+): Promise<void> {
+  const awaitTag = interpolateTemplate(joinStep.awaitTag!, {
+    parentId: triggeringTask.parentId,
+  });
+
+  const completedTasks = await getTasks({
+    tags: awaitTag,
+    status: 'completed',
+  });
+
+  const parentTask = await getTask(triggeringTask.parentId!);
+  const parentInfo = JSON.parse(parentTask.additionalInfo || '{}');
+  const expectedCount = parentInfo.foreachSpawned;
+
+  if (completedTasks.length < expectedCount) {
+    return; // Not all complete yet
+  }
+
+  // All complete - aggregate and create join task
+  const aggregatedResults = completedTasks.map(t => ({
+    output: JSON.parse(t.additionalInfo || '{}'),
+  }));
+
+  await createTask({
+    title: `${workflow.name}: ${joinStep.name}`,
+    workflowId: workflow._id,
+    workflowStage: joinStep.id,
+    parentId: parentTask._id,
+    extraPrompt: joinStep.prompt,
+    status: 'pending',
+    additionalInfo: JSON.stringify({ aggregatedResults }),
+  });
+}
+```
+
+---
+
 ## Export/Import Format
 
-For workflow export with prompts (separate from mermaid diagram):
+For workflow export with prompts (mermaid config embedded, also parsed out for convenience):
 
 ```json
 {
   "workflow": {
-    "name": "Code Review Pipeline",
-    "description": "Automated code review workflow",
-    "mermaidDiagram": "graph TD\n  A[Lint Check] --> B[Security Scan] --> C(Human Review)",
+    "name": "PR Review Pipeline",
+    "description": "Automated PR review with human escalation",
+    "mermaidSource": "graph TD\n    A[Fetch PR] --> B...\n\n%% === WORKFLOW_CONFIG ===\n...",
     "steps": [
       {
-        "id": "lint",
-        "name": "Lint Check",
-        "type": "automated",
-        "hitlPhase": "automated",
-        "prompt": "Run linting on the code and report any issues found. Focus on code style and potential bugs."
-      },
-      {
-        "id": "security",
-        "name": "Security Scan",
-        "type": "automated",
-        "hitlPhase": "automated",
-        "prompt": "Scan the code for security vulnerabilities. Check for SQL injection, XSS, and other OWASP top 10 issues."
-      },
-      {
-        "id": "human_review",
-        "name": "Human Review",
-        "type": "manual",
-        "hitlPhase": "review",
-        "prompt": "Review the automated findings and make final approval decision."
+        "id": "A",
+        "name": "Fetch PR Details",
+        "stepType": "task",
+        "execution": "automated",
+        "prompt": "Fetch PR #{{input.prNumber}}..."
       }
     ]
   },
-  "exportVersion": "1.0",
+  "agents": [
+    {
+      "id": "code-reviewer",
+      "displayName": "Code Review Agent",
+      "agentPrompt": "You are an expert code reviewer..."
+    }
+  ],
+  "exportVersion": "2.0",
   "exportedAt": "2025-01-15T10:00:00Z"
+}
+```
+
+---
+
+## Template Interpolation
+
+```typescript
+function interpolateTemplate(
+  template: string,
+  context: Record<string, unknown>
+): string {
+  return template.replace(/\{\{([\w.[\]]+)\}\}/g, (match, path) => {
+    const value = getValueByPath(context, path);
+
+    if (value === undefined) return match;
+    if (typeof value === 'object') return JSON.stringify(value, null, 2);
+    return String(value);
+  });
+}
+
+function getValueByPath(obj: unknown, path: string): unknown {
+  const parts = path.split(/[.[\]]+/).filter(Boolean);
+  let current = obj;
+
+  for (const part of parts) {
+    if (current === null || current === undefined) return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+
+  return current;
 }
 ```
 
@@ -391,22 +746,53 @@ For workflow export with prompts (separate from mermaid diagram):
 
 2. **Agent Assignment:** Should workflows define default agents per step, or should this be configured separately?
 
-3. **Branching Logic:** How should the daemon handle workflow decision points (diamonds in mermaid)?
+3. **Context Carry-Forward:** How much context should flow from task to task? All additionalInfo, or summarized?
 
-4. **Context Carry-Forward:** How much context should flow from task to task? All additionalInfo, or summarized?
+4. **Human-in-the-Loop:** When a task is `ESCALATE`d, what notification mechanism should trigger?
 
-5. **Human-in-the-Loop:** When a task is `ESCALATE`d, what notification mechanism should trigger?
+5. **Failure Handling:** If an agent fails repeatedly on a step, should there be automatic reassignment or workflow pause?
 
-6. **Failure Handling:** If an agent fails repeatedly on a step, should there be automatic reassignment or workflow pause?
+6. **Foreach Limits:** Should there be a max items limit to prevent runaway task creation?
+
+7. **Join Timeout:** What happens if some foreach tasks fail? Partial join?
+
+8. **Subflow Depth:** Limit nesting depth to prevent infinite recursion?
 
 ---
 
-## Next Steps
+## Implementation Checklist
 
-1. [ ] Finalize base daemon prompt format
-2. [ ] Add `isAgent` and `agentPrompt` to User schema
-3. [ ] Add `prompt` to WorkflowStep schema
-4. [ ] Update daemon to assemble layered prompts
-5. [ ] Add workflow step prompt editor to UI
-6. [ ] Implement export/import with prompts
-7. [ ] Add task auto-creation on workflow progression
+### Phase 1: Schema Updates
+- [ ] Add `waiting` and `failed` to TaskStatus
+- [ ] Add `isAgent` and `agentPrompt` to User interface
+- [ ] Add `stepType`, `execution`, `prompt`, `defaultAssigneeId` to WorkflowStep
+- [ ] Add decision fields: `branches`, `defaultBranch`
+- [ ] Add foreach fields: `itemsPath`, `itemVariable`
+- [ ] Add join fields: `awaitTag`
+- [ ] Add subflow fields: `subflowId`, `inputMapping`
+
+### Phase 2: Mermaid Parser Updates
+- [ ] Update `parseMermaidToSteps()` to extract config block
+- [ ] Parse step configs from `%% @ID: {...}` format
+- [ ] Extract decision branches from edge labels
+- [ ] Preserve config block in export
+
+### Phase 3: Daemon Updates
+- [ ] Implement layered prompt assembly
+- [ ] Add response parsing (Status, Summary, Output, Next Action, Metadata)
+- [ ] Implement decision routing logic
+- [ ] Implement foreach task spawning
+- [ ] Implement join condition checking
+- [ ] Implement subflow delegation
+
+### Phase 4: API Updates
+- [ ] Add endpoint to fetch agent user by ID
+- [ ] Add endpoint to get workflow step by stage ID
+- [ ] Update task creation to support workflow context
+
+### Phase 5: UI Updates
+- [ ] Add "Is Agent" checkbox to user form
+- [ ] Add agentPrompt textarea (shown when isAgent)
+- [ ] Add step prompt editor in workflow builder
+- [ ] Add step type selector in workflow builder
+- [ ] Add execution visualization with live status
