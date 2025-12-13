@@ -40,7 +40,8 @@ interface WorkflowData {
   name: string
   description: string
   isActive: boolean
-  steps: WorkflowStep[]
+  steps?: WorkflowStep[]
+  stages?: string[]  // Legacy format - simple stage names
   mermaidDiagram?: string
   createdAt: string
   updatedAt?: string
@@ -132,7 +133,17 @@ export default function WorkflowsPage() {
     },
   })
 
-  const workflows = workflowsData?.data || []
+  // Normalize workflows to ensure steps array exists
+  // Legacy workflows may have 'stages' (string[]) instead of 'steps' (WorkflowStep[])
+  const workflows = (workflowsData?.data || []).map(w => ({
+    ...w,
+    steps: w.steps || (w.stages?.map((name, i) => ({
+      id: `stage-${i}`,
+      name,
+      type: 'manual' as const,
+      hitlPhase: 'none',
+    })) || []),
+  }))
 
   const openCreateEditor = () => {
     setEditingWorkflow(null)
@@ -149,7 +160,7 @@ export default function WorkflowsPage() {
     setEditingWorkflow(null)
   }
 
-  const handleSave = (workflow: { _id?: string; name: string; description: string; isActive: boolean; steps: WorkflowStep[]; mermaidDiagram?: string }) => {
+  const handleSave = (workflow: { _id?: string; name: string; description: string; isActive: boolean; steps?: WorkflowStep[]; mermaidDiagram?: string }) => {
     if (workflow._id) {
       updateMutation.mutate({ id: workflow._id, data: workflow })
     } else {

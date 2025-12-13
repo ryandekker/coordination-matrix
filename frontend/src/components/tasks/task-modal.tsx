@@ -128,7 +128,8 @@ export function TaskModal({
 
   const selectedWorkflowId = watch('workflowId') as string | null
   const selectedWorkflow = workflows.find(w => w._id === selectedWorkflowId)
-  const workflowStages = selectedWorkflow?.steps?.map(s => s.name) || []
+  // Support both 'steps' (new format) and 'stages' (legacy format)
+  const workflowStages = selectedWorkflow?.steps?.map(s => s.name) || selectedWorkflow?.stages || []
 
   useEffect(() => {
     if (task) {

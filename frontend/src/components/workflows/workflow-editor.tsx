@@ -58,7 +58,8 @@ interface Workflow {
   name: string
   description: string
   isActive: boolean
-  steps: WorkflowStep[]
+  steps?: WorkflowStep[]
+  stages?: string[]  // Legacy format
   mermaidDiagram?: string
 }
 
@@ -121,7 +122,14 @@ export function WorkflowEditor({
         description: workflow.description || '',
         isActive: workflow.isActive,
       })
-      setSteps(workflow.steps || [])
+      // Support both 'steps' (new format) and 'stages' (legacy format)
+      const normalizedSteps = workflow.steps || (workflow.stages?.map((name, i) => ({
+        id: `stage-${i}`,
+        name,
+        type: 'manual' as const,
+        hitlPhase: 'none',
+      })) || [])
+      setSteps(normalizedSteps)
       setMermaidCode(workflow.mermaidDiagram || '')
     } else {
       reset({

@@ -490,7 +490,8 @@ export interface Workflow {
   _id: string
   name: string
   description?: string
-  steps: WorkflowStep[]
+  steps?: WorkflowStep[]
+  stages?: string[]  // Legacy format - simple stage names
   mermaidDiagram?: string
   isActive: boolean
   createdAt: string
