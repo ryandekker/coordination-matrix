@@ -59,36 +59,75 @@ import {
   Lightbulb,
   RefreshCw,
   ArrowRight,
+  Globe,
+  Link2,
+  Zap,
 } from 'lucide-react'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
 // Step types for workflow routing
-type WorkflowStepType = 'task' | 'decision' | 'foreach' | 'join' | 'subflow'
-type ExecutionMode = 'automated' | 'manual'
+// - agent: AI agent task (Claude, GPT, etc.) - optional additional instructions
+// - external: External service/webhook call - no prompting, has endpoint config
+// - manual: Human-in-the-loop task
+// - decision: Routing based on conditions from previous step output
+// - foreach: Fan-out loop over collection
+// - join: Fan-in aggregation point
+// - subflow: Delegate to another workflow
+type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'subflow'
+
+// Connection between steps (for non-linear flows)
+interface StepConnection {
+  targetStepId: string
+  condition?: string | null
+  label?: string
+}
+
+// External service configuration
+interface ExternalConfig {
+  endpoint?: string
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  headers?: Record<string, string>
+  payloadTemplate?: string
+}
 
 interface WorkflowStep {
   id: string
   name: string
-  stepType?: WorkflowStepType
-  execution?: ExecutionMode
-  type?: 'automated' | 'manual' // Legacy
-  prompt?: string
   description?: string
-  hitlPhase?: string // Legacy
+  stepType?: WorkflowStepType  // Optional for backward compatibility
+
+  // Non-linear flow: explicit connections to next steps
+  connections?: StepConnection[]
+
+  // Agent step configuration
+  additionalInstructions?: string
   defaultAssigneeId?: string
-  // Decision fields
-  branches?: { condition: string | null; targetStepId: string }[]
-  defaultBranch?: string
+
+  // External step configuration
+  externalConfig?: ExternalConfig
+
+  // Decision step configuration
+  defaultConnection?: string
+
   // ForEach fields
   itemsPath?: string
   itemVariable?: string
   maxItems?: number
+
   // Join fields
   awaitTag?: string
+
   // Subflow fields
   subflowId?: string
   inputMapping?: Record<string, string>
+
+  // Legacy compatibility
+  execution?: 'automated' | 'manual'
+  type?: 'automated' | 'manual'
+  prompt?: string
+  hitlPhase?: string
+  branches?: { condition: string | null; targetStepId: string }[]
 }
 
 interface Workflow {
@@ -116,12 +155,14 @@ interface WorkflowEditorProps {
   onSave: (workflow: Workflow) => void
 }
 
-const STEP_TYPES: { type: WorkflowStepType; label: string; icon: React.ElementType; color: string }[] = [
-  { type: 'task', label: 'Task', icon: Bot, color: 'text-blue-500' },
-  { type: 'decision', label: 'Decision', icon: GitBranch, color: 'text-amber-500' },
-  { type: 'foreach', label: 'ForEach', icon: Repeat, color: 'text-green-500' },
-  { type: 'join', label: 'Join', icon: Merge, color: 'text-purple-500' },
-  { type: 'subflow', label: 'Subflow', icon: WorkflowIcon, color: 'text-pink-500' },
+const STEP_TYPES: { type: WorkflowStepType; label: string; description: string; icon: React.ElementType; color: string; bgColor: string }[] = [
+  { type: 'agent', label: 'Agent', description: 'AI agent task', icon: Bot, color: 'text-blue-500', bgColor: 'bg-blue-50' },
+  { type: 'external', label: 'External', description: 'API/webhook call', icon: Globe, color: 'text-orange-500', bgColor: 'bg-orange-50' },
+  { type: 'manual', label: 'Manual', description: 'Human task', icon: User, color: 'text-purple-500', bgColor: 'bg-purple-50' },
+  { type: 'decision', label: 'Decision', description: 'Route by condition', icon: GitBranch, color: 'text-amber-500', bgColor: 'bg-amber-50' },
+  { type: 'foreach', label: 'ForEach', description: 'Loop over items', icon: Repeat, color: 'text-green-500', bgColor: 'bg-green-50' },
+  { type: 'join', label: 'Join', description: 'Aggregate results', icon: Merge, color: 'text-indigo-500', bgColor: 'bg-indigo-50' },
+  { type: 'subflow', label: 'Subflow', description: 'Run sub-workflow', icon: WorkflowIcon, color: 'text-pink-500', bgColor: 'bg-pink-50' },
 ]
 
 function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string {
@@ -135,7 +176,20 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     const label = step.name.replace(/"/g, "'")
 
     switch (step.stepType) {
+      case 'agent':
+        // Square brackets for agent tasks (AI)
+        lines.push(`    ${nodeId}["${label}"]`)
+        break
+      case 'external':
+        // Hexagon for external/API tasks
+        lines.push(`    ${nodeId}{{"${label}"}}`)
+        break
+      case 'manual':
+        // Round brackets for manual/HITL tasks
+        lines.push(`    ${nodeId}("${label}")`)
+        break
       case 'decision':
+        // Diamond for decision/routing
         lines.push(`    ${nodeId}{"${label}"}`)
         break
       case 'foreach':
@@ -147,8 +201,8 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
       case 'subflow':
         lines.push(`    ${nodeId}[["Run: ${label}"]]`)
         break
-      case 'task':
       default:
+        // Legacy support: check execution mode
         const execution = step.execution || step.type || 'automated'
         if (execution === 'manual') {
           lines.push(`    ${nodeId}("${label}")`)
@@ -158,13 +212,26 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     }
   })
 
-  // Generate connections
+  // Generate connections - use explicit connections if available, otherwise linear
+  const connectedFrom = new Set<string>()
+
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i]
     const nodeId = step.id || `step${i}`
 
-    // For decision nodes with branches, use labeled edges
-    if (step.stepType === 'decision' && step.branches && step.branches.length > 0) {
+    // Use explicit connections if defined
+    if (step.connections && step.connections.length > 0) {
+      for (const conn of step.connections) {
+        if (conn.condition || conn.label) {
+          lines.push(`    ${nodeId} -->|"${conn.label || conn.condition}"| ${conn.targetStepId}`)
+        } else {
+          lines.push(`    ${nodeId} --> ${conn.targetStepId}`)
+        }
+      }
+      connectedFrom.add(nodeId)
+    }
+    // Legacy: use branches for decision nodes
+    else if (step.stepType === 'decision' && step.branches && step.branches.length > 0) {
       for (const branch of step.branches) {
         if (branch.condition) {
           lines.push(`    ${nodeId} -->|"${branch.condition}"| ${branch.targetStepId}`)
@@ -172,25 +239,35 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
           lines.push(`    ${nodeId} --> ${branch.targetStepId}`)
         }
       }
-    } else if (i < steps.length - 1) {
-      // Simple linear connection to next step
+      connectedFrom.add(nodeId)
+    }
+  }
+
+  // Add linear connections for nodes without explicit connections
+  for (let i = 0; i < steps.length - 1; i++) {
+    const step = steps[i]
+    const nodeId = step.id || `step${i}`
+
+    if (!connectedFrom.has(nodeId)) {
       const nextNodeId = steps[i + 1].id || `step${i + 1}`
       lines.push(`    ${nodeId} --> ${nextNodeId}`)
     }
   }
 
-  // Add styling classes
+  // Add styling classes with distinct colors for each type
   lines.push('')
-  lines.push('    classDef automated fill:#3B82F6,color:#fff')
-  lines.push('    classDef manual fill:#8B5CF6,color:#fff')
-  lines.push('    classDef decision fill:#F59E0B,color:#fff')
-  lines.push('    classDef foreach fill:#10B981,color:#fff')
-  lines.push('    classDef join fill:#8B5CF6,color:#fff')
-  lines.push('    classDef subflow fill:#EC4899,color:#fff')
+  lines.push('    classDef agent fill:#3B82F6,color:#fff')       // Blue - AI agent
+  lines.push('    classDef external fill:#F97316,color:#fff')    // Orange - External/API
+  lines.push('    classDef manual fill:#8B5CF6,color:#fff')      // Purple - Human/HITL
+  lines.push('    classDef decision fill:#F59E0B,color:#fff')    // Amber - Decision
+  lines.push('    classDef foreach fill:#10B981,color:#fff')     // Green - Loop
+  lines.push('    classDef join fill:#6366F1,color:#fff')        // Indigo - Join
+  lines.push('    classDef subflow fill:#EC4899,color:#fff')     // Pink - Subflow
 
   // Apply classes to nodes
   const classGroups: Record<string, string[]> = {
-    automated: [],
+    agent: [],
+    external: [],
     manual: [],
     decision: [],
     foreach: [],
@@ -201,21 +278,36 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
   steps.forEach((step, i) => {
     const nodeId = step.id || `step${i}`
 
-    if (step.stepType === 'decision') {
-      classGroups.decision.push(nodeId)
-    } else if (step.stepType === 'foreach') {
-      classGroups.foreach.push(nodeId)
-    } else if (step.stepType === 'join') {
-      classGroups.join.push(nodeId)
-    } else if (step.stepType === 'subflow') {
-      classGroups.subflow.push(nodeId)
-    } else {
-      const execution = step.execution || step.type || 'automated'
-      if (execution === 'manual') {
+    switch (step.stepType) {
+      case 'agent':
+        classGroups.agent.push(nodeId)
+        break
+      case 'external':
+        classGroups.external.push(nodeId)
+        break
+      case 'manual':
         classGroups.manual.push(nodeId)
-      } else {
-        classGroups.automated.push(nodeId)
-      }
+        break
+      case 'decision':
+        classGroups.decision.push(nodeId)
+        break
+      case 'foreach':
+        classGroups.foreach.push(nodeId)
+        break
+      case 'join':
+        classGroups.join.push(nodeId)
+        break
+      case 'subflow':
+        classGroups.subflow.push(nodeId)
+        break
+      default:
+        // Legacy support
+        const execution = step.execution || step.type || 'automated'
+        if (execution === 'manual') {
+          classGroups.manual.push(nodeId)
+        } else {
+          classGroups.agent.push(nodeId)
+        }
     }
   })
 
@@ -267,18 +359,26 @@ export function WorkflowEditor({
         isActive: workflow.isActive,
       })
       // Support both 'steps' (new format) and 'stages' (legacy format)
-      // Also normalize stepType and execution for all steps
+      // Normalize stepType for all steps, mapping legacy types to new taxonomy
       const normalizedSteps = workflow.steps
-        ? workflow.steps.map(step => ({
-            ...step,
-            stepType: step.stepType || 'task',
-            execution: step.execution || (step as any).type || 'automated',
-          }))
+        ? workflow.steps.map(step => {
+            // Map legacy 'task' type to new types based on execution mode
+            let stepType = step.stepType
+            if (!stepType || stepType === 'task' as any) {
+              const execution = step.execution || (step as any).type || 'automated'
+              stepType = execution === 'manual' ? 'manual' : 'agent'
+            }
+            return {
+              ...step,
+              stepType,
+              // Map legacy prompt to additionalInstructions
+              additionalInstructions: step.additionalInstructions || step.prompt,
+            }
+          })
         : (workflow.stages?.map((name, i) => ({
             id: `stage-${i}`,
             name,
-            stepType: 'task' as const,
-            execution: 'manual' as const,
+            stepType: 'manual' as const,
           })) || [])
       setSteps(normalizedSteps)
       setMermaidCode(workflow.mermaidDiagram || '')
@@ -320,9 +420,7 @@ export function WorkflowEditor({
     const newStep: WorkflowStep = {
       id: `step-${Date.now()}`,
       name: `Step ${steps.length + 1}`,
-      stepType: 'task',
-      execution: 'automated',
-      prompt: '',
+      stepType: 'agent',
     }
     setSteps([...steps, newStep])
     // Auto-expand new step
@@ -376,11 +474,10 @@ export function WorkflowEditor({
         return
       }
 
-      // Normalize the parsed steps
+      // Normalize the parsed steps - new types don't need execution field
       const normalizedSteps = parsedSteps.map((step: WorkflowStep) => ({
         ...step,
-        stepType: step.stepType || 'task',
-        execution: step.execution || step.type || 'automated',
+        stepType: step.stepType || 'agent',
       }))
 
       setSteps(normalizedSteps)
@@ -611,34 +708,9 @@ export function WorkflowEditor({
                               </SelectContent>
                             </Select>
 
-                            {step.stepType === 'task' && (
-                              <Select
-                                value={step.execution || 'automated'}
-                                onValueChange={(val) => updateStep(index, { execution: val as ExecutionMode })}
-                              >
-                                <SelectTrigger className="w-[130px] h-8" onClick={(e) => e.stopPropagation()}>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="automated">
-                                    <div className="flex items-center gap-2">
-                                      <Bot className="h-4 w-4 text-blue-500" />
-                                      Automated
-                                    </div>
-                                  </SelectItem>
-                                  <SelectItem value="manual">
-                                    <div className="flex items-center gap-2">
-                                      <User className="h-4 w-4 text-purple-500" />
-                                      Manual
-                                    </div>
-                                  </SelectItem>
-                                </SelectContent>
-                              </Select>
-                            )}
-
-                            {step.prompt && (
+                            {(step.additionalInstructions || step.prompt) && (
                               <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
-                                has prompt
+                                has instructions
                               </span>
                             )}
 
@@ -656,76 +728,124 @@ export function WorkflowEditor({
                           {/* Step Details (Expanded) */}
                           <CollapsibleContent>
                             <div className="border-t px-4 py-3 space-y-3 bg-muted/20">
-                              {/* Prompt - for task steps */}
-                              {step.stepType === 'task' && (
+                              {/* Agent step configuration */}
+                              {(step.stepType === 'agent' || (!step.stepType && step.execution !== 'manual')) && (
                                 <div className="space-y-2">
-                                  <div className="flex items-center justify-between">
-                                    <label className="text-sm font-medium flex items-center gap-2">
-                                      <Sparkles className="h-4 w-4 text-amber-500" />
-                                      AI Prompt Instructions
-                                      {step.execution === 'automated' && (
-                                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                                          Required for automation
-                                        </span>
-                                      )}
-                                    </label>
-                                    {step.prompt && (
-                                      <span className="text-xs text-green-600 flex items-center gap-1">
-                                        <MessageSquare className="h-3 w-3" />
-                                        Configured
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
+                                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
                                     <div className="flex items-start gap-2">
-                                      <Lightbulb className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
-                                      <div className="text-amber-800 space-y-1">
-                                        <p className="font-medium">What should the AI do at this step?</p>
-                                        <p className="text-xs">
-                                          Write clear instructions for the AI agent. Be specific about:
+                                      <Bot className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                                      <div className="text-blue-800">
+                                        <p className="font-medium">AI Agent Task</p>
+                                        <p className="text-xs mt-1">
+                                          This step is handled by an AI agent. The agent already knows how to handle most tasks -
+                                          additional instructions are optional and provide extra context.
                                         </p>
-                                        <ul className="text-xs list-disc list-inside space-y-0.5 ml-2">
-                                          <li>What action to take (review, analyze, generate, etc.)</li>
-                                          <li>What inputs to use (files, previous outputs, task data)</li>
-                                          <li>What output format to produce</li>
-                                        </ul>
                                       </div>
                                     </div>
                                   </div>
 
-                                  <Textarea
-                                    value={step.prompt || ''}
-                                    onChange={(e) => updateStep(index, { prompt: e.target.value })}
-                                    placeholder={`Example prompts for "${step.name}":
+                                  <div className="space-y-1">
+                                    <label className="text-sm font-medium flex items-center gap-2">
+                                      <Sparkles className="h-4 w-4 text-amber-500" />
+                                      Additional Instructions
+                                      <span className="text-xs text-muted-foreground">(optional)</span>
+                                    </label>
+                                    <Textarea
+                                      value={step.additionalInstructions || step.prompt || ''}
+                                      onChange={(e) => updateStep(index, { additionalInstructions: e.target.value })}
+                                      placeholder={`Add extra context for the agent if needed. Examples:
 
-• "Review the code changes in {{task.metadata.files}} and provide feedback on code quality, potential bugs, and suggestions for improvement."
+• "Focus on security vulnerabilities in this review"
+• "Use the company style guide for formatting"
+• "Include test coverage recommendations"
 
-• "Analyze the test results from the previous step. If all tests pass, approve for merge. If any fail, create a detailed report of failures."
+The agent will receive task context automatically.`}
+                                      className="min-h-[100px] font-mono text-sm"
+                                    />
+                                  </div>
+                                </div>
+                              )}
 
-• "Generate a summary of changes made in this PR, including affected components and any breaking changes."
+                              {/* External step configuration */}
+                              {step.stepType === 'external' && (
+                                <div className="space-y-3">
+                                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-sm">
+                                    <div className="flex items-start gap-2">
+                                      <Globe className="h-4 w-4 text-orange-600 mt-0.5 flex-shrink-0" />
+                                      <div className="text-orange-800">
+                                        <p className="font-medium">External Service Call</p>
+                                        <p className="text-xs mt-1">
+                                          This step calls an external API or webhook. Configure the endpoint and request details below.
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
 
-Use {{variable}} to reference:
-- {{task.title}} - Task title
-- {{task.description}} - Task description
-- {{task.metadata.X}} - Custom metadata
-- {{previousStep.output}} - Output from prior step`}
-                                    className={cn(
-                                      "min-h-[140px] font-mono text-sm",
-                                      !step.prompt && step.execution === 'automated' && "border-amber-300 bg-amber-50/30"
-                                    )}
-                                  />
+                                  <div className="grid grid-cols-4 gap-3">
+                                    <div className="space-y-1">
+                                      <label className="text-sm font-medium">Method</label>
+                                      <Select
+                                        value={step.externalConfig?.method || 'POST'}
+                                        onValueChange={(val) => updateStep(index, {
+                                          externalConfig: { ...step.externalConfig, method: val as any }
+                                        })}
+                                      >
+                                        <SelectTrigger className="h-8">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="GET">GET</SelectItem>
+                                          <SelectItem value="POST">POST</SelectItem>
+                                          <SelectItem value="PUT">PUT</SelectItem>
+                                          <SelectItem value="PATCH">PATCH</SelectItem>
+                                          <SelectItem value="DELETE">DELETE</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                    <div className="col-span-3 space-y-1">
+                                      <label className="text-sm font-medium">Endpoint URL</label>
+                                      <Input
+                                        value={step.externalConfig?.endpoint || ''}
+                                        onChange={(e) => updateStep(index, {
+                                          externalConfig: { ...step.externalConfig, endpoint: e.target.value }
+                                        })}
+                                        placeholder="https://api.example.com/webhook"
+                                        className="font-mono text-sm h-8"
+                                      />
+                                    </div>
+                                  </div>
 
-                                  <div className="flex items-center justify-between text-xs">
-                                    <p className="text-muted-foreground flex items-center gap-1">
-                                      <Info className="h-3 w-3" />
-                                      This prompt guides the AI daemon when it processes tasks at this workflow stage.
-                                    </p>
-                                    {!step.prompt && step.execution === 'automated' && (
-                                      <span className="text-amber-600 font-medium">
-                                        ⚠ No prompt configured
-                                      </span>
-                                    )}
+                                  <div className="space-y-1">
+                                    <label className="text-sm font-medium">Payload Template (JSON)</label>
+                                    <Textarea
+                                      value={step.externalConfig?.payloadTemplate || ''}
+                                      onChange={(e) => updateStep(index, {
+                                        externalConfig: { ...step.externalConfig, payloadTemplate: e.target.value }
+                                      })}
+                                      placeholder={`{
+  "taskId": "{{task._id}}",
+  "title": "{{task.title}}",
+  "data": "{{previousStep.output}}"
+}`}
+                                      className="min-h-[80px] font-mono text-sm"
+                                    />
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Manual step configuration */}
+                              {step.stepType === 'manual' && (
+                                <div className="space-y-2">
+                                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-sm">
+                                    <div className="flex items-start gap-2">
+                                      <User className="h-4 w-4 text-purple-600 mt-0.5 flex-shrink-0" />
+                                      <div className="text-purple-800">
+                                        <p className="font-medium">Human Task</p>
+                                        <p className="text-xs mt-1">
+                                          This step requires human review or action. The task will wait for a person to complete it.
+                                        </p>
+                                      </div>
+                                    </div>
                                   </div>
                                 </div>
                               )}

@@ -6,52 +6,74 @@ import { createError } from '../middleware/error-handler.js';
 export const workflowsRouter = Router();
 
 // Step types for workflow routing
-type WorkflowStepType = 'task' | 'decision' | 'foreach' | 'join' | 'subflow';
+// - agent: AI agent task (Claude, GPT, etc.) - optional additional instructions
+// - external: External service/webhook call - no prompting, has endpoint config
+// - manual: Human-in-the-loop task
+// - decision: Routing based on conditions from previous step output
+// - foreach: Fan-out loop over collection
+// - join: Fan-in aggregation point
+// - subflow: Delegate to another workflow
+type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'subflow';
 
-// Execution mode (only applicable to 'task' type)
-type ExecutionMode = 'automated' | 'manual';
-
-// Decision branch for routing
-interface DecisionBranch {
-  condition: string | null;       // null = default branch
+// Connection between steps (for non-linear flows)
+interface StepConnection {
   targetStepId: string;
+  condition?: string | null;  // JSONPath condition or null for default/unconditional
+  label?: string;             // Display label for the connection
+}
+
+// External service configuration
+interface ExternalConfig {
+  endpoint?: string;          // URL to call
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  headers?: Record<string, string>;
+  payloadTemplate?: string;   // JSON template with {{variable}} interpolation
+  responseMapping?: Record<string, string>;  // Map response fields to output
 }
 
 interface WorkflowStep {
   id: string;
   name: string;
+  description?: string;
 
   // Step classification
-  stepType?: WorkflowStepType;    // What kind of step (default: 'task')
-  execution?: ExecutionMode;      // Execution mode for task steps
+  stepType: WorkflowStepType;
 
-  // Legacy field (kept for compatibility)
-  type?: 'automated' | 'manual';  // DEPRECATED: Use execution instead
-  hitlPhase: string;
-  description?: string;
-  config?: Record<string, unknown>;
+  // Non-linear flow: explicit connections to next steps
+  // If empty/undefined for non-decision steps, assumes linear flow to next step in array
+  connections?: StepConnection[];
 
-  // Prompt field for AI execution
-  prompt?: string;
+  // Agent step configuration
+  additionalInstructions?: string;  // Extra context for the agent (not required)
+  defaultAssigneeId?: string;       // Agent or user to assign to
 
-  // Default assignee for this step
-  defaultAssigneeId?: string;
+  // External step configuration
+  externalConfig?: ExternalConfig;
 
-  // Decision routing (only for stepType='decision')
-  branches?: DecisionBranch[];
-  defaultBranch?: string;
+  // Decision step configuration
+  // Uses connections[] with conditions for routing
+  // Each connection.condition is evaluated against previous step output
+  defaultConnection?: string;       // targetStepId for when no conditions match
 
-  // ForEach configuration (only for stepType='foreach')
-  itemsPath?: string;             // JSONPath to array in output
-  itemVariable?: string;          // Template variable name
-  maxItems?: number;              // Limit to prevent runaway (default: 100)
+  // ForEach configuration
+  itemsPath?: string;               // JSONPath to array in previous output
+  itemVariable?: string;            // Template variable name for each item
+  maxItems?: number;                // Safety limit (default: 100)
 
-  // Join configuration (only for stepType='join')
-  awaitTag?: string;              // Tag pattern: "foreach:{{parentId}}"
+  // Join configuration
+  awaitTag?: string;                // Tag pattern: "foreach:{{parentId}}"
 
-  // Subflow configuration (only for stepType='subflow')
+  // Subflow configuration
   subflowId?: string;
   inputMapping?: Record<string, string>;
+
+  // Legacy fields (kept for compatibility)
+  execution?: 'automated' | 'manual';
+  type?: 'automated' | 'manual';
+  prompt?: string;                  // Mapped to additionalInstructions
+  hitlPhase?: string;
+  config?: Record<string, unknown>;
+  branches?: { condition: string | null; targetStepId: string }[];  // Legacy, use connections
 }
 
 interface Workflow {
@@ -250,9 +272,9 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
 
   // Node storage with full step info
   interface ParsedNode {
+    id: string;  // Keep original mermaid ID for connection mapping
     name: string;
     stepType: WorkflowStepType;
-    execution?: ExecutionMode;
   }
 
   const nodes: Map<string, ParsedNode> = new Map();
@@ -267,6 +289,17 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
 
     // Parse node definitions - order matters! More specific patterns first
 
+    // Hexagon {{ }} - external service/API call
+    // Pattern: ID{{"text"}} or ID{{text}}
+    const hexagonMatch = line.match(/^(\w+)\{\{["']?([^"}]+?)["']?\}\}/);
+    if (hexagonMatch) {
+      const [, id, text] = hexagonMatch;
+      // Check for ext: or api: prefix
+      const cleanName = text.replace(/^(ext|api|webhook):\s*/i, '').trim();
+      nodes.set(id, { id, name: cleanName, stepType: 'external' });
+      continue;
+    }
+
     // Double square brackets [[ ]] - foreach/join/subflow
     // Pattern: ID[["text"]] or ID[[text]]
     const doubleSquareMatch = line.match(/^(\w+)\[\[["']?([^"\]]+?)["']?\]\]/);
@@ -274,7 +307,7 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
       const [, id, text] = doubleSquareMatch;
       const lowerText = text.toLowerCase();
 
-      let stepType: WorkflowStepType = 'task';
+      let stepType: WorkflowStepType = 'agent';
       let cleanName = text;
 
       if (lowerText.startsWith('each:') || lowerText.startsWith('foreach:')) {
@@ -292,43 +325,51 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
         cleanName = text;
       }
 
-      nodes.set(id, { name: cleanName, stepType });
+      nodes.set(id, { id, name: cleanName, stepType });
       continue;
     }
 
-    // Diamond brackets { } - decision
+    // Diamond brackets { } - decision/routing
     // Pattern: ID{"text"} or ID{text}
     const diamondMatch = line.match(/^(\w+)\{["']?([^"}]+?)["']?\}/);
     if (diamondMatch) {
       const [, id, text] = diamondMatch;
-      nodes.set(id, { name: text, stepType: 'decision' });
+      nodes.set(id, { id, name: text, stepType: 'decision' });
       continue;
     }
 
-    // Double round brackets (( )) - manual task (stadium shape)
+    // Double round brackets (( )) - manual/HITL task (stadium shape)
     // Pattern: ID(("text")) or ID((text))
     const stadiumMatch = line.match(/^(\w+)\(\(["']?([^")]+?)["']?\)\)/);
     if (stadiumMatch) {
       const [, id, text] = stadiumMatch;
-      nodes.set(id, { name: text, stepType: 'task', execution: 'manual' });
+      nodes.set(id, { id, name: text, stepType: 'manual' });
       continue;
     }
 
-    // Single round brackets ( ) - manual task
+    // Single round brackets ( ) - manual/HITL task
     // Pattern: ID("text") or ID(text)
     const roundMatch = line.match(/^(\w+)\(["']?([^")]+?)["']?\)/);
     if (roundMatch) {
       const [, id, text] = roundMatch;
-      nodes.set(id, { name: text, stepType: 'task', execution: 'manual' });
+      nodes.set(id, { id, name: text, stepType: 'manual' });
       continue;
     }
 
-    // Single square brackets [ ] - automated task (default)
+    // Single square brackets [ ] - agent task (default)
     // Pattern: ID["text"] or ID[text]
+    // Check for ext: prefix to make it external
     const squareMatch = line.match(/^(\w+)\[["']?([^"\]]+?)["']?\]/);
     if (squareMatch) {
       const [, id, text] = squareMatch;
-      nodes.set(id, { name: text, stepType: 'task', execution: 'automated' });
+      const lowerText = text.toLowerCase();
+
+      if (lowerText.startsWith('ext:') || lowerText.startsWith('api:') || lowerText.startsWith('webhook:')) {
+        const cleanName = text.replace(/^(ext|api|webhook):\s*/i, '').trim();
+        nodes.set(id, { id, name: cleanName, stepType: 'external' });
+      } else {
+        nodes.set(id, { id, name: text, stepType: 'agent' });
+      }
       continue;
     }
 
@@ -402,41 +443,68 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
     }
   }
 
+  // Create a map from mermaid ID to generated step ID for connection mapping
+  const mermaidIdToStepId: Map<string, string> = new Map();
+
   // Create workflow steps
-  for (const nodeId of orderedNodes) {
-    const node = nodes.get(nodeId);
+  for (const mermaidId of orderedNodes) {
+    const node = nodes.get(mermaidId);
     if (node) {
+      const stepId = new ObjectId().toString();
+      mermaidIdToStepId.set(mermaidId, stepId);
+
       const step: WorkflowStep = {
-        id: new ObjectId().toString(),
+        id: stepId,
         name: node.name,
         stepType: node.stepType,
-        hitlPhase: node.execution === 'manual' ? 'approval_required' : 'none',
       };
 
-      // Add execution mode for task steps
-      if (node.stepType === 'task') {
-        step.execution = node.execution || 'automated';
-        // Legacy compatibility
-        step.type = step.execution;
+      // Build connections for this step (non-linear flow support)
+      const stepConnections: StepConnection[] = [];
+      for (const conn of connections) {
+        if (conn.from === mermaidId) {
+          stepConnections.push({
+            targetStepId: conn.to,  // Will be remapped after all steps created
+            condition: conn.label || undefined,
+            label: conn.label || undefined,
+          });
+        }
       }
 
-      // For decision nodes, extract branches from connections
-      if (node.stepType === 'decision') {
-        const branches: DecisionBranch[] = [];
-        for (const conn of connections) {
-          if (conn.from === nodeId) {
-            branches.push({
-              condition: conn.label || null,
-              targetStepId: conn.to,
-            });
-          }
-        }
-        if (branches.length > 0) {
-          step.branches = branches;
-        }
+      if (stepConnections.length > 0) {
+        step.connections = stepConnections;
+      }
+
+      // Legacy compatibility
+      if (node.stepType === 'agent') {
+        step.execution = 'automated';
+        step.type = 'automated';
+      } else if (node.stepType === 'manual') {
+        step.execution = 'manual';
+        step.type = 'manual';
+        step.hitlPhase = 'approval_required';
       }
 
       steps.push(step);
+    }
+  }
+
+  // Remap connection targetStepIds from mermaid IDs to actual step IDs
+  for (const step of steps) {
+    if (step.connections) {
+      for (const conn of step.connections) {
+        const actualStepId = mermaidIdToStepId.get(conn.targetStepId);
+        if (actualStepId) {
+          conn.targetStepId = actualStepId;
+        }
+      }
+    }
+    // Also handle legacy branches for decision nodes
+    if (step.stepType === 'decision' && step.connections) {
+      step.branches = step.connections.map(c => ({
+        condition: c.condition || null,
+        targetStepId: c.targetStepId,
+      }));
     }
   }
 
@@ -456,7 +524,20 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     const nodeName = step.name.replace(/"/g, "'");
 
     switch (step.stepType) {
+      case 'agent':
+        // Square brackets for agent tasks (AI)
+        lines.push(`    ${nodeId}["${nodeName}"]`);
+        break;
+      case 'external':
+        // Hexagon for external/API tasks
+        lines.push(`    ${nodeId}{{"${nodeName}"}}`);
+        break;
+      case 'manual':
+        // Round brackets for manual/HITL tasks
+        lines.push(`    ${nodeId}("${nodeName}")`);
+        break;
       case 'decision':
+        // Diamond for decision/routing
         lines.push(`    ${nodeId}{"${nodeName}"}`);
         break;
       case 'foreach':
@@ -468,9 +549,8 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
       case 'subflow':
         lines.push(`    ${nodeId}[["Run: ${nodeName}"]]`);
         break;
-      case 'task':
       default:
-        // Check execution mode (support both new and legacy)
+        // Legacy support: check execution mode
         const execution = step.execution || step.type || 'automated';
         if (execution === 'manual') {
           lines.push(`    ${nodeId}("${nodeName}")`);
@@ -480,41 +560,62 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     }
   }
 
-  // Generate connections
-  // For decision nodes with branches, use labeled edges
+  // Generate connections - use explicit connections if available, otherwise linear
+  const connectedFrom = new Set<string>();  // Track which nodes have outgoing connections
+
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
     const nodeId = step.id || `step${i}`;
 
-    if (step.stepType === 'decision' && step.branches && step.branches.length > 0) {
-      // Use branch connections
-      for (const branch of step.branches) {
-        const targetId = branch.targetStepId;
-        if (branch.condition) {
-          lines.push(`    ${nodeId} -->|"${branch.condition}"| ${targetId}`);
+    // Use explicit connections if defined
+    if (step.connections && step.connections.length > 0) {
+      for (const conn of step.connections) {
+        if (conn.condition || conn.label) {
+          lines.push(`    ${nodeId} -->|"${conn.label || conn.condition}"| ${conn.targetStepId}`);
         } else {
-          lines.push(`    ${nodeId} --> ${targetId}`);
+          lines.push(`    ${nodeId} --> ${conn.targetStepId}`);
         }
       }
-    } else if (i < steps.length - 1) {
-      // Simple linear connection to next step
+      connectedFrom.add(nodeId);
+    }
+    // Legacy: use branches for decision nodes
+    else if (step.stepType === 'decision' && step.branches && step.branches.length > 0) {
+      for (const branch of step.branches) {
+        if (branch.condition) {
+          lines.push(`    ${nodeId} -->|"${branch.condition}"| ${branch.targetStepId}`);
+        } else {
+          lines.push(`    ${nodeId} --> ${branch.targetStepId}`);
+        }
+      }
+      connectedFrom.add(nodeId);
+    }
+  }
+
+  // Add linear connections for nodes without explicit connections
+  for (let i = 0; i < steps.length - 1; i++) {
+    const step = steps[i];
+    const nodeId = step.id || `step${i}`;
+
+    if (!connectedFrom.has(nodeId)) {
       const nextNodeId = steps[i + 1].id || `step${i + 1}`;
       lines.push(`    ${nodeId} --> ${nextNodeId}`);
     }
   }
 
-  // Add styling classes
+  // Add styling classes with distinct colors for each type
   lines.push('');
-  lines.push('    classDef automated fill:#3B82F6,color:#fff');
-  lines.push('    classDef manual fill:#8B5CF6,color:#fff');
-  lines.push('    classDef decision fill:#F59E0B,color:#fff');
-  lines.push('    classDef foreach fill:#10B981,color:#fff');
-  lines.push('    classDef join fill:#8B5CF6,color:#fff');
-  lines.push('    classDef subflow fill:#EC4899,color:#fff');
+  lines.push('    classDef agent fill:#3B82F6,color:#fff');      // Blue - AI agent
+  lines.push('    classDef external fill:#F97316,color:#fff');   // Orange - External/API
+  lines.push('    classDef manual fill:#8B5CF6,color:#fff');     // Purple - Human/HITL
+  lines.push('    classDef decision fill:#F59E0B,color:#fff');   // Amber - Decision
+  lines.push('    classDef foreach fill:#10B981,color:#fff');    // Green - Loop
+  lines.push('    classDef join fill:#6366F1,color:#fff');       // Indigo - Join
+  lines.push('    classDef subflow fill:#EC4899,color:#fff');    // Pink - Subflow
 
   // Apply classes to nodes
   const classGroups: Record<string, string[]> = {
-    automated: [],
+    agent: [],
+    external: [],
     manual: [],
     decision: [],
     foreach: [],
@@ -526,21 +627,36 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     const step = steps[i];
     const nodeId = step.id || `step${i}`;
 
-    if (step.stepType === 'decision') {
-      classGroups.decision.push(nodeId);
-    } else if (step.stepType === 'foreach') {
-      classGroups.foreach.push(nodeId);
-    } else if (step.stepType === 'join') {
-      classGroups.join.push(nodeId);
-    } else if (step.stepType === 'subflow') {
-      classGroups.subflow.push(nodeId);
-    } else {
-      const execution = step.execution || step.type || 'automated';
-      if (execution === 'manual') {
+    switch (step.stepType) {
+      case 'agent':
+        classGroups.agent.push(nodeId);
+        break;
+      case 'external':
+        classGroups.external.push(nodeId);
+        break;
+      case 'manual':
         classGroups.manual.push(nodeId);
-      } else {
-        classGroups.automated.push(nodeId);
-      }
+        break;
+      case 'decision':
+        classGroups.decision.push(nodeId);
+        break;
+      case 'foreach':
+        classGroups.foreach.push(nodeId);
+        break;
+      case 'join':
+        classGroups.join.push(nodeId);
+        break;
+      case 'subflow':
+        classGroups.subflow.push(nodeId);
+        break;
+      default:
+        // Legacy support
+        const execution = step.execution || step.type || 'automated';
+        if (execution === 'manual') {
+          classGroups.manual.push(nodeId);
+        } else {
+          classGroups.agent.push(nodeId);
+        }
     }
   }
 
