@@ -134,7 +134,7 @@ in_progress ──▶ on_hold (needs human intervention)
 // backend/src/types/index.ts
 export interface User {
   _id: ObjectId;
-  email: string;
+  email?: string;                 // CHANGED: Optional for agents
   displayName: string;
   role: UserRole;
   isActive: boolean;
@@ -147,9 +147,21 @@ export interface User {
 }
 ```
 
+**Validation Rules:**
+- `email` is required when `isAgent` is false or undefined
+- `email` is optional when `isAgent` is true
+- Agent users use their `_id` as a unique identifier instead
+
+**Default Agents:**
+Workflows can reference agent IDs that don't exist yet. On first use, the system creates a default agent with:
+- `displayName`: Derived from ID (e.g., `code-reviewer` → "Code Reviewer")
+- `isAgent: true`
+- `agentPrompt`: Empty (uses base daemon prompt only)
+
 **UI Changes:**
 - Add "Is Agent" checkbox in user form
 - Show `agentPrompt` textarea when `isAgent` is checked
+- Hide/disable email field when `isAgent` is checked
 - Agent users can be assigned to tasks like regular users
 
 **Use Cases:**
@@ -200,6 +212,7 @@ interface WorkflowStep {
   // NEW: ForEach configuration (only for stepType='foreach')
   itemsPath?: string;             // JSONPath to array in output: "output.files"
   itemVariable?: string;          // Template variable name: "file"
+  maxItems?: number;              // Limit to prevent runaway (default: 100)
 
   // NEW: Join configuration (only for stepType='join')
   awaitTag?: string;              // Tag pattern: "foreach:{{parentId}}"
@@ -252,38 +265,38 @@ Prompts are assembled from multiple sources in this order:
 
 **Purpose:** Ensure consistent, parsable responses that can be saved automatically.
 
-**Proposed Structure:**
-```markdown
-You are a task automation agent. Your response MUST follow this exact format:
-
-## Status
-[SUCCESS | PARTIAL | BLOCKED | FAILED]
-
-## Summary
-[1-2 sentence summary of what was accomplished]
-
-## Output
-[Main response content - the actual work product]
-
-## Next Action
-[COMPLETE | CONTINUE | ESCALATE | HOLD]
-- If CONTINUE: Describe what the next task should be
-- If ESCALATE: Explain why human intervention is needed
-- If HOLD: Specify what you're waiting for
-
-## Metadata
+**JSON-Only Response Format:**
 ```json
 {
-  "confidence": 0.0-1.0,
-  "suggested_tags": ["tag1", "tag2"],
-  "suggested_next_stage": "stage_name_or_null"
+  "status": "SUCCESS | PARTIAL | BLOCKED | FAILED",
+  "summary": "1-2 sentence summary of what was accomplished",
+  "output": "Main response content - the actual work product (can be multi-line string)",
+  "nextAction": "COMPLETE | CONTINUE | ESCALATE | HOLD",
+  "nextActionReason": "If CONTINUE: next task description. If ESCALATE/HOLD: reason why.",
+  "metadata": {
+    "confidence": 0.85,
+    "suggestedTags": ["tag1", "tag2"],
+    "suggestedNextStage": "stage_name_or_null"
+  }
 }
 ```
-```
+
+**Field Descriptions:**
+| Field | Required | Description |
+|-------|----------|-------------|
+| `status` | Yes | Execution result: SUCCESS, PARTIAL, BLOCKED, FAILED |
+| `summary` | Yes | Brief human-readable summary |
+| `output` | Yes | The actual work product (code, analysis, etc.) |
+| `nextAction` | Yes | What should happen next |
+| `nextActionReason` | No | Explanation for CONTINUE/ESCALATE/HOLD |
+| `metadata.confidence` | No | 0.0-1.0 confidence score |
+| `metadata.suggestedTags` | No | Tags to add to task |
+| `metadata.suggestedNextStage` | No | Override workflow's next step |
 
 **Benefits:**
-- Daemon can parse status and determine task state
-- Auto-advance workflows based on `suggested_next_stage`
+- Trivial to parse with `JSON.parse()`
+- Daemon can reliably determine task state from `status` and `nextAction`
+- Auto-advance workflows based on `suggestedNextStage`
 - Track confidence for human review thresholds
 - Structured data for analytics
 
@@ -292,59 +305,60 @@ You are a task automation agent. Your response MUST follow this exact format:
 ```typescript
 // scripts/task-daemon.mjs - Updated buildPrompt function
 
-const BASE_DAEMON_PROMPT = `You are a task automation agent. Your response MUST follow this exact format:
+const BASE_DAEMON_PROMPT = `You are a task automation agent. You MUST respond with valid JSON only - no markdown, no explanation, just the JSON object.
 
-## Status
-[SUCCESS | PARTIAL | BLOCKED | FAILED]
-
-## Summary
-[1-2 sentence summary of what was accomplished]
-
-## Output
-[Main response content - the actual work product]
-
-## Next Action
-[COMPLETE | CONTINUE | ESCALATE | HOLD]
-
-## Metadata
-\`\`\`json
+Response schema:
 {
-  "confidence": 0.0-1.0,
-  "suggested_tags": [],
-  "suggested_next_stage": null
+  "status": "SUCCESS" | "PARTIAL" | "BLOCKED" | "FAILED",
+  "summary": "1-2 sentence summary",
+  "output": "The actual work product (string, can contain newlines)",
+  "nextAction": "COMPLETE" | "CONTINUE" | "ESCALATE" | "HOLD",
+  "nextActionReason": "Optional: reason for CONTINUE/ESCALATE/HOLD",
+  "metadata": {
+    "confidence": 0.0-1.0,
+    "suggestedTags": [],
+    "suggestedNextStage": null
+  }
 }
-\`\`\`
-`;
+
+Rules:
+- status: SUCCESS if task fully completed, PARTIAL if partially done, BLOCKED if cannot proceed, FAILED if error
+- nextAction: COMPLETE to finish, CONTINUE to spawn follow-up, ESCALATE for human help, HOLD to pause
+- output: Put your actual work here (code, analysis, etc.) - escape newlines as \\n in JSON string
+- Respond with ONLY the JSON object, nothing else`;
 
 function assemblePrompt(task, agent, workflowStep) {
-  const parts = [];
+  const sections = [];
 
-  // 1. Base daemon prompt (ensures parsable output)
-  parts.push(BASE_DAEMON_PROMPT);
+  // 1. Base daemon prompt (ensures JSON output)
+  sections.push(BASE_DAEMON_PROMPT);
 
   // 2. Agent prompt (persona, capabilities)
   if (agent?.agentPrompt) {
-    parts.push(`## Agent Context\n${agent.agentPrompt}`);
+    sections.push(`## Agent Role\n${agent.agentPrompt}`);
   }
 
   // 3. Workflow step prompt (stage-specific instructions)
   if (workflowStep?.prompt) {
-    parts.push(`## Workflow Step: ${workflowStep.name}\n${workflowStep.prompt}`);
+    sections.push(`## Workflow Step: ${workflowStep.name}\n${workflowStep.prompt}`);
   }
 
   // 4. Task-specific prompt
   if (task.extraPrompt) {
-    parts.push(`## Task Instructions\n${task.extraPrompt}`);
+    sections.push(`## Task Instructions\n${task.extraPrompt}`);
   }
 
-  // 5. Task context
-  parts.push(`## Task Context
-**Title:** ${task.title}
-**Summary:** ${task.summary || 'N/A'}
-**Tags:** ${task.tags?.join(', ') || 'None'}
-**Additional Info:** ${task.additionalInfo || 'None'}`);
+  // 5. Task context as structured data
+  const context = {
+    title: task.title,
+    summary: task.summary || null,
+    tags: task.tags || [],
+    additionalInfo: task.additionalInfo || null,
+    workflowStage: task.workflowStage || null,
+  };
+  sections.push(`## Task Context\n${JSON.stringify(context, null, 2)}`);
 
-  return parts.join('\n\n---\n\n');
+  return sections.join('\n\n---\n\n');
 }
 ```
 
@@ -580,6 +594,8 @@ function evaluateCondition(expr: string, context: Record<string, unknown>): bool
 ### ForEach Execution
 
 ```typescript
+const DEFAULT_FOREACH_LIMIT = 100;
+
 async function spawnForeachTasks(
   workflow: Workflow,
   step: WorkflowStep,
@@ -596,6 +612,15 @@ async function spawnForeachTasks(
       await routeToStep(workflow, nextStep, parentTask);
     }
     return;
+  }
+
+  // Enforce foreach limit
+  const maxItems = step.maxItems ?? DEFAULT_FOREACH_LIMIT;
+  if (items.length > maxItems) {
+    throw new Error(
+      `ForEach ${step.id}: ${items.length} items exceeds limit of ${maxItems}. ` +
+      `Increase maxItems in step config or reduce input size.`
+    );
   }
 
   const foreachTag = `foreach:${parentTask._id}`;
@@ -740,23 +765,27 @@ function getValueByPath(obj: unknown, path: string): unknown {
 
 ---
 
-## Questions for Discussion
+## Design Decisions
 
-1. **Response Format Strictness:** How strict should the base prompt be? Should we require JSON-only responses, or allow markdown with structured sections?
+### Resolved
 
-2. **Agent Assignment:** Should workflows define default agents per step, or should this be configured separately?
+1. **Response Format:** JSON-only responses. Much easier to parse reliably.
 
-3. **Context Carry-Forward:** How much context should flow from task to task? All additionalInfo, or summarized?
+2. **Default Agents:** Provide default agents based on ID if they don't exist yet. Allows workflows to reference agents that get auto-created on first use.
 
-4. **Human-in-the-Loop:** When a task is `ESCALATE`d, what notification mechanism should trigger?
+3. **Foreach Limits:** Yes, implement max items limit (default: 100) to prevent runaway task creation.
 
-5. **Failure Handling:** If an agent fails repeatedly on a step, should there be automatic reassignment or workflow pause?
+4. **Partial Join Failures:** Handled via escalation system. Failed foreach tasks get escalated to `on_hold`. If a join is waiting for items that failed, it can be pushed manually. Need to add a "force complete" or "skip failed" mechanism for joins.
 
-6. **Foreach Limits:** Should there be a max items limit to prevent runaway task creation?
+5. **Email for Agents:** Make `email` optional when `isAgent: true`. Agent users don't need real email addresses.
 
-7. **Join Timeout:** What happens if some foreach tasks fail? Partial join?
+### Open Questions
 
-8. **Subflow Depth:** Limit nesting depth to prevent infinite recursion?
+1. **Context Carry-Forward:** How much context should flow from task to task? All additionalInfo, or summarized?
+
+2. **Human-in-the-Loop Notifications:** When a task is `ESCALATE`d, what notification mechanism should trigger?
+
+3. **Subflow Depth:** Limit nesting depth to prevent infinite recursion? (Suggest: max 5 levels)
 
 ---
 
@@ -765,9 +794,10 @@ function getValueByPath(obj: unknown, path: string): unknown {
 ### Phase 1: Schema Updates
 - [ ] Add `waiting` and `failed` to TaskStatus
 - [ ] Add `isAgent` and `agentPrompt` to User interface
+- [ ] Make `email` optional (required only when `isAgent` is false)
 - [ ] Add `stepType`, `execution`, `prompt`, `defaultAssigneeId` to WorkflowStep
 - [ ] Add decision fields: `branches`, `defaultBranch`
-- [ ] Add foreach fields: `itemsPath`, `itemVariable`
+- [ ] Add foreach fields: `itemsPath`, `itemVariable`, `maxItems`
 - [ ] Add join fields: `awaitTag`
 - [ ] Add subflow fields: `subflowId`, `inputMapping`
 
