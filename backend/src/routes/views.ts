@@ -111,14 +111,15 @@ viewsRouter.get('/:id/tasks', async (req: Request, res: Response, next: NextFunc
     }
 
     // Build sort from view's sorting config
-    const sort: Sort = {};
+    const sortSpec: Record<string, 1 | -1> = {};
     if (view.sorting && view.sorting.length > 0) {
       for (const s of view.sorting) {
-        sort[s.field] = s.direction === 'asc' ? 1 : -1;
+        sortSpec[s.field] = s.direction === 'asc' ? 1 : -1;
       }
     } else {
-      sort.createdAt = -1; // Default sort
+      sortSpec.createdAt = -1; // Default sort
     }
+    const sort: Sort = sortSpec;
 
     // Execute query
     const [tasks, total] = await Promise.all([
