@@ -28,7 +28,8 @@
       "mcp__playwright__browser_console_messages",
       "mcp__playwright__browser_hover",
       "Bash(npx ts-node:*)",
-      "Bash(node /Users/ryandekker/src/coordination-matrix/scripts/task-daemon.mjs:*)"
+      "Bash(node /Users/ryandekker/src/coordination-matrix/scripts/task-daemon.mjs:*)",
+      "mcp__playwright__browser_fill_form"
     ],
     "deny": [],
     "ask": []
