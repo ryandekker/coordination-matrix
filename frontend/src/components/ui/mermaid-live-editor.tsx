@@ -51,7 +51,7 @@ export function MermaidLiveEditor({
   initialLayout = 'split',
 }: MermaidLiveEditorProps) {
   const [layout, setLayout] = useState<LayoutMode>(initialLayout)
-  const [zoom, setZoom] = useState(100)
+  const [zoom, setZoom] = useState(130)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)

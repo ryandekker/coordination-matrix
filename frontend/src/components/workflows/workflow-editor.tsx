@@ -856,7 +856,8 @@ The agent will receive task context automatically.`}
                                       <div className="text-green-800">
                                         <p className="font-medium">Loop Configuration</p>
                                         <p className="text-xs mt-1">
-                                          This step will iterate over a collection and create a subtask for each item.
+                                          This step iterates over a collection from the previous step&apos;s output
+                                          and creates a subtask for each item. Routing is determined programmatically.
                                         </p>
                                       </div>
                                     </div>
@@ -889,29 +890,9 @@ The agent will receive task context automatically.`}
                                         className="font-mono text-sm"
                                       />
                                       <p className="text-xs text-muted-foreground">
-                                        Use as {"{{variable}}"} in prompt below
+                                        Variable name available to downstream steps
                                       </p>
                                     </div>
-                                  </div>
-
-                                  <div className="space-y-2">
-                                    <label className="text-sm font-medium flex items-center gap-2">
-                                      <Sparkles className="h-4 w-4 text-amber-500" />
-                                      Per-Item Prompt
-                                    </label>
-                                    <Textarea
-                                      value={step.prompt || ''}
-                                      onChange={(e) => updateStep(index, { prompt: e.target.value })}
-                                      placeholder={`This prompt runs for EACH item in the collection.
-
-Example: "Review the file {{file.path}} and check for:
-- Code style consistency
-- Potential bugs
-- Security vulnerabilities
-
-Provide a structured report with severity levels."`}
-                                      className="min-h-[100px] font-mono text-sm"
-                                    />
                                   </div>
 
                                   <div className="space-y-1">
@@ -933,13 +914,14 @@ Provide a structured report with severity levels."`}
                               {/* Join configuration */}
                               {step.stepType === 'join' && (
                                 <>
-                                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-sm">
+                                  <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 text-sm">
                                     <div className="flex items-start gap-2">
-                                      <Merge className="h-4 w-4 text-purple-600 mt-0.5 flex-shrink-0" />
-                                      <div className="text-purple-800">
+                                      <Merge className="h-4 w-4 text-indigo-600 mt-0.5 flex-shrink-0" />
+                                      <div className="text-indigo-800">
                                         <p className="font-medium">Join / Aggregation Point</p>
                                         <p className="text-xs mt-1">
-                                          This step waits for all parallel tasks to complete, then aggregates results.
+                                          This step waits for all parallel tasks to complete and programmatically
+                                          aggregates their results into a single output.
                                         </p>
                                       </div>
                                     </div>
@@ -959,56 +941,71 @@ Provide a structured report with severity levels."`}
                                       Pattern to match tasks to wait for. Use {"{{parentId}}"} to reference the loop&apos;s parent task.
                                     </p>
                                   </div>
+                                </>
+                              )}
 
-                                  <div className="space-y-2">
-                                    <label className="text-sm font-medium flex items-center gap-2">
-                                      <Sparkles className="h-4 w-4 text-amber-500" />
-                                      Aggregation Prompt
-                                    </label>
-                                    <Textarea
-                                      value={step.prompt || ''}
-                                      onChange={(e) => updateStep(index, { prompt: e.target.value })}
-                                      placeholder={`Combine the results from all completed subtasks.
+                              {/* Decision configuration */}
+                              {step.stepType === 'decision' && (
+                                <>
+                                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
+                                    <div className="flex items-start gap-2">
+                                      <GitBranch className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                                      <div className="text-amber-800">
+                                        <p className="font-medium">Decision / Router</p>
+                                        <p className="text-xs mt-1">
+                                          This step evaluates conditions from the previous step&apos;s output and
+                                          routes to the appropriate branch. No AI prompting - purely programmatic.
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
 
-Example: "Review all the individual file reviews completed by the foreach step. Create a consolidated report that:
-
-1. Summarizes the overall code quality
-2. Lists critical issues by priority
-3. Provides a final recommendation (approve/request changes)
-
-The results from each subtask are available in {{subtasks}}."`}
-                                      className="min-h-[120px] font-mono text-sm"
-                                    />
+                                  <div className="space-y-1">
+                                    <label className="text-sm font-medium">Branch Conditions</label>
+                                    <p className="text-sm text-muted-foreground">
+                                      Define branches in the Mermaid diagram using edge labels with conditions:
+                                    </p>
+                                    <div className="bg-muted/50 rounded p-2 font-mono text-xs space-y-1">
+                                      <p>A --&gt;|&quot;output.status === &apos;approved&apos;&quot;| B</p>
+                                      <p>A --&gt;|&quot;output.score &gt;= 80&quot;| C</p>
+                                      <p>A --&gt;|&quot;default&quot;| D</p>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground mt-2">
+                                      Conditions are evaluated in order. Use &quot;default&quot; for fallback routing.
+                                    </p>
                                   </div>
                                 </>
                               )}
 
-                              {/* Decision - branches would need more complex UI */}
-                              {step.stepType === 'decision' && (
-                                <div className="space-y-1">
-                                  <p className="text-sm text-muted-foreground">
-                                    Decision branches are defined in the Mermaid diagram using edge labels.
-                                  </p>
-                                  <p className="text-xs text-muted-foreground">
-                                    Example: A --&gt;|"output.score &gt;= 80"| B
-                                  </p>
-                                </div>
-                              )}
-
                               {/* Subflow configuration */}
                               {step.stepType === 'subflow' && (
-                                <div className="space-y-1">
-                                  <label className="text-sm font-medium">Subflow ID</label>
-                                  <Input
-                                    value={step.subflowId || ''}
-                                    onChange={(e) => updateStep(index, { subflowId: e.target.value })}
-                                    placeholder="workflow-id"
-                                    className="font-mono text-sm"
-                                  />
-                                  <p className="text-xs text-muted-foreground">
-                                    The ID of the workflow to delegate to.
-                                  </p>
-                                </div>
+                                <>
+                                  <div className="bg-pink-50 border border-pink-200 rounded-lg p-3 text-sm">
+                                    <div className="flex items-start gap-2">
+                                      <WorkflowIcon className="h-4 w-4 text-pink-600 mt-0.5 flex-shrink-0" />
+                                      <div className="text-pink-800">
+                                        <p className="font-medium">Subflow / Nested Workflow</p>
+                                        <p className="text-xs mt-1">
+                                          Delegates execution to another workflow. Input is passed programmatically
+                                          and results are returned when the subflow completes.
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-sm font-medium">Subflow ID</label>
+                                    <Input
+                                      value={step.subflowId || ''}
+                                      onChange={(e) => updateStep(index, { subflowId: e.target.value })}
+                                      placeholder="workflow-id"
+                                      className="font-mono text-sm"
+                                    />
+                                    <p className="text-xs text-muted-foreground">
+                                      The ID of the workflow to delegate to.
+                                    </p>
+                                  </div>
+                                </>
                               )}
 
                               {/* Description - for all types */}
