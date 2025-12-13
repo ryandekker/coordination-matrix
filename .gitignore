@@ -44,3 +44,6 @@ coverage/
 *.tgz
 .cache/
 tsconfig.tsbuildinfo
+
+# Playwright MCP screenshots
+.playwright-mcp/
