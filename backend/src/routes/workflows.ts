@@ -248,63 +248,130 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
   const steps: WorkflowStep[] = [];
   const lines = mermaid.split('\n').map((l) => l.trim()).filter(Boolean);
 
-  // Extract node definitions and connections
-  const nodePattern = /(\w+)\[([^\]]+)\]/g;
-  const nodePatternRound = /(\w+)\(([^)]+)\)/g;
-  const nodePatternDiamond = /(\w+)\{([^}]+)\}/g;
-  const connectionPattern = /(\w+)\s*-->\s*(\w+)/g;
-  const connectionPatternLabeled = /(\w+)\s*-->?\|([^|]+)\|\s*(\w+)/g;
+  // Node storage with full step info
+  interface ParsedNode {
+    name: string;
+    stepType: WorkflowStepType;
+    execution?: ExecutionMode;
+  }
 
-  const nodes: Map<string, { name: string; type: 'automated' | 'manual' }> = new Map();
+  const nodes: Map<string, ParsedNode> = new Map();
   const connections: Array<{ from: string; to: string; label?: string }> = [];
 
   for (const line of lines) {
-    // Skip diagram type declarations
+    // Skip diagram type declarations, styling, and comments
     if (line.startsWith('graph') || line.startsWith('flowchart')) continue;
+    if (line.startsWith('classDef') || line.startsWith('class ')) continue;
+    if (line.startsWith('%%')) continue;
+    if (line.startsWith('subgraph') || line === 'end') continue;
 
-    // Extract nodes with square brackets (automated)
-    let match;
-    while ((match = nodePattern.exec(line)) !== null) {
-      nodes.set(match[1], { name: match[2], type: 'automated' });
+    // Parse node definitions - order matters! More specific patterns first
+
+    // Double square brackets [[ ]] - foreach/join/subflow
+    // Pattern: ID[["text"]] or ID[[text]]
+    const doubleSquareMatch = line.match(/^(\w+)\[\[["']?([^"\]]+?)["']?\]\]/);
+    if (doubleSquareMatch) {
+      const [, id, text] = doubleSquareMatch;
+      const lowerText = text.toLowerCase();
+
+      let stepType: WorkflowStepType = 'task';
+      let cleanName = text;
+
+      if (lowerText.startsWith('each:') || lowerText.startsWith('foreach:')) {
+        stepType = 'foreach';
+        cleanName = text.replace(/^(each|foreach):\s*/i, '').trim();
+      } else if (lowerText.startsWith('join:') || lowerText.startsWith('merge:')) {
+        stepType = 'join';
+        cleanName = text.replace(/^(join|merge):\s*/i, '').trim();
+      } else if (lowerText.startsWith('run:') || lowerText.startsWith('subflow:')) {
+        stepType = 'subflow';
+        cleanName = text.replace(/^(run|subflow):\s*/i, '').trim();
+      } else {
+        // Default double brackets to foreach if no prefix
+        stepType = 'foreach';
+        cleanName = text;
+      }
+
+      nodes.set(id, { name: cleanName, stepType });
+      continue;
     }
 
-    // Extract nodes with round brackets (manual/HITL)
-    while ((match = nodePatternRound.exec(line)) !== null) {
-      nodes.set(match[1], { name: match[2], type: 'manual' });
+    // Diamond brackets { } - decision
+    // Pattern: ID{"text"} or ID{text}
+    const diamondMatch = line.match(/^(\w+)\{["']?([^"}]+?)["']?\}/);
+    if (diamondMatch) {
+      const [, id, text] = diamondMatch;
+      nodes.set(id, { name: text, stepType: 'decision' });
+      continue;
     }
 
-    // Extract nodes with diamond brackets (decision - treat as HITL)
-    while ((match = nodePatternDiamond.exec(line)) !== null) {
-      nodes.set(match[1], { name: match[2], type: 'manual' });
+    // Double round brackets (( )) - manual task (stadium shape)
+    // Pattern: ID(("text")) or ID((text))
+    const stadiumMatch = line.match(/^(\w+)\(\(["']?([^")]+?)["']?\)\)/);
+    if (stadiumMatch) {
+      const [, id, text] = stadiumMatch;
+      nodes.set(id, { name: text, stepType: 'task', execution: 'manual' });
+      continue;
     }
 
-    // Extract connections with labels
-    while ((match = connectionPatternLabeled.exec(line)) !== null) {
-      connections.push({ from: match[1], to: match[3], label: match[2] });
+    // Single round brackets ( ) - manual task
+    // Pattern: ID("text") or ID(text)
+    const roundMatch = line.match(/^(\w+)\(["']?([^")]+?)["']?\)/);
+    if (roundMatch) {
+      const [, id, text] = roundMatch;
+      nodes.set(id, { name: text, stepType: 'task', execution: 'manual' });
+      continue;
     }
 
-    // Extract simple connections
-    while ((match = connectionPattern.exec(line)) !== null) {
-      // Avoid duplicates from labeled connections
-      if (!connections.some((c) => c.from === match![1] && c.to === match![2])) {
-        connections.push({ from: match[1], to: match[2] });
+    // Single square brackets [ ] - automated task (default)
+    // Pattern: ID["text"] or ID[text]
+    const squareMatch = line.match(/^(\w+)\[["']?([^"\]]+?)["']?\]/);
+    if (squareMatch) {
+      const [, id, text] = squareMatch;
+      nodes.set(id, { name: text, stepType: 'task', execution: 'automated' });
+      continue;
+    }
+
+    // Parse connections
+    // Labeled connections: A -->|"label"| B or A -->|label| B
+    const labeledConnMatch = line.match(/(\w+)\s*-->?\|["']?([^|"']+?)["']?\|\s*(\w+)/);
+    if (labeledConnMatch) {
+      connections.push({
+        from: labeledConnMatch[1],
+        to: labeledConnMatch[3],
+        label: labeledConnMatch[2].trim()
+      });
+      continue;
+    }
+
+    // Simple connections: A --> B
+    const simpleConnMatch = line.match(/(\w+)\s*-->\s*(\w+)/);
+    if (simpleConnMatch) {
+      // Check if already added as labeled connection
+      const from = simpleConnMatch[1];
+      const to = simpleConnMatch[2];
+      if (!connections.some((c) => c.from === from && c.to === to)) {
+        connections.push({ from, to });
       }
     }
   }
 
-  // Build ordered steps from connections
+  // Build ordered steps using topological sort
   const visited = new Set<string>();
   const orderedNodes: string[] = [];
 
-  // Find starting nodes (nodes with no incoming connections)
+  // Count incoming connections for each node
   const incomingCount: Map<string, number> = new Map();
   for (const node of nodes.keys()) {
     incomingCount.set(node, 0);
   }
   for (const conn of connections) {
-    incomingCount.set(conn.to, (incomingCount.get(conn.to) || 0) + 1);
+    if (nodes.has(conn.to)) {
+      incomingCount.set(conn.to, (incomingCount.get(conn.to) || 0) + 1);
+    }
   }
 
+  // Start with nodes that have no incoming connections
   const queue: string[] = [];
   for (const [node, count] of incomingCount) {
     if (count === 0) queue.push(node);
@@ -318,7 +385,7 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
     orderedNodes.push(node);
 
     for (const conn of connections) {
-      if (conn.from === node) {
+      if (conn.from === node && nodes.has(conn.to)) {
         const newCount = (incomingCount.get(conn.to) || 1) - 1;
         incomingCount.set(conn.to, newCount);
         if (newCount === 0 && !visited.has(conn.to)) {
@@ -328,23 +395,48 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
     }
   }
 
-  // Add any remaining nodes
+  // Add any remaining nodes not connected
   for (const node of nodes.keys()) {
     if (!visited.has(node)) {
       orderedNodes.push(node);
     }
   }
 
-  // Create steps
+  // Create workflow steps
   for (const nodeId of orderedNodes) {
     const node = nodes.get(nodeId);
     if (node) {
-      steps.push({
+      const step: WorkflowStep = {
         id: new ObjectId().toString(),
         name: node.name,
-        type: node.type,
-        hitlPhase: node.type === 'manual' ? 'approval_required' : 'none',
-      });
+        stepType: node.stepType,
+        hitlPhase: node.execution === 'manual' ? 'approval_required' : 'none',
+      };
+
+      // Add execution mode for task steps
+      if (node.stepType === 'task') {
+        step.execution = node.execution || 'automated';
+        // Legacy compatibility
+        step.type = step.execution;
+      }
+
+      // For decision nodes, extract branches from connections
+      if (node.stepType === 'decision') {
+        const branches: DecisionBranch[] = [];
+        for (const conn of connections) {
+          if (conn.from === nodeId) {
+            branches.push({
+              condition: conn.label || null,
+              targetStepId: conn.to,
+            });
+          }
+        }
+        if (branches.length > 0) {
+          step.branches = branches;
+        }
+      }
+
+      steps.push(step);
     }
   }
 
@@ -352,48 +444,111 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
 }
 
 // Helper function to generate Mermaid diagram from workflow steps
-function generateMermaidFromSteps(steps: WorkflowStep[], name?: string): string {
+function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string {
+  if (steps.length === 0) return '';
+
   const lines: string[] = ['flowchart TD'];
 
-  if (name) {
-    lines.push(`    subgraph ${name.replace(/\s+/g, '_')}`);
-  }
-
+  // Generate node definitions based on step type
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
-    const nodeId = `step${i}`;
+    const nodeId = step.id || `step${i}`;
     const nodeName = step.name.replace(/"/g, "'");
 
-    // Use different bracket styles based on type
-    if (step.type === 'manual') {
-      lines.push(`    ${nodeId}(("${nodeName}"))`);
-    } else if (step.hitlPhase !== 'none') {
-      lines.push(`    ${nodeId}["${nodeName}"]:::hitl`);
-    } else {
-      lines.push(`    ${nodeId}["${nodeName}"]`);
+    switch (step.stepType) {
+      case 'decision':
+        lines.push(`    ${nodeId}{"${nodeName}"}`);
+        break;
+      case 'foreach':
+        lines.push(`    ${nodeId}[["Each: ${nodeName}"]]`);
+        break;
+      case 'join':
+        lines.push(`    ${nodeId}[["Join: ${nodeName}"]]`);
+        break;
+      case 'subflow':
+        lines.push(`    ${nodeId}[["Run: ${nodeName}"]]`);
+        break;
+      case 'task':
+      default:
+        // Check execution mode (support both new and legacy)
+        const execution = step.execution || step.type || 'automated';
+        if (execution === 'manual') {
+          lines.push(`    ${nodeId}("${nodeName}")`);
+        } else {
+          lines.push(`    ${nodeId}["${nodeName}"]`);
+        }
     }
   }
 
-  // Add connections
-  for (let i = 0; i < steps.length - 1; i++) {
-    lines.push(`    step${i} --> step${i + 1}`);
+  // Generate connections
+  // For decision nodes with branches, use labeled edges
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    const nodeId = step.id || `step${i}`;
+
+    if (step.stepType === 'decision' && step.branches && step.branches.length > 0) {
+      // Use branch connections
+      for (const branch of step.branches) {
+        const targetId = branch.targetStepId;
+        if (branch.condition) {
+          lines.push(`    ${nodeId} -->|"${branch.condition}"| ${targetId}`);
+        } else {
+          lines.push(`    ${nodeId} --> ${targetId}`);
+        }
+      }
+    } else if (i < steps.length - 1) {
+      // Simple linear connection to next step
+      const nextNodeId = steps[i + 1].id || `step${i + 1}`;
+      lines.push(`    ${nodeId} --> ${nextNodeId}`);
+    }
   }
 
-  if (name) {
-    lines.push('    end');
-  }
-
-  // Add styling
+  // Add styling classes
   lines.push('');
-  lines.push('    classDef hitl fill:#8B5CF6,color:#fff');
-  lines.push('    classDef manual fill:#EC4899,color:#fff');
+  lines.push('    classDef automated fill:#3B82F6,color:#fff');
+  lines.push('    classDef manual fill:#8B5CF6,color:#fff');
+  lines.push('    classDef decision fill:#F59E0B,color:#fff');
+  lines.push('    classDef foreach fill:#10B981,color:#fff');
+  lines.push('    classDef join fill:#8B5CF6,color:#fff');
+  lines.push('    classDef subflow fill:#EC4899,color:#fff');
 
-  // Apply manual class to manual nodes
-  const manualNodes = steps
-    .map((s, i) => (s.type === 'manual' ? `step${i}` : null))
-    .filter(Boolean);
-  if (manualNodes.length > 0) {
-    lines.push(`    class ${manualNodes.join(',')} manual`);
+  // Apply classes to nodes
+  const classGroups: Record<string, string[]> = {
+    automated: [],
+    manual: [],
+    decision: [],
+    foreach: [],
+    join: [],
+    subflow: [],
+  };
+
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    const nodeId = step.id || `step${i}`;
+
+    if (step.stepType === 'decision') {
+      classGroups.decision.push(nodeId);
+    } else if (step.stepType === 'foreach') {
+      classGroups.foreach.push(nodeId);
+    } else if (step.stepType === 'join') {
+      classGroups.join.push(nodeId);
+    } else if (step.stepType === 'subflow') {
+      classGroups.subflow.push(nodeId);
+    } else {
+      const execution = step.execution || step.type || 'automated';
+      if (execution === 'manual') {
+        classGroups.manual.push(nodeId);
+      } else {
+        classGroups.automated.push(nodeId);
+      }
+    }
+  }
+
+  // Output class assignments
+  for (const [className, nodeIds] of Object.entries(classGroups)) {
+    if (nodeIds.length > 0) {
+      lines.push(`    class ${nodeIds.join(',')} ${className}`);
+    }
   }
 
   return lines.join('\n');

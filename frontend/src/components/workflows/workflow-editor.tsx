@@ -57,6 +57,8 @@ import {
   Info,
   MessageSquare,
   Lightbulb,
+  RefreshCw,
+  ArrowRight,
 } from 'lucide-react'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
@@ -122,19 +124,19 @@ const STEP_TYPES: { type: WorkflowStepType; label: string; icon: React.ElementTy
   { type: 'subflow', label: 'Subflow', icon: WorkflowIcon, color: 'text-pink-500' },
 ]
 
-function generateMermaidFromSteps(steps: WorkflowStep[], name?: string): string {
+function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string {
   if (steps.length === 0) return ''
 
   const lines: string[] = ['flowchart TD']
 
-  // Generate node definitions
+  // Generate node definitions based on step type
   steps.forEach((step, i) => {
     const nodeId = step.id || `step${i}`
     const label = step.name.replace(/"/g, "'")
 
     switch (step.stepType) {
       case 'decision':
-        lines.push(`    ${nodeId}{${label}}`)
+        lines.push(`    ${nodeId}{"${label}"}`)
         break
       case 'foreach':
         lines.push(`    ${nodeId}[["Each: ${label}"]]`)
@@ -147,26 +149,82 @@ function generateMermaidFromSteps(steps: WorkflowStep[], name?: string): string 
         break
       case 'task':
       default:
-        if (step.execution === 'manual') {
-          lines.push(`    ${nodeId}(${label})`)
+        const execution = step.execution || step.type || 'automated'
+        if (execution === 'manual') {
+          lines.push(`    ${nodeId}("${label}")`)
         } else {
-          lines.push(`    ${nodeId}[${label}]`)
+          lines.push(`    ${nodeId}["${label}"]`)
         }
     }
   })
 
-  // Generate connections (simple linear for now)
-  for (let i = 0; i < steps.length - 1; i++) {
-    const fromId = steps[i].id || `step${i}`
-    const toId = steps[i + 1].id || `step${i + 1}`
-    lines.push(`    ${fromId} --> ${toId}`)
+  // Generate connections
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i]
+    const nodeId = step.id || `step${i}`
+
+    // For decision nodes with branches, use labeled edges
+    if (step.stepType === 'decision' && step.branches && step.branches.length > 0) {
+      for (const branch of step.branches) {
+        if (branch.condition) {
+          lines.push(`    ${nodeId} -->|"${branch.condition}"| ${branch.targetStepId}`)
+        } else {
+          lines.push(`    ${nodeId} --> ${branch.targetStepId}`)
+        }
+      }
+    } else if (i < steps.length - 1) {
+      // Simple linear connection to next step
+      const nextNodeId = steps[i + 1].id || `step${i + 1}`
+      lines.push(`    ${nodeId} --> ${nextNodeId}`)
+    }
   }
 
-  // Add styling
+  // Add styling classes
   lines.push('')
   lines.push('    classDef automated fill:#3B82F6,color:#fff')
   lines.push('    classDef manual fill:#8B5CF6,color:#fff')
   lines.push('    classDef decision fill:#F59E0B,color:#fff')
+  lines.push('    classDef foreach fill:#10B981,color:#fff')
+  lines.push('    classDef join fill:#8B5CF6,color:#fff')
+  lines.push('    classDef subflow fill:#EC4899,color:#fff')
+
+  // Apply classes to nodes
+  const classGroups: Record<string, string[]> = {
+    automated: [],
+    manual: [],
+    decision: [],
+    foreach: [],
+    join: [],
+    subflow: [],
+  }
+
+  steps.forEach((step, i) => {
+    const nodeId = step.id || `step${i}`
+
+    if (step.stepType === 'decision') {
+      classGroups.decision.push(nodeId)
+    } else if (step.stepType === 'foreach') {
+      classGroups.foreach.push(nodeId)
+    } else if (step.stepType === 'join') {
+      classGroups.join.push(nodeId)
+    } else if (step.stepType === 'subflow') {
+      classGroups.subflow.push(nodeId)
+    } else {
+      const execution = step.execution || step.type || 'automated'
+      if (execution === 'manual') {
+        classGroups.manual.push(nodeId)
+      } else {
+        classGroups.automated.push(nodeId)
+      }
+    }
+  })
+
+  // Output class assignments
+  for (const [className, nodeIds] of Object.entries(classGroups)) {
+    if (nodeIds.length > 0) {
+      lines.push(`    class ${nodeIds.join(',')} ${className}`)
+    }
+  }
 
   return lines.join('\n')
 }
@@ -182,6 +240,8 @@ export function WorkflowEditor({
   const [mermaidError, setMermaidError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState('visual')
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [syncError, setSyncError] = useState<string | null>(null)
 
   const {
     register,
@@ -287,6 +347,53 @@ export function WorkflowEditor({
     setSteps(newSteps)
   }
 
+  // Sync Mermaid code to steps by calling backend parse API
+  const syncMermaidToSteps = async () => {
+    if (!mermaidCode.trim()) {
+      setSyncError('No Mermaid code to parse')
+      return
+    }
+
+    setIsSyncing(true)
+    setSyncError(null)
+
+    try {
+      const response = await fetch(`${API_BASE}/workflows/parse-mermaid`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mermaidDiagram: mermaidCode }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to parse: ${response.statusText}`)
+      }
+
+      const result = await response.json()
+      const parsedSteps = result.data?.steps || []
+
+      if (parsedSteps.length === 0) {
+        setSyncError('No steps found in diagram. Check your Mermaid syntax.')
+        return
+      }
+
+      // Normalize the parsed steps
+      const normalizedSteps = parsedSteps.map((step: WorkflowStep) => ({
+        ...step,
+        stepType: step.stepType || 'task',
+        execution: step.execution || step.type || 'automated',
+      }))
+
+      setSteps(normalizedSteps)
+      // Expand all newly created steps
+      setExpandedSteps(new Set(normalizedSteps.map((s: WorkflowStep) => s.id)))
+      setActiveTab('visual')
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : 'Failed to parse Mermaid')
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
   const onSubmit = (data: WorkflowFormData) => {
     const workflowData: Workflow = {
       ...data,
@@ -383,6 +490,33 @@ export function WorkflowEditor({
                   Full Preview
                 </TabsTrigger>
               </TabsList>
+
+              {/* Sync button - converts Mermaid code to steps */}
+              {activeTab === 'code' && (
+                <div className="flex items-center gap-2">
+                  {syncError && (
+                    <span className="text-xs text-destructive flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" />
+                      {syncError}
+                    </span>
+                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={syncMermaidToSteps}
+                    disabled={isSyncing || !mermaidCode.trim()}
+                    className="gap-2"
+                  >
+                    {isSyncing ? (
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ArrowRight className="h-4 w-4" />
+                    )}
+                    {isSyncing ? 'Parsing...' : 'Import to Steps'}
+                  </Button>
+                </div>
+              )}
             </div>
 
             {/* Visual Editor Tab */}
