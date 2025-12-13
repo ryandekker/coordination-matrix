@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import { useTaskActivity, useAddComment } from '@/hooks/use-activity-logs'
 import { ActivityLogEntry, FieldChange } from '@/lib/api'
@@ -11,6 +11,8 @@ interface TaskActivityProps {
   taskId: string
   className?: string
   compact?: boolean
+  /** Polling interval in milliseconds. Default: 5000 (5 seconds) */
+  pollInterval?: number
 }
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
@@ -48,13 +50,16 @@ function formatFieldChange(change: FieldChange, compact: boolean): string {
   return `${change.field}: ${formatValue(change.oldValue)} → ${formatValue(change.newValue)}`
 }
 
-function ActivityEntry({ entry, compact }: { entry: ActivityLogEntry; compact?: boolean }) {
+function ActivityEntry({ entry, compact, isNew }: { entry: ActivityLogEntry; compact?: boolean; isNew?: boolean }) {
   const label = EVENT_TYPE_LABELS[entry.eventType] || entry.eventType
   const colorClass = EVENT_TYPE_COLORS[entry.eventType] || 'bg-muted-foreground'
 
   if (compact) {
     return (
-      <div className="flex gap-2 py-1.5 border-b border-border/50 last:border-b-0">
+      <div className={cn(
+        'flex gap-2 py-1.5 border-b border-border/50 last:border-b-0 transition-colors duration-500',
+        isNew && 'bg-primary/5'
+      )}>
         <div className={cn('w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0', colorClass)} />
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-1.5">
@@ -86,7 +91,10 @@ function ActivityEntry({ entry, compact }: { entry: ActivityLogEntry; compact?: 
   }
 
   return (
-    <div className="flex gap-3 py-2 border-b border-border last:border-b-0">
+    <div className={cn(
+      'flex gap-3 py-2 border-b border-border last:border-b-0 transition-colors duration-500',
+      isNew && 'bg-primary/5'
+    )}>
       <div className={cn('flex-shrink-0 w-2 h-2 rounded-full mt-1.5', colorClass)} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 text-sm">
@@ -119,10 +127,37 @@ function ActivityEntry({ entry, compact }: { entry: ActivityLogEntry; compact?: 
   )
 }
 
-export function TaskActivity({ taskId, className, compact = false }: TaskActivityProps) {
+export function TaskActivity({ taskId, className, compact = false, pollInterval = 5000 }: TaskActivityProps) {
   const [newComment, setNewComment] = useState('')
-  const { data, isLoading, error } = useTaskActivity(taskId)
+  const [newEntryIds, setNewEntryIds] = useState<Set<string>>(new Set())
+  const prevEntriesRef = useRef<string[]>([])
+
+  const { data, isLoading, error, dataUpdatedAt } = useTaskActivity(taskId, {
+    refetchInterval: pollInterval,
+    refetchOnMount: 'always',
+  })
   const addComment = useAddComment()
+
+  const entries = data?.data || []
+
+  // Track new entries for highlight effect
+  useEffect(() => {
+    if (entries.length > 0) {
+      const currentIds = entries.map(e => e._id)
+      const prevIds = prevEntriesRef.current
+
+      if (prevIds.length > 0) {
+        const newIds = currentIds.filter(id => !prevIds.includes(id))
+        if (newIds.length > 0) {
+          setNewEntryIds(new Set(newIds))
+          // Clear highlight after animation
+          setTimeout(() => setNewEntryIds(new Set()), 2000)
+        }
+      }
+
+      prevEntriesRef.current = currentIds
+    }
+  }, [entries])
 
   const handleSubmitComment = async () => {
     if (!newComment.trim()) return
@@ -150,8 +185,6 @@ export function TaskActivity({ taskId, className, compact = false }: TaskActivit
       </div>
     )
   }
-
-  const entries = data?.data || []
 
   if (compact) {
     return (
@@ -191,18 +224,27 @@ export function TaskActivity({ taskId, className, compact = false }: TaskActivit
           ) : (
             <div>
               {entries.map((entry) => (
-                <ActivityEntry key={entry._id} entry={entry} compact />
+                <ActivityEntry
+                  key={entry._id}
+                  entry={entry}
+                  compact
+                  isNew={newEntryIds.has(entry._id)}
+                />
               ))}
             </div>
           )}
         </div>
 
-        {/* Entry count */}
-        {entries.length > 0 && (
-          <div className="px-3 py-1.5 border-t border-border/50 text-[10px] text-muted-foreground">
+        {/* Entry count + live indicator */}
+        <div className="px-3 py-1.5 border-t border-border/50 flex items-center justify-between">
+          <span className="text-[10px] text-muted-foreground">
             {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
-          </div>
-        )}
+          </span>
+          <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+            Live
+          </span>
+        </div>
       </div>
     )
   }
@@ -211,7 +253,13 @@ export function TaskActivity({ taskId, className, compact = false }: TaskActivit
     <div className={cn('flex flex-col', className)}>
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-medium">Activity</h3>
-        <span className="text-xs text-muted-foreground">{entries.length} entries</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">{entries.length} entries</span>
+          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+            Live
+          </span>
+        </div>
       </div>
 
       {/* Comment input */}
@@ -245,7 +293,11 @@ export function TaskActivity({ taskId, className, compact = false }: TaskActivit
         ) : (
           <div className="space-y-1">
             {entries.map((entry) => (
-              <ActivityEntry key={entry._id} entry={entry} />
+              <ActivityEntry
+                key={entry._id}
+                entry={entry}
+                isNew={newEntryIds.has(entry._id)}
+              />
             ))}
           </div>
         )}

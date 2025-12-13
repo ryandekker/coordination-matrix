@@ -3,7 +3,15 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { activityLogsApi, ActivityLogEntry } from '@/lib/api'
 
-export function useTaskActivity(taskId: string | null, options?: { enabled?: boolean }) {
+interface UseTaskActivityOptions {
+  enabled?: boolean
+  /** Polling interval in milliseconds. Set to false to disable polling. Default: false */
+  refetchInterval?: number | false
+  /** Always refetch when component mounts */
+  refetchOnMount?: boolean | 'always'
+}
+
+export function useTaskActivity(taskId: string | null, options?: UseTaskActivityOptions) {
   return useQuery({
     queryKey: ['activity-logs', 'task', taskId],
     queryFn: async () => {
@@ -11,7 +19,10 @@ export function useTaskActivity(taskId: string | null, options?: { enabled?: boo
       return activityLogsApi.getTaskActivity(taskId, { limit: 50 })
     },
     enabled: options?.enabled !== false && !!taskId,
-    staleTime: 30000, // 30 seconds
+    staleTime: 10000, // 10 seconds - data is considered fresh for this period
+    refetchInterval: options?.refetchInterval ?? false,
+    refetchOnMount: options?.refetchOnMount ?? 'always',
+    refetchOnWindowFocus: true,
   })
 }
 

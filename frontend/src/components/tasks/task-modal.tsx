@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useForm, Controller } from 'react-hook-form'
+import { useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceToNow } from 'date-fns'
 import {
   Dialog,
@@ -45,6 +46,9 @@ export function TaskModal({
   parentTask = null,
   onClose,
 }: TaskModalProps) {
+  const queryClient = useQueryClient()
+  const prevIsOpenRef = useRef(false)
+
   const createTask = useCreateTask()
   const updateTask = useUpdateTask()
   const { data: usersData } = useUsers()
@@ -57,6 +61,15 @@ export function TaskModal({
 
   const statusOptions = lookups['status'] || []
   const urgencyOptions = lookups['urgency'] || []
+
+  // Invalidate activity cache when modal opens to ensure fresh data
+  useEffect(() => {
+    if (isOpen && !prevIsOpenRef.current && task?._id) {
+      // Modal just opened - invalidate activity logs to force fresh fetch
+      queryClient.invalidateQueries({ queryKey: ['activity-logs', 'task', task._id] })
+    }
+    prevIsOpenRef.current = isOpen
+  }, [isOpen, task?._id, queryClient])
 
   const editableFields = useMemo(() => {
     return fieldConfigs
