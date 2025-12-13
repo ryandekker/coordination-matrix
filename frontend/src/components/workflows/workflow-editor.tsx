@@ -63,10 +63,12 @@ type ExecutionMode = 'automated' | 'manual'
 interface WorkflowStep {
   id: string
   name: string
-  stepType: WorkflowStepType
+  stepType?: WorkflowStepType
   execution?: ExecutionMode
+  type?: 'automated' | 'manual' // Legacy
   prompt?: string
   description?: string
+  hitlPhase?: string // Legacy
   defaultAssigneeId?: string
   // Decision fields
   branches?: { condition: string | null; targetStepId: string }[]
@@ -316,8 +318,8 @@ export function WorkflowEditor({
     reader.readAsText(file)
   }
 
-  const getStepTypeInfo = (stepType: WorkflowStepType) => {
-    return STEP_TYPES.find(st => st.type === stepType) || STEP_TYPES[0]
+  const getStepTypeInfo = (stepType?: WorkflowStepType) => {
+    return STEP_TYPES.find(st => st.type === (stepType || 'task')) || STEP_TYPES[0]
   }
 
   return (

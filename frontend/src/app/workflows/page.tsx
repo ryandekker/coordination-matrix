@@ -54,6 +54,7 @@ interface WorkflowStep {
   type?: 'automated' | 'manual' // Legacy
   prompt?: string
   description?: string
+  hitlPhase?: string // Legacy
 }
 
 interface WorkflowData {
@@ -202,12 +203,12 @@ export default function WorkflowsPage() {
   // Legacy workflows may have 'stages' (string[]) instead of 'steps' (WorkflowStep[])
   const workflows = (workflowsData?.data || []).map(w => ({
     ...w,
-    steps: w.steps || (w.stages?.map((name, i) => ({
+    steps: (w.steps || (w.stages?.map((name, i) => ({
       id: `stage-${i}`,
       name,
       type: 'manual' as const,
       hitlPhase: 'none',
-    })) || []),
+    })) || [])) as WorkflowStep[],
   }))
 
   const openCreateEditor = () => {
@@ -230,7 +231,7 @@ export default function WorkflowsPage() {
     name: string
     description: string
     isActive: boolean
-    steps: WorkflowStep[]
+    steps?: WorkflowStep[]
     mermaidDiagram?: string
   }) => {
     if (workflow._id) {
@@ -387,7 +388,9 @@ export default function WorkflowsPage() {
                             {getStepTypeLabel(step)}
                           </Badge>
                           {step.prompt && (
-                            <FileText className="h-3 w-3 text-muted-foreground" title="Has prompt" />
+                            <span title="Has prompt">
+                              <FileText className="h-3 w-3 text-muted-foreground" />
+                            </span>
                           )}
                         </div>
                       </div>
