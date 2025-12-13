@@ -7,8 +7,10 @@ import { ObjectId } from 'mongodb';
 export type TaskStatus =
   | 'pending'
   | 'in_progress'
+  | 'waiting'      // Waiting for child tasks (foreach, subflow)
   | 'on_hold'
   | 'completed'
+  | 'failed'       // Execution failed (distinct from on_hold)
   | 'cancelled';
 
 export type Urgency = 'low' | 'normal' | 'high' | 'urgent';
@@ -184,10 +186,12 @@ export type UserRole = 'admin' | 'operator' | 'reviewer' | 'viewer';
 
 export interface User {
   _id: ObjectId;
-  email: string;
+  email?: string;                 // Optional for agent users
   displayName: string;
   role: UserRole;
   isActive: boolean;
+  isAgent?: boolean;              // Is this user an AI agent?
+  agentPrompt?: string;           // Agent's base prompt/persona
   teamIds?: ObjectId[];
   preferences?: Record<string, unknown>;
   createdAt: Date;
