@@ -43,7 +43,6 @@ import {
   Bot,
   User,
   FileCode,
-  Eye,
   Upload,
   Download,
   AlertCircle,
@@ -570,7 +569,7 @@ export function WorkflowEditor({
             </label>
           </div>
 
-          {/* Tabs for Visual/Code/Preview */}
+          {/* Tabs for Visual/Code */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
             <div className="flex items-center justify-between mb-2">
               <TabsList>
@@ -580,11 +579,7 @@ export function WorkflowEditor({
                 </TabsTrigger>
                 <TabsTrigger value="code" className="gap-2">
                   <FileCode className="h-4 w-4" />
-                  Diagram Editor
-                </TabsTrigger>
-                <TabsTrigger value="preview" className="gap-2">
-                  <Eye className="h-4 w-4" />
-                  Full Preview
+                  Diagram
                 </TabsTrigger>
               </TabsList>
 
@@ -1044,27 +1039,15 @@ The results from each subtask are available in {{subtasks}}."`}
               </div>
             </TabsContent>
 
-            {/* Combined Mermaid Editor with Live Preview */}
+            {/* Mermaid Editor with Live Preview */}
             <TabsContent value="code" className="flex-1 flex flex-col overflow-hidden mt-0">
               <MermaidLiveEditor
                 value={mermaidCode}
                 onChange={setMermaidCode}
                 onError={setMermaidError}
                 className="flex-1"
-                minHeight="350px"
+                minHeight="500px"
                 initialLayout="split"
-              />
-            </TabsContent>
-
-            {/* Preview Tab - Full Preview */}
-            <TabsContent value="preview" className="flex-1 overflow-auto mt-0">
-              <MermaidLiveEditor
-                value={mermaidCode}
-                onChange={setMermaidCode}
-                onError={setMermaidError}
-                className="flex-1"
-                minHeight="350px"
-                initialLayout="preview"
               />
             </TabsContent>
           </Tabs>
