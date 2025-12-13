@@ -37,6 +37,12 @@ import {
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { FieldConfig, LookupValue } from '@/lib/api'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
@@ -623,21 +629,73 @@ export default function FieldSettingsPage() {
                         <div className="col-span-2">Field Path</div>
                         <div className="col-span-2">Display Name</div>
                         <div className="col-span-1">Type</div>
-                        <div className="col-span-1 text-center" title="Default Visible">
-                          <Eye className="h-3 w-3 inline" />
-                        </div>
-                        <div className="col-span-1 text-center" title="Editable">
-                          <Pencil className="h-3 w-3 inline" />
-                        </div>
-                        <div className="col-span-1 text-center" title="Searchable">
-                          <Search className="h-3 w-3 inline" />
-                        </div>
-                        <div className="col-span-1 text-center" title="Sortable">
-                          <SortAsc className="h-3 w-3 inline" />
-                        </div>
-                        <div className="col-span-1 text-center" title="Filterable">
-                          <Filter className="h-3 w-3 inline" />
-                        </div>
+                        <TooltipProvider delayDuration={0}>
+                          <div className="col-span-1 text-center">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="cursor-help inline-flex items-center gap-1">
+                                  <Eye className="h-3 w-3" />
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p className="font-medium">Default Visible</p>
+                                <p className="text-xs text-muted-foreground">Show this field by default in table views</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                          <div className="col-span-1 text-center">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="cursor-help inline-flex items-center gap-1">
+                                  <Pencil className="h-3 w-3" />
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p className="font-medium">Editable</p>
+                                <p className="text-xs text-muted-foreground">Allow editing this field in forms and modals</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                          <div className="col-span-1 text-center">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="cursor-help inline-flex items-center gap-1">
+                                  <Search className="h-3 w-3" />
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p className="font-medium">Searchable</p>
+                                <p className="text-xs text-muted-foreground">Include this field in text search queries</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                          <div className="col-span-1 text-center">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="cursor-help inline-flex items-center gap-1">
+                                  <SortAsc className="h-3 w-3" />
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p className="font-medium">Sortable</p>
+                                <p className="text-xs text-muted-foreground">Allow sorting the table by this field</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                          <div className="col-span-1 text-center">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="cursor-help inline-flex items-center gap-1">
+                                  <Filter className="h-3 w-3" />
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p className="font-medium">Filterable</p>
+                                <p className="text-xs text-muted-foreground">Show filter options for this field in the toolbar</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </TooltipProvider>
                         <div className="col-span-1"></div>
                       </div>
                       {(fieldConfigs[collection] || [])

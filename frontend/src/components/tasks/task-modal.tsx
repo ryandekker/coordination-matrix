@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Select,
   SelectContent,
@@ -30,6 +31,8 @@ interface TaskModalProps {
   parentTask?: Task | null
   onClose: () => void
 }
+
+type FormValues = Record<string, unknown>
 
 export function TaskModal({
   task,
@@ -80,6 +83,12 @@ export function TaskModal({
             break
           case 'datetime':
             values[fc.fieldPath] = null
+            break
+          case 'boolean':
+            values[fc.fieldPath] = false
+            break
+          case 'number':
+            values[fc.fieldPath] = ''
             break
           default:
             values[fc.fieldPath] = ''
@@ -139,8 +148,14 @@ export function TaskModal({
           .filter(Boolean) as never
       } else if (fc.fieldType === 'datetime' && value) {
         taskData[fc.fieldPath as keyof Task] = new Date(value as string).toISOString() as never
+      } else if (fc.fieldType === 'datetime' && !value) {
+        taskData[fc.fieldPath as keyof Task] = null as never
       } else if (fc.fieldType === 'reference') {
         taskData[fc.fieldPath as keyof Task] = (value || null) as never
+      } else if (fc.fieldType === 'number' && value !== '') {
+        taskData[fc.fieldPath as keyof Task] = Number(value) as never
+      } else if (fc.fieldType === 'boolean') {
+        taskData[fc.fieldPath as keyof Task] = Boolean(value) as never
       } else {
         taskData[fc.fieldPath as keyof Task] = value as never
       }
@@ -193,6 +208,47 @@ export function TaskModal({
                 'flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm',
                 'ring-offset-background placeholder:text-muted-foreground',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+              )}
+            />
+          </div>
+        )
+
+      case 'number':
+        return (
+          <div key={fieldKey} className="space-y-2">
+            <label className="text-sm font-medium">
+              {fc.displayName}
+              {fc.isRequired && ' *'}
+            </label>
+            <Input
+              type="number"
+              {...register(fieldKey)}
+              placeholder={`Enter ${fc.displayName.toLowerCase()}`}
+            />
+          </div>
+        )
+
+      case 'boolean':
+        return (
+          <div key={fieldKey} className="space-y-2">
+            <label className="text-sm font-medium">
+              {fc.displayName}
+              {fc.isRequired && ' *'}
+            </label>
+            <Controller
+              name={fieldKey}
+              control={control}
+              render={({ field }) => (
+                <div className="flex items-center space-x-2 py-2">
+                  <Checkbox
+                    id={fieldKey}
+                    checked={Boolean(field.value)}
+                    onCheckedChange={field.onChange}
+                  />
+                  <label htmlFor={fieldKey} className="text-sm cursor-pointer">
+                    {fc.displayName}
+                  </label>
+                </div>
               )}
             />
           </div>
@@ -286,6 +342,20 @@ export function TaskModal({
           </div>
         )
 
+      case 'date':
+        return (
+          <div key={fieldKey} className="space-y-2">
+            <label className="text-sm font-medium">
+              {fc.displayName}
+              {fc.isRequired && ' *'}
+            </label>
+            <Input
+              type="date"
+              {...register(fieldKey)}
+            />
+          </div>
+        )
+
       case 'tags':
         return (
           <div key={fieldKey} className="space-y-2">
@@ -343,7 +413,7 @@ export function TaskModal({
             <Button type="button" variant="outline" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isSubmitting}>
+            <Button type="submit" disabled={isSubmitting || editableFields.length === 0}>
               {isSubmitting ? 'Saving...' : task ? 'Update Task' : 'Create Task'}
             </Button>
           </DialogFooter>

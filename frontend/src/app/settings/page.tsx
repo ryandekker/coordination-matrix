@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Settings, Database, Palette, Bell, Shield, Cog } from 'lucide-react'
+import { Settings, Database, Palette, Bell, Shield, Cog, Key } from 'lucide-react'
 
 const settingsItems = [
   {
@@ -9,6 +9,12 @@ const settingsItems = [
     description: 'Configure which fields are displayed, editable, and searchable',
     href: '/settings/fields',
     icon: Database,
+  },
+  {
+    name: 'API Keys',
+    description: 'Generate and manage API keys for programmatic access',
+    href: '/settings/api-keys',
+    icon: Key,
   },
   {
     name: 'Appearance',
@@ -26,7 +32,7 @@ const settingsItems = [
   },
   {
     name: 'Security',
-    description: 'Manage security settings and API keys',
+    description: 'Manage security settings and permissions',
     href: '/settings/security',
     icon: Shield,
     disabled: true,

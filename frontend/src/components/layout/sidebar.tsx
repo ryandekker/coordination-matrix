@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { cn } from '@/lib/utils'
@@ -9,18 +10,28 @@ import {
   Users,
   Settings,
   Workflow,
-  AlertCircle,
-  CheckCircle2,
-  Clock,
   Cog,
+  Bookmark,
+  ChevronDown,
+  ChevronRight,
+  Trash2,
 } from 'lucide-react'
+import { View } from '@/lib/api'
+import { useViews, useDeleteView } from '@/hooks/use-tasks'
 
-const navigation = [
+interface NavItem {
+  name: string
+  href: string
+  icon: React.ComponentType<{ className?: string }>
+  exact?: boolean
+}
+
+const staticNavigation: NavItem[] = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard, exact: true },
   { name: 'All Tasks', href: '/tasks', icon: ListTodo, exact: true },
-  { name: 'Awaiting Review', href: '/tasks?view=awaiting-review', icon: Clock, exact: false },
-  { name: 'HITL Queue', href: '/tasks?view=hitl', icon: AlertCircle, exact: false },
-  { name: 'Completed', href: '/tasks?view=completed', icon: CheckCircle2, exact: false },
+]
+
+const bottomNavigation: NavItem[] = [
   { name: 'Workflows', href: '/workflows', icon: Workflow, exact: true },
   { name: 'Users', href: '/users', icon: Users, exact: true },
   { name: 'Settings', href: '/settings', icon: Settings, exact: true },
@@ -30,24 +41,35 @@ const navigation = [
 export function Sidebar() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
-  const currentView = searchParams.get('view')
+  const currentViewId = searchParams.get('viewId')
+  const [savedSearchesExpanded, setSavedSearchesExpanded] = useState(true)
 
-  const isItemActive = (item: typeof navigation[0]) => {
-    const [itemPath, itemQuery] = item.href.split('?')
-    const itemView = itemQuery ? new URLSearchParams(itemQuery).get('view') : null
+  const { data: viewsData } = useViews('tasks')
+  const deleteViewMutation = useDeleteView()
 
-    // For items with query params (view filters)
-    if (itemView) {
-      return pathname === itemPath && currentView === itemView
+  // Filter out the default "All Tasks" view since we have that as a static nav item
+  const views = (viewsData?.data || []).filter((v: View) => v.name !== 'All Tasks')
+
+  const handleDeleteView = async (e: React.MouseEvent, viewId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (confirm('Are you sure you want to delete this saved search?')) {
+      await deleteViewMutation.mutateAsync(viewId)
     }
+  }
 
-    // For exact match items
+  const isStaticItemActive = (item: NavItem) => {
+    const [itemPath] = item.href.split('?')
+
     if (item.exact) {
-      return pathname === itemPath && !currentView
+      return pathname === itemPath && !currentViewId
     }
 
-    // For non-exact items without view params
     return pathname.startsWith(itemPath)
+  }
+
+  const isViewActive = (view: View) => {
+    return pathname === '/tasks' && currentViewId === view._id
   }
 
   return (
@@ -60,25 +82,106 @@ export function Sidebar() {
           <span className="font-semibold">Coordination Matrix</span>
         </Link>
       </div>
-      <nav className="flex-1 space-y-1 p-4">
-        {navigation.map((item) => {
-          const isActive = isItemActive(item)
-          return (
-            <Link
-              key={item.name}
-              href={item.href}
-              className={cn(
-                'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                isActive
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-              )}
+      <nav className="flex-1 overflow-y-auto p-4">
+        <div className="space-y-1">
+          {staticNavigation.map((item) => {
+            const isActive = isStaticItemActive(item)
+            return (
+              <Link
+                key={item.name}
+                href={item.href}
+                className={cn(
+                  'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                  isActive
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                )}
+              >
+                <item.icon className="h-4 w-4" />
+                {item.name}
+              </Link>
+            )
+          })}
+        </div>
+
+        {/* Saved Searches Section */}
+        {views.length > 0 && (
+          <div className="mt-4">
+            <button
+              onClick={() => setSavedSearchesExpanded(!savedSearchesExpanded)}
+              className="flex w-full items-center gap-2 px-3 py-2 text-xs font-semibold uppercase text-muted-foreground hover:text-foreground"
             >
-              <item.icon className="h-4 w-4" />
-              {item.name}
-            </Link>
-          )
-        })}
+              {savedSearchesExpanded ? (
+                <ChevronDown className="h-3 w-3" />
+              ) : (
+                <ChevronRight className="h-3 w-3" />
+              )}
+              Saved Searches
+            </button>
+            {savedSearchesExpanded && (
+              <div className="mt-1 space-y-1">
+                {views.map((view) => {
+                  const isActive = isViewActive(view)
+                  return (
+                    <div key={view._id} className="group relative">
+                      <Link
+                        href={`/tasks?viewId=${view._id}`}
+                        className={cn(
+                          'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                          isActive
+                            ? 'bg-primary text-primary-foreground'
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                        )}
+                      >
+                        <Bookmark className="h-4 w-4" />
+                        <span className="truncate flex-1">{view.name}</span>
+                        {view.isSystem && (
+                          <span className="text-xs opacity-50">System</span>
+                        )}
+                      </Link>
+                      {!view.isSystem && (
+                        <button
+                          onClick={(e) => handleDeleteView(e, view._id)}
+                          className={cn(
+                            'absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity',
+                            isActive
+                              ? 'hover:bg-primary-foreground/20 text-primary-foreground'
+                              : 'hover:bg-destructive/20 text-destructive'
+                          )}
+                          title="Delete saved search"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Bottom Navigation */}
+        <div className="mt-4 space-y-1 border-t pt-4">
+          {bottomNavigation.map((item) => {
+            const isActive = isStaticItemActive(item)
+            return (
+              <Link
+                key={item.name}
+                href={item.href}
+                className={cn(
+                  'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                  isActive
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                )}
+              >
+                <item.icon className="h-4 w-4" />
+                {item.name}
+              </Link>
+            )
+          })}
+        </div>
       </nav>
       <div className="border-t p-4">
         <div className="flex items-center gap-3">
