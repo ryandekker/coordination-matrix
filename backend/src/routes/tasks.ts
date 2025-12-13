@@ -4,6 +4,8 @@ import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
 import { ReferenceResolver } from '../services/reference-resolver.js';
 import { Task, TaskWithChildren, PaginatedResponse } from '../types/index.js';
+import { publishTaskEvent, computeChanges, getSpecificEventTypes } from '../services/event-bus.js';
+import { activityLogService } from '../services/activity-log.js';
 
 export const tasksRouter = Router();
 
@@ -331,6 +333,8 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
   try {
     const db = getDb();
     const taskData = req.body;
+    const silent = taskData.silent === true;
+    delete taskData.silent;
 
     // Validate required fields
     if (!taskData.title) {
@@ -373,6 +377,14 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
     const result = await db.collection('tasks').insertOne(newTask);
     const insertedTask = await db.collection<Task>('tasks').findOne({ _id: result.insertedId });
 
+    // Publish task.created event unless silent
+    if (!silent && insertedTask) {
+      await publishTaskEvent('task.created', insertedTask, {
+        actorId: taskData.createdById ? toObjectId(taskData.createdById) : null,
+        actorType: 'user',
+      });
+    }
+
     res.status(201).json({ data: insertedTask });
   } catch (error) {
     next(error);
@@ -385,6 +397,18 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     const db = getDb();
     const taskId = toObjectId(req.params.id);
     const updates = req.body;
+    const silent = updates.silent === true;
+    const actorId = updates.actorId ? toObjectId(updates.actorId) : null;
+    const actorType = updates.actorType || 'user';
+    delete updates.silent;
+    delete updates.actorId;
+    delete updates.actorType;
+
+    // Get original task for change tracking
+    const originalTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
+    if (!originalTask) {
+      throw createError('Task not found', 404);
+    }
 
     // Remove fields that shouldn't be updated directly
     delete updates._id;
@@ -418,6 +442,34 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
       throw createError('Task not found', 404);
     }
 
+    // Publish task.updated event unless silent
+    if (!silent) {
+      const changes = computeChanges(originalTask, result);
+      if (changes.length > 0) {
+        // Publish main update event
+        await publishTaskEvent('task.updated', result, {
+          changes,
+          actorId,
+          actorType: actorType as 'user' | 'system' | 'daemon',
+        });
+
+        // Publish field-specific events
+        const specificEvents = getSpecificEventTypes(changes);
+        for (const eventType of specificEvents) {
+          await publishTaskEvent(eventType, result, {
+            changes: changes.filter(c => {
+              if (eventType === 'task.status.changed') return c.field === 'status';
+              if (eventType === 'task.assignee.changed') return c.field === 'assigneeId';
+              if (eventType === 'task.priority.changed') return c.field === 'urgency';
+              return false;
+            }),
+            actorId,
+            actorType: actorType as 'user' | 'system' | 'daemon',
+          });
+        }
+      }
+    }
+
     res.json({ data: result });
   } catch (error) {
     next(error);
@@ -429,13 +481,15 @@ tasksRouter.put('/:id/move', async (req: Request, res: Response, next: NextFunct
   try {
     const db = getDb();
     const taskId = toObjectId(req.params.id);
-    const { newParentId } = req.body;
+    const { newParentId, silent, actorId: actorIdStr } = req.body;
+    const actorId = actorIdStr ? toObjectId(actorIdStr) : null;
 
     const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
     if (!task) {
       throw createError('Task not found', 404);
     }
 
+    const oldParentId = task.parentId;
     const now = new Date();
     let newParent: Task | null = null;
 
@@ -470,6 +524,20 @@ tasksRouter.put('/:id/move', async (req: Request, res: Response, next: NextFunct
     );
 
     const updatedTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
+
+    // Publish task.moved event unless silent
+    if (!silent && updatedTask) {
+      await publishTaskEvent('task.moved', updatedTask, {
+        changes: [{
+          field: 'parentId',
+          oldValue: oldParentId,
+          newValue: newParent ? newParent._id : null,
+        }],
+        actorId,
+        actorType: 'user',
+      });
+    }
+
     res.json({ data: updatedTask });
   } catch (error) {
     next(error);
@@ -481,7 +549,8 @@ tasksRouter.delete('/:id', async (req: Request, res: Response, next: NextFunctio
   try {
     const db = getDb();
     const taskId = toObjectId(req.params.id);
-    const { deleteChildren = 'true' } = req.query;
+    const { deleteChildren = 'true', silent = 'false', actorId: actorIdStr } = req.query;
+    const actorId = actorIdStr ? toObjectId(actorIdStr as string) : null;
 
     const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
     if (!task) {
@@ -489,11 +558,13 @@ tasksRouter.delete('/:id', async (req: Request, res: Response, next: NextFunctio
     }
 
     const now = new Date();
+    const deletedTaskIds: ObjectId[] = [taskId];
 
     if (deleteChildren === 'true') {
       // Delete all descendants recursively
       const descendantIds = await getDescendantIds(db, taskId);
       if (descendantIds.length > 0) {
+        deletedTaskIds.push(...descendantIds);
         await db.collection('tasks').deleteMany({ _id: { $in: descendantIds } });
       }
     } else {
@@ -511,6 +582,20 @@ tasksRouter.delete('/:id', async (req: Request, res: Response, next: NextFunctio
 
     // Delete the task
     await db.collection('tasks').deleteOne({ _id: taskId });
+
+    // Publish task.deleted event unless silent
+    if (silent !== 'true') {
+      await publishTaskEvent('task.deleted', task, {
+        actorId,
+        actorType: 'user',
+        metadata: { deletedTaskIds: deletedTaskIds.map(id => id.toString()) },
+      });
+    }
+
+    // Clean up activity logs for deleted tasks
+    for (const deletedId of deletedTaskIds) {
+      await activityLogService.deleteTaskActivity(deletedId);
+    }
 
     res.json({ success: true, message: 'Task deleted successfully' });
   } catch (error) {

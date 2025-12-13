@@ -19,9 +19,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Task, FieldConfig, LookupValue, User, Workflow } from '@/lib/api'
 import { useCreateTask, useUpdateTask, useUsers, useWorkflows, useTasks } from '@/hooks/use-tasks'
 import { cn } from '@/lib/utils'
+import { TaskActivity } from './task-activity'
 
 interface TaskModalProps {
   task: Task | null
@@ -51,6 +53,10 @@ export function TaskModal({
   const users = usersData?.data || []
   const workflows = workflowsData?.data || []
   const allTasks = tasksData?.data || []
+
+  // Get status and urgency options from lookups
+  const statusOptions = lookups['status'] || []
+  const urgencyOptions = lookups['urgency'] || []
 
   // Get editable fields sorted by displayOrder
   const editableFields = useMemo(() => {
@@ -103,6 +109,8 @@ export function TaskModal({
     handleSubmit,
     control,
     reset,
+    watch,
+    setValue,
     formState: { isSubmitting },
   } = useForm({
     defaultValues,
@@ -389,35 +397,193 @@ export function TaskModal({
     }
   }
 
+  const formContent = (
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      {/* Title */}
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Title *</label>
+        <Input {...register('title')} placeholder="Enter task title" />
+      </div>
+
+      {/* Summary */}
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Summary</label>
+        <textarea
+          {...register('summary')}
+          placeholder="Enter task summary"
+          className={cn(
+            'flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm',
+            'ring-offset-background placeholder:text-muted-foreground',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+          )}
+        />
+      </div>
+
+      {/* Status and Urgency */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Status</label>
+          <Select
+            value={watch('status') as string}
+            onValueChange={(val) => setValue('status', val)}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {statusOptions.map((opt) => (
+                <SelectItem key={opt.code} value={opt.code}>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: opt.color }}
+                    />
+                    {opt.displayName}
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Urgency</label>
+          <Select
+            value={watch('urgency') as string}
+            onValueChange={(val) => setValue('urgency', val)}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {urgencyOptions.map((opt) => (
+                <SelectItem key={opt.code} value={opt.code}>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: opt.color }}
+                    />
+                    {opt.displayName}
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Parent Task (for creating subtasks) */}
+      {!task && (
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Parent Task (Optional)</label>
+          <Input
+            value={parentTask?.title || ''}
+            disabled
+            placeholder="This will be a root task"
+            className="bg-muted"
+          />
+          {parentTask && (
+            <p className="text-xs text-muted-foreground">
+              Creating subtask under: {parentTask.title}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Assignee and Due Date */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Assignee</label>
+          <Select
+            value={(watch('assigneeId') as string) || '_unassigned'}
+            onValueChange={(val) => setValue('assigneeId', val === '_unassigned' ? null : val)}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select assignee" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_unassigned">Unassigned</SelectItem>
+              {users
+                .filter((user) => user._id)
+                .map((user) => (
+                  <SelectItem key={user._id} value={user._id}>
+                    {user.displayName}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Due Date</label>
+          <Input
+            type="datetime-local"
+            {...register('dueAt')}
+          />
+        </div>
+      </div>
+
+      {/* Tags */}
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Tags</label>
+        <Input
+          {...register('tags')}
+          placeholder="Enter tags separated by commas"
+        />
+        <p className="text-xs text-muted-foreground">
+          Separate multiple tags with commas
+        </p>
+      </div>
+
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={isSubmitting}>
+          {isSubmitting ? 'Saving...' : task ? 'Update Task' : 'Create Task'}
+        </Button>
+      </DialogFooter>
+    </form>
+  )
+
+  // For new tasks, show just the form
+  if (!task) {
+    return (
+      <Dialog open={isOpen} onOpenChange={onClose}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {parentTask ? `Create Subtask under "${parentTask.title}"` : 'Create New Task'}
+            </DialogTitle>
+          </DialogHeader>
+          {formContent}
+        </DialogContent>
+      </Dialog>
+    )
+  }
+
+  // For existing tasks, show tabs with form and activity
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>{task ? 'Edit Task' : 'Create New Task'}</DialogTitle>
+          <DialogTitle>Edit Task</DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 overflow-y-auto flex-1 px-1">
-          {/* Parent Task Info (for creating subtasks) */}
-          {!task && parentTask && (
-            <div className="rounded-lg border bg-muted/50 p-3">
-              <p className="text-sm text-muted-foreground">
-                Creating subtask under: <strong>{parentTask.title}</strong>
-              </p>
-            </div>
-          )}
+        <Tabs defaultValue="details" className="flex-1 overflow-hidden flex flex-col">
+          <TabsList className="w-full justify-start">
+            <TabsTrigger value="details">Details</TabsTrigger>
+            <TabsTrigger value="activity">Activity</TabsTrigger>
+          </TabsList>
 
-          {/* Render all editable fields dynamically */}
-          {editableFields.map((fc) => renderField(fc))}
+          <TabsContent value="details" className="flex-1 overflow-y-auto mt-4 px-1">
+            {formContent}
+          </TabsContent>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isSubmitting || editableFields.length === 0}>
-              {isSubmitting ? 'Saving...' : task ? 'Update Task' : 'Create Task'}
-            </Button>
-          </DialogFooter>
-        </form>
+          <TabsContent value="activity" className="flex-1 overflow-hidden mt-4">
+            <TaskActivity taskId={task._id} className="h-full" />
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   )

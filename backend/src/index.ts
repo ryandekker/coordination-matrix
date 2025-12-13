@@ -11,7 +11,11 @@ import { usersRouter } from './routes/users.js';
 import { externalJobsRouter } from './routes/external-jobs.js';
 import { workflowsRouter } from './routes/workflows.js';
 import { apiKeysRouter } from './routes/api-keys.js';
+import { activityLogsRouter } from './routes/activity-logs.js';
+import { webhooksRouter } from './routes/webhooks.js';
 import { errorHandler } from './middleware/error-handler.js';
+import { activityLogService } from './services/activity-log.js';
+import { webhookService } from './services/webhook-service.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -39,6 +43,8 @@ app.use('/api/users', usersRouter);
 app.use('/api/external-jobs', externalJobsRouter);
 app.use('/api/workflows', workflowsRouter);
 app.use('/api/auth/api-keys', apiKeysRouter);
+app.use('/api/activity-logs', activityLogsRouter);
+app.use('/api/webhooks', webhooksRouter);
 
 // Error handling
 app.use(errorHandler);
@@ -57,8 +63,14 @@ process.on('SIGINT', shutdown);
 const start = async () => {
   try {
     await connectToDatabase();
+
+    // Initialize event system services
+    activityLogService.initialize();
+    webhookService.initialize();
+
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
+      console.log('Event system initialized');
     });
   } catch (error) {
     console.error('Failed to start server:', error);

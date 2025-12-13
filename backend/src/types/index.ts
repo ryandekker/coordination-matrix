@@ -254,3 +254,141 @@ export interface QueryParams {
   includeChildren?: boolean;
   resolveReferences?: boolean;
 }
+
+// ============================================================================
+// Event System Types
+// ============================================================================
+
+export type TaskEventType =
+  | 'task.created'
+  | 'task.updated'
+  | 'task.deleted'
+  | 'task.status.changed'
+  | 'task.assignee.changed'
+  | 'task.priority.changed'
+  | 'task.moved'
+  | 'task.comment.added';
+
+export interface FieldChange {
+  field: string;
+  oldValue: unknown;
+  newValue: unknown;
+}
+
+export interface TaskEvent {
+  id: string;
+  type: TaskEventType;
+  taskId: ObjectId;
+  task: Task;
+  changes?: FieldChange[];
+  actorId?: ObjectId | null;
+  actorType: 'user' | 'system' | 'daemon';
+  timestamp: Date;
+  metadata?: Record<string, unknown>;
+}
+
+export type EventHandler = (event: TaskEvent) => void | Promise<void>;
+
+// ============================================================================
+// Activity Log Types
+// ============================================================================
+
+export interface ActivityLogEntry {
+  _id: ObjectId;
+  taskId: ObjectId;
+  eventType: TaskEventType;
+  actorId?: ObjectId | null;
+  actorType: 'user' | 'system' | 'daemon';
+  changes?: FieldChange[];
+  comment?: string;
+  timestamp: Date;
+  metadata?: Record<string, unknown>;
+}
+
+// ============================================================================
+// Webhook Types
+// ============================================================================
+
+export type WebhookTrigger =
+  | 'task.created'
+  | 'task.updated'
+  | 'task.deleted'
+  | 'task.status.changed'
+  | 'task.assignee.changed'
+  | 'task.priority.changed'
+  | 'task.entered_filter';
+
+export type WebhookDeliveryStatus = 'pending' | 'success' | 'failed' | 'retrying';
+
+export interface Webhook {
+  _id: ObjectId;
+  name: string;
+  url: string;
+  secret: string;
+  triggers: WebhookTrigger[];
+  savedSearchId?: ObjectId | null;
+  filterQuery?: string;
+  isActive: boolean;
+  createdById?: ObjectId | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface WebhookDelivery {
+  _id: ObjectId;
+  webhookId: ObjectId;
+  eventId: string;
+  eventType: TaskEventType;
+  payload: Record<string, unknown>;
+  status: WebhookDeliveryStatus;
+  statusCode?: number;
+  responseBody?: string;
+  error?: string;
+  attempts: number;
+  maxAttempts: number;
+  nextRetryAt?: Date | null;
+  createdAt: Date;
+  completedAt?: Date | null;
+}
+
+// ============================================================================
+// Automation Daemon Types
+// ============================================================================
+
+export interface DaemonTrigger {
+  event: TaskEventType;
+  filter?: string;
+}
+
+export interface DaemonAction {
+  command: string;
+  update_fields?: Record<string, string>;
+  timeout?: number;
+}
+
+export interface DaemonRule {
+  name: string;
+  trigger: DaemonTrigger;
+  action: DaemonAction;
+  enabled?: boolean;
+}
+
+export interface DaemonConfig {
+  concurrency: number;
+  rules: DaemonRule[];
+}
+
+export interface DaemonExecution {
+  _id: ObjectId;
+  ruleName: string;
+  taskId: ObjectId;
+  eventId: string;
+  command: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  output?: string;
+  error?: string;
+  updatedFields?: Record<string, unknown>;
+  startedAt?: Date | null;
+  completedAt?: Date | null;
+  createdAt: Date;
+}

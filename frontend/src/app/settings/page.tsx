@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Settings, Database, Palette, Bell, Shield, Cog, Key } from 'lucide-react'
+import { Database, Palette, Bell, Shield, Webhook, Activity, Key } from 'lucide-react'
 
 const settingsItems = [
   {
@@ -15,6 +15,19 @@ const settingsItems = [
     description: 'Generate and manage API keys for programmatic access',
     href: '/settings/api-keys',
     icon: Key,
+  },
+  {
+    name: 'Webhooks',
+    description: 'Configure webhooks to notify external services of task events',
+    href: '/settings/webhooks',
+    icon: Webhook,
+  },
+  {
+    name: 'Activity Tracking',
+    description: 'Configure which fields trigger activity log entries',
+    href: '/settings/activity',
+    icon: Activity,
+    disabled: true,
   },
   {
     name: 'Appearance',

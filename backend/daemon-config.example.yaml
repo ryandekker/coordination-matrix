@@ -1,0 +1,77 @@
+# Automation Daemon Configuration
+# Copy this file to daemon-config.yaml and customize for your environment
+
+# Maximum number of commands that can run in parallel
+concurrency: 1
+
+rules:
+  # Example: Auto-triage new tasks with specific label
+  - name: auto-triage
+    trigger:
+      event: task.created
+      filter: "status:pending AND label:auto-triage"
+    action:
+      command: "claude -p 'Analyze this task and suggest a priority and category: {{task.title}} - {{task.description}}'"
+      timeout: 120000  # 2 minutes
+      update_fields:
+        # Output from claude should be JSON like: {"suggested_priority": "high", "category": "bug"}
+        priority: "{{result.suggested_priority}}"
+        tags: "+triaged"
+
+  # Example: Notify Slack when important tasks are completed
+  - name: notify-slack-completion
+    enabled: true  # Can be disabled without removing
+    trigger:
+      event: task.status.changed
+      filter: "status:completed AND label:important"
+    action:
+      command: |
+        curl -X POST https://hooks.slack.com/services/YOUR/WEBHOOK/URL \
+          -H 'Content-Type: application/json' \
+          -d '{"text": "Task completed: {{task.title}}"}'
+      timeout: 30000  # 30 seconds
+
+  # Example: Auto-assign tasks based on tags
+  - name: auto-assign-frontend
+    trigger:
+      event: task.created
+      filter: "label:frontend"
+    action:
+      command: "echo '{\"assigneeId\": \"frontend-team-lead-id\"}'"
+      update_fields:
+        assigneeId: "{{result.assigneeId}}"
+
+  # Example: Run tests when task status changes to in_progress
+  - name: run-tests-on-start
+    enabled: false  # Disabled by default
+    trigger:
+      event: task.status.changed
+      filter: "status:in_progress AND label:test-required"
+    action:
+      command: "npm test -- --passWithNoTests"
+      timeout: 300000  # 5 minutes
+      update_fields:
+        tags: "+tests-run"
+
+  # Example: Generate summary using Claude Code
+  - name: generate-task-summary
+    trigger:
+      event: task.created
+      filter: "label:needs-summary"
+    action:
+      command: |
+        claude -p 'Generate a brief one-paragraph summary of this task for stakeholders:
+        Title: {{task.title}}
+        Description: {{task.description}}
+        Output as JSON: {"summary": "..."}'
+      timeout: 60000
+      update_fields:
+        # Assuming metadata.summary is a valid field path
+        description: "{{result.summary}}"
+        tags: "-needs-summary"
+        tags: "+summarized"
+
+# Authentication note:
+# The daemon connects to the API at http://localhost:3001/api by default.
+# Set the API_URL environment variable to override.
+# For authenticated APIs, you would need to add token support to the daemon.
