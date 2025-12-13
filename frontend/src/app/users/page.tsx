@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Pencil, Trash2, MoreHorizontal, UserCheck, UserX } from 'lucide-react'
+import { Plus, Pencil, Trash2, MoreHorizontal, UserCheck, UserX, Bot } from 'lucide-react'
 import {
   Table,
   TableBody,
@@ -35,6 +35,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Textarea } from '@/components/ui/textarea'
 import { User } from '@/lib/api'
 import { formatDateTime } from '@/lib/utils'
 
@@ -81,6 +83,8 @@ export default function UsersPage() {
     email: '',
     displayName: '',
     role: 'viewer' as string,
+    isAgent: false,
+    agentPrompt: '',
   })
 
   const { data: usersData, isLoading } = useQuery({
@@ -115,7 +119,7 @@ export default function UsersPage() {
 
   const openCreateModal = () => {
     setEditingUser(null)
-    setFormData({ email: '', displayName: '', role: 'viewer' })
+    setFormData({ email: '', displayName: '', role: 'viewer', isAgent: false, agentPrompt: '' })
     setIsModalOpen(true)
   }
 
@@ -125,6 +129,8 @@ export default function UsersPage() {
       email: user.email || '',
       displayName: user.displayName,
       role: user.role,
+      isAgent: user.isAgent || false,
+      agentPrompt: user.agentPrompt || '',
     })
     setIsModalOpen(true)
   }
@@ -132,7 +138,7 @@ export default function UsersPage() {
   const closeModal = () => {
     setIsModalOpen(false)
     setEditingUser(null)
-    setFormData({ email: '', displayName: '', role: 'viewer' })
+    setFormData({ email: '', displayName: '', role: 'viewer', isAgent: false, agentPrompt: '' })
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -175,6 +181,7 @@ export default function UsersPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
+              <TableHead>Type</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Role</TableHead>
               <TableHead>Status</TableHead>
@@ -185,13 +192,13 @@ export default function UsersPage() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-24 text-center">
+                <TableCell colSpan={7} className="h-24 text-center">
                   Loading...
                 </TableCell>
               </TableRow>
             ) : users.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
                   No users found
                 </TableCell>
               </TableRow>
@@ -199,7 +206,19 @@ export default function UsersPage() {
               users.map((user) => (
                 <TableRow key={user._id}>
                   <TableCell className="font-medium">{user.displayName}</TableCell>
-                  <TableCell>{user.email}</TableCell>
+                  <TableCell>
+                    {user.isAgent ? (
+                      <Badge variant="outline" className="text-blue-600 border-blue-600">
+                        <Bot className="mr-1 h-3 w-3" />
+                        Agent
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-gray-500 border-gray-500">
+                        Human
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>{user.email || '-'}</TableCell>
                   <TableCell>
                     <Badge color={roleColors[user.role]} variant="outline">
                       {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
@@ -257,6 +276,17 @@ export default function UsersPage() {
             <DialogTitle>{editingUser ? 'Edit User' : 'Create New User'}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="isAgent"
+                checked={formData.isAgent}
+                onCheckedChange={(checked) => setFormData({ ...formData, isAgent: !!checked })}
+              />
+              <label htmlFor="isAgent" className="text-sm font-medium cursor-pointer flex items-center gap-2">
+                <Bot className="h-4 w-4 text-blue-500" />
+                This is an AI Agent
+              </label>
+            </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Display Name *</label>
               <Input
@@ -266,17 +296,19 @@ export default function UsersPage() {
                 required
               />
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Email *</label>
-              <Input
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                placeholder="Enter email"
-                required
-                disabled={!!editingUser}
-              />
-            </div>
+            {!formData.isAgent && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Email *</label>
+                <Input
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  placeholder="Enter email"
+                  required
+                  disabled={!!editingUser}
+                />
+              </div>
+            )}
             <div className="space-y-2">
               <label className="text-sm font-medium">Role</label>
               <Select
@@ -294,6 +326,20 @@ export default function UsersPage() {
                 </SelectContent>
               </Select>
             </div>
+            {formData.isAgent && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Agent Prompt</label>
+                <Textarea
+                  value={formData.agentPrompt}
+                  onChange={(e) => setFormData({ ...formData, agentPrompt: e.target.value })}
+                  placeholder="Enter the agent's base prompt/persona (optional). This will be prepended to task instructions."
+                  rows={4}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Define the agent&apos;s personality, capabilities, and constraints. Leave empty to use default daemon behavior.
+                </p>
+              </div>
+            )}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={closeModal}>
                 Cancel
