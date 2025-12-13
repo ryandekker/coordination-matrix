@@ -353,7 +353,7 @@ export default function WorkflowsPage() {
             return (
               <div
                 key={workflow._id}
-                className="rounded-lg border bg-card p-6 space-y-4"
+                className="rounded-lg border bg-card p-6 space-y-4 overflow-hidden"
               >
                 <div className="flex items-start justify-between">
                   <div className="space-y-1">

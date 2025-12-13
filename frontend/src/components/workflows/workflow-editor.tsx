@@ -532,7 +532,7 @@ export function WorkflowEditor({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+      <DialogContent className="max-w-[90vw] w-full max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>
             {workflow ? 'Edit Workflow' : 'Create New Workflow'}
