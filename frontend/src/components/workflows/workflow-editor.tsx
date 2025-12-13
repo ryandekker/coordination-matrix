@@ -121,47 +121,61 @@ function generateMermaidFromSteps(steps: WorkflowStep[], name?: string): string 
   if (steps.length === 0) return ''
 
   const lines: string[] = ['flowchart TD']
+  const classAssignments: { nodeId: string; className: string }[] = []
 
-  // Generate node definitions
+  // Generate node definitions - use quoted labels to handle special chars
   steps.forEach((step, i) => {
     const nodeId = step.id || `step${i}`
-    const label = step.name.replace(/"/g, "'")
+    // Escape quotes in labels
+    const label = step.name.replace(/"/g, '#quot;')
 
     switch (step.stepType) {
       case 'decision':
-        lines.push(`    ${nodeId}{${label}}`)
+        lines.push(`    ${nodeId}{"${label}"}`)
+        classAssignments.push({ nodeId, className: 'decision' })
         break
       case 'foreach':
         lines.push(`    ${nodeId}[["Each: ${label}"]]`)
+        classAssignments.push({ nodeId, className: 'automated' })
         break
       case 'join':
         lines.push(`    ${nodeId}[["Join: ${label}"]]`)
+        classAssignments.push({ nodeId, className: 'automated' })
         break
       case 'subflow':
         lines.push(`    ${nodeId}[["Run: ${label}"]]`)
+        classAssignments.push({ nodeId, className: 'automated' })
         break
       case 'task':
       default:
         if (step.execution === 'manual') {
-          lines.push(`    ${nodeId}(${label})`)
+          lines.push(`    ${nodeId}(["${label}"])`)
+          classAssignments.push({ nodeId, className: 'manual' })
         } else {
-          lines.push(`    ${nodeId}[${label}]`)
+          lines.push(`    ${nodeId}["${label}"]`)
+          classAssignments.push({ nodeId, className: 'automated' })
         }
     }
   })
 
   // Generate connections (simple linear for now)
+  lines.push('')
   for (let i = 0; i < steps.length - 1; i++) {
     const fromId = steps[i].id || `step${i}`
     const toId = steps[i + 1].id || `step${i + 1}`
     lines.push(`    ${fromId} --> ${toId}`)
   }
 
-  // Add styling
+  // Add class definitions
   lines.push('')
-  lines.push('    classDef automated fill:#3B82F6,color:#fff')
-  lines.push('    classDef manual fill:#8B5CF6,color:#fff')
-  lines.push('    classDef decision fill:#F59E0B,color:#fff')
+  lines.push('    classDef automated fill:#3B82F6,color:#fff,stroke:#2563EB')
+  lines.push('    classDef manual fill:#8B5CF6,color:#fff,stroke:#7C3AED')
+  lines.push('    classDef decision fill:#F59E0B,color:#fff,stroke:#D97706')
+
+  // Apply classes to nodes
+  classAssignments.forEach(({ nodeId, className }) => {
+    lines.push(`    class ${nodeId} ${className}`)
+  })
 
   return lines.join('\n')
 }
