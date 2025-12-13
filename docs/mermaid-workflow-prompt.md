@@ -43,6 +43,9 @@ All labels should be quoted with double quotes to handle special characters safe
 classDef automated fill:#3B82F6,color:#fff,stroke:#2563EB
 classDef manual fill:#8B5CF6,color:#fff,stroke:#7C3AED
 classDef decision fill:#F59E0B,color:#fff,stroke:#D97706
+classDef foreach fill:#10B981,color:#fff,stroke:#059669
+classDef join fill:#8B5CF6,color:#fff,stroke:#7C3AED
+classDef subflow fill:#EC4899,color:#fff,stroke:#DB2777
 ```
 
 ### Class Assignments (Required - Apply Classes to Nodes)
@@ -87,12 +90,14 @@ flowchart TD
     classDef automated fill:#3B82F6,color:#fff,stroke:#2563EB
     classDef manual fill:#8B5CF6,color:#fff,stroke:#7C3AED
     classDef decision fill:#F59E0B,color:#fff,stroke:#D97706
+    classDef foreach fill:#10B981,color:#fff,stroke:#059669
+    classDef join fill:#8B5CF6,color:#fff,stroke:#7C3AED
+    classDef subflow fill:#EC4899,color:#fff,stroke:#DB2777
 
     class step1 automated
     class step2 decision
-    class step3 automated
-    class step4 manual
-    class step5 manual
+    class step3 foreach
+    class step4,step5 manual
 ```
 
 ## When Editing Existing Diagrams
@@ -135,12 +140,15 @@ flowchart TD
     %% Connections
     step1 --> step2
 
-    %% Class definitions
+    %% Class definitions (all 6 classes)
     classDef automated fill:#3B82F6,color:#fff,stroke:#2563EB
     classDef manual fill:#8B5CF6,color:#fff,stroke:#7C3AED
     classDef decision fill:#F59E0B,color:#fff,stroke:#D97706
+    classDef foreach fill:#10B981,color:#fff,stroke:#059669
+    classDef join fill:#8B5CF6,color:#fff,stroke:#7C3AED
+    classDef subflow fill:#EC4899,color:#fff,stroke:#DB2777
 
-    %% Class assignments (one per node)
+    %% Class assignments (can group nodes: class nodeA,nodeB className)
     class step1 automated
     class step2 decision
 ```

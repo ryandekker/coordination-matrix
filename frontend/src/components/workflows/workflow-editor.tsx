@@ -28,6 +28,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { Mermaid } from '@/components/ui/mermaid'
+import { MermaidLiveEditor } from '@/components/ui/mermaid-live-editor'
 import {
   Tabs,
   TabsContent,
@@ -52,6 +53,12 @@ import {
   Repeat,
   Merge,
   Workflow as WorkflowIcon,
+  Sparkles,
+  Info,
+  MessageSquare,
+  Lightbulb,
+  RefreshCw,
+  ArrowRight,
 } from 'lucide-react'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
@@ -117,11 +124,10 @@ const STEP_TYPES: { type: WorkflowStepType; label: string; icon: React.ElementTy
   { type: 'subflow', label: 'Subflow', icon: WorkflowIcon, color: 'text-pink-500' },
 ]
 
-function generateMermaidFromSteps(steps: WorkflowStep[], name?: string): string {
+function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string {
   if (steps.length === 0) return ''
 
   const lines: string[] = ['flowchart TD']
-  const classAssignments: { nodeId: string; className: string }[] = []
 
   // Generate node definitions - use quoted labels to handle special chars
   steps.forEach((step, i) => {
@@ -132,50 +138,96 @@ function generateMermaidFromSteps(steps: WorkflowStep[], name?: string): string 
     switch (step.stepType) {
       case 'decision':
         lines.push(`    ${nodeId}{"${label}"}`)
-        classAssignments.push({ nodeId, className: 'decision' })
         break
       case 'foreach':
         lines.push(`    ${nodeId}[["Each: ${label}"]]`)
-        classAssignments.push({ nodeId, className: 'automated' })
         break
       case 'join':
         lines.push(`    ${nodeId}[["Join: ${label}"]]`)
-        classAssignments.push({ nodeId, className: 'automated' })
         break
       case 'subflow':
         lines.push(`    ${nodeId}[["Run: ${label}"]]`)
-        classAssignments.push({ nodeId, className: 'automated' })
         break
       case 'task':
       default:
-        if (step.execution === 'manual') {
+        const execution = step.execution || step.type || 'automated'
+        if (execution === 'manual') {
+          // Stadium shape with quoted label for manual tasks
           lines.push(`    ${nodeId}(["${label}"])`)
-          classAssignments.push({ nodeId, className: 'manual' })
         } else {
           lines.push(`    ${nodeId}["${label}"]`)
-          classAssignments.push({ nodeId, className: 'automated' })
         }
     }
   })
 
-  // Generate connections (simple linear for now)
+  // Generate connections
   lines.push('')
-  for (let i = 0; i < steps.length - 1; i++) {
-    const fromId = steps[i].id || `step${i}`
-    const toId = steps[i + 1].id || `step${i + 1}`
-    lines.push(`    ${fromId} --> ${toId}`)
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i]
+    const nodeId = step.id || `step${i}`
+
+    // For decision nodes with branches, use labeled edges
+    if (step.stepType === 'decision' && step.branches && step.branches.length > 0) {
+      for (const branch of step.branches) {
+        if (branch.condition) {
+          lines.push(`    ${nodeId} -->|"${branch.condition}"| ${branch.targetStepId}`)
+        } else {
+          lines.push(`    ${nodeId} --> ${branch.targetStepId}`)
+        }
+      }
+    } else if (i < steps.length - 1) {
+      // Simple linear connection to next step
+      const nextNodeId = steps[i + 1].id || `step${i + 1}`
+      lines.push(`    ${nodeId} --> ${nextNodeId}`)
+    }
   }
 
-  // Add class definitions
+  // Add styling classes with stroke colors
   lines.push('')
   lines.push('    classDef automated fill:#3B82F6,color:#fff,stroke:#2563EB')
   lines.push('    classDef manual fill:#8B5CF6,color:#fff,stroke:#7C3AED')
   lines.push('    classDef decision fill:#F59E0B,color:#fff,stroke:#D97706')
+  lines.push('    classDef foreach fill:#10B981,color:#fff,stroke:#059669')
+  lines.push('    classDef join fill:#8B5CF6,color:#fff,stroke:#7C3AED')
+  lines.push('    classDef subflow fill:#EC4899,color:#fff,stroke:#DB2777')
 
-  // Apply classes to nodes
-  classAssignments.forEach(({ nodeId, className }) => {
-    lines.push(`    class ${nodeId} ${className}`)
+  // Apply classes to nodes (grouped for efficiency)
+  const classGroups: Record<string, string[]> = {
+    automated: [],
+    manual: [],
+    decision: [],
+    foreach: [],
+    join: [],
+    subflow: [],
+  }
+
+  steps.forEach((step, i) => {
+    const nodeId = step.id || `step${i}`
+
+    if (step.stepType === 'decision') {
+      classGroups.decision.push(nodeId)
+    } else if (step.stepType === 'foreach') {
+      classGroups.foreach.push(nodeId)
+    } else if (step.stepType === 'join') {
+      classGroups.join.push(nodeId)
+    } else if (step.stepType === 'subflow') {
+      classGroups.subflow.push(nodeId)
+    } else {
+      const execution = step.execution || step.type || 'automated'
+      if (execution === 'manual') {
+        classGroups.manual.push(nodeId)
+      } else {
+        classGroups.automated.push(nodeId)
+      }
+    }
   })
+
+  // Output class assignments
+  for (const [className, nodeIds] of Object.entries(classGroups)) {
+    if (nodeIds.length > 0) {
+      lines.push(`    class ${nodeIds.join(',')} ${className}`)
+    }
+  }
 
   return lines.join('\n')
 }
@@ -191,6 +243,8 @@ export function WorkflowEditor({
   const [mermaidError, setMermaidError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState('visual')
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [syncError, setSyncError] = useState<string | null>(null)
 
   const {
     register,
@@ -296,6 +350,53 @@ export function WorkflowEditor({
     setSteps(newSteps)
   }
 
+  // Sync Mermaid code to steps by calling backend parse API
+  const syncMermaidToSteps = async () => {
+    if (!mermaidCode.trim()) {
+      setSyncError('No Mermaid code to parse')
+      return
+    }
+
+    setIsSyncing(true)
+    setSyncError(null)
+
+    try {
+      const response = await fetch(`${API_BASE}/workflows/parse-mermaid`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mermaidDiagram: mermaidCode }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to parse: ${response.statusText}`)
+      }
+
+      const result = await response.json()
+      const parsedSteps = result.data?.steps || []
+
+      if (parsedSteps.length === 0) {
+        setSyncError('No steps found in diagram. Check your Mermaid syntax.')
+        return
+      }
+
+      // Normalize the parsed steps
+      const normalizedSteps = parsedSteps.map((step: WorkflowStep) => ({
+        ...step,
+        stepType: step.stepType || 'task',
+        execution: step.execution || step.type || 'automated',
+      }))
+
+      setSteps(normalizedSteps)
+      // Expand all newly created steps
+      setExpandedSteps(new Set(normalizedSteps.map((s: WorkflowStep) => s.id)))
+      setActiveTab('visual')
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : 'Failed to parse Mermaid')
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
   const onSubmit = (data: WorkflowFormData) => {
     const workflowData: Workflow = {
       ...data,
@@ -385,45 +486,40 @@ export function WorkflowEditor({
                 </TabsTrigger>
                 <TabsTrigger value="code" className="gap-2">
                   <FileCode className="h-4 w-4" />
-                  Mermaid
+                  Diagram Editor
                 </TabsTrigger>
                 <TabsTrigger value="preview" className="gap-2">
                   <Eye className="h-4 w-4" />
-                  Preview
+                  Full Preview
                 </TabsTrigger>
               </TabsList>
 
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={exportMermaid}
-                  disabled={!mermaidCode}
-                >
-                  <Download className="h-4 w-4 mr-1" />
-                  Export
-                </Button>
-                <label>
+              {/* Sync button - converts Mermaid code to steps */}
+              {activeTab === 'code' && (
+                <div className="flex items-center gap-2">
+                  {syncError && (
+                    <span className="text-xs text-destructive flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" />
+                      {syncError}
+                    </span>
+                  )}
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    asChild
+                    onClick={syncMermaidToSteps}
+                    disabled={isSyncing || !mermaidCode.trim()}
+                    className="gap-2"
                   >
-                    <span>
-                      <Upload className="h-4 w-4 mr-1" />
-                      Import
-                    </span>
+                    {isSyncing ? (
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ArrowRight className="h-4 w-4" />
+                    )}
+                    {isSyncing ? 'Parsing...' : 'Import to Steps'}
                   </Button>
-                  <input
-                    type="file"
-                    accept=".mmd,.txt"
-                    className="hidden"
-                    onChange={importMermaidFile}
-                  />
-                </label>
-              </div>
+                </div>
+              )}
             </div>
 
             {/* Visual Editor Tab */}
@@ -565,61 +661,157 @@ export function WorkflowEditor({
                             <div className="border-t px-4 py-3 space-y-3 bg-muted/20">
                               {/* Prompt - for task steps */}
                               {step.stepType === 'task' && (
-                                <div className="space-y-1">
-                                  <label className="text-sm font-medium">AI Prompt</label>
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <label className="text-sm font-medium flex items-center gap-2">
+                                      <Sparkles className="h-4 w-4 text-amber-500" />
+                                      AI Prompt Instructions
+                                      {step.execution === 'automated' && (
+                                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                                          Required for automation
+                                        </span>
+                                      )}
+                                    </label>
+                                    {step.prompt && (
+                                      <span className="text-xs text-green-600 flex items-center gap-1">
+                                        <MessageSquare className="h-3 w-3" />
+                                        Configured
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
+                                    <div className="flex items-start gap-2">
+                                      <Lightbulb className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                                      <div className="text-amber-800 space-y-1">
+                                        <p className="font-medium">What should the AI do at this step?</p>
+                                        <p className="text-xs">
+                                          Write clear instructions for the AI agent. Be specific about:
+                                        </p>
+                                        <ul className="text-xs list-disc list-inside space-y-0.5 ml-2">
+                                          <li>What action to take (review, analyze, generate, etc.)</li>
+                                          <li>What inputs to use (files, previous outputs, task data)</li>
+                                          <li>What output format to produce</li>
+                                        </ul>
+                                      </div>
+                                    </div>
+                                  </div>
+
                                   <Textarea
                                     value={step.prompt || ''}
                                     onChange={(e) => updateStep(index, { prompt: e.target.value })}
-                                    placeholder="Instructions for the AI when processing this step...&#10;&#10;Use {{variable}} syntax to reference data from previous steps."
-                                    className="min-h-[100px] font-mono text-sm"
+                                    placeholder={`Example prompts for "${step.name}":
+
+• "Review the code changes in {{task.metadata.files}} and provide feedback on code quality, potential bugs, and suggestions for improvement."
+
+• "Analyze the test results from the previous step. If all tests pass, approve for merge. If any fail, create a detailed report of failures."
+
+• "Generate a summary of changes made in this PR, including affected components and any breaking changes."
+
+Use {{variable}} to reference:
+- {{task.title}} - Task title
+- {{task.description}} - Task description
+- {{task.metadata.X}} - Custom metadata
+- {{previousStep.output}} - Output from prior step`}
+                                    className={cn(
+                                      "min-h-[140px] font-mono text-sm",
+                                      !step.prompt && step.execution === 'automated' && "border-amber-300 bg-amber-50/30"
+                                    )}
                                   />
-                                  <p className="text-xs text-muted-foreground">
-                                    This prompt will be included when the daemon processes tasks at this stage.
-                                  </p>
+
+                                  <div className="flex items-center justify-between text-xs">
+                                    <p className="text-muted-foreground flex items-center gap-1">
+                                      <Info className="h-3 w-3" />
+                                      This prompt guides the AI daemon when it processes tasks at this workflow stage.
+                                    </p>
+                                    {!step.prompt && step.execution === 'automated' && (
+                                      <span className="text-amber-600 font-medium">
+                                        ⚠ No prompt configured
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               )}
 
                               {/* ForEach configuration */}
                               {step.stepType === 'foreach' && (
                                 <>
+                                  <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm">
+                                    <div className="flex items-start gap-2">
+                                      <Repeat className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+                                      <div className="text-green-800">
+                                        <p className="font-medium">Loop Configuration</p>
+                                        <p className="text-xs mt-1">
+                                          This step will iterate over a collection and create a subtask for each item.
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+
                                   <div className="grid grid-cols-2 gap-3">
                                     <div className="space-y-1">
-                                      <label className="text-sm font-medium">Items Path</label>
+                                      <label className="text-sm font-medium flex items-center gap-1">
+                                        Items Path
+                                        <span className="text-xs text-muted-foreground">(JSONPath)</span>
+                                      </label>
                                       <Input
                                         value={step.itemsPath || ''}
                                         onChange={(e) => updateStep(index, { itemsPath: e.target.value })}
-                                        placeholder="output.files"
+                                        placeholder="e.g., output.files or results.items"
                                         className="font-mono text-sm"
                                       />
+                                      <p className="text-xs text-muted-foreground">
+                                        Path to the array in the previous step&apos;s output
+                                      </p>
                                     </div>
                                     <div className="space-y-1">
-                                      <label className="text-sm font-medium">Item Variable</label>
+                                      <label className="text-sm font-medium flex items-center gap-1">
+                                        Item Variable Name
+                                      </label>
                                       <Input
                                         value={step.itemVariable || ''}
                                         onChange={(e) => updateStep(index, { itemVariable: e.target.value })}
-                                        placeholder="file"
+                                        placeholder="e.g., file, item, record"
                                         className="font-mono text-sm"
                                       />
+                                      <p className="text-xs text-muted-foreground">
+                                        Use as {"{{variable}}"} in prompt below
+                                      </p>
                                     </div>
                                   </div>
-                                  <div className="space-y-1">
-                                    <label className="text-sm font-medium">Prompt (per item)</label>
+
+                                  <div className="space-y-2">
+                                    <label className="text-sm font-medium flex items-center gap-2">
+                                      <Sparkles className="h-4 w-4 text-amber-500" />
+                                      Per-Item Prompt
+                                    </label>
                                     <Textarea
                                       value={step.prompt || ''}
                                       onChange={(e) => updateStep(index, { prompt: e.target.value })}
-                                      placeholder="Process {{file.name}}..."
-                                      className="min-h-[80px] font-mono text-sm"
+                                      placeholder={`This prompt runs for EACH item in the collection.
+
+Example: "Review the file {{file.path}} and check for:
+- Code style consistency
+- Potential bugs
+- Security vulnerabilities
+
+Provide a structured report with severity levels."`}
+                                      className="min-h-[100px] font-mono text-sm"
                                     />
                                   </div>
+
                                   <div className="space-y-1">
-                                    <label className="text-sm font-medium">Max Items (default: 100)</label>
+                                    <label className="text-sm font-medium">Max Items</label>
                                     <Input
                                       type="number"
                                       value={step.maxItems || ''}
                                       onChange={(e) => updateStep(index, { maxItems: parseInt(e.target.value) || undefined })}
-                                      placeholder="100"
-                                      className="w-32"
+                                      placeholder="100 (default)"
+                                      className="w-40"
                                     />
+                                    <p className="text-xs text-muted-foreground">
+                                      Safety limit to prevent runaway loops
+                                    </p>
                                   </div>
                                 </>
                               )}
@@ -627,25 +819,51 @@ export function WorkflowEditor({
                               {/* Join configuration */}
                               {step.stepType === 'join' && (
                                 <>
+                                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-sm">
+                                    <div className="flex items-start gap-2">
+                                      <Merge className="h-4 w-4 text-purple-600 mt-0.5 flex-shrink-0" />
+                                      <div className="text-purple-800">
+                                        <p className="font-medium">Join / Aggregation Point</p>
+                                        <p className="text-xs mt-1">
+                                          This step waits for all parallel tasks to complete, then aggregates results.
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+
                                   <div className="space-y-1">
-                                    <label className="text-sm font-medium">Await Tag</label>
+                                    <label className="text-sm font-medium flex items-center gap-1">
+                                      Await Tag Pattern
+                                    </label>
                                     <Input
                                       value={step.awaitTag || ''}
                                       onChange={(e) => updateStep(index, { awaitTag: e.target.value })}
-                                      placeholder="foreach:{{parentId}}"
+                                      placeholder="e.g., foreach:{{parentId}}"
                                       className="font-mono text-sm"
                                     />
                                     <p className="text-xs text-muted-foreground">
-                                      Tag pattern to wait for. Uses {"{{parentId}}"} to reference the foreach parent.
+                                      Pattern to match tasks to wait for. Use {"{{parentId}}"} to reference the loop&apos;s parent task.
                                     </p>
                                   </div>
-                                  <div className="space-y-1">
-                                    <label className="text-sm font-medium">Aggregation Prompt</label>
+
+                                  <div className="space-y-2">
+                                    <label className="text-sm font-medium flex items-center gap-2">
+                                      <Sparkles className="h-4 w-4 text-amber-500" />
+                                      Aggregation Prompt
+                                    </label>
                                     <Textarea
                                       value={step.prompt || ''}
                                       onChange={(e) => updateStep(index, { prompt: e.target.value })}
-                                      placeholder="Aggregate the results from all items..."
-                                      className="min-h-[80px] font-mono text-sm"
+                                      placeholder={`Combine the results from all completed subtasks.
+
+Example: "Review all the individual file reviews completed by the foreach step. Create a consolidated report that:
+
+1. Summarizes the overall code quality
+2. Lists critical issues by priority
+3. Provides a final recommendation (approve/request changes)
+
+The results from each subtask are available in {{subtasks}}."`}
+                                      className="min-h-[120px] font-mono text-sm"
                                     />
                                   </div>
                                 </>
@@ -709,56 +927,28 @@ export function WorkflowEditor({
               </div>
             </TabsContent>
 
-            {/* Mermaid Code Tab */}
+            {/* Combined Mermaid Editor with Live Preview */}
             <TabsContent value="code" className="flex-1 flex flex-col overflow-hidden mt-0">
-              <div className="flex-1 flex flex-col gap-2">
-                <textarea
-                  value={mermaidCode}
-                  onChange={(e) => setMermaidCode(e.target.value)}
-                  placeholder={`Enter Mermaid flowchart code here...
-
-Example:
-flowchart TD
-    A[Fetch Data] --> B{Validate}
-    B -->|"valid"| C[Process]
-    B -->|"invalid"| D[Reject]
-    C --> E[[Each: Review Item]]
-    E --> F[[Join: Summarize]]`}
-                  className={cn(
-                    'flex-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono',
-                    'ring-offset-background placeholder:text-muted-foreground',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-                    'resize-none min-h-[200px]'
-                  )}
-                />
-                <div className="flex items-center gap-2">
-                  {mermaidError && (
-                    <div className="flex items-center gap-1 text-sm text-destructive">
-                      <AlertCircle className="h-4 w-4" />
-                      {mermaidError}
-                    </div>
-                  )}
-                  <p className="text-xs text-muted-foreground ml-auto">
-                    [ ] = automated task, ( ) = manual task, {"{ }"} = decision, [[ ]] = foreach/join/subflow
-                  </p>
-                </div>
-              </div>
+              <MermaidLiveEditor
+                value={mermaidCode}
+                onChange={setMermaidCode}
+                onError={setMermaidError}
+                className="flex-1"
+                minHeight="350px"
+                initialLayout="split"
+              />
             </TabsContent>
 
-            {/* Preview Tab */}
+            {/* Preview Tab - Full Preview */}
             <TabsContent value="preview" className="flex-1 overflow-auto mt-0">
-              <div className="bg-white rounded-lg border p-4 min-h-[300px]">
-                {mermaidCode ? (
-                  <Mermaid
-                    chart={mermaidCode}
-                    onError={(err) => setMermaidError(err)}
-                  />
-                ) : (
-                  <div className="flex items-center justify-center h-full text-muted-foreground">
-                    <p>Add steps or enter Mermaid code to preview the diagram</p>
-                  </div>
-                )}
-              </div>
+              <MermaidLiveEditor
+                value={mermaidCode}
+                onChange={setMermaidCode}
+                onError={setMermaidError}
+                className="flex-1"
+                minHeight="350px"
+                initialLayout="preview"
+              />
             </TabsContent>
           </Tabs>
 
