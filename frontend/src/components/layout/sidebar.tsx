@@ -140,18 +140,20 @@ export function Sidebar() {
                         )}
                       </Link>
                       {!view.isSystem && (
-                        <button
-                          onClick={(e) => handleDeleteView(e, view._id)}
-                          className={cn(
-                            'absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity',
-                            isActive
-                              ? 'hover:bg-primary-foreground/20 text-primary-foreground'
-                              : 'hover:bg-destructive/20 text-destructive'
-                          )}
-                          title="Delete saved search"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
+                        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={(e) => handleDeleteView(e, view._id)}
+                            className={cn(
+                              'p-1 rounded',
+                              isActive
+                                ? 'hover:bg-primary-foreground/20 text-primary-foreground'
+                                : 'hover:bg-destructive/20 text-destructive'
+                            )}
+                            title="Delete saved search"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </div>
                       )}
                     </div>
                   )

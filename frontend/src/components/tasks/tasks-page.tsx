@@ -6,7 +6,7 @@ import { TaskDataTable } from './task-data-table'
 import { TaskToolbar } from './task-toolbar'
 import { TaskModal } from './task-modal'
 import { ColumnConfigModal } from './column-config-modal'
-import { useTasks, useLookups, useFieldConfigs, useViews, useUsers, useCreateView } from '@/hooks/use-tasks'
+import { useTasks, useLookups, useFieldConfigs, useViews, useUsers, useCreateView, useUpdateView } from '@/hooks/use-tasks'
 import { Task, View } from '@/lib/api'
 
 export function TasksPage() {
@@ -44,6 +44,7 @@ export function TasksPage() {
   const { data: viewsData, refetch: refetchViews } = useViews('tasks')
   const { data: usersData } = useUsers()
   const createViewMutation = useCreateView()
+  const updateViewMutation = useUpdateView()
 
   const tasks = tasksData?.data || []
   const pagination = tasksData?.pagination
@@ -131,6 +132,24 @@ export function TasksPage() {
     }
   }
 
+  const handleUpdateSearch = async (
+    viewId: string,
+    filtersToSave: Record<string, unknown>,
+    sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>
+  ) => {
+    await updateViewMutation.mutateAsync({
+      id: viewId,
+      data: {
+        filters: filtersToSave,
+        sorting: sorting || currentSorting,
+        visibleColumns: effectiveVisibleColumns,
+      },
+    })
+
+    // Refetch views to update sidebar
+    await refetchViews()
+  }
+
   const handleFilterChange = (newFilters: Record<string, unknown>) => {
     setFilters(newFilters)
     setPage(1)
@@ -184,6 +203,7 @@ export function TasksPage() {
         currentView={currentView}
         lookups={lookups}
         users={users}
+        tasks={tasks}
         filters={filters}
         search={search}
         sorting={currentSorting}
@@ -193,6 +213,7 @@ export function TasksPage() {
         onCreateTask={handleCreateTask}
         onOpenColumnConfig={() => setIsColumnConfigOpen(true)}
         onSaveSearch={handleSaveSearch}
+        onUpdateSearch={handleUpdateSearch}
       />
 
       <TaskDataTable

@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { Search, Plus, Filter, Columns, ChevronDown, X, Bookmark } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { Search, Plus, Filter, Columns, ChevronDown, X, Bookmark, Tag } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -28,13 +28,14 @@ import {
   DialogFooter,
   DialogDescription,
 } from '@/components/ui/dialog'
-import { View, LookupValue, User } from '@/lib/api'
+import { View, LookupValue, User, Task } from '@/lib/api'
 
 interface TaskToolbarProps {
   views: View[]
   currentView?: View
   lookups: Record<string, LookupValue[]>
   users: User[]
+  tasks?: Task[]
   filters: Record<string, unknown>
   search: string
   sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>
@@ -44,6 +45,7 @@ interface TaskToolbarProps {
   onCreateTask: () => void
   onOpenColumnConfig: () => void
   onSaveSearch?: (name: string, filters: Record<string, unknown>, sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>) => Promise<void>
+  onUpdateSearch?: (viewId: string, filters: Record<string, unknown>, sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>) => Promise<void>
 }
 
 export function TaskToolbar({
@@ -51,6 +53,7 @@ export function TaskToolbar({
   currentView,
   lookups,
   users,
+  tasks = [],
   filters,
   search,
   sorting,
@@ -60,30 +63,70 @@ export function TaskToolbar({
   onCreateTask,
   onOpenColumnConfig,
   onSaveSearch,
+  onUpdateSearch,
 }: TaskToolbarProps) {
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false)
   const [saveName, setSaveName] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const [saveMode, setSaveMode] = useState<'new' | 'update'>('new')
 
   const statusOptions = lookups.task_status || []
   const urgencyOptions = lookups.urgency || []
 
+  // Get unique tags from tasks for filter dropdown
+  const availableTags = useMemo(() => {
+    const tagSet = new Set<string>()
+    tasks.forEach((task) => {
+      if (task.tags && Array.isArray(task.tags)) {
+        task.tags.forEach((tag) => tagSet.add(tag))
+      }
+    })
+    return Array.from(tagSet).sort()
+  }, [tasks])
+
   const hasActiveFilters = Object.keys(filters).length > 0 || search.length > 0
 
-  const handleSaveSearch = async () => {
-    if (!saveName.trim() || !onSaveSearch) return
-    setIsSaving(true)
-    try {
-      // Combine search with filters
-      const filtersToSave = { ...filters }
-      if (search) {
-        filtersToSave.search = search
-      }
-      await onSaveSearch(saveName.trim(), filtersToSave, sorting)
-      setIsSaveModalOpen(false)
+  // Check if we're viewing a non-system, user-created view
+  const canUpdateCurrentView = currentView && !currentView.isSystem && currentView.name !== 'All Tasks'
+
+  const openSaveModal = () => {
+    // Default to update mode if we're on a user-created view
+    if (canUpdateCurrentView) {
+      setSaveMode('update')
+      setSaveName(currentView?.name || '')
+    } else {
+      setSaveMode('new')
       setSaveName('')
-    } finally {
-      setIsSaving(false)
+    }
+    setIsSaveModalOpen(true)
+  }
+
+  const handleSaveSearch = async () => {
+    if (saveMode === 'update' && canUpdateCurrentView && onUpdateSearch) {
+      setIsSaving(true)
+      try {
+        const filtersToSave = { ...filters }
+        if (search) {
+          filtersToSave.search = search
+        }
+        await onUpdateSearch(currentView!._id, filtersToSave, sorting)
+        setIsSaveModalOpen(false)
+      } finally {
+        setIsSaving(false)
+      }
+    } else if (saveMode === 'new' && saveName.trim() && onSaveSearch) {
+      setIsSaving(true)
+      try {
+        const filtersToSave = { ...filters }
+        if (search) {
+          filtersToSave.search = search
+        }
+        await onSaveSearch(saveName.trim(), filtersToSave, sorting)
+        setIsSaveModalOpen(false)
+        setSaveName('')
+      } finally {
+        setIsSaving(false)
+      }
     }
   }
 
@@ -117,6 +160,17 @@ export function TaskToolbar({
     onFilterChange({
       ...filters,
       assigneeId: newAssignees.length > 0 ? newAssignees : undefined,
+    })
+  }
+
+  const handleTagFilter = (tag: string, checked: boolean) => {
+    const currentTags = (filters.tags as string[]) || []
+    const newTags = checked
+      ? [...currentTags, tag]
+      : currentTags.filter((t) => t !== tag)
+    onFilterChange({
+      ...filters,
+      tags: newTags.length > 0 ? newTags : undefined,
     })
   }
 
@@ -156,6 +210,11 @@ export function TaskToolbar({
     }
   })
 
+  const tagFilters = (filters.tags as string[]) || []
+  tagFilters.forEach((tag) => {
+    activeFilters.push({ key: `tag-${tag}`, label: 'Tag', value: tag })
+  })
+
   const removeFilter = (filterKey: string) => {
     if (filterKey === 'search') {
       onSearchChange('')
@@ -168,6 +227,9 @@ export function TaskToolbar({
     } else if (filterKey.startsWith('assignee-')) {
       const assigneeId = filterKey.replace('assignee-', '')
       handleAssigneeFilter(assigneeId, false)
+    } else if (filterKey.startsWith('tag-')) {
+      const tag = filterKey.replace('tag-', '')
+      handleTagFilter(tag, false)
     }
   }
 
@@ -281,11 +343,37 @@ export function TaskToolbar({
         </DropdownMenuContent>
       </DropdownMenu>
 
+      {/* Tags Filter */}
+      {availableTags.length > 0 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm">
+              <Tag className="mr-2 h-4 w-4" />
+              Tags
+              <ChevronDown className="ml-2 h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-56 max-h-64 overflow-y-auto">
+            <DropdownMenuLabel>Filter by Tag</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {availableTags.map((tag) => (
+              <DropdownMenuCheckboxItem
+                key={tag}
+                checked={((filters.tags as string[]) || []).includes(tag)}
+                onCheckedChange={(checked) => handleTagFilter(tag, checked)}
+              >
+                {tag}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+
       <div className="flex-1" />
 
       {/* Save Search */}
-      {onSaveSearch && hasActiveFilters && (
-        <Button variant="outline" size="sm" onClick={() => setIsSaveModalOpen(true)}>
+      {(onSaveSearch || onUpdateSearch) && hasActiveFilters && (
+        <Button variant="outline" size="sm" onClick={openSaveModal}>
           <Bookmark className="mr-2 h-4 w-4" />
           Save Search
         </Button>
@@ -345,21 +433,58 @@ export function TaskToolbar({
       <Dialog open={isSaveModalOpen} onOpenChange={setIsSaveModalOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Save Current Search</DialogTitle>
+            <DialogTitle>Save Search</DialogTitle>
             <DialogDescription>
-              Save your current filters as a reusable search. It will appear in the sidebar.
+              {canUpdateCurrentView
+                ? 'Update the current saved search or create a new one.'
+                : 'Save your current filters as a reusable search. It will appear in the sidebar.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Name *</label>
-              <Input
-                value={saveName}
-                onChange={(e) => setSaveName(e.target.value)}
-                placeholder="e.g., Urgent Pending Tasks"
-                autoFocus
-              />
-            </div>
+            {/* Save Mode Selection */}
+            {canUpdateCurrentView && (
+              <div className="space-y-3">
+                <label className="text-sm font-medium">Save Option</label>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant={saveMode === 'update' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setSaveMode('update')}
+                    className="flex-1"
+                  >
+                    Update "{currentView?.name}"
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={saveMode === 'new' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => {
+                      setSaveMode('new')
+                      setSaveName('')
+                    }}
+                    className="flex-1"
+                  >
+                    Save as New
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Name Input - only show for new saves */}
+            {saveMode === 'new' && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Name *</label>
+                <Input
+                  value={saveName}
+                  onChange={(e) => setSaveName(e.target.value)}
+                  placeholder="e.g., Urgent Pending Tasks"
+                  autoFocus
+                />
+              </div>
+            )}
+
+            {/* Current Filters Preview */}
             {activeFilters.length > 0 && (
               <div className="space-y-2">
                 <label className="text-sm font-medium text-muted-foreground">Current Filters</label>
@@ -377,8 +502,11 @@ export function TaskToolbar({
             <Button variant="outline" onClick={() => setIsSaveModalOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleSaveSearch} disabled={isSaving || !saveName.trim()}>
-              {isSaving ? 'Saving...' : 'Save Search'}
+            <Button
+              onClick={handleSaveSearch}
+              disabled={isSaving || (saveMode === 'new' && !saveName.trim())}
+            >
+              {isSaving ? 'Saving...' : saveMode === 'update' ? 'Update Search' : 'Save Search'}
             </Button>
           </DialogFooter>
         </DialogContent>
