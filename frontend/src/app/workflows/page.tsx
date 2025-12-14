@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Workflow,
@@ -40,7 +41,11 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { WorkflowEditor } from '@/components/workflows/workflow-editor'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+
+const API_RUN_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
@@ -200,11 +205,27 @@ function getStepTypeLabel(step: WorkflowStep): string {
   }
 }
 
+async function startWorkflowRun(workflowId: string, inputPayload?: Record<string, unknown>): Promise<{ run: { _id: string } }> {
+  const response = await fetch(`${API_RUN_BASE}/workflow-runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workflowId, inputPayload }),
+  })
+  if (!response.ok) throw new Error('Failed to start workflow')
+  return response.json()
+}
+
 export default function WorkflowsPage() {
+  const router = useRouter()
   const queryClient = useQueryClient()
   const [isEditorOpen, setIsEditorOpen] = useState(false)
   const [editingWorkflow, setEditingWorkflow] = useState<WorkflowData | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<WorkflowData | null>(null)
+  const [runDialog, setRunDialog] = useState<{ open: boolean; workflow: WorkflowData | null }>({
+    open: false,
+    workflow: null,
+  })
+  const [runPayload, setRunPayload] = useState('')
 
   const { data: workflowsData, isLoading, error } = useQuery({
     queryKey: ['workflows'],
@@ -242,6 +263,35 @@ export default function WorkflowsPage() {
       queryClient.invalidateQueries({ queryKey: ['workflows'] })
     },
   })
+
+  const runMutation = useMutation({
+    mutationFn: ({ workflowId, inputPayload }: { workflowId: string; inputPayload?: Record<string, unknown> }) =>
+      startWorkflowRun(workflowId, inputPayload),
+    onSuccess: (data) => {
+      setRunDialog({ open: false, workflow: null })
+      setRunPayload('')
+      router.push(`/workflow-runs/${data.run._id}`)
+    },
+  })
+
+  const handleRunWorkflow = () => {
+    if (!runDialog.workflow) return
+
+    let payload: Record<string, unknown> | undefined
+    if (runPayload.trim()) {
+      try {
+        payload = JSON.parse(runPayload)
+      } catch {
+        alert('Invalid JSON payload')
+        return
+      }
+    }
+
+    runMutation.mutate({
+      workflowId: runDialog.workflow._id,
+      inputPayload: payload,
+    })
+  }
 
   // Normalize workflows to ensure steps array exists
   // Legacy workflows may have 'stages' (string[]) instead of 'steps' (WorkflowStep[])
@@ -391,6 +441,15 @@ export default function WorkflowsPage() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                      {workflow.isActive && (
+                        <>
+                          <DropdownMenuItem onClick={() => setRunDialog({ open: true, workflow })}>
+                            <Play className="mr-2 h-4 w-4" />
+                            Run Workflow
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                        </>
+                      )}
                       <DropdownMenuItem onClick={() => openEditEditor(workflow)}>
                         <Pencil className="mr-2 h-4 w-4" />
                         Edit
@@ -507,6 +566,44 @@ export default function WorkflowsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Run Workflow Dialog */}
+      <Dialog open={runDialog.open} onOpenChange={(open) => {
+        if (!open) {
+          setRunDialog({ open: false, workflow: null })
+          setRunPayload('')
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Run Workflow: {runDialog.workflow?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">Input Payload (JSON)</label>
+              <Textarea
+                value={runPayload}
+                onChange={(e) => setRunPayload(e.target.value)}
+                placeholder='{"key": "value"}'
+                className="mt-1 font-mono text-sm"
+                rows={6}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Optional. Provide initial data for the workflow.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRunDialog({ open: false, workflow: null })}>
+              Cancel
+            </Button>
+            <Button onClick={handleRunWorkflow} disabled={runMutation.isPending}>
+              <Play className="mr-2 h-4 w-4" />
+              {runMutation.isPending ? 'Starting...' : 'Start Run'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

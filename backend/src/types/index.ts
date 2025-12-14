@@ -15,6 +15,56 @@ export type TaskStatus =
 
 export type Urgency = 'low' | 'normal' | 'high' | 'urgent';
 
+// Task types that map to workflow step types
+export type TaskType =
+  | 'standard'     // Regular task (default)
+  | 'trigger'      // Entry point / trigger step
+  | 'decision'     // Conditional branching
+  | 'foreach'      // Fan-out iteration
+  | 'join'         // Fan-in synchronization
+  | 'subflow'      // Nested workflow
+  | 'external';    // Waiting for external callback
+
+// How the task gets executed
+export type ExecutionMode =
+  | 'immediate'           // Runs immediately (trigger tasks)
+  | 'automated'           // System/AI executes
+  | 'manual'              // Human executes
+  | 'external_callback';  // Waits for webhook callback
+
+// Foreach task configuration
+export interface ForeachConfig {
+  itemsSource: 'payload' | 'external_callback' | 'previous_step';
+  itemsPath?: string;           // JSONPath to items array
+  maxItems?: number;            // Safety limit
+  batchSize?: number;           // For chunked processing
+  minSuccessPercent?: number;   // Required success rate (default: 100)
+  deadlineAt?: Date;            // Timeout for receiving all items
+}
+
+// Join task configuration
+export interface JoinConfig {
+  awaitTaskId?: ObjectId;       // Task whose descendants we're waiting for
+  scope: 'children' | 'descendants';
+  minSuccessPercent?: number;
+  deadlineAt?: Date;
+}
+
+// External task configuration
+export interface ExternalConfig {
+  callbackSecret?: string;
+  expectedCallbacks?: number;
+  timeoutAt?: Date;
+}
+
+// Counters for foreach/batch tasks
+export interface BatchCounters {
+  expectedCount: number;
+  receivedCount: number;
+  processedCount: number;
+  failedCount: number;
+}
+
 export interface Task {
   _id: ObjectId;
   title: string;
@@ -27,9 +77,30 @@ export interface Task {
   // Hierarchy - simplified to just parent reference
   parentId: ObjectId | null;
 
-  // Workflow
+  // Workflow definition reference
   workflowId?: ObjectId | null;
   workflowStage?: string;
+
+  // Workflow execution context
+  workflowRunId?: ObjectId | null;    // Which run this task belongs to
+  workflowStepId?: string;            // Which step in the workflow
+
+  // Task type and execution mode (for workflow tasks)
+  taskType?: TaskType;
+  executionMode?: ExecutionMode;
+
+  // Foreach/batch configuration
+  foreachConfig?: ForeachConfig;
+  batchCounters?: BatchCounters;
+
+  // Join configuration
+  joinConfig?: JoinConfig;
+
+  // External callback configuration
+  externalConfig?: ExternalConfig;
+
+  // Decision result (which branch was taken)
+  decisionResult?: string;
 
   // External tracking
   externalId?: string;
@@ -399,6 +470,125 @@ export interface DaemonExecution {
   startedAt?: Date | null;
   completedAt?: Date | null;
   createdAt: Date;
+}
+
+// ============================================================================
+// Workflow Execution Types
+// ============================================================================
+
+export type WorkflowRunStatus =
+  | 'pending'     // Created but not started
+  | 'running'     // Currently executing
+  | 'paused'      // Paused (manual intervention needed)
+  | 'completed'   // Successfully completed
+  | 'failed'      // Failed with error
+  | 'cancelled';  // Manually cancelled
+
+// Workflow step types (from mermaid)
+export type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'subflow';
+
+export interface WorkflowStep {
+  id: string;
+  name: string;
+  description?: string;
+  stepType: WorkflowStepType;
+  connections?: Array<{
+    targetStepId: string;
+    condition?: string | null;
+    label?: string;
+  }>;
+  additionalInstructions?: string;
+  defaultAssigneeId?: string;
+  externalConfig?: {
+    endpoint?: string;
+    method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+    headers?: Record<string, string>;
+    payloadTemplate?: string;
+    responseMapping?: Record<string, string>;
+  };
+  defaultConnection?: string;
+  itemsPath?: string;
+  itemVariable?: string;
+  maxItems?: number;
+  awaitTag?: string;
+  subflowId?: string;
+  inputMapping?: Record<string, string>;
+}
+
+export interface Workflow {
+  _id: ObjectId;
+  name: string;
+  description: string;
+  isActive: boolean;
+  steps: WorkflowStep[];
+  mermaidDiagram?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  createdById?: ObjectId | null;
+}
+
+export interface WorkflowRun {
+  _id: ObjectId;
+  workflowId: ObjectId;
+  workflowVersion?: number;
+
+  // Execution status
+  status: WorkflowRunStatus;
+
+  // Task tracking
+  rootTaskId?: ObjectId | null;
+  currentStepIds: string[];
+  completedStepIds: string[];
+
+  // Input/Output
+  inputPayload?: Record<string, unknown>;
+  outputPayload?: Record<string, unknown>;
+
+  // Error handling
+  error?: string;
+  failedStepId?: string;
+
+  // Callback configuration
+  callbackSecret?: string;
+
+  // Ownership
+  createdById?: ObjectId | null;
+
+  // Timestamps
+  createdAt: Date;
+  startedAt?: Date | null;
+  completedAt?: Date | null;
+}
+
+// Workflow run event types
+export type WorkflowRunEventType =
+  | 'workflow.run.created'
+  | 'workflow.run.started'
+  | 'workflow.run.step.started'
+  | 'workflow.run.step.completed'
+  | 'workflow.run.step.failed'
+  | 'workflow.run.completed'
+  | 'workflow.run.failed'
+  | 'workflow.run.cancelled';
+
+export interface WorkflowRunEvent {
+  id: string;
+  type: WorkflowRunEventType;
+  workflowRunId: ObjectId;
+  workflowRun: WorkflowRun;
+  stepId?: string;
+  taskId?: ObjectId;
+  error?: string;
+  actorId?: ObjectId | null;
+  actorType: 'user' | 'system' | 'daemon';
+  timestamp: Date;
+  metadata?: Record<string, unknown>;
+}
+
+// Input for starting a workflow run
+export interface StartWorkflowInput {
+  workflowId: string;
+  inputPayload?: Record<string, unknown>;
 }
 
 // ============================================================================

@@ -165,6 +165,103 @@ db.workflows.createIndex({ name: 1 });
 db.workflows.createIndex({ isActive: 1 });
 
 // ============================================================================
+// WORKFLOW RUNS - Workflow execution instances
+// ============================================================================
+db.createCollection('workflow_runs', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['workflowId', 'status', 'createdAt'],
+      properties: {
+        workflowId: {
+          bsonType: 'objectId',
+          description: 'Reference to workflow definition'
+        },
+        workflowVersion: {
+          bsonType: 'int',
+          description: 'Snapshot version of workflow at run time'
+        },
+
+        // Execution status
+        status: {
+          bsonType: 'string',
+          enum: ['pending', 'running', 'paused', 'completed', 'failed', 'cancelled'],
+          description: 'Current run status'
+        },
+
+        // Task tracking
+        rootTaskId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Root task created for this run'
+        },
+        currentStepIds: {
+          bsonType: 'array',
+          items: { bsonType: 'string' },
+          description: 'Currently active step IDs (supports parallel execution)'
+        },
+        completedStepIds: {
+          bsonType: 'array',
+          items: { bsonType: 'string' },
+          description: 'Steps that have completed'
+        },
+
+        // Input/Output
+        inputPayload: {
+          bsonType: 'object',
+          description: 'Initial input data for the workflow'
+        },
+        outputPayload: {
+          bsonType: 'object',
+          description: 'Final aggregated output from the workflow'
+        },
+
+        // Error handling
+        error: {
+          bsonType: 'string',
+          description: 'Error message if failed'
+        },
+        failedStepId: {
+          bsonType: 'string',
+          description: 'Step ID where failure occurred'
+        },
+
+        // Callback configuration (for external triggers)
+        callbackSecret: {
+          bsonType: 'string',
+          description: 'Secret for authenticating external callbacks'
+        },
+
+        // Ownership
+        createdById: {
+          bsonType: ['objectId', 'null'],
+          description: 'User who triggered this run'
+        },
+
+        // Timestamps
+        createdAt: {
+          bsonType: 'date',
+          description: 'When the run was created'
+        },
+        startedAt: {
+          bsonType: ['date', 'null'],
+          description: 'When execution started'
+        },
+        completedAt: {
+          bsonType: ['date', 'null'],
+          description: 'When execution completed'
+        }
+      }
+    }
+  }
+});
+
+db.workflow_runs.createIndex({ workflowId: 1, createdAt: -1 });
+db.workflow_runs.createIndex({ status: 1 });
+db.workflow_runs.createIndex({ rootTaskId: 1 });
+db.workflow_runs.createIndex({ createdAt: -1 });
+db.workflow_runs.createIndex({ createdById: 1 });
+
+// ============================================================================
 // EXTERNAL JOBS - Queue for external work
 // ============================================================================
 db.createCollection('external_jobs');

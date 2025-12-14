@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronRight,
   Trash2,
+  Play,
 } from 'lucide-react'
 import { View } from '@/lib/api'
 import { useViews, useDeleteView } from '@/hooks/use-tasks'
@@ -33,6 +34,7 @@ const staticNavigation: NavItem[] = [
 
 const bottomNavigation: NavItem[] = [
   { name: 'Workflows', href: '/workflows', icon: Workflow, exact: true },
+  { name: 'Workflow Runs', href: '/workflow-runs', icon: Play, exact: false },
   { name: 'Users', href: '/users', icon: Users, exact: true },
   { name: 'Settings', href: '/settings', icon: Settings, exact: true },
   { name: 'Field Config', href: '/settings/fields', icon: Cog, exact: true },

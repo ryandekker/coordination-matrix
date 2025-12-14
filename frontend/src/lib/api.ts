@@ -518,6 +518,98 @@ export interface ActivityLogEntry {
   metadata?: Record<string, unknown>
 }
 
+// Workflow Run Types
+export type WorkflowRunStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
+
+export interface WorkflowRun {
+  _id: string
+  workflowId: string
+  status: WorkflowRunStatus
+  rootTaskId?: string | null
+  inputPayload?: Record<string, unknown>
+  outputPayload?: Record<string, unknown>
+  currentStepIds: string[]
+  completedStepIds: string[]
+  failedStepId?: string | null
+  error?: string | null
+  startedAt?: string | null
+  completedAt?: string | null
+  createdAt: string
+  updatedAt: string
+  _resolved?: {
+    workflow?: { _id: string; name: string }
+    rootTask?: { _id: string; title: string; status: string }
+  }
+}
+
+export interface WorkflowRunWithTasks extends WorkflowRun {
+  tasks: Task[]
+  workflow?: Workflow
+}
+
+// Workflow Runs API
+export const workflowRunsApi = {
+  list: async (params?: {
+    workflowId?: string
+    status?: WorkflowRunStatus | WorkflowRunStatus[]
+    page?: number
+    limit?: number
+  }): Promise<PaginatedResponse<WorkflowRun>> => {
+    const searchParams = new URLSearchParams()
+    if (params?.workflowId) searchParams.append('workflowId', params.workflowId)
+    if (params?.status) {
+      const statuses = Array.isArray(params.status) ? params.status : [params.status]
+      searchParams.append('status', statuses.join(','))
+    }
+    if (params?.page) searchParams.append('page', String(params.page))
+    if (params?.limit) searchParams.append('limit', String(params.limit))
+    const response = await fetch(`${API_BASE}/workflow-runs?${searchParams}`)
+    return handleResponse(response)
+  },
+
+  get: async (id: string, includeTasks = false): Promise<ApiResponse<WorkflowRun | WorkflowRunWithTasks>> => {
+    const params = includeTasks ? '?includeTasks=true' : ''
+    const response = await fetch(`${API_BASE}/workflow-runs/${id}${params}`)
+    return handleResponse(response)
+  },
+
+  start: async (data: {
+    workflowId: string
+    inputPayload?: Record<string, unknown>
+  }): Promise<ApiResponse<{ run: WorkflowRun; rootTask: Task }>> => {
+    const response = await fetch(`${API_BASE}/workflow-runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  cancel: async (id: string): Promise<ApiResponse<WorkflowRun>> => {
+    const response = await fetch(`${API_BASE}/workflow-runs/${id}/cancel`, {
+      method: 'POST',
+    })
+    return handleResponse(response)
+  },
+
+  callback: async (
+    runId: string,
+    stepId: string,
+    payload: Record<string, unknown>,
+    secret: string
+  ): Promise<ApiResponse<{ acknowledged: boolean; taskId: string; taskStatus: string }>> => {
+    const response = await fetch(`${API_BASE}/workflow-runs/${runId}/callback/${stepId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Workflow-Secret': secret,
+      },
+      body: JSON.stringify(payload),
+    })
+    return handleResponse(response)
+  },
+}
+
 // Webhook Types
 export interface Webhook {
   _id: string
