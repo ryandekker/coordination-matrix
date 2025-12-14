@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, ReactNode } from 'react'
+import { useState, useRef, useEffect, ReactNode, useCallback, memo } from 'react'
 import { Check, Search } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import {
@@ -28,6 +28,23 @@ import { FieldConfig, LookupValue, User, Task, tasksApi } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useQuery } from '@tanstack/react-query'
 
+// Debounce hook for search
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value)
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value)
+    }, delay)
+
+    return () => {
+      clearTimeout(handler)
+    }
+  }, [value, delay])
+
+  return debouncedValue
+}
+
 interface EditableCellProps {
   value: unknown
   fieldConfig: FieldConfig
@@ -38,7 +55,7 @@ interface EditableCellProps {
   isTitle?: boolean
 }
 
-export function EditableCell({
+export const EditableCell = memo(function EditableCell({
   value,
   fieldConfig,
   lookups,
@@ -66,9 +83,10 @@ export function EditableCell({
     setEditValue(value)
   }, [value])
 
-  // Handle click outside to save
+  // Handle click outside to save - only register when editing
   useEffect(() => {
     if (!isEditing) return
+
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         handleSave()
@@ -76,44 +94,48 @@ export function EditableCell({
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [isEditing, editValue])
+  }, [isEditing]) // Removed editValue from deps to prevent re-registration on keystroke
 
-  const handleSave = () => {
+  const handleSave = useCallback(() => {
     onSave(editValue)
     setIsEditing(false)
     setSearchQuery('')
-  }
+  }, [editValue, onSave])
 
-  const handleCancel = () => {
+  const handleCancel = useCallback(() => {
     setEditValue(value)
     setIsEditing(false)
     setSearchQuery('')
-  }
+  }, [value])
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       handleSave()
     } else if (e.key === 'Escape') {
       handleCancel()
     }
-  }
+  }, [handleSave, handleCancel])
+
+  // Memoized click handler for boolean fields
+  const handleBooleanToggle = useCallback(() => {
+    const newValue = !value
+    onSave(newValue)
+  }, [value, onSave])
+
+  const handleBooleanKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      handleBooleanToggle()
+    }
+  }, [handleBooleanToggle])
 
   // Special handling for boolean fields - direct toggle without edit mode
   if (fieldConfig.fieldType === 'boolean') {
     return (
       <div
         className="editable-cell cursor-pointer hover:bg-muted/50 py-0.5 rounded transition-colors truncate"
-        onClick={() => {
-          const newValue = !value
-          onSave(newValue)
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            const newValue = !value
-            onSave(newValue)
-          }
-        }}
+        onClick={handleBooleanToggle}
+        onKeyDown={handleBooleanKeyDown}
         tabIndex={0}
         role="button"
       >
@@ -397,7 +419,7 @@ export function EditableCell({
           </div>
         )
       }
-      
+
       // Always render as input, looks like text until focused
       return (
         <div
@@ -416,10 +438,10 @@ export function EditableCell({
         </div>
       )
   }
-}
+})
 
-// Parent Task Selector Component
-function ParentTaskSelector({
+// Memoized Parent Task Selector Component with debounced search
+const ParentTaskSelector = memo(function ParentTaskSelector({
   containerRef,
   currentValue,
   searchQuery,
@@ -434,19 +456,23 @@ function ParentTaskSelector({
   onSelect: (taskId: string | null) => void
   onCancel: () => void
 }) {
-  // Fetch tasks for selection - debounce search
+  // Debounce search query to prevent excessive API calls
+  const debouncedSearchQuery = useDebounce(searchQuery, 300)
+
+  // Fetch tasks for selection with debounced search
   const { data: tasksData, isLoading } = useQuery({
-    queryKey: ['tasks-search', searchQuery],
+    queryKey: ['tasks-search', debouncedSearchQuery],
     queryFn: async () => {
       const params: Record<string, string> = {
         limit: '20',
         resolveReferences: 'false',
       }
-      if (searchQuery) {
-        params.search = searchQuery
+      if (debouncedSearchQuery) {
+        params.search = debouncedSearchQuery
       }
       return tasksApi.list(params)
     },
+    staleTime: 30 * 1000, // Cache for 30 seconds
   })
 
   const tasks = tasksData?.data || []
@@ -509,4 +535,4 @@ function ParentTaskSelector({
       </Command>
     </div>
   )
-}
+})

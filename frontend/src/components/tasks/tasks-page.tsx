@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { TaskDataTable } from './task-data-table'
 import { TaskToolbar } from './task-toolbar'
@@ -73,23 +73,27 @@ export function TasksPage() {
     }
   }, [viewIdFromUrl, views, selectedView])
 
-  // Get current view
-  const currentView = selectedView
-    ? views.find((v: View) => v._id === selectedView)
-    : views.find((v: View) => v.isDefault) || views[0]
+  // Memoized current view
+  const currentView = useMemo(() => {
+    return selectedView
+      ? views.find((v: View) => v._id === selectedView)
+      : views.find((v: View) => v.isDefault) || views[0]
+  }, [selectedView, views])
 
-  // Current sorting for toolbar
-  const currentSorting: Array<{ field: string; direction: 'asc' | 'desc' }> = [
-    { field: sortBy, direction: sortOrder }
-  ]
+  // Memoized current sorting for toolbar
+  const currentSorting = useMemo<Array<{ field: string; direction: 'asc' | 'desc' }>>(
+    () => [{ field: sortBy, direction: sortOrder }],
+    [sortBy, sortOrder]
+  )
 
-  // Initialize visible columns from view
-  const effectiveVisibleColumns =
-    visibleColumns.length > 0
+  // Memoized effective visible columns
+  const effectiveVisibleColumns = useMemo(() => {
+    return visibleColumns.length > 0
       ? visibleColumns
       : currentView?.visibleColumns || fieldConfigs.filter((fc) => fc.defaultVisible).map((fc) => fc.fieldPath)
+  }, [visibleColumns, currentView?.visibleColumns, fieldConfigs])
 
-  const handleViewChange = (viewId: string) => {
+  const handleViewChange = useCallback((viewId: string) => {
     setSelectedView(viewId)
     // Update URL with viewId
     router.push(`/tasks?viewId=${viewId}`)
@@ -108,9 +112,9 @@ export function TasksPage() {
         setSearch('')
       }
     }
-  }
+  }, [views, router])
 
-  const handleSaveSearch = async (
+  const handleSaveSearch = useCallback(async (
     name: string,
     filtersToSave: Record<string, unknown>,
     sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>
@@ -130,9 +134,9 @@ export function TasksPage() {
     if (newView?.data?._id) {
       router.push(`/tasks?viewId=${newView.data._id}`)
     }
-  }
+  }, [createViewMutation, currentSorting, effectiveVisibleColumns, refetchViews, router])
 
-  const handleUpdateSearch = async (
+  const handleUpdateSearch = useCallback(async (
     viewId: string,
     filtersToSave: Record<string, unknown>,
     sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>
@@ -148,44 +152,61 @@ export function TasksPage() {
 
     // Refetch views to update sidebar
     await refetchViews()
-  }
+  }, [updateViewMutation, currentSorting, effectiveVisibleColumns, refetchViews])
 
-  const handleFilterChange = (newFilters: Record<string, unknown>) => {
+  const handleFilterChange = useCallback((newFilters: Record<string, unknown>) => {
     setFilters(newFilters)
     setPage(1)
-  }
+  }, [])
 
-  const handleSort = (field: string) => {
+  const handleSort = useCallback((field: string) => {
     if (sortBy === field) {
-      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')
+      setSortOrder((prev) => prev === 'asc' ? 'desc' : 'asc')
     } else {
       setSortBy(field)
       setSortOrder('asc')
     }
-  }
+  }, [sortBy])
 
-  const handleCreateTask = () => {
+  const handleCreateTask = useCallback(() => {
     setSelectedTask(null)
     setParentTask(null)
     setIsTaskModalOpen(true)
-  }
+  }, [])
 
-  const handleEditTask = (task: Task) => {
+  const handleEditTask = useCallback((task: Task) => {
     setSelectedTask(task)
     setParentTask(null)
     setIsTaskModalOpen(true)
-  }
+  }, [])
 
-  const handleCreateSubtask = (parent: Task) => {
+  const handleCreateSubtask = useCallback((parent: Task) => {
     setSelectedTask(null)
     setParentTask(parent)
     setIsTaskModalOpen(true)
-  }
+  }, [])
 
-  const handleColumnConfigSave = (columns: string[]) => {
+  const handleColumnConfigSave = useCallback((columns: string[]) => {
     setVisibleColumns(columns)
     setIsColumnConfigOpen(false)
-  }
+  }, [])
+
+  const handleSearchChange = useCallback((value: string) => {
+    setSearch(value)
+  }, [])
+
+  const handleOpenColumnConfig = useCallback(() => {
+    setIsColumnConfigOpen(true)
+  }, [])
+
+  const handleCloseTaskModal = useCallback(() => {
+    setIsTaskModalOpen(false)
+    setParentTask(null)
+  }, [])
+
+  const handleCloseColumnConfig = useCallback(() => {
+    setIsColumnConfigOpen(false)
+  }, [])
 
   return (
     <div className="flex flex-col gap-4">
@@ -209,9 +230,9 @@ export function TasksPage() {
         sorting={currentSorting}
         onViewChange={handleViewChange}
         onFilterChange={handleFilterChange}
-        onSearchChange={setSearch}
+        onSearchChange={handleSearchChange}
         onCreateTask={handleCreateTask}
-        onOpenColumnConfig={() => setIsColumnConfigOpen(true)}
+        onOpenColumnConfig={handleOpenColumnConfig}
         onSaveSearch={handleSaveSearch}
         onUpdateSearch={handleUpdateSearch}
       />
@@ -238,17 +259,14 @@ export function TasksPage() {
         fieldConfigs={fieldConfigs}
         lookups={lookups}
         parentTask={parentTask}
-        onClose={() => {
-          setIsTaskModalOpen(false)
-          setParentTask(null)
-        }}
+        onClose={handleCloseTaskModal}
       />
 
       <ColumnConfigModal
         isOpen={isColumnConfigOpen}
         fieldConfigs={fieldConfigs}
         visibleColumns={effectiveVisibleColumns}
-        onClose={() => setIsColumnConfigOpen(false)}
+        onClose={handleCloseColumnConfig}
         onSave={handleColumnConfigSave}
       />
     </div>

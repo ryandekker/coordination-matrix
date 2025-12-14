@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useForm, Controller } from 'react-hook-form'
 import { useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceToNow } from 'date-fns'
@@ -49,9 +49,17 @@ export function TaskModal({
 
   const createTask = useCreateTask()
   const updateTask = useUpdateTask()
+
+  // Only fetch users and workflows when modal is open
   const { data: usersData } = useUsers()
   const { data: workflowsData } = useWorkflows()
-  const { data: tasksData } = useTasks({ limit: 100 })
+
+  // Only fetch tasks list for parent task selector when editing (not creating)
+  // This significantly reduces unnecessary data fetching
+  const { data: tasksData } = useTasks({
+    limit: 50,
+    enabled: isOpen && !!task // Only fetch when editing an existing task
+  })
 
   const users = usersData?.data || []
   const workflows = workflowsData?.data || []
@@ -124,9 +132,18 @@ export function TaskModal({
   })
 
   const selectedWorkflowId = watch('workflowId') as string | null
-  const selectedWorkflow = workflows.find(w => w._id === selectedWorkflowId)
+
+  // Memoize workflow lookup to prevent unnecessary recalculations
+  const selectedWorkflow = useMemo(
+    () => workflows.find(w => w._id === selectedWorkflowId),
+    [workflows, selectedWorkflowId]
+  )
+
   // Support both 'steps' (new format) and 'stages' (legacy format)
-  const workflowStages = selectedWorkflow?.steps?.map(s => s.name) || selectedWorkflow?.stages || []
+  const workflowStages = useMemo(
+    () => selectedWorkflow?.steps?.map(s => s.name) || selectedWorkflow?.stages || [],
+    [selectedWorkflow]
+  )
 
   useEffect(() => {
     if (task) {

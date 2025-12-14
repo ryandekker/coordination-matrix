@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useCallback, useMemo, memo, useRef, useEffect } from 'react'
 import {
   ChevronDown,
   ChevronRight,
@@ -59,6 +59,261 @@ interface TaskDataTableProps {
   onPageChange: (page: number) => void
 }
 
+// Memoized Title cell component with special edit behavior
+const TitleCell = memo(function TitleCell({
+  task,
+  fieldConfig,
+  depth,
+  isExpanded,
+  onToggleExpand,
+  onCellUpdate,
+  onEdit,
+  renderCellValue,
+}: {
+  task: Task
+  fieldConfig: FieldConfig
+  depth: number
+  isExpanded: boolean
+  onToggleExpand: () => void
+  onCellUpdate: (taskId: string, field: string, value: unknown) => void
+  onEdit: () => void
+  renderCellValue: (task: Task, fc: FieldConfig) => React.ReactNode
+}) {
+  const [isInlineEditing, setIsInlineEditing] = useState(false)
+  const [editValue, setEditValue] = useState(task.title || '')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (isInlineEditing && inputRef.current) {
+      inputRef.current.focus()
+      inputRef.current.select()
+    }
+  }, [isInlineEditing])
+
+  const handleSave = useCallback(() => {
+    onCellUpdate(task._id, 'title', editValue)
+    setIsInlineEditing(false)
+  }, [task._id, editValue, onCellUpdate])
+
+  const handleCancel = useCallback(() => {
+    setEditValue(task.title || '')
+    setIsInlineEditing(false)
+  }, [task.title])
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSave()
+    } else if (e.key === 'Escape') {
+      handleCancel()
+    }
+  }, [handleSave, handleCancel])
+
+  return (
+    <div style={{ paddingLeft: depth * 16 }} className="flex items-center gap-1 group">
+      {(task.children && task.children.length > 0) ? (
+        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 flex-shrink-0" onClick={onToggleExpand}>
+          {isExpanded ? (
+            <ChevronDown className="h-4 w-4" />
+          ) : (
+            <ChevronRight className="h-4 w-4" />
+          )}
+        </Button>
+      ) : (
+        <div className="w-6 flex-shrink-0" />
+      )}
+      {isInlineEditing ? (
+        <Input
+          ref={inputRef}
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onBlur={handleSave}
+          className="h-[20px] text-sm border-0 bg-transparent shadow-none focus-visible:ring-1 focus-visible:ring-primary px-1 rounded w-full"
+        />
+      ) : (
+        <>
+          <div
+            className="flex-1 min-w-0 cursor-pointer hover:underline truncate"
+            onClick={onEdit}
+          >
+            {renderCellValue(task, fieldConfig)}
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 w-5 p-0 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+            onClick={(e) => {
+              e.stopPropagation()
+              setIsInlineEditing(true)
+            }}
+          >
+            <Pencil className="h-3 w-3" />
+          </Button>
+        </>
+      )}
+    </div>
+  )
+})
+
+// Memoized recursive row component for nested tasks
+const TaskRow = memo(function TaskRow({
+  task,
+  fieldConfigs,
+  lookups,
+  users,
+  depth,
+  isExpanded,
+  isSelected,
+  onToggleExpand,
+  onToggleSelect,
+  onCellUpdate,
+  onEdit,
+  onDelete,
+  onCreateSubtask,
+  renderCellValue,
+  expandedRows,
+  selectedRows,
+  toggleRowExpansion,
+  toggleRowSelection,
+  handleDeleteTask,
+  handleEditTask,
+  handleCreateSubtask,
+}: {
+  task: Task
+  fieldConfigs: FieldConfig[]
+  lookups: Record<string, LookupValue[]>
+  users: User[]
+  depth: number
+  isExpanded: boolean
+  isSelected: boolean
+  onToggleExpand: () => void
+  onToggleSelect: () => void
+  onCellUpdate: (taskId: string, field: string, value: unknown) => void
+  onEdit: () => void
+  onDelete: () => void
+  onCreateSubtask: () => void
+  renderCellValue: (task: Task, fc: FieldConfig) => React.ReactNode
+  expandedRows: Set<string>
+  selectedRows: Set<string>
+  toggleRowExpansion: (taskId: string) => void
+  toggleRowSelection: (taskId: string) => void
+  handleDeleteTask: (taskId: string) => void
+  handleEditTask: (task: Task) => void
+  handleCreateSubtask: (task: Task) => void
+}) {
+  // Fetch children when expanded
+  const { data: childrenData } = useTaskChildren(isExpanded ? task._id : null)
+  const children = childrenData?.data || []
+  const hasChildren = isExpanded ? children.length > 0 : task.children && task.children.length > 0
+
+  return (
+    <>
+      <TableRow
+        className={cn(depth > 0 && 'bg-muted/30')}
+        data-state={isSelected ? 'selected' : undefined}
+      >
+        <TableCell className="text-center">
+          <Checkbox checked={isSelected} onCheckedChange={onToggleSelect} className="h-5 w-5" />
+        </TableCell>
+        {fieldConfigs.map((fc) => (
+          <TableCell
+            key={fc.fieldPath}
+            className="relative py-0.5 px-1"
+          >
+            {fc.fieldPath === 'title' ? (
+              <TitleCell
+                task={task}
+                fieldConfig={fc}
+                depth={depth}
+                isExpanded={isExpanded}
+                onToggleExpand={onToggleExpand}
+                onCellUpdate={onCellUpdate}
+                onEdit={onEdit}
+                renderCellValue={renderCellValue}
+              />
+            ) : (
+              <>
+                {fc.isEditable ? (
+                  <EditableCell
+                    value={task[fc.fieldPath as keyof Task]}
+                    fieldConfig={fc}
+                    lookups={lookups}
+                    users={users}
+                    onSave={(value) => onCellUpdate(task._id, fc.fieldPath, value)}
+                  >
+                    {renderCellValue(task, fc)}
+                  </EditableCell>
+                ) : (
+                  renderCellValue(task, fc)
+                )}
+              </>
+            )}
+          </TableCell>
+        ))}
+        <TableCell>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={onEdit}>
+                <Pencil className="mr-2 h-4 w-4" />
+                Edit
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onCreateSubtask}>
+                <Plus className="mr-2 h-4 w-4" />
+                Create Subtask
+              </DropdownMenuItem>
+              <DropdownMenuItem>
+                <Copy className="mr-2 h-4 w-4" />
+                Duplicate
+              </DropdownMenuItem>
+              <DropdownMenuItem>
+                <ExternalLink className="mr-2 h-4 w-4" />
+                Open
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="text-destructive" onClick={onDelete}>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </TableCell>
+      </TableRow>
+      {isExpanded &&
+        children.map((child) => (
+          <TaskRow
+            key={child._id}
+            task={child}
+            fieldConfigs={fieldConfigs}
+            lookups={lookups}
+            users={users}
+            depth={depth + 1}
+            isExpanded={expandedRows.has(child._id)}
+            isSelected={selectedRows.has(child._id)}
+            onToggleExpand={() => toggleRowExpansion(child._id)}
+            onToggleSelect={() => toggleRowSelection(child._id)}
+            onCellUpdate={onCellUpdate}
+            onEdit={() => handleEditTask(child)}
+            onDelete={() => handleDeleteTask(child._id)}
+            onCreateSubtask={() => handleCreateSubtask(child)}
+            renderCellValue={renderCellValue}
+            expandedRows={expandedRows}
+            selectedRows={selectedRows}
+            toggleRowExpansion={toggleRowExpansion}
+            toggleRowSelection={toggleRowSelection}
+            handleDeleteTask={handleDeleteTask}
+            handleEditTask={handleEditTask}
+            handleCreateSubtask={handleCreateSubtask}
+          />
+        ))}
+    </>
+  )
+})
+
 export function TaskDataTable({
   tasks,
   fieldConfigs,
@@ -80,53 +335,65 @@ export function TaskDataTable({
   const updateTask = useUpdateTask()
   const deleteTask = useDeleteTask()
 
-  // Get field config map for quick lookup
-  const fieldConfigMap = new Map(fieldConfigs.map((fc) => [fc.fieldPath, fc]))
+  // Memoized field config map for quick lookup
+  const fieldConfigMap = useMemo(
+    () => new Map(fieldConfigs.map((fc) => [fc.fieldPath, fc])),
+    [fieldConfigs]
+  )
 
-  // Get visible field configs in order
-  const visibleFieldConfigs = visibleColumns
-    .map((col) => fieldConfigMap.get(col))
-    .filter(Boolean) as FieldConfig[]
+  // Memoized visible field configs in order
+  const visibleFieldConfigs = useMemo(
+    () => visibleColumns
+      .map((col) => fieldConfigMap.get(col))
+      .filter(Boolean) as FieldConfig[],
+    [visibleColumns, fieldConfigMap]
+  )
 
-  const toggleRowExpansion = (taskId: string) => {
-    const newExpanded = new Set(expandedRows)
-    if (newExpanded.has(taskId)) {
-      newExpanded.delete(taskId)
-    } else {
-      newExpanded.add(taskId)
-    }
-    setExpandedRows(newExpanded)
-  }
+  const toggleRowExpansion = useCallback((taskId: string) => {
+    setExpandedRows((prev) => {
+      const newExpanded = new Set(prev)
+      if (newExpanded.has(taskId)) {
+        newExpanded.delete(taskId)
+      } else {
+        newExpanded.add(taskId)
+      }
+      return newExpanded
+    })
+  }, [])
 
-  const toggleRowSelection = (taskId: string) => {
-    const newSelected = new Set(selectedRows)
-    if (newSelected.has(taskId)) {
-      newSelected.delete(taskId)
-    } else {
-      newSelected.add(taskId)
-    }
-    setSelectedRows(newSelected)
-  }
+  const toggleRowSelection = useCallback((taskId: string) => {
+    setSelectedRows((prev) => {
+      const newSelected = new Set(prev)
+      if (newSelected.has(taskId)) {
+        newSelected.delete(taskId)
+      } else {
+        newSelected.add(taskId)
+      }
+      return newSelected
+    })
+  }, [])
 
-  const toggleAllSelection = () => {
-    if (selectedRows.size === tasks.length) {
-      setSelectedRows(new Set())
-    } else {
-      setSelectedRows(new Set(tasks.map((t) => t._id)))
-    }
-  }
+  const toggleAllSelection = useCallback(() => {
+    setSelectedRows((prev) => {
+      if (prev.size === tasks.length) {
+        return new Set()
+      } else {
+        return new Set(tasks.map((t) => t._id))
+      }
+    })
+  }, [tasks])
 
-  const handleCellUpdate = async (taskId: string, field: string, value: unknown) => {
+  const handleCellUpdate = useCallback(async (taskId: string, field: string, value: unknown) => {
     await updateTask.mutateAsync({ id: taskId, data: { [field]: value } })
-  }
+  }, [updateTask])
 
-  const handleDeleteTask = async (taskId: string) => {
+  const handleDeleteTask = useCallback(async (taskId: string) => {
     if (confirm('Are you sure you want to delete this task?')) {
       await deleteTask.mutateAsync({ id: taskId })
     }
-  }
+  }, [deleteTask])
 
-  const renderSortIcon = (field: string) => {
+  const renderSortIcon = useCallback((field: string) => {
     const config = fieldConfigMap.get(field)
     if (!config?.isSortable) return null
 
@@ -138,9 +405,9 @@ export function TaskDataTable({
     ) : (
       <ArrowDown className="ml-2 h-4 w-4" />
     )
-  }
+  }, [fieldConfigMap, sortBy, sortOrder])
 
-  const renderCellValue = (task: Task, fieldConfig: FieldConfig) => {
+  const renderCellValue = useCallback((task: Task, fieldConfig: FieldConfig) => {
     const value = task[fieldConfig.fieldPath as keyof Task]
     const resolved = task._resolved?.[fieldConfig.fieldPath as keyof typeof task._resolved]
 
@@ -210,7 +477,7 @@ export function TaskDataTable({
     }
 
     return value?.toString() || '-'
-  }
+  }, [])
 
   if (isLoading) {
     return (
@@ -323,266 +590,5 @@ export function TaskDataTable({
         </div>
       )}
     </div>
-  )
-}
-
-// Title cell component with special edit behavior
-function TitleCell({
-  task,
-  fieldConfig,
-  lookups,
-  users,
-  depth,
-  isExpanded,
-  onToggleExpand,
-  onCellUpdate,
-  onEdit,
-  renderCellValue,
-}: {
-  task: Task
-  fieldConfig: FieldConfig
-  lookups: Record<string, LookupValue[]>
-  users: User[]
-  depth: number
-  isExpanded: boolean
-  onToggleExpand: () => void
-  onCellUpdate: (taskId: string, field: string, value: unknown) => void
-  onEdit: () => void
-  renderCellValue: (task: Task, fc: FieldConfig) => React.ReactNode
-}) {
-  const [isInlineEditing, setIsInlineEditing] = useState(false)
-  const [editValue, setEditValue] = useState(task.title || '')
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (isInlineEditing && inputRef.current) {
-      inputRef.current.focus()
-      inputRef.current.select()
-    }
-  }, [isInlineEditing])
-
-  const handleSave = () => {
-    onCellUpdate(task._id, 'title', editValue)
-    setIsInlineEditing(false)
-  }
-
-  const handleCancel = () => {
-    setEditValue(task.title || '')
-    setIsInlineEditing(false)
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleSave()
-    } else if (e.key === 'Escape') {
-      handleCancel()
-    }
-  }
-
-  return (
-    <div style={{ paddingLeft: depth * 16 }} className="flex items-center gap-1 group">
-      {(task.children && task.children.length > 0) ? (
-        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 flex-shrink-0" onClick={onToggleExpand}>
-          {isExpanded ? (
-            <ChevronDown className="h-4 w-4" />
-          ) : (
-            <ChevronRight className="h-4 w-4" />
-          )}
-        </Button>
-      ) : (
-        <div className="w-6 flex-shrink-0" />
-      )}
-      {isInlineEditing ? (
-        <Input
-          ref={inputRef}
-          value={editValue}
-          onChange={(e) => setEditValue(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onBlur={handleSave}
-          className="h-[20px] text-sm border-0 bg-transparent shadow-none focus-visible:ring-1 focus-visible:ring-primary px-1 rounded w-full"
-        />
-      ) : (
-        <>
-          <div
-            className="flex-1 min-w-0 cursor-pointer hover:underline truncate"
-            onClick={onEdit}
-          >
-            {renderCellValue(task, fieldConfig)}
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-5 w-5 p-0 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
-            onClick={(e) => {
-              e.stopPropagation()
-              setIsInlineEditing(true)
-            }}
-          >
-            <Pencil className="h-3 w-3" />
-          </Button>
-        </>
-      )}
-    </div>
-  )
-}
-
-// Recursive row component for nested tasks
-function TaskRow({
-  task,
-  fieldConfigs,
-  lookups,
-  users,
-  depth,
-  isExpanded,
-  isSelected,
-  onToggleExpand,
-  onToggleSelect,
-  onCellUpdate,
-  onEdit,
-  onDelete,
-  onCreateSubtask,
-  renderCellValue,
-  expandedRows,
-  selectedRows,
-  toggleRowExpansion,
-  toggleRowSelection,
-  handleDeleteTask,
-  handleEditTask,
-  handleCreateSubtask,
-}: {
-  task: Task
-  fieldConfigs: FieldConfig[]
-  lookups: Record<string, LookupValue[]>
-  users: User[]
-  depth: number
-  isExpanded: boolean
-  isSelected: boolean
-  onToggleExpand: () => void
-  onToggleSelect: () => void
-  onCellUpdate: (taskId: string, field: string, value: unknown) => void
-  onEdit: () => void
-  onDelete: () => void
-  onCreateSubtask: () => void
-  renderCellValue: (task: Task, fc: FieldConfig) => React.ReactNode
-  expandedRows: Set<string>
-  selectedRows: Set<string>
-  toggleRowExpansion: (taskId: string) => void
-  toggleRowSelection: (taskId: string) => void
-  handleDeleteTask: (taskId: string) => void
-  handleEditTask: (task: Task) => void
-  handleCreateSubtask: (task: Task) => void
-}) {
-  // Fetch children when expanded
-  const { data: childrenData } = useTaskChildren(isExpanded ? task._id : null)
-  const children = childrenData?.data || []
-  const hasChildren = isExpanded ? children.length > 0 : task.children && task.children.length > 0
-
-  return (
-    <>
-      <TableRow
-        className={cn(depth > 0 && 'bg-muted/30')}
-        data-state={isSelected ? 'selected' : undefined}
-      >
-        <TableCell className="text-center">
-          <Checkbox checked={isSelected} onCheckedChange={onToggleSelect} className="h-5 w-5" />
-        </TableCell>
-        {fieldConfigs.map((fc) => (
-          <TableCell
-            key={fc.fieldPath}
-            className="relative py-0.5 px-1"
-          >
-            {fc.fieldPath === 'title' ? (
-              <TitleCell
-                task={task}
-                fieldConfig={fc}
-                lookups={lookups}
-                users={users}
-                depth={depth}
-                isExpanded={isExpanded}
-                onToggleExpand={onToggleExpand}
-                onCellUpdate={onCellUpdate}
-                onEdit={onEdit}
-                renderCellValue={renderCellValue}
-              />
-            ) : (
-              <>
-                {fc.isEditable ? (
-                  <EditableCell
-                    value={task[fc.fieldPath as keyof Task]}
-                    fieldConfig={fc}
-                    lookups={lookups}
-                    users={users}
-                    onSave={(value) => onCellUpdate(task._id, fc.fieldPath, value)}
-                  >
-                    {renderCellValue(task, fc)}
-                  </EditableCell>
-                ) : (
-                  renderCellValue(task, fc)
-                )}
-              </>
-            )}
-          </TableCell>
-        ))}
-        <TableCell>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={onEdit}>
-                <Pencil className="mr-2 h-4 w-4" />
-                Edit
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onCreateSubtask}>
-                <Plus className="mr-2 h-4 w-4" />
-                Create Subtask
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <Copy className="mr-2 h-4 w-4" />
-                Duplicate
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <ExternalLink className="mr-2 h-4 w-4" />
-                Open
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-destructive" onClick={onDelete}>
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </TableCell>
-      </TableRow>
-      {isExpanded &&
-        children.map((child) => (
-          <TaskRow
-            key={child._id}
-            task={child}
-            fieldConfigs={fieldConfigs}
-            lookups={lookups}
-            users={users}
-            depth={depth + 1}
-            isExpanded={expandedRows.has(child._id)}
-            isSelected={selectedRows.has(child._id)}
-            onToggleExpand={() => toggleRowExpansion(child._id)}
-            onToggleSelect={() => toggleRowSelection(child._id)}
-            onCellUpdate={onCellUpdate}
-            onEdit={() => handleEditTask(child)}
-            onDelete={() => handleDeleteTask(child._id)}
-            onCreateSubtask={() => handleCreateSubtask(child)}
-            renderCellValue={renderCellValue}
-            expandedRows={expandedRows}
-            selectedRows={selectedRows}
-            toggleRowExpansion={toggleRowExpansion}
-            toggleRowSelection={toggleRowSelection}
-            handleDeleteTask={handleDeleteTask}
-            handleEditTask={handleEditTask}
-            handleCreateSubtask={handleCreateSubtask}
-          />
-        ))}
-    </>
   )
 }
