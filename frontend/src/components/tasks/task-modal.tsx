@@ -57,7 +57,7 @@ export function TaskModal({
   const workflows = workflowsData?.data || []
   const allTasks = tasksData?.data || []
 
-  const statusOptions = lookups['status'] || []
+  const statusOptions = lookups['task_status'] || []
   const urgencyOptions = lookups['urgency'] || []
 
   // Invalidate activity cache when modal opens to ensure fresh data
