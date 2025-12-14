@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
-import { Plus, Trash2, RotateCcw, Eye, EyeOff, TestTube, ChevronDown, ChevronRight, Copy, Check } from 'lucide-react'
+import { Plus, Trash2, RotateCcw, Eye, EyeOff, TestTube, ChevronDown, ChevronRight, Copy, Check, Filter } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -13,8 +13,15 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { cn } from '@/lib/utils'
-import { webhooksApi, Webhook, WebhookDelivery } from '@/lib/api'
+import { webhooksApi, viewsApi, Webhook, WebhookDelivery, View } from '@/lib/api'
 
 const WEBHOOK_TRIGGERS = [
   { value: 'task.created', label: 'Task Created' },
@@ -31,21 +38,31 @@ function WebhookForm({
   onSave,
   onCancel,
   isSaving,
+  savedSearches,
 }: {
   webhook?: Webhook | null
   onSave: (data: Partial<Webhook>) => void
   onCancel: () => void
   isSaving: boolean
+  savedSearches: View[]
 }) {
   const [name, setName] = useState(webhook?.name || '')
   const [url, setUrl] = useState(webhook?.url || '')
   const [triggers, setTriggers] = useState<string[]>(webhook?.triggers || ['task.updated'])
+  const [savedSearchId, setSavedSearchId] = useState<string | null>(webhook?.savedSearchId || null)
   const [filterQuery, setFilterQuery] = useState(webhook?.filterQuery || '')
   const [isActive, setIsActive] = useState(webhook?.isActive ?? true)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    onSave({ name, url, triggers, filterQuery: filterQuery || undefined, isActive })
+    onSave({
+      name,
+      url,
+      triggers,
+      savedSearchId: savedSearchId || undefined,
+      filterQuery: filterQuery || undefined,
+      isActive,
+    })
   }
 
   const toggleTrigger = (trigger: string) => {
@@ -105,16 +122,41 @@ function WebhookForm({
       </div>
 
       <div className="space-y-2">
-        <label className="text-sm font-medium">Filter Query (Optional)</label>
-        <Input
-          value={filterQuery}
-          onChange={(e) => setFilterQuery(e.target.value)}
-          placeholder="status:pending AND urgency:high"
-        />
+        <label className="text-sm font-medium">Saved Search (Optional)</label>
+        <Select
+          value={savedSearchId || 'none'}
+          onValueChange={(value) => setSavedSearchId(value === 'none' ? null : value)}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Select a saved search..." />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">No saved search filter</SelectItem>
+            {savedSearches.map((search) => (
+              <SelectItem key={search._id} value={search._id}>
+                {search.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <p className="text-xs text-muted-foreground">
-          Only trigger for tasks matching this filter. Supports: status:value, urgency:value, tag:value
+          Only trigger for tasks matching this saved search&apos;s filters
         </p>
       </div>
+
+      {!savedSearchId && (
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Filter Query (Optional)</label>
+          <Input
+            value={filterQuery}
+            onChange={(e) => setFilterQuery(e.target.value)}
+            placeholder="status:pending AND urgency:high"
+          />
+          <p className="text-xs text-muted-foreground">
+            Only trigger for tasks matching this filter. Supports: status:value, urgency:value, tag:value
+          </p>
+        </div>
+      )}
 
       <div className="flex items-center gap-2">
         <input
@@ -269,7 +311,7 @@ function DeliveryHistory({ webhookId }: { webhookId: string }) {
   )
 }
 
-function WebhookCard({ webhook }: { webhook: Webhook }) {
+function WebhookCard({ webhook, savedSearches }: { webhook: Webhook; savedSearches: View[] }) {
   const [editing, setEditing] = useState(false)
   const queryClient = useQueryClient()
 
@@ -291,6 +333,10 @@ function WebhookCard({ webhook }: { webhook: Webhook }) {
   const testWebhook = useMutation({
     mutationFn: () => webhooksApi.test(webhook._id),
   })
+
+  const linkedSavedSearch = webhook.savedSearchId
+    ? savedSearches.find((s) => s._id === webhook.savedSearchId)
+    : null
 
   return (
     <div className={cn('border rounded-lg p-4', !webhook.isActive && 'opacity-60')}>
@@ -344,7 +390,14 @@ function WebhookCard({ webhook }: { webhook: Webhook }) {
           ))}
         </div>
 
-        {webhook.filterQuery && (
+        {linkedSavedSearch && (
+          <p className="text-xs text-muted-foreground flex items-center gap-1">
+            <Filter className="h-3 w-3" />
+            Saved Search: <span className="font-medium text-foreground">{linkedSavedSearch.name}</span>
+          </p>
+        )}
+
+        {webhook.filterQuery && !linkedSavedSearch && (
           <p className="text-xs text-muted-foreground">
             Filter: <code className="bg-muted px-1 rounded">{webhook.filterQuery}</code>
           </p>
@@ -368,6 +421,7 @@ function WebhookCard({ webhook }: { webhook: Webhook }) {
             onSave={(data) => updateWebhook.mutate(data)}
             onCancel={() => setEditing(false)}
             isSaving={updateWebhook.isPending}
+            savedSearches={savedSearches}
           />
         </DialogContent>
       </Dialog>
@@ -384,6 +438,11 @@ export default function WebhooksPage() {
     queryFn: () => webhooksApi.list(),
   })
 
+  const { data: savedSearchesData } = useQuery({
+    queryKey: ['views', 'tasks'],
+    queryFn: () => viewsApi.list('tasks'),
+  })
+
   const createWebhook = useMutation({
     mutationFn: webhooksApi.create,
     onSuccess: () => {
@@ -393,6 +452,7 @@ export default function WebhooksPage() {
   })
 
   const webhooks = data?.data || []
+  const savedSearches = savedSearchesData?.data || []
 
   return (
     <div className="space-y-6">
@@ -422,7 +482,7 @@ export default function WebhooksPage() {
       ) : (
         <div className="space-y-4">
           {webhooks.map((webhook) => (
-            <WebhookCard key={webhook._id} webhook={webhook} />
+            <WebhookCard key={webhook._id} webhook={webhook} savedSearches={savedSearches} />
           ))}
         </div>
       )}
@@ -436,6 +496,7 @@ export default function WebhooksPage() {
             onSave={(data) => createWebhook.mutate(data)}
             onCancel={() => setCreating(false)}
             isSaving={createWebhook.isPending}
+            savedSearches={savedSearches}
           />
         </DialogContent>
       </Dialog>
