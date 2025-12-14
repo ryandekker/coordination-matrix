@@ -3,6 +3,7 @@ import { getDb } from '../db/connection.js';
 import { eventBus } from './event-bus.js';
 import {
   TaskEvent,
+  View,
   Webhook,
   WebhookDelivery,
   WebhookTrigger,
@@ -71,6 +72,10 @@ class WebhookService {
   private async shouldTrigger(webhook: Webhook, event: TaskEvent): Promise<boolean> {
     // Always trigger for direct event type matches
     if (webhook.triggers.includes(event.type as WebhookTrigger)) {
+      // If there's a saved search, check if task matches its filters
+      if (webhook.savedSearchId) {
+        return this.taskMatchesSavedSearch(event.task as unknown as Record<string, unknown>, webhook.savedSearchId);
+      }
       // If there's a filter query, check if task matches
       if (webhook.filterQuery) {
         return this.taskMatchesFilter(event.task as unknown as Record<string, unknown>, webhook.filterQuery);
@@ -79,10 +84,16 @@ class WebhookService {
     }
 
     // Handle task.entered_filter trigger
-    if (webhook.triggers.includes('task.entered_filter') && webhook.filterQuery) {
+    if (webhook.triggers.includes('task.entered_filter')) {
       // Check if task now matches filter when it didn't before
       if (event.type === 'task.updated' || event.type === 'task.created') {
-        return this.taskMatchesFilter(event.task as unknown as Record<string, unknown>, webhook.filterQuery);
+        // Check saved search first, then fall back to filter query
+        if (webhook.savedSearchId) {
+          return this.taskMatchesSavedSearch(event.task as unknown as Record<string, unknown>, webhook.savedSearchId);
+        }
+        if (webhook.filterQuery) {
+          return this.taskMatchesFilter(event.task as unknown as Record<string, unknown>, webhook.filterQuery);
+        }
       }
     }
 
@@ -111,6 +122,60 @@ class WebhookService {
     }
 
     return true;
+  }
+
+  /**
+   * Check if a task matches a saved search's filters
+   */
+  private async taskMatchesSavedSearch(task: Record<string, unknown>, savedSearchId: ObjectId): Promise<boolean> {
+    try {
+      const db = getDb();
+      const savedSearch = await db.collection<View>('views').findOne({ _id: savedSearchId });
+
+      if (!savedSearch || !savedSearch.filters) {
+        return true; // No filters means all tasks match
+      }
+
+      // Check each filter condition from the saved search
+      for (const [key, value] of Object.entries(savedSearch.filters)) {
+        if (value === undefined || value === null || value === '') continue;
+
+        const taskValue = task[key];
+
+        // Handle array filter values (like status: ['pending', 'in_progress'])
+        if (Array.isArray(value)) {
+          // If the filter has array values, task value must be in that array
+          if (!value.includes(taskValue as string)) {
+            return false;
+          }
+        } else if (key.endsWith('Id')) {
+          // Handle ObjectId comparisons - convert both to strings for comparison
+          let taskIdStr: string;
+          if (taskValue && typeof (taskValue as ObjectId).toString === 'function' && (taskValue as ObjectId)._bsontype === 'ObjectId') {
+            taskIdStr = (taskValue as ObjectId).toString();
+          } else if (typeof taskValue === 'object' && taskValue !== null && '_id' in (taskValue as object)) {
+            taskIdStr = String((taskValue as { _id: unknown })._id);
+          } else {
+            taskIdStr = String(taskValue ?? '');
+          }
+          const filterIdStr = value instanceof ObjectId ? value.toString() : String(value);
+
+          if (taskIdStr !== filterIdStr) {
+            return false;
+          }
+        } else {
+          // Simple equality check for other fields
+          if (taskValue !== value) {
+            return false;
+          }
+        }
+      }
+
+      return true;
+    } catch (error) {
+      console.error('WebhookService: Error checking saved search filters:', error);
+      return false; // Fail closed - don't trigger if we can't check
+    }
   }
 
   /**
