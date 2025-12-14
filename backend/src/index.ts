@@ -13,9 +13,11 @@ import { workflowsRouter } from './routes/workflows.js';
 import { apiKeysRouter } from './routes/api-keys.js';
 import { activityLogsRouter } from './routes/activity-logs.js';
 import { webhooksRouter } from './routes/webhooks.js';
+import batchJobsRouter from './routes/batch-jobs.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { activityLogService } from './services/activity-log.js';
 import { webhookService } from './services/webhook-service.js';
+import { batchJobService } from './services/batch-job-service.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -45,6 +47,7 @@ app.use('/api/workflows', workflowsRouter);
 app.use('/api/auth/api-keys', apiKeysRouter);
 app.use('/api/activity-logs', activityLogsRouter);
 app.use('/api/webhooks', webhooksRouter);
+app.use('/api/batch-jobs', batchJobsRouter);
 
 // Error handling
 app.use(errorHandler);
@@ -52,6 +55,7 @@ app.use(errorHandler);
 // Graceful shutdown
 const shutdown = async () => {
   console.log('Shutting down gracefully...');
+  await batchJobService.shutdown();
   await closeDatabase();
   process.exit(0);
 };
@@ -67,6 +71,7 @@ const start = async () => {
     // Initialize event system services
     activityLogService.initialize();
     webhookService.initialize();
+    batchJobService.initialize();
 
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);

@@ -430,4 +430,237 @@ db.daemon_executions.createIndex({ taskId: 1 });
 db.daemon_executions.createIndex({ status: 1 });
 db.daemon_executions.createIndex({ createdAt: -1 });
 
+// ============================================================================
+// BATCH JOBS - Fan-out/fan-in workflow coordination
+// ============================================================================
+db.createCollection('batch_jobs', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['status', 'expectedCount', 'createdAt'],
+      properties: {
+        // Core identification
+        name: {
+          bsonType: 'string',
+          description: 'Human-readable batch job name'
+        },
+        type: {
+          bsonType: 'string',
+          description: 'Batch job type (e.g., email_analysis, data_processing)'
+        },
+
+        // Workflow correlation
+        workflowId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Associated workflow if part of a workflow run'
+        },
+        workflowStepId: {
+          bsonType: 'string',
+          description: 'Step ID within workflow (e.g., foreach step)'
+        },
+        taskId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Parent task that initiated this batch'
+        },
+
+        // Callback configuration
+        callbackUrl: {
+          bsonType: 'string',
+          description: 'URL where external service should POST results'
+        },
+        callbackSecret: {
+          bsonType: 'string',
+          description: 'Secret for authenticating callbacks (whsec_ prefix)'
+        },
+
+        // Batch tracking
+        status: {
+          bsonType: 'string',
+          enum: ['pending', 'processing', 'awaiting_responses', 'completed',
+                 'completed_with_warnings', 'failed', 'cancelled', 'manual_review'],
+          description: 'Current batch job status'
+        },
+        expectedCount: {
+          bsonType: 'int',
+          minimum: 0,
+          description: 'Expected number of items to process'
+        },
+        receivedCount: {
+          bsonType: 'int',
+          minimum: 0,
+          description: 'Number of callback responses received'
+        },
+        processedCount: {
+          bsonType: 'int',
+          minimum: 0,
+          description: 'Number of items successfully processed'
+        },
+        failedCount: {
+          bsonType: 'int',
+          minimum: 0,
+          description: 'Number of items that failed'
+        },
+
+        // Completion policy
+        minSuccessPercent: {
+          bsonType: 'double',
+          minimum: 0,
+          maximum: 100,
+          description: 'Minimum success percentage required (default: 100)'
+        },
+        deadlineAt: {
+          bsonType: ['date', 'null'],
+          description: 'Deadline for receiving all responses'
+        },
+
+        // Payload and results
+        inputPayload: {
+          bsonType: 'object',
+          description: 'Original input data sent to external service'
+        },
+        aggregateResult: {
+          bsonType: 'object',
+          description: 'Aggregated results after join (sealed on completion)'
+        },
+        isResultSealed: {
+          bsonType: 'bool',
+          description: 'Whether aggregate result is finalized'
+        },
+
+        // Manual review
+        requiresManualReview: {
+          bsonType: 'bool',
+          description: 'Whether this job requires manual review before proceeding'
+        },
+        reviewedById: {
+          bsonType: ['objectId', 'null'],
+          description: 'User who reviewed this batch job'
+        },
+        reviewedAt: {
+          bsonType: ['date', 'null'],
+          description: 'When the job was reviewed'
+        },
+        reviewDecision: {
+          bsonType: 'string',
+          enum: ['approved', 'rejected', 'proceed_with_partial'],
+          description: 'Manual review decision'
+        },
+        reviewNotes: {
+          bsonType: 'string',
+          description: 'Notes from manual review'
+        },
+
+        // Ownership
+        createdById: {
+          bsonType: ['objectId', 'null'],
+          description: 'User who created this batch job'
+        },
+
+        // Timestamps
+        createdAt: {
+          bsonType: 'date',
+          description: 'When the batch job was created'
+        },
+        updatedAt: {
+          bsonType: 'date',
+          description: 'Last update timestamp'
+        },
+        startedAt: {
+          bsonType: ['date', 'null'],
+          description: 'When processing started'
+        },
+        completedAt: {
+          bsonType: ['date', 'null'],
+          description: 'When the batch job completed'
+        }
+      }
+    }
+  }
+});
+
+db.batch_jobs.createIndex({ status: 1, deadlineAt: 1 });
+db.batch_jobs.createIndex({ workflowId: 1, workflowStepId: 1 });
+db.batch_jobs.createIndex({ taskId: 1 });
+db.batch_jobs.createIndex({ type: 1 });
+db.batch_jobs.createIndex({ createdAt: -1 });
+db.batch_jobs.createIndex({ status: 1, requiresManualReview: 1 });
+
+// ============================================================================
+// BATCH ITEMS - Individual items within a batch job (for deduplication)
+// ============================================================================
+db.createCollection('batch_items', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['batchJobId', 'itemKey', 'status', 'createdAt'],
+      properties: {
+        batchJobId: {
+          bsonType: 'objectId',
+          description: 'Parent batch job'
+        },
+
+        // Idempotency key (e.g., job_id + email_message_id)
+        itemKey: {
+          bsonType: 'string',
+          description: 'Unique key for deduplication within batch'
+        },
+
+        // Optional external reference
+        externalId: {
+          bsonType: 'string',
+          description: 'External system ID (e.g., email_message_id)'
+        },
+
+        // Processing status
+        status: {
+          bsonType: 'string',
+          enum: ['pending', 'received', 'processing', 'completed', 'failed', 'skipped'],
+          description: 'Item processing status'
+        },
+
+        // Item data
+        inputData: {
+          bsonType: 'object',
+          description: 'Input data for this item'
+        },
+        resultData: {
+          bsonType: 'object',
+          description: 'Result data from processing'
+        },
+        error: {
+          bsonType: 'string',
+          description: 'Error message if failed'
+        },
+
+        // Tracking
+        attempts: {
+          bsonType: 'int',
+          minimum: 0,
+          description: 'Number of processing attempts'
+        },
+
+        // Timestamps
+        createdAt: {
+          bsonType: 'date',
+          description: 'When the item was created'
+        },
+        receivedAt: {
+          bsonType: ['date', 'null'],
+          description: 'When callback was received'
+        },
+        completedAt: {
+          bsonType: ['date', 'null'],
+          description: 'When processing completed'
+        }
+      }
+    }
+  }
+});
+
+// Unique constraint for idempotent processing
+db.batch_items.createIndex({ batchJobId: 1, itemKey: 1 }, { unique: true });
+db.batch_items.createIndex({ batchJobId: 1, status: 1 });
+db.batch_items.createIndex({ batchJobId: 1, createdAt: 1 });
+db.batch_items.createIndex({ externalId: 1 });
+
 print('Database initialization complete!');

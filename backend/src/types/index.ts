@@ -396,3 +396,174 @@ export interface DaemonExecution {
   completedAt?: Date | null;
   createdAt: Date;
 }
+
+// ============================================================================
+// Batch Job Types (Fan-out/Fan-in Workflow Coordination)
+// ============================================================================
+
+export type BatchJobStatus =
+  | 'pending'           // Created but not started
+  | 'processing'        // Initial request sent to external service
+  | 'awaiting_responses' // Waiting for callbacks
+  | 'completed'         // All items processed successfully
+  | 'completed_with_warnings' // Completed but below threshold or with failures
+  | 'failed'            // Critical failure
+  | 'cancelled'         // Manually cancelled
+  | 'manual_review';    // Requires human intervention
+
+export type BatchItemStatus =
+  | 'pending'    // Created, waiting to be sent
+  | 'received'   // Callback received, not yet processed
+  | 'processing' // Currently being processed
+  | 'completed'  // Successfully processed
+  | 'failed'     // Processing failed
+  | 'skipped';   // Intentionally skipped
+
+export type ReviewDecision = 'approved' | 'rejected' | 'proceed_with_partial';
+
+export interface BatchJob {
+  _id: ObjectId;
+
+  // Core identification
+  name?: string;
+  type?: string;
+
+  // Workflow correlation
+  workflowId?: ObjectId | null;
+  workflowStepId?: string;
+  taskId?: ObjectId | null;
+
+  // Callback configuration
+  callbackUrl?: string;
+  callbackSecret?: string;
+
+  // Batch tracking
+  status: BatchJobStatus;
+  expectedCount: number;
+  receivedCount: number;
+  processedCount: number;
+  failedCount: number;
+
+  // Completion policy
+  minSuccessPercent: number;  // Default: 100
+  deadlineAt?: Date | null;
+
+  // Payload and results
+  inputPayload?: Record<string, unknown>;
+  aggregateResult?: Record<string, unknown>;
+  isResultSealed: boolean;
+
+  // Manual review
+  requiresManualReview: boolean;
+  reviewedById?: ObjectId | null;
+  reviewedAt?: Date | null;
+  reviewDecision?: ReviewDecision;
+  reviewNotes?: string;
+
+  // Ownership
+  createdById?: ObjectId | null;
+
+  // Timestamps
+  createdAt: Date;
+  updatedAt: Date;
+  startedAt?: Date | null;
+  completedAt?: Date | null;
+}
+
+export interface BatchItem {
+  _id: ObjectId;
+  batchJobId: ObjectId;
+
+  // Idempotency key
+  itemKey: string;
+
+  // External reference
+  externalId?: string;
+
+  // Processing status
+  status: BatchItemStatus;
+
+  // Item data
+  inputData?: Record<string, unknown>;
+  resultData?: Record<string, unknown>;
+  error?: string;
+
+  // Tracking
+  attempts: number;
+
+  // Timestamps
+  createdAt: Date;
+  receivedAt?: Date | null;
+  completedAt?: Date | null;
+}
+
+// Join condition evaluation result
+export interface JoinConditionResult {
+  isSatisfied: boolean;
+  reason: 'count_met' | 'threshold_met_with_deadline' | 'deadline_passed' | 'not_satisfied';
+  successPercent: number;
+  details: {
+    expectedCount: number;
+    processedCount: number;
+    failedCount: number;
+    minSuccessPercent: number;
+    deadlineAt?: Date | null;
+    isDeadlinePassed: boolean;
+  };
+}
+
+// Batch job event types
+export type BatchJobEventType =
+  | 'batch.created'
+  | 'batch.started'
+  | 'batch.item.received'
+  | 'batch.item.completed'
+  | 'batch.item.failed'
+  | 'batch.join.satisfied'
+  | 'batch.completed'
+  | 'batch.completed_with_warnings'
+  | 'batch.failed'
+  | 'batch.manual_review_required'
+  | 'batch.reviewed';
+
+export interface BatchJobEvent {
+  id: string;
+  type: BatchJobEventType;
+  batchJobId: ObjectId;
+  batchJob: BatchJob;
+  itemId?: ObjectId;
+  item?: BatchItem;
+  joinResult?: JoinConditionResult;
+  actorId?: ObjectId | null;
+  actorType: 'user' | 'system' | 'daemon';
+  timestamp: Date;
+  metadata?: Record<string, unknown>;
+}
+
+// Create batch job input
+export interface CreateBatchJobInput {
+  name?: string;
+  type?: string;
+  expectedCount: number;
+  workflowId?: string;
+  workflowStepId?: string;
+  taskId?: string;
+  minSuccessPercent?: number;  // Default: 100
+  deadlineAt?: Date | string;
+  inputPayload?: Record<string, unknown>;
+  items?: Array<{
+    itemKey: string;
+    externalId?: string;
+    inputData?: Record<string, unknown>;
+  }>;
+}
+
+// Callback payload from external service
+export interface BatchCallbackPayload {
+  jobId: string;
+  itemKey: string;
+  externalId?: string;
+  success: boolean;
+  result?: Record<string, unknown>;
+  error?: string;
+}
