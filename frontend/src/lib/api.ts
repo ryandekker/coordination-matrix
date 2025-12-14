@@ -610,18 +610,18 @@ export const workflowRunsApi = {
     }
     if (params?.page) searchParams.append('page', String(params.page))
     if (params?.limit) searchParams.append('limit', String(params.limit))
-    const response = await fetch(`${API_BASE}/workflow-runs?${searchParams}`)
+    const response = await authFetch(`${API_BASE}/workflow-runs?${searchParams}`)
     return handleResponse(response)
   },
 
   get: async (id: string, includeTasks = false): Promise<ApiResponse<WorkflowRun | WorkflowRunWithTasks>> => {
     const params = includeTasks ? '?includeTasks=true' : ''
-    const response = await fetch(`${API_BASE}/workflow-runs/${id}${params}`)
+    const response = await authFetch(`${API_BASE}/workflow-runs/${id}${params}`)
     return handleResponse(response)
   },
 
   start: async (data: StartWorkflowInput): Promise<ApiResponse<{ run: WorkflowRun; rootTask: Task }>> => {
-    const response = await fetch(`${API_BASE}/workflow-runs`, {
+    const response = await authFetch(`${API_BASE}/workflow-runs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -630,7 +630,7 @@ export const workflowRunsApi = {
   },
 
   cancel: async (id: string): Promise<ApiResponse<WorkflowRun>> => {
-    const response = await fetch(`${API_BASE}/workflow-runs/${id}/cancel`, {
+    const response = await authFetch(`${API_BASE}/workflow-runs/${id}/cancel`, {
       method: 'POST',
     })
     return handleResponse(response)
@@ -642,7 +642,7 @@ export const workflowRunsApi = {
     payload: Record<string, unknown>,
     secret: string
   ): Promise<ApiResponse<{ acknowledged: boolean; taskId: string; taskStatus: string }>> => {
-    const response = await fetch(`${API_BASE}/workflow-runs/${runId}/callback/${stepId}`, {
+    const response = await authFetch(`${API_BASE}/workflow-runs/${runId}/callback/${stepId}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
