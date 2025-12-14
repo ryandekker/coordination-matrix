@@ -2,9 +2,49 @@
 # Copy this file to daemon-config.yaml and customize for your environment
 
 # Maximum number of commands that can run in parallel
-concurrency: 1
+concurrency: 3
 
 rules:
+  # ============================================================================
+  # Workflow Execution Rules
+  # ============================================================================
+
+  # Execute automated agent tasks from workflows
+  - name: workflow-agent-tasks
+    enabled: true
+    trigger:
+      event: task.created
+      filter: "executionMode:automated"
+    action:
+      # This script should:
+      # 1. Fetch task details including extraPrompt and metadata.inputPayload
+      # 2. Call the AI/agent system
+      # 3. Output JSON with status and result metadata
+      command: "node scripts/run-workflow-agent.js {{task._id}}"
+      timeout: 300000  # 5 minutes
+      update_fields:
+        status: "{{result.status}}"
+        metadata: "{{result.metadata}}"
+
+  # Handle external service integration
+  # Tasks with executionMode:external_callback can trigger outbound calls
+  - name: workflow-external-init
+    enabled: false  # Enable and customize for your external services
+    trigger:
+      event: task.created
+      filter: "executionMode:external_callback"
+    action:
+      # This script should:
+      # 1. Read task.externalConfig.callbackSecret
+      # 2. Call the external service with callback URL
+      # 3. The external service will call back /api/workflow-runs/{runId}/callback/{stepId}
+      command: "node scripts/init-external-call.js {{task._id}}"
+      timeout: 60000
+
+  # ============================================================================
+  # General Task Automation Rules
+  # ============================================================================
+
   # Example: Auto-triage new tasks with specific label
   - name: auto-triage
     trigger:
