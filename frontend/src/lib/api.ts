@@ -16,12 +16,34 @@ export interface ApiResponse<T> {
   message?: string
 }
 
+function getAuthHeaders(): Record<string, string> {
+  if (typeof window === 'undefined') return {}
+  const token = localStorage.getItem('auth_token')
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 async function handleResponse<T>(response: Response): Promise<T> {
+  if (response.status === 401) {
+    // Token expired or invalid - redirect to login
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('auth_token')
+      window.location.href = '/login'
+    }
+  }
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'An error occurred' }))
     throw new Error(error.error?.message || error.message || 'Request failed')
   }
   return response.json()
+}
+
+// Helper to make authenticated requests
+export async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const headers = {
+    ...getAuthHeaders(),
+    ...options.headers,
+  }
+  return fetch(url, { ...options, headers })
 }
 
 // Tasks API
@@ -40,40 +62,40 @@ export const tasksApi = {
         }
       })
     }
-    const response = await fetch(`${API_BASE}/tasks?${searchParams}`)
+    const response = await authFetch(`${API_BASE}/tasks?${searchParams}`)
     return handleResponse(response)
   },
 
   get: async (id: string, params?: Record<string, string>): Promise<ApiResponse<Task>> => {
     const searchParams = new URLSearchParams(params)
-    const response = await fetch(`${API_BASE}/tasks/${id}?${searchParams}`)
+    const response = await authFetch(`${API_BASE}/tasks/${id}?${searchParams}`)
     return handleResponse(response)
   },
 
   getTree: async (params?: Record<string, string>): Promise<ApiResponse<Task[]>> => {
     const searchParams = new URLSearchParams(params)
-    const response = await fetch(`${API_BASE}/tasks/tree?${searchParams}`)
+    const response = await authFetch(`${API_BASE}/tasks/tree?${searchParams}`)
     return handleResponse(response)
   },
 
   getChildren: async (id: string): Promise<ApiResponse<Task[]>> => {
-    const response = await fetch(`${API_BASE}/tasks/${id}/children`)
+    const response = await authFetch(`${API_BASE}/tasks/${id}/children`)
     return handleResponse(response)
   },
 
   getDescendants: async (id: string, maxDepth?: number): Promise<ApiResponse<Task[]>> => {
     const params = maxDepth ? `?maxDepth=${maxDepth}` : ''
-    const response = await fetch(`${API_BASE}/tasks/${id}/descendants${params}`)
+    const response = await authFetch(`${API_BASE}/tasks/${id}/descendants${params}`)
     return handleResponse(response)
   },
 
   getAncestors: async (id: string): Promise<ApiResponse<Task[]>> => {
-    const response = await fetch(`${API_BASE}/tasks/${id}/ancestors`)
+    const response = await authFetch(`${API_BASE}/tasks/${id}/ancestors`)
     return handleResponse(response)
   },
 
   create: async (data: Partial<Task>): Promise<ApiResponse<Task>> => {
-    const response = await fetch(`${API_BASE}/tasks`, {
+    const response = await authFetch(`${API_BASE}/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -82,7 +104,7 @@ export const tasksApi = {
   },
 
   update: async (id: string, data: Partial<Task>): Promise<ApiResponse<Task>> => {
-    const response = await fetch(`${API_BASE}/tasks/${id}`, {
+    const response = await authFetch(`${API_BASE}/tasks/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -91,14 +113,14 @@ export const tasksApi = {
   },
 
   delete: async (id: string, deleteChildren = true): Promise<ApiResponse<void>> => {
-    const response = await fetch(`${API_BASE}/tasks/${id}?deleteChildren=${deleteChildren}`, {
+    const response = await authFetch(`${API_BASE}/tasks/${id}?deleteChildren=${deleteChildren}`, {
       method: 'DELETE',
     })
     return handleResponse(response)
   },
 
   bulkUpdate: async (taskIds: string[], updates: Partial<Task>): Promise<ApiResponse<void>> => {
-    const response = await fetch(`${API_BASE}/tasks/bulk`, {
+    const response = await authFetch(`${API_BASE}/tasks/bulk`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ operation: 'update', taskIds, updates }),
@@ -107,7 +129,7 @@ export const tasksApi = {
   },
 
   bulkDelete: async (taskIds: string[]): Promise<ApiResponse<void>> => {
-    const response = await fetch(`${API_BASE}/tasks/bulk`, {
+    const response = await authFetch(`${API_BASE}/tasks/bulk`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ operation: 'delete', taskIds }),
@@ -119,23 +141,23 @@ export const tasksApi = {
 // Lookups API
 export const lookupsApi = {
   getAll: async (): Promise<ApiResponse<Record<string, LookupValue[]>>> => {
-    const response = await fetch(`${API_BASE}/lookups`)
+    const response = await authFetch(`${API_BASE}/lookups`)
     return handleResponse(response)
   },
 
   getByType: async (type: string, includeInactive = false): Promise<ApiResponse<LookupValue[]>> => {
     const params = includeInactive ? '?includeInactive=true' : ''
-    const response = await fetch(`${API_BASE}/lookups/${type}${params}`)
+    const response = await authFetch(`${API_BASE}/lookups/${type}${params}`)
     return handleResponse(response)
   },
 
   getTypes: async (): Promise<ApiResponse<string[]>> => {
-    const response = await fetch(`${API_BASE}/lookups/types`)
+    const response = await authFetch(`${API_BASE}/lookups/types`)
     return handleResponse(response)
   },
 
   create: async (data: Omit<LookupValue, '_id'>): Promise<ApiResponse<LookupValue>> => {
-    const response = await fetch(`${API_BASE}/lookups`, {
+    const response = await authFetch(`${API_BASE}/lookups`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -144,7 +166,7 @@ export const lookupsApi = {
   },
 
   update: async (id: string, data: Partial<LookupValue>): Promise<ApiResponse<LookupValue>> => {
-    const response = await fetch(`${API_BASE}/lookups/${id}`, {
+    const response = await authFetch(`${API_BASE}/lookups/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -153,14 +175,14 @@ export const lookupsApi = {
   },
 
   delete: async (id: string): Promise<ApiResponse<void>> => {
-    const response = await fetch(`${API_BASE}/lookups/${id}`, {
+    const response = await authFetch(`${API_BASE}/lookups/${id}`, {
       method: 'DELETE',
     })
     return handleResponse(response)
   },
 
   reorder: async (type: string, order: { id: string; sortOrder: number }[]): Promise<ApiResponse<LookupValue[]>> => {
-    const response = await fetch(`${API_BASE}/lookups/${type}/reorder`, {
+    const response = await authFetch(`${API_BASE}/lookups/${type}/reorder`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ order }),
@@ -172,12 +194,12 @@ export const lookupsApi = {
 // Field Configs API
 export const fieldConfigsApi = {
   getForCollection: async (collection: string): Promise<ApiResponse<FieldConfig[]>> => {
-    const response = await fetch(`${API_BASE}/field-configs/${collection}`)
+    const response = await authFetch(`${API_BASE}/field-configs/${collection}`)
     return handleResponse(response)
   },
 
   update: async (id: string, data: Partial<FieldConfig>): Promise<ApiResponse<FieldConfig>> => {
-    const response = await fetch(`${API_BASE}/field-configs/${id}`, {
+    const response = await authFetch(`${API_BASE}/field-configs/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -190,17 +212,17 @@ export const fieldConfigsApi = {
 export const viewsApi = {
   list: async (collectionName?: string): Promise<ApiResponse<View[]>> => {
     const params = collectionName ? `?collectionName=${collectionName}` : ''
-    const response = await fetch(`${API_BASE}/views${params}`)
+    const response = await authFetch(`${API_BASE}/views${params}`)
     return handleResponse(response)
   },
 
   get: async (id: string): Promise<ApiResponse<View>> => {
-    const response = await fetch(`${API_BASE}/views/${id}`)
+    const response = await authFetch(`${API_BASE}/views/${id}`)
     return handleResponse(response)
   },
 
   create: async (data: Partial<View>): Promise<ApiResponse<View>> => {
-    const response = await fetch(`${API_BASE}/views`, {
+    const response = await authFetch(`${API_BASE}/views`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -209,7 +231,7 @@ export const viewsApi = {
   },
 
   update: async (id: string, data: Partial<View>): Promise<ApiResponse<View>> => {
-    const response = await fetch(`${API_BASE}/views/${id}`, {
+    const response = await authFetch(`${API_BASE}/views/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -218,7 +240,7 @@ export const viewsApi = {
   },
 
   delete: async (id: string): Promise<ApiResponse<void>> => {
-    const response = await fetch(`${API_BASE}/views/${id}`, {
+    const response = await authFetch(`${API_BASE}/views/${id}`, {
       method: 'DELETE',
     })
     return handleResponse(response)
@@ -229,7 +251,7 @@ export const viewsApi = {
     userId: string,
     preferences: { visibleColumns?: string[]; columnWidths?: Record<string, number>; columnOrder?: string[] }
   ): Promise<ApiResponse<void>> => {
-    const response = await fetch(`${API_BASE}/views/${viewId}/preferences`, {
+    const response = await authFetch(`${API_BASE}/views/${viewId}/preferences`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, ...preferences }),
@@ -241,17 +263,17 @@ export const viewsApi = {
 // Users API
 export const usersApi = {
   list: async (): Promise<ApiResponse<User[]>> => {
-    const response = await fetch(`${API_BASE}/users`)
+    const response = await authFetch(`${API_BASE}/users`)
     return handleResponse(response)
   },
 
   get: async (id: string): Promise<ApiResponse<User>> => {
-    const response = await fetch(`${API_BASE}/users/${id}`)
+    const response = await authFetch(`${API_BASE}/users/${id}`)
     return handleResponse(response)
   },
 
   create: async (data: Partial<User>): Promise<ApiResponse<User>> => {
-    const response = await fetch(`${API_BASE}/users`, {
+    const response = await authFetch(`${API_BASE}/users`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -260,7 +282,7 @@ export const usersApi = {
   },
 
   update: async (id: string, data: Partial<User>): Promise<ApiResponse<User>> => {
-    const response = await fetch(`${API_BASE}/users/${id}`, {
+    const response = await authFetch(`${API_BASE}/users/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -269,12 +291,12 @@ export const usersApi = {
   },
 
   listAgents: async (): Promise<ApiResponse<User[]>> => {
-    const response = await fetch(`${API_BASE}/users/agents`)
+    const response = await authFetch(`${API_BASE}/users/agents`)
     return handleResponse(response)
   },
 
   ensureAgent: async (agentId: string): Promise<ApiResponse<User>> => {
-    const response = await fetch(`${API_BASE}/users/agents/ensure/${agentId}`, {
+    const response = await authFetch(`${API_BASE}/users/agents/ensure/${agentId}`, {
       method: 'POST',
     })
     return handleResponse(response)
@@ -284,12 +306,12 @@ export const usersApi = {
 // Workflows API
 export const workflowsApi = {
   list: async (): Promise<ApiResponse<Workflow[]>> => {
-    const response = await fetch(`${API_BASE}/workflows`)
+    const response = await authFetch(`${API_BASE}/workflows`)
     return handleResponse(response)
   },
 
   get: async (id: string): Promise<ApiResponse<Workflow>> => {
-    const response = await fetch(`${API_BASE}/workflows/${id}`)
+    const response = await authFetch(`${API_BASE}/workflows/${id}`)
     return handleResponse(response)
   },
 }
@@ -298,12 +320,12 @@ export const workflowsApi = {
 export const externalJobsApi = {
   list: async (params?: Record<string, string>): Promise<PaginatedResponse<ExternalJob>> => {
     const searchParams = new URLSearchParams(params)
-    const response = await fetch(`${API_BASE}/external-jobs?${searchParams}`)
+    const response = await authFetch(`${API_BASE}/external-jobs?${searchParams}`)
     return handleResponse(response)
   },
 
   create: async (data: { taskId: string; type: string; payload?: Record<string, unknown> }): Promise<ApiResponse<ExternalJob>> => {
-    const response = await fetch(`${API_BASE}/external-jobs`, {
+    const response = await authFetch(`${API_BASE}/external-jobs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -312,7 +334,7 @@ export const externalJobsApi = {
   },
 
   claim: async (id: string, workerId?: string): Promise<ApiResponse<ExternalJob>> => {
-    const response = await fetch(`${API_BASE}/external-jobs/${id}/claim`, {
+    const response = await authFetch(`${API_BASE}/external-jobs/${id}/claim`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ workerId }),
@@ -321,7 +343,7 @@ export const externalJobsApi = {
   },
 
   complete: async (id: string, result?: Record<string, unknown>): Promise<ApiResponse<ExternalJob>> => {
-    const response = await fetch(`${API_BASE}/external-jobs/${id}/complete`, {
+    const response = await authFetch(`${API_BASE}/external-jobs/${id}/complete`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ result }),
@@ -330,7 +352,7 @@ export const externalJobsApi = {
   },
 
   fail: async (id: string, error: string, retryAfter?: number): Promise<ApiResponse<ExternalJob>> => {
-    const response = await fetch(`${API_BASE}/external-jobs/${id}/fail`, {
+    const response = await authFetch(`${API_BASE}/external-jobs/${id}/fail`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ error, retryAfter }),
@@ -339,7 +361,7 @@ export const externalJobsApi = {
   },
 
   getStats: async (): Promise<ApiResponse<{ byStatus: Record<string, number> }>> => {
-    const response = await fetch(`${API_BASE}/external-jobs/stats/summary`)
+    const response = await authFetch(`${API_BASE}/external-jobs/stats/summary`)
     return handleResponse(response)
   },
 }
@@ -676,7 +698,7 @@ export const activityLogsApi = {
     if (params?.eventTypes) {
       params.eventTypes.forEach(t => searchParams.append('eventTypes', t))
     }
-    const response = await fetch(`${API_BASE}/activity-logs/task/${taskId}?${searchParams}`)
+    const response = await authFetch(`${API_BASE}/activity-logs/task/${taskId}?${searchParams}`)
     return handleResponse(response)
   },
 
@@ -690,7 +712,7 @@ export const activityLogsApi = {
     if (params?.eventTypes) {
       params.eventTypes.forEach(t => searchParams.append('eventTypes', t))
     }
-    const response = await fetch(`${API_BASE}/activity-logs/recent?${searchParams}`)
+    const response = await authFetch(`${API_BASE}/activity-logs/recent?${searchParams}`)
     return handleResponse(response)
   },
 
@@ -699,7 +721,7 @@ export const activityLogsApi = {
     comment: string,
     actorId?: string
   ): Promise<ApiResponse<ActivityLogEntry>> => {
-    const response = await fetch(`${API_BASE}/activity-logs/task/${taskId}/comments`, {
+    const response = await authFetch(`${API_BASE}/activity-logs/task/${taskId}/comments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ comment, actorId }),
@@ -718,17 +740,17 @@ export const webhooksApi = {
     if (params?.isActive !== undefined) searchParams.append('isActive', String(params.isActive))
     if (params?.limit) searchParams.append('limit', String(params.limit))
     if (params?.offset) searchParams.append('offset', String(params.offset))
-    const response = await fetch(`${API_BASE}/webhooks?${searchParams}`)
+    const response = await authFetch(`${API_BASE}/webhooks?${searchParams}`)
     return handleResponse(response)
   },
 
   get: async (id: string): Promise<ApiResponse<Webhook>> => {
-    const response = await fetch(`${API_BASE}/webhooks/${id}`)
+    const response = await authFetch(`${API_BASE}/webhooks/${id}`)
     return handleResponse(response)
   },
 
   create: async (data: Partial<Webhook>): Promise<ApiResponse<Webhook>> => {
-    const response = await fetch(`${API_BASE}/webhooks`, {
+    const response = await authFetch(`${API_BASE}/webhooks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -737,7 +759,7 @@ export const webhooksApi = {
   },
 
   update: async (id: string, data: Partial<Webhook>): Promise<ApiResponse<Webhook>> => {
-    const response = await fetch(`${API_BASE}/webhooks/${id}`, {
+    const response = await authFetch(`${API_BASE}/webhooks/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -746,21 +768,21 @@ export const webhooksApi = {
   },
 
   delete: async (id: string): Promise<ApiResponse<void>> => {
-    const response = await fetch(`${API_BASE}/webhooks/${id}`, {
+    const response = await authFetch(`${API_BASE}/webhooks/${id}`, {
       method: 'DELETE',
     })
     return handleResponse(response)
   },
 
   rotateSecret: async (id: string): Promise<ApiResponse<{ secret: string }>> => {
-    const response = await fetch(`${API_BASE}/webhooks/${id}/rotate-secret`, {
+    const response = await authFetch(`${API_BASE}/webhooks/${id}/rotate-secret`, {
       method: 'POST',
     })
     return handleResponse(response)
   },
 
   test: async (id: string): Promise<ApiResponse<void>> => {
-    const response = await fetch(`${API_BASE}/webhooks/${id}/test`, {
+    const response = await authFetch(`${API_BASE}/webhooks/${id}/test`, {
       method: 'POST',
     })
     return handleResponse(response)
@@ -773,12 +795,12 @@ export const webhooksApi = {
     const searchParams = new URLSearchParams()
     if (params?.limit) searchParams.append('limit', String(params.limit))
     if (params?.offset) searchParams.append('offset', String(params.offset))
-    const response = await fetch(`${API_BASE}/webhooks/${webhookId}/deliveries?${searchParams}`)
+    const response = await authFetch(`${API_BASE}/webhooks/${webhookId}/deliveries?${searchParams}`)
     return handleResponse(response)
   },
 
   retryDelivery: async (deliveryId: string): Promise<ApiResponse<void>> => {
-    const response = await fetch(`${API_BASE}/webhooks/deliveries/${deliveryId}/retry`, {
+    const response = await authFetch(`${API_BASE}/webhooks/deliveries/${deliveryId}/retry`, {
       method: 'POST',
     })
     return handleResponse(response)

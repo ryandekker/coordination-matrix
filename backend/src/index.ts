@@ -15,7 +15,9 @@ import { activityLogsRouter } from './routes/activity-logs.js';
 import { webhooksRouter } from './routes/webhooks.js';
 import batchJobsRouter from './routes/batch-jobs.js';
 import workflowRunsRouter from './routes/workflow-runs.js';
+import { authRouter } from './routes/auth.js';
 import { errorHandler } from './middleware/error-handler.js';
+import { requireAuth } from './middleware/auth.js';
 import { activityLogService } from './services/activity-log.js';
 import { webhookService } from './services/webhook-service.js';
 import { batchJobService } from './services/batch-job-service.js';
@@ -38,17 +40,22 @@ app.get('/health', (_, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
 
-// API Routes
-app.use('/api/tasks', tasksRouter);
-app.use('/api/lookups', lookupsRouter);
-app.use('/api/field-configs', fieldConfigsRouter);
-app.use('/api/views', viewsRouter);
-app.use('/api/users', usersRouter);
-app.use('/api/external-jobs', externalJobsRouter);
-app.use('/api/workflows', workflowsRouter);
-app.use('/api/auth/api-keys', apiKeysRouter);
-app.use('/api/activity-logs', activityLogsRouter);
-app.use('/api/webhooks', webhooksRouter);
+// Auth routes (public)
+app.use('/api/auth', authRouter);
+
+// Protected API Routes - require authentication
+app.use('/api/tasks', requireAuth, tasksRouter);
+app.use('/api/lookups', requireAuth, lookupsRouter);
+app.use('/api/field-configs', requireAuth, fieldConfigsRouter);
+app.use('/api/views', requireAuth, viewsRouter);
+app.use('/api/users', requireAuth, usersRouter);
+app.use('/api/external-jobs', requireAuth, externalJobsRouter);
+app.use('/api/workflows', requireAuth, workflowsRouter);
+app.use('/api/auth/api-keys', requireAuth, apiKeysRouter);
+app.use('/api/activity-logs', requireAuth, activityLogsRouter);
+app.use('/api/webhooks', requireAuth, webhooksRouter);
+
+// New routes from HEAD (currently unprotected)
 app.use('/api/batch-jobs', batchJobsRouter);
 app.use('/api/workflow-runs', workflowRunsRouter);
 
