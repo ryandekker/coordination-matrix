@@ -88,6 +88,11 @@ db.createCollection('tasks', {
         dueAt: {
           bsonType: ['date', 'null'],
           description: 'Due date for the task'
+        },
+        // Flexible metadata for task outputs and custom fields
+        metadata: {
+          bsonType: 'object',
+          description: 'Flexible metadata object for storing task outputs, results, and custom data'
         }
       }
     }
@@ -184,7 +189,8 @@ db.createCollection('activity_logs', {
         eventType: {
           bsonType: 'string',
           enum: ['task.created', 'task.updated', 'task.deleted', 'task.status.changed',
-                 'task.assignee.changed', 'task.priority.changed', 'task.moved', 'task.comment.added'],
+                 'task.assignee.changed', 'task.priority.changed', 'task.metadata.changed',
+                 'task.moved', 'task.comment.added'],
           description: 'Type of event'
         },
         actorId: {

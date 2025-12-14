@@ -46,6 +46,9 @@ export interface Task {
   createdAt: Date;
   updatedAt: Date;
   dueAt?: Date | null;
+
+  // Flexible metadata for task outputs and custom data
+  metadata?: Record<string, unknown>;
 }
 
 export interface TaskWithChildren extends Task {
@@ -270,6 +273,7 @@ export type TaskEventType =
   | 'task.status.changed'
   | 'task.assignee.changed'
   | 'task.priority.changed'
+  | 'task.metadata.changed'
   | 'task.moved'
   | 'task.comment.added';
 
