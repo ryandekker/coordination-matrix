@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { useUsers } from '@/hooks/use-tasks'
 import {
   Dialog,
   DialogContent,
@@ -335,6 +336,10 @@ export function WorkflowEditor({
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
+
+  // Fetch users for default assignee dropdown
+  const { data: usersData } = useUsers()
+  const users = usersData?.data || []
 
   const {
     register,
@@ -727,7 +732,7 @@ export function WorkflowEditor({
                             <div className="border-t px-4 py-3 space-y-3 bg-muted/20">
                               {/* Agent step configuration */}
                               {(step.stepType === 'agent' || (!step.stepType && step.execution !== 'manual')) && (
-                                <div className="space-y-2">
+                                <div className="space-y-3">
                                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
                                     <div className="flex items-start gap-2">
                                       <Bot className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
@@ -739,6 +744,33 @@ export function WorkflowEditor({
                                         </p>
                                       </div>
                                     </div>
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-sm font-medium flex items-center gap-2">
+                                      <User className="h-4 w-4 text-muted-foreground" />
+                                      Default Assignee
+                                      <span className="text-xs text-muted-foreground">(optional)</span>
+                                    </label>
+                                    <Select
+                                      value={step.defaultAssigneeId || '_none'}
+                                      onValueChange={(val) => updateStep(index, { defaultAssigneeId: val === '_none' ? undefined : val })}
+                                    >
+                                      <SelectTrigger className="w-full">
+                                        <SelectValue placeholder="Select default assignee" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="_none">No default assignee</SelectItem>
+                                        {users.map((user: { _id: string; displayName: string }) => (
+                                          <SelectItem key={user._id} value={user._id}>
+                                            {user.displayName}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                    <p className="text-xs text-muted-foreground">
+                                      Tasks created from this step will be assigned to this user by default
+                                    </p>
                                   </div>
 
                                   <div className="space-y-1">
@@ -832,7 +864,7 @@ The agent will receive task context automatically.`}
 
                               {/* Manual step configuration */}
                               {step.stepType === 'manual' && (
-                                <div className="space-y-2">
+                                <div className="space-y-3">
                                   <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-sm">
                                     <div className="flex items-start gap-2">
                                       <User className="h-4 w-4 text-purple-600 mt-0.5 flex-shrink-0" />
@@ -843,6 +875,33 @@ The agent will receive task context automatically.`}
                                         </p>
                                       </div>
                                     </div>
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-sm font-medium flex items-center gap-2">
+                                      <User className="h-4 w-4 text-muted-foreground" />
+                                      Default Assignee
+                                      <span className="text-xs text-muted-foreground">(optional)</span>
+                                    </label>
+                                    <Select
+                                      value={step.defaultAssigneeId || '_none'}
+                                      onValueChange={(val) => updateStep(index, { defaultAssigneeId: val === '_none' ? undefined : val })}
+                                    >
+                                      <SelectTrigger className="w-full">
+                                        <SelectValue placeholder="Select default assignee" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="_none">No default assignee</SelectItem>
+                                        {users.map((user: { _id: string; displayName: string }) => (
+                                          <SelectItem key={user._id} value={user._id}>
+                                            {user.displayName}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                    <p className="text-xs text-muted-foreground">
+                                      Tasks created from this step will be assigned to this user by default
+                                    </p>
                                   </div>
                                 </div>
                               )}
