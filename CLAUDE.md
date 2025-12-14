@@ -2,6 +2,11 @@
 
 Project context and conventions for Claude Code.
 
+## Git Workflow
+
+- **Main branch**: `main` - use this as the base for all PRs
+- Feature branches should be named descriptively (e.g., `feature/add-workflow-steps`)
+
 ## Project Overview
 
 Coordination Matrix is a full-stack AI workflow task management system:

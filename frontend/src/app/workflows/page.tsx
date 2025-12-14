@@ -1,12 +1,14 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Workflow,
   Play,
   Pause,
   ChevronRight,
+  ChevronDown,
   User,
   Bot,
   Plus,
@@ -19,6 +21,7 @@ import {
   Merge,
   FileText,
   Globe,
+  Settings2,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -40,7 +43,23 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { WorkflowEditor } from '@/components/workflows/workflow-editor'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
+import { authFetch } from '@/lib/api'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
@@ -108,7 +127,7 @@ interface WorkflowData {
 }
 
 async function fetchWorkflows(): Promise<{ data: WorkflowData[] }> {
-  const response = await fetch(`${API_BASE}/workflows`)
+  const response = await authFetch(`${API_BASE}/workflows`)
   if (!response.ok) {
     throw new Error('Failed to fetch workflows')
   }
@@ -116,7 +135,7 @@ async function fetchWorkflows(): Promise<{ data: WorkflowData[] }> {
 }
 
 async function createWorkflow(data: Partial<WorkflowData>): Promise<{ data: WorkflowData }> {
-  const response = await fetch(`${API_BASE}/workflows`, {
+  const response = await authFetch(`${API_BASE}/workflows`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -126,7 +145,7 @@ async function createWorkflow(data: Partial<WorkflowData>): Promise<{ data: Work
 }
 
 async function updateWorkflow(id: string, data: Partial<WorkflowData>): Promise<{ data: WorkflowData }> {
-  const response = await fetch(`${API_BASE}/workflows/${id}`, {
+  const response = await authFetch(`${API_BASE}/workflows/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -136,14 +155,14 @@ async function updateWorkflow(id: string, data: Partial<WorkflowData>): Promise<
 }
 
 async function deleteWorkflow(id: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/workflows/${id}`, {
+  const response = await authFetch(`${API_BASE}/workflows/${id}`, {
     method: 'DELETE',
   })
   if (!response.ok) throw new Error('Failed to delete workflow')
 }
 
 async function duplicateWorkflow(id: string): Promise<{ data: WorkflowData }> {
-  const response = await fetch(`${API_BASE}/workflows/${id}/duplicate`, {
+  const response = await authFetch(`${API_BASE}/workflows/${id}/duplicate`, {
     method: 'POST',
   })
   if (!response.ok) throw new Error('Failed to duplicate workflow')
@@ -200,16 +219,68 @@ function getStepTypeLabel(step: WorkflowStep): string {
   }
 }
 
+interface WorkflowTaskDefaults {
+  assigneeId?: string
+  urgency?: 'low' | 'normal' | 'high' | 'urgent'
+  tags?: string[]
+}
+
+async function startWorkflowRun(
+  workflowId: string,
+  inputPayload?: Record<string, unknown>,
+  taskDefaults?: WorkflowTaskDefaults,
+  externalId?: string,
+  source?: string
+): Promise<{ run: { _id: string } }> {
+  const response = await authFetch(`${API_BASE}/workflow-runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      workflowId,
+      inputPayload,
+      taskDefaults: taskDefaults && Object.keys(taskDefaults).length > 0 ? taskDefaults : undefined,
+      externalId: externalId || undefined,
+      source: source || undefined,
+    }),
+  })
+  if (!response.ok) throw new Error('Failed to start workflow')
+  return response.json()
+}
+
+async function fetchUsers(): Promise<{ data: { _id: string; displayName: string; isAgent?: boolean }[] }> {
+  const response = await authFetch(`${API_BASE}/users`)
+  if (!response.ok) throw new Error('Failed to fetch users')
+  return response.json()
+}
+
 export default function WorkflowsPage() {
+  const router = useRouter()
   const queryClient = useQueryClient()
   const [isEditorOpen, setIsEditorOpen] = useState(false)
   const [editingWorkflow, setEditingWorkflow] = useState<WorkflowData | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<WorkflowData | null>(null)
+  const [runDialog, setRunDialog] = useState<{ open: boolean; workflow: WorkflowData | null }>({
+    open: false,
+    workflow: null,
+  })
+  const [runPayload, setRunPayload] = useState('')
+  const [runAssignee, setRunAssignee] = useState('')
+  const [runUrgency, setRunUrgency] = useState('')
+  const [runTags, setRunTags] = useState('')
+  const [runExternalId, setRunExternalId] = useState('')
+  const [runSource, setRunSource] = useState('')
 
   const { data: workflowsData, isLoading, error } = useQuery({
     queryKey: ['workflows'],
     queryFn: fetchWorkflows,
   })
+
+  const { data: usersData } = useQuery({
+    queryKey: ['users'],
+    queryFn: fetchUsers,
+  })
+
+  const users = usersData?.data || []
 
   const createMutation = useMutation({
     mutationFn: createWorkflow,
@@ -242,6 +313,64 @@ export default function WorkflowsPage() {
       queryClient.invalidateQueries({ queryKey: ['workflows'] })
     },
   })
+
+  const runMutation = useMutation({
+    mutationFn: ({
+      workflowId,
+      inputPayload,
+      taskDefaults,
+      externalId,
+      source,
+    }: {
+      workflowId: string
+      inputPayload?: Record<string, unknown>
+      taskDefaults?: WorkflowTaskDefaults
+      externalId?: string
+      source?: string
+    }) => startWorkflowRun(workflowId, inputPayload, taskDefaults, externalId, source),
+    onSuccess: (data) => {
+      setRunDialog({ open: false, workflow: null })
+      resetRunForm()
+      router.push(`/workflow-runs/${data.run._id}`)
+    },
+  })
+
+  const resetRunForm = () => {
+    setRunPayload('')
+    setRunAssignee('')
+    setRunUrgency('')
+    setRunTags('')
+    setRunExternalId('')
+    setRunSource('')
+  }
+
+  const handleRunWorkflow = () => {
+    if (!runDialog.workflow) return
+
+    let payload: Record<string, unknown> | undefined
+    if (runPayload.trim()) {
+      try {
+        payload = JSON.parse(runPayload)
+      } catch {
+        alert('Invalid JSON payload')
+        return
+      }
+    }
+
+    // Build task defaults
+    const taskDefaults: WorkflowTaskDefaults = {}
+    if (runAssignee) taskDefaults.assigneeId = runAssignee
+    if (runUrgency) taskDefaults.urgency = runUrgency as WorkflowTaskDefaults['urgency']
+    if (runTags.trim()) taskDefaults.tags = runTags.split(',').map(t => t.trim()).filter(Boolean)
+
+    runMutation.mutate({
+      workflowId: runDialog.workflow._id,
+      inputPayload: payload,
+      taskDefaults: Object.keys(taskDefaults).length > 0 ? taskDefaults : undefined,
+      externalId: runExternalId.trim() || undefined,
+      source: runSource.trim() || undefined,
+    })
+  }
 
   // Normalize workflows to ensure steps array exists
   // Legacy workflows may have 'stages' (string[]) instead of 'steps' (WorkflowStep[])
@@ -391,6 +520,15 @@ export default function WorkflowsPage() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                      {workflow.isActive && (
+                        <>
+                          <DropdownMenuItem onClick={() => setRunDialog({ open: true, workflow })}>
+                            <Play className="mr-2 h-4 w-4" />
+                            Run Workflow
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                        </>
+                      )}
                       <DropdownMenuItem onClick={() => openEditEditor(workflow)}>
                         <Pencil className="mr-2 h-4 w-4" />
                         Edit
@@ -507,6 +645,143 @@ export default function WorkflowsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Run Workflow Dialog */}
+      <Dialog open={runDialog.open} onOpenChange={(open) => {
+        if (!open) {
+          setRunDialog({ open: false, workflow: null })
+          resetRunForm()
+        }
+      }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Run Workflow: {runDialog.workflow?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+            {/* Task Defaults */}
+            <div className="space-y-3">
+              <h4 className="text-sm font-medium flex items-center gap-2">
+                <Settings2 className="h-4 w-4" />
+                Task Defaults
+              </h4>
+              <p className="text-xs text-muted-foreground">
+                These settings apply to all tasks created in this workflow run.
+              </p>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium">Assignee</label>
+                  <Select value={runAssignee} onValueChange={setRunAssignee}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Select assignee..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">No default assignee</SelectItem>
+                      {users.map((user) => (
+                        <SelectItem key={user._id} value={user._id}>
+                          {user.displayName} {user.isAgent && '(Agent)'}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium">Urgency</label>
+                  <Select value={runUrgency} onValueChange={setRunUrgency}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Select urgency..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">No default urgency</SelectItem>
+                      <SelectItem value="low">Low</SelectItem>
+                      <SelectItem value="normal">Normal</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="urgent">Urgent</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium">Tags</label>
+                <Input
+                  value={runTags}
+                  onChange={(e) => setRunTags(e.target.value)}
+                  placeholder="tag1, tag2, tag3"
+                  className="mt-1"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Comma-separated list of tags to apply to all tasks.
+                </p>
+              </div>
+            </div>
+
+            {/* Collapsible Advanced Options */}
+            <Collapsible>
+              <CollapsibleTrigger className="flex items-center gap-2 text-sm font-medium hover:underline">
+                <ChevronRight className="h-4 w-4 transition-transform data-[state=open]:rotate-90" />
+                Advanced Options
+              </CollapsibleTrigger>
+              <CollapsibleContent className="space-y-3 pt-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-sm font-medium">External ID</label>
+                    <Input
+                      value={runExternalId}
+                      onChange={(e) => setRunExternalId(e.target.value)}
+                      placeholder="External reference..."
+                      className="mt-1"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      ID for correlating with external systems.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium">Source</label>
+                    <Input
+                      value={runSource}
+                      onChange={(e) => setRunSource(e.target.value)}
+                      placeholder="e.g., api, webhook, ui"
+                      className="mt-1"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Where this run was triggered from.
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium">Input Payload (JSON)</label>
+                  <Textarea
+                    value={runPayload}
+                    onChange={(e) => setRunPayload(e.target.value)}
+                    placeholder='{"key": "value"}'
+                    className="mt-1 font-mono text-sm"
+                    rows={4}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Custom data that flows through the workflow steps.
+                  </p>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setRunDialog({ open: false, workflow: null })
+              resetRunForm()
+            }}>
+              Cancel
+            </Button>
+            <Button onClick={handleRunWorkflow} disabled={runMutation.isPending}>
+              <Play className="mr-2 h-4 w-4" />
+              {runMutation.isPending ? 'Starting...' : 'Start Run'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -13,11 +13,15 @@ import { workflowsRouter } from './routes/workflows.js';
 import { apiKeysRouter } from './routes/api-keys.js';
 import { activityLogsRouter } from './routes/activity-logs.js';
 import { webhooksRouter } from './routes/webhooks.js';
+import batchJobsRouter from './routes/batch-jobs.js';
+import workflowRunsRouter from './routes/workflow-runs.js';
 import { authRouter } from './routes/auth.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { requireAuth } from './middleware/auth.js';
 import { activityLogService } from './services/activity-log.js';
 import { webhookService } from './services/webhook-service.js';
+import { batchJobService } from './services/batch-job-service.js';
+import { workflowExecutionService } from './services/workflow-execution-service.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -50,6 +54,8 @@ app.use('/api/workflows', requireAuth, workflowsRouter);
 app.use('/api/auth/api-keys', requireAuth, apiKeysRouter);
 app.use('/api/activity-logs', requireAuth, activityLogsRouter);
 app.use('/api/webhooks', requireAuth, webhooksRouter);
+app.use('/api/batch-jobs', requireAuth, batchJobsRouter);
+app.use('/api/workflow-runs', requireAuth, workflowRunsRouter);
 
 // Error handling
 app.use(errorHandler);
@@ -57,6 +63,7 @@ app.use(errorHandler);
 // Graceful shutdown
 const shutdown = async () => {
   console.log('Shutting down gracefully...');
+  await batchJobService.shutdown();
   await closeDatabase();
   process.exit(0);
 };
@@ -72,6 +79,8 @@ const start = async () => {
     // Initialize event system services
     activityLogService.initialize();
     webhookService.initialize();
+    batchJobService.initialize();
+    workflowExecutionService.initialize();
 
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);

@@ -29,7 +29,8 @@
       "mcp__playwright__browser_hover",
       "Bash(npx ts-node:*)",
       "Bash(node /Users/ryandekker/src/coordination-matrix/scripts/task-daemon.mjs:*)",
-      "mcp__playwright__browser_fill_form"
+      "mcp__playwright__browser_fill_form",
+      "mcp__playwright__browser_wait_for"
     ],
     "deny": [],
     "ask": []

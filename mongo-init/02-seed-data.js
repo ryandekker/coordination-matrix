@@ -727,4 +727,189 @@ db.tasks.insertMany([
   ...additionalTasks,
 ]);
 
+// ============================================================================
+// BATCH JOB LOOKUPS - Status codes for batch processing
+// ============================================================================
+
+const batchJobLookups = [
+  // Batch job statuses
+  { type: 'batch_job_status', code: 'pending', displayName: 'Pending', color: '#6B7280', icon: 'clock', sortOrder: 1, isActive: true },
+  { type: 'batch_job_status', code: 'processing', displayName: 'Processing', color: '#3B82F6', icon: 'loader', sortOrder: 2, isActive: true },
+  { type: 'batch_job_status', code: 'awaiting_responses', displayName: 'Awaiting Responses', color: '#8B5CF6', icon: 'inbox', sortOrder: 3, isActive: true },
+  { type: 'batch_job_status', code: 'completed', displayName: 'Completed', color: '#10B981', icon: 'check-circle', sortOrder: 4, isActive: true },
+  { type: 'batch_job_status', code: 'completed_with_warnings', displayName: 'Completed with Warnings', color: '#F59E0B', icon: 'alert-triangle', sortOrder: 5, isActive: true },
+  { type: 'batch_job_status', code: 'failed', displayName: 'Failed', color: '#EF4444', icon: 'x-circle', sortOrder: 6, isActive: true },
+  { type: 'batch_job_status', code: 'cancelled', displayName: 'Cancelled', color: '#9CA3AF', icon: 'ban', sortOrder: 7, isActive: true },
+  { type: 'batch_job_status', code: 'manual_review', displayName: 'Manual Review', color: '#EC4899', icon: 'user-check', sortOrder: 8, isActive: true },
+
+  // Batch item statuses
+  { type: 'batch_item_status', code: 'pending', displayName: 'Pending', color: '#6B7280', icon: 'clock', sortOrder: 1, isActive: true },
+  { type: 'batch_item_status', code: 'received', displayName: 'Received', color: '#3B82F6', icon: 'inbox', sortOrder: 2, isActive: true },
+  { type: 'batch_item_status', code: 'processing', displayName: 'Processing', color: '#8B5CF6', icon: 'loader', sortOrder: 3, isActive: true },
+  { type: 'batch_item_status', code: 'completed', displayName: 'Completed', color: '#10B981', icon: 'check', sortOrder: 4, isActive: true },
+  { type: 'batch_item_status', code: 'failed', displayName: 'Failed', color: '#EF4444', icon: 'x', sortOrder: 5, isActive: true },
+  { type: 'batch_item_status', code: 'skipped', displayName: 'Skipped', color: '#9CA3AF', icon: 'skip-forward', sortOrder: 6, isActive: true },
+
+  // Review decisions
+  { type: 'review_decision', code: 'approved', displayName: 'Approved', color: '#10B981', icon: 'check', sortOrder: 1, isActive: true },
+  { type: 'review_decision', code: 'rejected', displayName: 'Rejected', color: '#EF4444', icon: 'x', sortOrder: 2, isActive: true },
+  { type: 'review_decision', code: 'proceed_with_partial', displayName: 'Proceed with Partial', color: '#F59E0B', icon: 'alert-circle', sortOrder: 3, isActive: true },
+];
+
+db.lookups.insertMany(batchJobLookups);
+
+// ============================================================================
+// SAMPLE BATCH JOBS - Example batch processing scenarios
+// ============================================================================
+
+// Example 1: Completed email analysis batch
+const batchJob1Id = ObjectId();
+const batchJob1 = {
+  _id: batchJob1Id,
+  name: 'Email Sentiment Analysis - October 2024',
+  type: 'email_analysis',
+  workflowId: null,
+  workflowStepId: null,
+  taskId: null,
+  callbackUrl: 'http://localhost:3001/api/batch-jobs/' + batchJob1Id.toString() + '/callback',
+  callbackSecret: 'whsec_example_secret_for_demo_purposes_only',
+  status: 'completed',
+  expectedCount: 100,
+  receivedCount: 100,
+  processedCount: 97,
+  failedCount: 3,
+  minSuccessPercent: 90,
+  deadlineAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+  inputPayload: {
+    sourceFolder: 'inbox/october',
+    analysisType: 'sentiment',
+    categories: ['positive', 'negative', 'neutral', 'urgent']
+  },
+  aggregateResult: {
+    totalItems: 100,
+    successfulCount: 97,
+    failedCount: 3,
+    successRate: 97,
+    results: [
+      { itemKey: 'email_001', externalId: 'msg_abc123', data: { sentiment: 'positive', confidence: 0.92 } },
+      { itemKey: 'email_002', externalId: 'msg_def456', data: { sentiment: 'neutral', confidence: 0.78 } }
+    ],
+    errors: [
+      { itemKey: 'email_098', externalId: 'msg_xyz999', error: 'Content too short for analysis' }
+    ],
+    aggregatedAt: new Date(now.getTime() - 23 * 60 * 60 * 1000)
+  },
+  isResultSealed: true,
+  requiresManualReview: false,
+  createdById: userIds[0],
+  createdAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000),
+  updatedAt: new Date(now.getTime() - 23 * 60 * 60 * 1000),
+  startedAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000 + 60000),
+  completedAt: new Date(now.getTime() - 23 * 60 * 60 * 1000)
+};
+
+// Example 2: In-progress batch job
+const batchJob2Id = ObjectId();
+const batchJob2 = {
+  _id: batchJob2Id,
+  name: 'Document Classification Batch',
+  type: 'document_classification',
+  workflowId: workflowIds[0],
+  workflowStepId: 'foreach_classify',
+  taskId: rootTask1Id,
+  callbackUrl: 'http://localhost:3001/api/batch-jobs/' + batchJob2Id.toString() + '/callback',
+  callbackSecret: 'whsec_' + ObjectId().toString(),
+  status: 'awaiting_responses',
+  expectedCount: 50,
+  receivedCount: 32,
+  processedCount: 30,
+  failedCount: 2,
+  minSuccessPercent: 80,
+  deadlineAt: new Date(now.getTime() + 2 * 60 * 60 * 1000),
+  inputPayload: {
+    documentSource: 's3://documents/incoming',
+    classificationModel: 'gpt-4-classification',
+    outputFormat: 'json'
+  },
+  aggregateResult: null,
+  isResultSealed: false,
+  requiresManualReview: false,
+  createdById: userIds[1],
+  createdAt: new Date(now.getTime() - 60 * 60 * 1000),
+  updatedAt: now,
+  startedAt: new Date(now.getTime() - 55 * 60 * 1000),
+  completedAt: null
+};
+
+// Example 3: Batch job requiring manual review
+const batchJob3Id = ObjectId();
+const batchJob3 = {
+  _id: batchJob3Id,
+  name: 'Customer Data Validation',
+  type: 'data_validation',
+  workflowId: null,
+  workflowStepId: null,
+  taskId: null,
+  callbackUrl: 'http://localhost:3001/api/batch-jobs/' + batchJob3Id.toString() + '/callback',
+  callbackSecret: 'whsec_' + ObjectId().toString(),
+  status: 'manual_review',
+  expectedCount: 200,
+  receivedCount: 200,
+  processedCount: 140,
+  failedCount: 60,
+  minSuccessPercent: 95,
+  deadlineAt: new Date(now.getTime() - 1 * 60 * 60 * 1000),
+  inputPayload: {
+    dataSource: 'customer_database',
+    validationRules: ['email_format', 'phone_format', 'address_complete']
+  },
+  aggregateResult: {
+    totalItems: 200,
+    successfulCount: 140,
+    failedCount: 60,
+    successRate: 70,
+    results: [],
+    errors: [
+      { itemKey: 'cust_001', error: 'Invalid email format' },
+      { itemKey: 'cust_015', error: 'Missing phone number' }
+    ],
+    aggregatedAt: now
+  },
+  isResultSealed: false,
+  requiresManualReview: true,
+  createdById: userIds[0],
+  createdAt: new Date(now.getTime() - 3 * 60 * 60 * 1000),
+  updatedAt: now,
+  startedAt: new Date(now.getTime() - 2.5 * 60 * 60 * 1000),
+  completedAt: null
+};
+
+db.batch_jobs.insertMany([batchJob1, batchJob2, batchJob3]);
+
+// Sample batch items for the in-progress batch job
+const batchItems = [];
+for (let i = 1; i <= 32; i++) {
+  batchItems.push({
+    batchJobId: batchJob2Id,
+    itemKey: 'doc_' + String(i).padStart(3, '0'),
+    externalId: 'file_' + ObjectId().toString().substring(0, 8),
+    status: i <= 30 ? 'completed' : 'failed',
+    inputData: {
+      filename: 'document_' + i + '.pdf',
+      size: Math.floor(Math.random() * 1000000) + 10000
+    },
+    resultData: i <= 30 ? {
+      classification: ['invoice', 'contract', 'report', 'memo'][Math.floor(Math.random() * 4)],
+      confidence: 0.7 + Math.random() * 0.3
+    } : null,
+    error: i > 30 ? 'Unable to parse document format' : null,
+    attempts: 1,
+    createdAt: new Date(now.getTime() - 55 * 60 * 1000),
+    receivedAt: new Date(now.getTime() - (55 - i) * 60 * 1000),
+    completedAt: new Date(now.getTime() - (54 - i) * 60 * 1000)
+  });
+}
+
+db.batch_items.insertMany(batchItems);
+
 print('Seed data inserted successfully!');
