@@ -7,8 +7,12 @@ import {
   BatchJobStatus,
   ReviewDecision,
 } from '../types/index.js';
+import { optionalAuth } from '../middleware/auth.js';
 
 const router = Router();
+
+// Apply optional auth to all routes to get user ID from JWT token
+router.use(optionalAuth);
 
 // ============================================================================
 // Create Batch Job
@@ -44,11 +48,11 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       }
     }
 
-    // Get actor from request (would come from auth middleware in production)
-    const actorId = req.headers['x-user-id']
-      ? new ObjectId(req.headers['x-user-id'] as string)
+    // Get actor from authenticated user (via JWT token)
+    const actorId = req.user?.userId
+      ? new ObjectId(req.user.userId)
       : null;
-    const actorType = (req.headers['x-actor-type'] as 'user' | 'system' | 'daemon') || 'system';
+    const actorType = req.user ? 'user' : 'system';
 
     const batchJob = await batchJobService.createBatchJob(input, actorId, actorType);
 
@@ -164,10 +168,11 @@ router.post('/:id/start', async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    const actorId = req.headers['x-user-id']
-      ? new ObjectId(req.headers['x-user-id'] as string)
+    // Get actor from authenticated user (via JWT token)
+    const actorId = req.user?.userId
+      ? new ObjectId(req.user.userId)
       : null;
-    const actorType = (req.headers['x-actor-type'] as 'user' | 'system' | 'daemon') || 'system';
+    const actorType = req.user ? 'user' : 'system';
 
     const job = await batchJobService.startBatchJob(id, actorId, actorType);
     res.json(job);
@@ -299,10 +304,9 @@ router.post('/:id/review', async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    // Get reviewer from request
-    const reviewerId = req.headers['x-user-id'] as string;
-    if (!reviewerId || !ObjectId.isValid(reviewerId)) {
-      res.status(401).json({ error: 'Reviewer ID required' });
+    // Get reviewer from authenticated user (via JWT token)
+    if (!req.user?.userId) {
+      res.status(401).json({ error: 'Authentication required for review' });
       return;
     }
 
@@ -310,7 +314,7 @@ router.post('/:id/review', async (req: Request, res: Response): Promise<void> =>
       id,
       decision,
       notes || '',
-      new ObjectId(reviewerId)
+      new ObjectId(req.user.userId)
     );
 
     res.json(job);
@@ -357,10 +361,11 @@ router.post('/:id/cancel', async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    const actorId = req.headers['x-user-id']
-      ? new ObjectId(req.headers['x-user-id'] as string)
+    // Get actor from authenticated user (via JWT token)
+    const actorId = req.user?.userId
+      ? new ObjectId(req.user.userId)
       : null;
-    const actorType = (req.headers['x-actor-type'] as 'user' | 'system' | 'daemon') || 'system';
+    const actorType = req.user ? 'user' : 'system';
 
     const job = await batchJobService.cancelBatchJob(id, actorId, actorType);
     res.json(job);

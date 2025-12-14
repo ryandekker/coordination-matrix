@@ -2,8 +2,12 @@ import { Router, Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
 import { workflowExecutionService } from '../services/workflow-execution-service.js';
 import { StartWorkflowInput, WorkflowRunStatus } from '../types/index.js';
+import { optionalAuth } from '../middleware/auth.js';
 
 const router = Router();
+
+// Apply optional auth to all routes to get user ID from JWT token
+router.use(optionalAuth);
 
 // ============================================================================
 // Start Workflow Run
@@ -23,8 +27,9 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const actorId = req.headers['x-user-id']
-      ? new ObjectId(req.headers['x-user-id'] as string)
+    // Get actor ID from authenticated user (via JWT token)
+    const actorId = req.user?.userId
+      ? new ObjectId(req.user.userId)
       : null;
 
     const { run, rootTask } = await workflowExecutionService.startWorkflow(input, actorId);
@@ -131,8 +136,9 @@ router.post('/:id/cancel', async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    const actorId = req.headers['x-user-id']
-      ? new ObjectId(req.headers['x-user-id'] as string)
+    // Get actor ID from authenticated user (via JWT token)
+    const actorId = req.user?.userId
+      ? new ObjectId(req.user.userId)
       : undefined;
 
     const run = await workflowExecutionService.cancelWorkflowRun(id, actorId);

@@ -59,8 +59,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
-
-const API_RUN_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
+import { authFetch } from '@/lib/api'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
@@ -128,7 +127,7 @@ interface WorkflowData {
 }
 
 async function fetchWorkflows(): Promise<{ data: WorkflowData[] }> {
-  const response = await fetch(`${API_BASE}/workflows`)
+  const response = await authFetch(`${API_BASE}/workflows`)
   if (!response.ok) {
     throw new Error('Failed to fetch workflows')
   }
@@ -136,7 +135,7 @@ async function fetchWorkflows(): Promise<{ data: WorkflowData[] }> {
 }
 
 async function createWorkflow(data: Partial<WorkflowData>): Promise<{ data: WorkflowData }> {
-  const response = await fetch(`${API_BASE}/workflows`, {
+  const response = await authFetch(`${API_BASE}/workflows`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -146,7 +145,7 @@ async function createWorkflow(data: Partial<WorkflowData>): Promise<{ data: Work
 }
 
 async function updateWorkflow(id: string, data: Partial<WorkflowData>): Promise<{ data: WorkflowData }> {
-  const response = await fetch(`${API_BASE}/workflows/${id}`, {
+  const response = await authFetch(`${API_BASE}/workflows/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -156,14 +155,14 @@ async function updateWorkflow(id: string, data: Partial<WorkflowData>): Promise<
 }
 
 async function deleteWorkflow(id: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/workflows/${id}`, {
+  const response = await authFetch(`${API_BASE}/workflows/${id}`, {
     method: 'DELETE',
   })
   if (!response.ok) throw new Error('Failed to delete workflow')
 }
 
 async function duplicateWorkflow(id: string): Promise<{ data: WorkflowData }> {
-  const response = await fetch(`${API_BASE}/workflows/${id}/duplicate`, {
+  const response = await authFetch(`${API_BASE}/workflows/${id}/duplicate`, {
     method: 'POST',
   })
   if (!response.ok) throw new Error('Failed to duplicate workflow')
@@ -233,7 +232,7 @@ async function startWorkflowRun(
   externalId?: string,
   source?: string
 ): Promise<{ run: { _id: string } }> {
-  const response = await fetch(`${API_RUN_BASE}/workflow-runs`, {
+  const response = await authFetch(`${API_BASE}/workflow-runs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -249,7 +248,7 @@ async function startWorkflowRun(
 }
 
 async function fetchUsers(): Promise<{ data: { _id: string; displayName: string; isAgent?: boolean }[] }> {
-  const response = await fetch(`${API_BASE}/users`)
+  const response = await authFetch(`${API_BASE}/users`)
   if (!response.ok) throw new Error('Failed to fetch users')
   return response.json()
 }

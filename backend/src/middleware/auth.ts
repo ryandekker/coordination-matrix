@@ -53,7 +53,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
 }
 
 // Optional auth - doesn't fail if no token, but populates user if valid
-export function optionalAuth(req: Request, res: Response, next: NextFunction): void {
+export function optionalAuth(req: Request, _res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
 
   if (authHeader) {

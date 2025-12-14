@@ -1,3 +1,4 @@
+// API base URL - must be set via NEXT_PUBLIC_API_URL env var for auth headers to work
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
 export interface PaginatedResponse<T> {
@@ -39,8 +40,9 @@ async function handleResponse<T>(response: Response): Promise<T> {
 
 // Helper to make authenticated requests
 export async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const authHeaders = getAuthHeaders()
   const headers = {
-    ...getAuthHeaders(),
+    ...authHeaders,
     ...options.headers,
   }
   return fetch(url, { ...options, headers })
