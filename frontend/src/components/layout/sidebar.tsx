@@ -15,9 +15,21 @@ import {
   ChevronDown,
   ChevronRight,
   Trash2,
+  LogOut,
+  Key,
+  User,
 } from 'lucide-react'
 import { View } from '@/lib/api'
 import { useViews, useDeleteView } from '@/hooks/use-tasks'
+import { useAuth } from '@/lib/auth'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { ChangePasswordDialog } from '@/components/auth/change-password-dialog'
 
 interface NavItem {
   name: string
@@ -43,6 +55,8 @@ export function Sidebar() {
   const searchParams = useSearchParams()
   const currentViewId = searchParams.get('viewId')
   const [savedSearchesExpanded, setSavedSearchesExpanded] = useState(true)
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false)
+  const { user, logout } = useAuth()
 
   const { data: viewsData } = useViews('tasks')
   const deleteViewMutation = useDeleteView()
@@ -186,15 +200,35 @@ export function Sidebar() {
         </div>
       </nav>
       <div className="border-t p-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
-            <Users className="h-4 w-4" />
-          </div>
-          <div className="flex-1 text-sm">
-            <p className="font-medium">Admin User</p>
-            <p className="text-muted-foreground">admin@example.com</p>
-          </div>
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="flex w-full items-center gap-3 rounded-lg p-2 hover:bg-muted transition-colors">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                <User className="h-4 w-4" />
+              </div>
+              <div className="flex-1 text-left text-sm">
+                <p className="font-medium truncate">{user?.displayName || 'User'}</p>
+                <p className="text-muted-foreground truncate text-xs">{user?.email || ''}</p>
+              </div>
+              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuItem onClick={() => setChangePasswordOpen(true)}>
+              <Key className="mr-2 h-4 w-4" />
+              Change Password
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={logout} className="text-destructive focus:text-destructive">
+              <LogOut className="mr-2 h-4 w-4" />
+              Log Out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <ChangePasswordDialog
+          open={changePasswordOpen}
+          onOpenChange={setChangePasswordOpen}
+        />
       </div>
     </div>
   )
