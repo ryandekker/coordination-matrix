@@ -544,6 +544,25 @@ export interface WorkflowRun {
   inputPayload?: Record<string, unknown>;
   outputPayload?: Record<string, unknown>;
 
+  // Task defaults - applied to all tasks created in this run
+  taskDefaults?: {
+    assigneeId?: ObjectId;
+    urgency?: Urgency;
+    tags?: string[];
+    dueOffsetHours?: number;
+  };
+
+  // Execution options
+  executionOptions?: {
+    pauseAtSteps?: string[];
+    skipSteps?: string[];
+    dryRun?: boolean;
+  };
+
+  // External correlation
+  externalId?: string;
+  source?: string;
+
   // Error handling
   error?: string;
   failedStepId?: string;
@@ -586,9 +605,36 @@ export interface WorkflowRunEvent {
 }
 
 // Input for starting a workflow run
+// Task defaults that apply to all tasks created in a workflow run
+export interface WorkflowTaskDefaults {
+  assigneeId?: ObjectId | string;   // Default assignee for tasks
+  urgency?: Urgency;                 // Default priority level
+  tags?: string[];                   // Tags to apply to all tasks
+  dueOffsetHours?: number;           // Hours from task creation for due date
+}
+
+// Execution options for workflow runs
+export interface WorkflowExecutionOptions {
+  pauseAtSteps?: string[];           // Step IDs to pause before executing
+  skipSteps?: string[];              // Step IDs to bypass entirely
+  dryRun?: boolean;                  // Simulate without creating real tasks
+}
+
 export interface StartWorkflowInput {
   workflowId: string;
+
+  // Input data that flows through the workflow
   inputPayload?: Record<string, unknown>;
+
+  // Defaults applied to all tasks created in this run
+  taskDefaults?: WorkflowTaskDefaults;
+
+  // Execution control options
+  executionOptions?: WorkflowExecutionOptions;
+
+  // External correlation
+  externalId?: string;               // ID from external system for correlation
+  source?: string;                   // Where this run was triggered from
 }
 
 // ============================================================================

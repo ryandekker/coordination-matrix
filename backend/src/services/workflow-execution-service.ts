@@ -129,6 +129,16 @@ class WorkflowExecutionService {
       throw new Error(`Workflow ${workflow.name} has no steps`);
     }
 
+    // Normalize task defaults (convert string assigneeId to ObjectId)
+    const taskDefaults = input.taskDefaults ? {
+      assigneeId: input.taskDefaults.assigneeId
+        ? new ObjectId(input.taskDefaults.assigneeId)
+        : undefined,
+      urgency: input.taskDefaults.urgency,
+      tags: input.taskDefaults.tags,
+      dueOffsetHours: input.taskDefaults.dueOffsetHours,
+    } : undefined;
+
     // Create workflow run
     const run: Omit<WorkflowRun, '_id'> = {
       workflowId,
@@ -136,6 +146,10 @@ class WorkflowExecutionService {
       currentStepIds: [],
       completedStepIds: [],
       inputPayload: input.inputPayload,
+      taskDefaults,
+      executionOptions: input.executionOptions,
+      externalId: input.externalId,
+      source: input.source,
       callbackSecret: this.generateSecret(),
       createdById: actorId,
       createdAt: now,
@@ -195,11 +209,42 @@ class WorkflowExecutionService {
       metadata: {
         workflowRunId: run._id.toString(),
         inputPayload: run.inputPayload,
+        externalId: run.externalId,
+        source: run.source,
       },
+      // Apply task defaults from workflow run
+      ...this.applyTaskDefaults(run, now),
     };
 
     const result = await this.tasks.insertOne(task as Task);
     return { ...task, _id: result.insertedId } as Task;
+  }
+
+  /**
+   * Apply task defaults from the workflow run configuration
+   */
+  private applyTaskDefaults(
+    run: WorkflowRun,
+    now: Date
+  ): Partial<Task> {
+    const defaults: Partial<Task> = {};
+
+    if (run.taskDefaults) {
+      if (run.taskDefaults.assigneeId) {
+        defaults.assigneeId = run.taskDefaults.assigneeId;
+      }
+      if (run.taskDefaults.urgency) {
+        defaults.urgency = run.taskDefaults.urgency;
+      }
+      if (run.taskDefaults.tags && run.taskDefaults.tags.length > 0) {
+        defaults.tags = run.taskDefaults.tags;
+      }
+      if (run.taskDefaults.dueOffsetHours) {
+        defaults.dueAt = new Date(now.getTime() + run.taskDefaults.dueOffsetHours * 60 * 60 * 1000);
+      }
+    }
+
+    return defaults;
   }
 
   // ============================================================================
@@ -295,6 +340,9 @@ class WorkflowExecutionService {
       initialStatus = 'in_progress';
     }
 
+    // Apply run-level task defaults, then step-specific overrides
+    const runDefaults = this.applyTaskDefaults(run, now);
+
     const task: Omit<Task, '_id'> = {
       title: step.name,
       summary: step.description,
@@ -307,7 +355,11 @@ class WorkflowExecutionService {
       workflowStage: step.name,
       taskType,
       executionMode,
-      assigneeId: step.defaultAssigneeId ? new ObjectId(step.defaultAssigneeId) : null,
+      // Apply run defaults first, then step-specific assignee overrides
+      ...runDefaults,
+      assigneeId: step.defaultAssigneeId
+        ? new ObjectId(step.defaultAssigneeId)
+        : runDefaults.assigneeId || null,
       createdAt: now,
       updatedAt: now,
       metadata: {

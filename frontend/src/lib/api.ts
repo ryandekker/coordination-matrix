@@ -547,6 +547,31 @@ export interface WorkflowRunWithTasks extends WorkflowRun {
   workflow?: Workflow
 }
 
+// Task defaults that apply to all tasks created in a workflow run
+export interface WorkflowTaskDefaults {
+  assigneeId?: string
+  urgency?: 'low' | 'normal' | 'high' | 'urgent'
+  tags?: string[]
+  dueOffsetHours?: number
+}
+
+// Execution options for workflow runs
+export interface WorkflowExecutionOptions {
+  pauseAtSteps?: string[]
+  skipSteps?: string[]
+  dryRun?: boolean
+}
+
+// Input for starting a workflow run
+export interface StartWorkflowInput {
+  workflowId: string
+  inputPayload?: Record<string, unknown>
+  taskDefaults?: WorkflowTaskDefaults
+  executionOptions?: WorkflowExecutionOptions
+  externalId?: string
+  source?: string
+}
+
 // Workflow Runs API
 export const workflowRunsApi = {
   list: async (params?: {
@@ -573,10 +598,7 @@ export const workflowRunsApi = {
     return handleResponse(response)
   },
 
-  start: async (data: {
-    workflowId: string
-    inputPayload?: Record<string, unknown>
-  }): Promise<ApiResponse<{ run: WorkflowRun; rootTask: Task }>> => {
+  start: async (data: StartWorkflowInput): Promise<ApiResponse<{ run: WorkflowRun; rootTask: Task }>> => {
     const response = await fetch(`${API_BASE}/workflow-runs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
