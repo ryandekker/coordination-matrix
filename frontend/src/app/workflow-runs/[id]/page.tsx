@@ -16,7 +16,7 @@ import {
   ChevronDown,
   RefreshCw,
   Ban,
-  Workflow,
+  Workflow as WorkflowIcon,
   Bot,
   User,
   Globe,
@@ -42,7 +42,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
-import { workflowRunsApi, WorkflowRunWithTasks, WorkflowRunStatus, Task } from '@/lib/api'
+import { workflowRunsApi, WorkflowRun, WorkflowRunStatus, Task, Workflow } from '@/lib/api'
 
 const STATUS_CONFIG: Record<WorkflowRunStatus, { icon: React.ElementType; color: string; bgColor: string; label: string }> = {
   pending: { icon: Clock, color: 'text-gray-500', bgColor: 'bg-gray-50', label: 'Pending' },
@@ -70,7 +70,7 @@ const TASK_TYPE_CONFIG: Record<TaskType, { icon: React.ElementType; color: strin
   decision: { icon: GitBranch, color: 'text-amber-500', label: 'Decision' },
   foreach: { icon: Repeat, color: 'text-green-500', label: 'ForEach' },
   join: { icon: Merge, color: 'text-indigo-500', label: 'Join' },
-  subflow: { icon: Workflow, color: 'text-pink-500', label: 'Subflow' },
+  subflow: { icon: WorkflowIcon, color: 'text-pink-500', label: 'Subflow' },
   external: { icon: Globe, color: 'text-orange-500', label: 'External' },
 }
 
@@ -198,9 +198,9 @@ export default function WorkflowRunDetailPage() {
     queryKey: ['workflow-run', runId],
     queryFn: () => workflowRunsApi.get(runId, true),
     refetchInterval: (query) => {
-      const run = query.state.data?.data as WorkflowRunWithTasks | undefined
+      const apiData = query.state.data as { run?: WorkflowRun } | undefined
       // Auto-refresh every 3 seconds if the run is active
-      if (run && (run.status === 'running' || run.status === 'pending')) {
+      if (apiData?.run && (apiData.run.status === 'running' || apiData.run.status === 'pending')) {
         return 3000
       }
       return false
@@ -215,8 +215,10 @@ export default function WorkflowRunDetailPage() {
     },
   })
 
-  const run = data?.data as WorkflowRunWithTasks | undefined
-  const tasks = run?.tasks || []
+  // API returns { run: {...}, tasks: [...] } structure when includeTasks=true
+  const apiResponse = data as { run?: WorkflowRun & { workflow?: Workflow }; tasks?: Task[] } | undefined
+  const run = apiResponse?.run
+  const tasks = apiResponse?.tasks || []
   const workflow = run?.workflow
 
   // Build task tree - find root tasks (those without parent in this run)
