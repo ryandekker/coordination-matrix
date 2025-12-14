@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { Search, Plus, Filter, Columns, ChevronDown, X, Bookmark, Tag } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -89,7 +89,7 @@ export function TaskToolbar({
   // Check if we're viewing a non-system, user-created view
   const canUpdateCurrentView = currentView && !currentView.isSystem && currentView.name !== 'All Tasks'
 
-  const openSaveModal = () => {
+  const openSaveModal = useCallback(() => {
     // Default to update mode if we're on a user-created view
     if (canUpdateCurrentView) {
       setSaveMode('update')
@@ -99,9 +99,9 @@ export function TaskToolbar({
       setSaveName('')
     }
     setIsSaveModalOpen(true)
-  }
+  }, [canUpdateCurrentView, currentView?.name])
 
-  const handleSaveSearch = async () => {
+  const handleSaveSearch = useCallback(async () => {
     if (saveMode === 'update' && canUpdateCurrentView && onUpdateSearch) {
       setIsSaving(true)
       try {
@@ -128,9 +128,9 @@ export function TaskToolbar({
         setIsSaving(false)
       }
     }
-  }
+  }, [saveMode, canUpdateCurrentView, onUpdateSearch, currentView, filters, search, sorting, saveName, onSaveSearch])
 
-  const handleStatusFilter = (status: string, checked: boolean) => {
+  const handleStatusFilter = useCallback((status: string, checked: boolean) => {
     const currentStatuses = (filters.status as string[]) || []
     const newStatuses = checked
       ? [...currentStatuses, status]
@@ -139,9 +139,9 @@ export function TaskToolbar({
       ...filters,
       status: newStatuses.length > 0 ? newStatuses : undefined,
     })
-  }
+  }, [filters, onFilterChange])
 
-  const handleUrgencyFilter = (urgency: string, checked: boolean) => {
+  const handleUrgencyFilter = useCallback((urgency: string, checked: boolean) => {
     const currentUrgencies = (filters.urgency as string[]) || []
     const newUrgencies = checked
       ? [...currentUrgencies, urgency]
@@ -150,9 +150,9 @@ export function TaskToolbar({
       ...filters,
       urgency: newUrgencies.length > 0 ? newUrgencies : undefined,
     })
-  }
+  }, [filters, onFilterChange])
 
-  const handleAssigneeFilter = (assigneeId: string, checked: boolean) => {
+  const handleAssigneeFilter = useCallback((assigneeId: string, checked: boolean) => {
     const currentAssignees = (filters.assigneeId as string[]) || []
     const newAssignees = checked
       ? [...currentAssignees, assigneeId]
@@ -161,9 +161,9 @@ export function TaskToolbar({
       ...filters,
       assigneeId: newAssignees.length > 0 ? newAssignees : undefined,
     })
-  }
+  }, [filters, onFilterChange])
 
-  const handleTagFilter = (tag: string, checked: boolean) => {
+  const handleTagFilter = useCallback((tag: string, checked: boolean) => {
     const currentTags = (filters.tags as string[]) || []
     const newTags = checked
       ? [...currentTags, tag]
@@ -172,50 +172,54 @@ export function TaskToolbar({
       ...filters,
       tags: newTags.length > 0 ? newTags : undefined,
     })
-  }
+  }, [filters, onFilterChange])
 
-  const clearAllFilters = () => {
+  const clearAllFilters = useCallback(() => {
     onFilterChange({})
     onSearchChange('')
-  }
+  }, [onFilterChange, onSearchChange])
 
-  // Build active filter chips
-  const activeFilters: { key: string; label: string; value: string; color?: string }[] = []
+  // Build active filter chips - memoized
+  const activeFilters = useMemo(() => {
+    const result: { key: string; label: string; value: string; color?: string }[] = []
 
-  if (search) {
-    activeFilters.push({ key: 'search', label: 'Search', value: search })
-  }
-
-  const statusFilters = (filters.status as string[]) || []
-  statusFilters.forEach((status) => {
-    const opt = statusOptions.find((s) => s.code === status)
-    if (opt) {
-      activeFilters.push({ key: `status-${status}`, label: 'Status', value: opt.displayName, color: opt.color })
+    if (search) {
+      result.push({ key: 'search', label: 'Search', value: search })
     }
-  })
 
-  const urgencyFilters = (filters.urgency as string[]) || []
-  urgencyFilters.forEach((urgency) => {
-    const opt = urgencyOptions.find((u) => u.code === urgency)
-    if (opt) {
-      activeFilters.push({ key: `urgency-${urgency}`, label: 'Urgency', value: opt.displayName, color: opt.color })
-    }
-  })
+    const statusFilters = (filters.status as string[]) || []
+    statusFilters.forEach((status) => {
+      const opt = statusOptions.find((s) => s.code === status)
+      if (opt) {
+        result.push({ key: `status-${status}`, label: 'Status', value: opt.displayName, color: opt.color })
+      }
+    })
 
-  const assigneeFilters = (filters.assigneeId as string[]) || []
-  assigneeFilters.forEach((assigneeId) => {
-    const user = users.find((u) => u._id === assigneeId)
-    if (user) {
-      activeFilters.push({ key: `assignee-${assigneeId}`, label: 'Assignee', value: user.displayName })
-    }
-  })
+    const urgencyFilters = (filters.urgency as string[]) || []
+    urgencyFilters.forEach((urgency) => {
+      const opt = urgencyOptions.find((u) => u.code === urgency)
+      if (opt) {
+        result.push({ key: `urgency-${urgency}`, label: 'Urgency', value: opt.displayName, color: opt.color })
+      }
+    })
 
-  const tagFilters = (filters.tags as string[]) || []
-  tagFilters.forEach((tag) => {
-    activeFilters.push({ key: `tag-${tag}`, label: 'Tag', value: tag })
-  })
+    const assigneeFilters = (filters.assigneeId as string[]) || []
+    assigneeFilters.forEach((assigneeId) => {
+      const user = users.find((u) => u._id === assigneeId)
+      if (user) {
+        result.push({ key: `assignee-${assigneeId}`, label: 'Assignee', value: user.displayName })
+      }
+    })
 
-  const removeFilter = (filterKey: string) => {
+    const tagFilters = (filters.tags as string[]) || []
+    tagFilters.forEach((tag) => {
+      result.push({ key: `tag-${tag}`, label: 'Tag', value: tag })
+    })
+
+    return result
+  }, [search, filters, statusOptions, urgencyOptions, users])
+
+  const removeFilter = useCallback((filterKey: string) => {
     if (filterKey === 'search') {
       onSearchChange('')
     } else if (filterKey.startsWith('status-')) {
@@ -231,7 +235,7 @@ export function TaskToolbar({
       const tag = filterKey.replace('tag-', '')
       handleTagFilter(tag, false)
     }
-  }
+  }, [onSearchChange, handleStatusFilter, handleUrgencyFilter, handleAssigneeFilter, handleTagFilter])
 
   return (
     <div className="space-y-3">

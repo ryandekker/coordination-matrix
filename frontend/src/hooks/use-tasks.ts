@@ -3,10 +3,29 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { tasksApi, lookupsApi, fieldConfigsApi, viewsApi, usersApi, workflowsApi, Task } from '@/lib/api'
 
-export function useTasks(params?: Record<string, string | number | boolean>) {
+// Helper to normalize query params for consistent cache keys
+function normalizeParams(params?: Record<string, string | number | boolean>): string {
+  if (!params) return ''
+  // Sort keys and create a stable string representation
+  const sortedKeys = Object.keys(params).sort()
+  return sortedKeys.map(k => `${k}:${params[k]}`).join('|')
+}
+
+interface UseTasksOptions extends Record<string, string | number | boolean | undefined> {
+  enabled?: boolean
+}
+
+export function useTasks(options?: UseTasksOptions) {
+  const { enabled = true, ...params } = options || {}
+
+  // Create a stable query key by normalizing params
+  const normalizedKey = normalizeParams(params as Record<string, string | number | boolean>)
+
   return useQuery({
-    queryKey: ['tasks', params],
-    queryFn: () => tasksApi.list(params),
+    queryKey: ['tasks', normalizedKey],
+    queryFn: () => tasksApi.list(params as Record<string, string | number | boolean | string[]>),
+    enabled,
+    staleTime: 30 * 1000, // 30 seconds - reduce refetching
   })
 }
 
@@ -19,8 +38,10 @@ export function useTask(id: string | null) {
 }
 
 export function useTaskTree(params?: Record<string, string>) {
+  const normalizedKey = normalizeParams(params as Record<string, string | number | boolean>)
+
   return useQuery({
-    queryKey: ['task-tree', params],
+    queryKey: ['task-tree', normalizedKey],
     queryFn: () => tasksApi.getTree(params),
   })
 }
@@ -39,6 +60,7 @@ export function useCreateTask() {
   return useMutation({
     mutationFn: tasksApi.create,
     onSuccess: () => {
+      // Invalidate all task queries
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
       queryClient.invalidateQueries({ queryKey: ['task-tree'] })
     },
@@ -52,9 +74,11 @@ export function useUpdateTask() {
     mutationFn: ({ id, data }: { id: string; data: Partial<Task> }) =>
       tasksApi.update(id, data),
     onSuccess: (_, variables) => {
+      // Invalidate specific task and task lists
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
       queryClient.invalidateQueries({ queryKey: ['task', variables.id] })
       queryClient.invalidateQueries({ queryKey: ['task-tree'] })
+      queryClient.invalidateQueries({ queryKey: ['task-children'] })
     },
   })
 }
@@ -68,6 +92,7 @@ export function useDeleteTask() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
       queryClient.invalidateQueries({ queryKey: ['task-tree'] })
+      queryClient.invalidateQueries({ queryKey: ['task-children'] })
     },
   })
 }
@@ -120,6 +145,7 @@ export function useViews(collectionName?: string) {
   return useQuery({
     queryKey: ['views', collectionName],
     queryFn: () => viewsApi.list(collectionName),
+    staleTime: 60 * 1000, // 1 minute
   })
 }
 

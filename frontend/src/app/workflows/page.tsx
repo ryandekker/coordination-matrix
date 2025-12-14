@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import dynamic from 'next/dynamic'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Workflow,
@@ -39,8 +40,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { WorkflowEditor } from '@/components/workflows/workflow-editor'
 import { cn } from '@/lib/utils'
+
+// Lazy-load WorkflowEditor to reduce initial bundle size (includes heavy mermaid dependency)
+const WorkflowEditor = dynamic(
+  () => import('@/components/workflows/workflow-editor').then(mod => ({ default: mod.WorkflowEditor })),
+  {
+    loading: () => (
+      <div className="flex items-center justify-center p-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    ),
+    ssr: false, // Mermaid doesn't work with SSR
+  }
+)
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
