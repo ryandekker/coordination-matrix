@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useForm, Controller } from 'react-hook-form'
 import { useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceToNow } from 'date-fns'
@@ -44,6 +44,8 @@ export function TaskModal({
 }: TaskModalProps) {
   const queryClient = useQueryClient()
   const prevIsOpenRef = useRef(false)
+  const [isMetadataEditMode, setIsMetadataEditMode] = useState(false)
+  const metadataTextareaRef = useRef<HTMLTextAreaElement>(null)
 
   const createTask = useCreateTask()
   const updateTask = useUpdateTask()
@@ -179,6 +181,22 @@ export function TaskModal({
 
     if (!task && parentTask) {
       taskData.parentId = parentTask._id
+    }
+
+    // Include metadata from the textarea if in edit mode
+    if (task && metadataTextareaRef.current) {
+      try {
+        const jsonValue = metadataTextareaRef.current.value.trim()
+        if (jsonValue) {
+          const parsed = JSON.parse(jsonValue)
+          if (typeof parsed === 'object' && !Array.isArray(parsed)) {
+            taskData.metadata = parsed
+          }
+        }
+      } catch {
+        // Invalid JSON - don't include metadata update, let form submit continue
+        // The validation will show on next edit attempt
+      }
     }
 
     if (task) {
@@ -568,6 +586,77 @@ export function TaskModal({
             className="h-8 text-sm"
           />
         </div>
+
+        {/* Metadata - toggleable between visual and edit modes */}
+        {isEditMode && (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-muted-foreground">Metadata</label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-5 px-1.5 text-[10px]"
+onClick={() => {
+                  if (!isMetadataEditMode) {
+                    // Switching to edit mode - populate textarea after render
+                    setTimeout(() => {
+                      if (metadataTextareaRef.current) {
+                        metadataTextareaRef.current.value = JSON.stringify(task?.metadata || {}, null, 2)
+                        metadataTextareaRef.current.focus()
+                      }
+                    }, 0)
+                  }
+                  setIsMetadataEditMode(!isMetadataEditMode)
+                }}
+              >
+                {isMetadataEditMode ? 'View' : 'Edit'}
+              </Button>
+            </div>
+
+            {isMetadataEditMode ? (
+              // Edit mode - JSON textarea (uncontrolled to prevent cursor issues)
+              // Saves automatically when the main form Update button is clicked
+              <div className="space-y-1">
+                <textarea
+                  ref={metadataTextareaRef}
+                  defaultValue={JSON.stringify(task?.metadata || {}, null, 2)}
+                  onKeyDown={(e) => {
+                    // Prevent form submission on Enter
+                    if (e.key === 'Enter') {
+                      e.stopPropagation()
+                    }
+                  }}
+                  placeholder='{"key": "value"}'
+                  rows={6}
+                  className={cn(
+                    'flex w-full rounded-md border bg-background px-3 py-1.5 text-xs font-mono',
+                    'ring-offset-background placeholder:text-muted-foreground resize-y',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
+                    'border-input'
+                  )}
+                />
+                <p className="text-[10px] text-muted-foreground">Edit JSON and click Update to save</p>
+              </div>
+            ) : (
+              // View mode - key-value display
+              <div className="px-3 py-2 text-sm bg-muted/50 rounded-md border space-y-1.5 max-h-40 overflow-y-auto">
+                {task?.metadata && Object.keys(task.metadata).length > 0 ? (
+                  Object.entries(task.metadata).map(([key, value]) => (
+                    <div key={key} className="flex gap-2">
+                      <span className="text-xs font-medium text-muted-foreground min-w-[80px]">{key}:</span>
+                      <span className="text-xs break-all">
+                        {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <span className="text-xs text-muted-foreground italic">No metadata</span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Parent Task (for subtask creation) */}
         {!task && parentTask && (

@@ -372,6 +372,7 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       createdAt: now,
       updatedAt: now,
       dueAt: taskData.dueAt ? new Date(taskData.dueAt) : null,
+      metadata: taskData.metadata || {},
     };
 
     const result = await db.collection('tasks').insertOne(newTask);
@@ -430,6 +431,20 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
       }
     }
 
+    // Handle metadata merge: shallow merge new metadata keys with existing
+    if (updates.metadata !== undefined) {
+      if (updates.metadata === null) {
+        // Allow explicit null to clear metadata
+        updates.metadata = {};
+      } else {
+        // Merge with existing metadata (new keys override existing)
+        updates.metadata = {
+          ...(originalTask.metadata || {}),
+          ...updates.metadata,
+        };
+      }
+    }
+
     updates.updatedAt = new Date();
 
     const result = await db.collection<Task>('tasks').findOneAndUpdate(
@@ -461,6 +476,7 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
               if (eventType === 'task.status.changed') return c.field === 'status';
               if (eventType === 'task.assignee.changed') return c.field === 'assigneeId';
               if (eventType === 'task.priority.changed') return c.field === 'urgency';
+              if (eventType === 'task.metadata.changed') return c.field === 'metadata';
               return false;
             }),
             actorId,

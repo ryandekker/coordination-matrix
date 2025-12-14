@@ -123,7 +123,7 @@ export function computeChanges(oldTask: Partial<Task>, newTask: Partial<Task>): 
   const trackedFields = [
     'title', 'summary', 'extraPrompt', 'additionalInfo', 'status', 'urgency',
     'parentId', 'workflowId', 'workflowStage', 'externalId', 'externalHoldDate',
-    'assigneeId', 'createdById', 'tags', 'dueAt'
+    'assigneeId', 'createdById', 'tags', 'dueAt', 'metadata'
   ];
 
   for (const field of trackedFields) {
@@ -162,6 +162,9 @@ export function getSpecificEventTypes(changes: FieldChange[]): TaskEventType[] {
         break;
       case 'urgency':
         types.push('task.priority.changed');
+        break;
+      case 'metadata':
+        types.push('task.metadata.changed');
         break;
     }
   }

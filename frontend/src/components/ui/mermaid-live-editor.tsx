@@ -51,7 +51,7 @@ export function MermaidLiveEditor({
   initialLayout = 'split',
 }: MermaidLiveEditorProps) {
   const [layout, setLayout] = useState<LayoutMode>(initialLayout)
-  const [zoom, setZoom] = useState(100)
+  const [zoom, setZoom] = useState(130)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -373,11 +373,12 @@ export function MermaidLiveEditor({
 
       {/* Syntax help footer */}
       <div className="border-t bg-muted/20 px-3 py-1.5 flex items-center justify-between text-xs text-muted-foreground">
-        <div className="flex items-center gap-4">
-          <span><code className="bg-muted px-1 rounded">[ ]</code> task</span>
-          <span><code className="bg-muted px-1 rounded">( )</code> manual</span>
-          <span><code className="bg-muted px-1 rounded">{"{ }"}</code> decision</span>
-          <span><code className="bg-muted px-1 rounded">[[ ]]</code> loop/join</span>
+        <div className="flex items-center gap-3 flex-wrap">
+          <span><code className="bg-blue-100 text-blue-700 px-1 rounded">[ ]</code> agent</span>
+          <span><code className="bg-orange-100 text-orange-700 px-1 rounded">{"{{"} {"}}"}</code> external</span>
+          <span><code className="bg-purple-100 text-purple-700 px-1 rounded">( )</code> manual</span>
+          <span><code className="bg-amber-100 text-amber-700 px-1 rounded">{"{ }"}</code> decision</span>
+          <span><code className="bg-green-100 text-green-700 px-1 rounded">[[ ]]</code> loop/join</span>
           <span><code className="bg-muted px-1 rounded">--&gt;</code> flow</span>
         </div>
         <a
@@ -386,7 +387,7 @@ export function MermaidLiveEditor({
           rel="noopener noreferrer"
           className="text-primary hover:underline"
         >
-          Mermaid docs →
+          Docs →
         </a>
       </div>
     </div>

@@ -364,6 +364,7 @@ export interface Task {
   createdAt: string
   updatedAt: string
   dueAt?: string | null
+  metadata?: Record<string, unknown>
   children?: Task[]
   _resolved?: {
     assignee?: { _id: string; displayName: string }

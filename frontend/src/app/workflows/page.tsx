@@ -18,6 +18,7 @@ import {
   Repeat,
   Merge,
   FileText,
+  Globe,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -43,18 +44,55 @@ import { cn } from '@/lib/utils'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
-type WorkflowStepType = 'task' | 'decision' | 'foreach' | 'join' | 'subflow'
-type ExecutionMode = 'automated' | 'manual'
+// Updated step types - aligned with workflow-editor
+type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'subflow'
+
+interface StepConnection {
+  targetStepId: string
+  condition?: string | null
+  label?: string
+}
+
+interface ExternalConfig {
+  endpoint?: string
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  headers?: Record<string, string>
+  payloadTemplate?: string
+}
 
 interface WorkflowStep {
   id: string
   name: string
-  stepType?: WorkflowStepType
-  execution?: ExecutionMode
-  type?: 'automated' | 'manual' // Legacy
-  prompt?: string
   description?: string
-  hitlPhase?: string // Legacy
+  stepType?: WorkflowStepType
+
+  // Non-linear flow connections
+  connections?: StepConnection[]
+
+  // Agent step configuration
+  additionalInstructions?: string
+  defaultAssigneeId?: string
+
+  // External step configuration
+  externalConfig?: ExternalConfig
+
+  // Decision step configuration
+  defaultConnection?: string
+
+  // ForEach/Join/Subflow fields
+  itemsPath?: string
+  itemVariable?: string
+  maxItems?: number
+  awaitTag?: string
+  subflowId?: string
+  inputMapping?: Record<string, string>
+
+  // Legacy compatibility
+  execution?: 'automated' | 'manual'
+  type?: 'automated' | 'manual'
+  prompt?: string
+  hitlPhase?: string
+  branches?: { condition: string | null; targetStepId: string }[]
 }
 
 interface WorkflowData {
@@ -114,34 +152,41 @@ async function duplicateWorkflow(id: string): Promise<{ data: WorkflowData }> {
 
 // Get icon for step type
 function getStepIcon(step: WorkflowStep) {
-  const stepType = step.stepType || 'task'
-  const execution = step.execution || step.type || 'automated'
+  // Normalize step type - handle legacy 'task' type
+  const stepType = step.stepType || (step.execution === 'manual' || step.type === 'manual' ? 'manual' : 'agent')
 
   switch (stepType) {
+    case 'agent':
+      return <Bot className="h-4 w-4 text-blue-500" />
+    case 'external':
+      return <Globe className="h-4 w-4 text-orange-500" />
+    case 'manual':
+      return <User className="h-4 w-4 text-purple-500" />
     case 'decision':
       return <GitBranch className="h-4 w-4 text-amber-500" />
     case 'foreach':
       return <Repeat className="h-4 w-4 text-green-500" />
     case 'join':
-      return <Merge className="h-4 w-4 text-purple-500" />
+      return <Merge className="h-4 w-4 text-indigo-500" />
     case 'subflow':
       return <Workflow className="h-4 w-4 text-pink-500" />
-    case 'task':
     default:
-      return execution === 'manual' ? (
-        <User className="h-4 w-4 text-purple-500" />
-      ) : (
-        <Bot className="h-4 w-4 text-blue-500" />
-      )
+      return <Bot className="h-4 w-4 text-blue-500" />
   }
 }
 
 // Get step type label
 function getStepTypeLabel(step: WorkflowStep): string {
-  const stepType = step.stepType || 'task'
-  const execution = step.execution || step.type || 'automated'
+  // Normalize step type - handle legacy 'task' type
+  const stepType = step.stepType || (step.execution === 'manual' || step.type === 'manual' ? 'manual' : 'agent')
 
   switch (stepType) {
+    case 'agent':
+      return 'Agent'
+    case 'external':
+      return 'External'
+    case 'manual':
+      return 'Manual'
     case 'decision':
       return 'Decision'
     case 'foreach':
@@ -150,9 +195,8 @@ function getStepTypeLabel(step: WorkflowStep): string {
       return 'Join'
     case 'subflow':
       return 'Subflow'
-    case 'task':
     default:
-      return execution === 'manual' ? 'Manual' : 'Automated'
+      return 'Agent'
   }
 }
 
@@ -294,18 +338,22 @@ export default function WorkflowsPage() {
       ) : (
         <div className="grid gap-6">
           {workflows.map((workflow) => {
-            const automatedCount = workflow.steps.filter(
-              (s) => (s.stepType || 'task') === 'task' && (s.execution || s.type) !== 'manual'
+            // Count different step types
+            const agentCount = workflow.steps.filter(
+              (s) => s.stepType === 'agent' || (!s.stepType && s.execution !== 'manual' && s.type !== 'manual')
+            ).length
+            const externalCount = workflow.steps.filter(
+              (s) => s.stepType === 'external'
             ).length
             const manualCount = workflow.steps.filter(
-              (s) => (s.stepType || 'task') === 'task' && (s.execution || s.type) === 'manual'
+              (s) => s.stepType === 'manual' || (!s.stepType && (s.execution === 'manual' || s.type === 'manual'))
             ).length
-            const promptCount = workflow.steps.filter((s) => s.prompt).length
+            const promptCount = workflow.steps.filter((s) => s.prompt || s.additionalInstructions).length
 
             return (
               <div
                 key={workflow._id}
-                className="rounded-lg border bg-card p-6 space-y-4"
+                className="rounded-lg border bg-card p-6 space-y-4 overflow-hidden"
               >
                 <div className="flex items-start justify-between">
                   <div className="space-y-1">
@@ -365,40 +413,50 @@ export default function WorkflowsPage() {
 
                 {/* Step visualization */}
                 <div className="flex items-center gap-2 overflow-x-auto pb-2">
-                  {workflow.steps.map((step, index) => (
-                    <div key={step.id || index} className="flex items-center">
-                      <div
-                        className={cn(
-                          'flex flex-col items-center gap-1 rounded-lg border p-3 min-w-[140px]',
-                          (step.execution || step.type) === 'manual'
-                            ? 'border-purple-300 bg-purple-50'
-                            : step.stepType === 'decision'
-                            ? 'border-amber-300 bg-amber-50'
-                            : step.stepType === 'foreach' || step.stepType === 'join'
-                            ? 'border-green-300 bg-green-50'
-                            : 'border-gray-200'
-                        )}
-                      >
-                        <div className="flex items-center gap-2">
-                          {getStepIcon(step)}
-                          <span className="text-sm font-medium">{step.name}</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Badge variant="outline" className="text-xs">
-                            {getStepTypeLabel(step)}
-                          </Badge>
-                          {step.prompt && (
-                            <span title="Has prompt">
-                              <FileText className="h-3 w-3 text-muted-foreground" />
-                            </span>
+                  {workflow.steps.map((step, index) => {
+                    // Determine step type for styling
+                    const effectiveType = step.stepType || (step.execution === 'manual' || step.type === 'manual' ? 'manual' : 'agent')
+                    const getBorderStyle = () => {
+                      switch (effectiveType) {
+                        case 'agent': return 'border-blue-300 bg-blue-50'
+                        case 'external': return 'border-orange-300 bg-orange-50'
+                        case 'manual': return 'border-purple-300 bg-purple-50'
+                        case 'decision': return 'border-amber-300 bg-amber-50'
+                        case 'foreach': return 'border-green-300 bg-green-50'
+                        case 'join': return 'border-indigo-300 bg-indigo-50'
+                        case 'subflow': return 'border-pink-300 bg-pink-50'
+                        default: return 'border-gray-200 bg-gray-50'
+                      }
+                    }
+                    return (
+                      <div key={step.id || index} className="flex items-center">
+                        <div
+                          className={cn(
+                            'flex flex-col items-center gap-1 rounded-lg border p-3 min-w-[140px]',
+                            getBorderStyle()
                           )}
+                        >
+                          <div className="flex items-center gap-2">
+                            {getStepIcon(step)}
+                            <span className="text-sm font-medium">{step.name}</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Badge variant="outline" className="text-xs">
+                              {getStepTypeLabel(step)}
+                            </Badge>
+                            {(step.prompt || step.additionalInstructions) && (
+                              <span title="Has instructions">
+                                <FileText className="h-3 w-3 text-muted-foreground" />
+                              </span>
+                            )}
+                          </div>
                         </div>
+                        {index < workflow.steps.length - 1 && (
+                          <ChevronRight className="h-5 w-5 text-muted-foreground mx-1 flex-shrink-0" />
+                        )}
                       </div>
-                      {index < workflow.steps.length - 1 && (
-                        <ChevronRight className="h-5 w-5 text-muted-foreground mx-1 flex-shrink-0" />
-                      )}
-                    </div>
-                  ))}
+                    )
+                  })}
                   {workflow.steps.length === 0 && (
                     <p className="text-sm text-muted-foreground italic">No steps defined</p>
                   )}
@@ -407,10 +465,11 @@ export default function WorkflowsPage() {
                 {/* Stats */}
                 <div className="flex items-center gap-4 text-sm text-muted-foreground">
                   <span>{workflow.steps.length} steps</span>
-                  <span>{automatedCount} automated</span>
-                  <span>{manualCount} manual</span>
+                  {agentCount > 0 && <span className="text-blue-600">{agentCount} agent</span>}
+                  {externalCount > 0 && <span className="text-orange-600">{externalCount} external</span>}
+                  {manualCount > 0 && <span className="text-purple-600">{manualCount} manual</span>}
                   {promptCount > 0 && (
-                    <span className="text-blue-600">{promptCount} with prompts</span>
+                    <span className="text-green-600">{promptCount} with instructions</span>
                   )}
                 </div>
               </div>
