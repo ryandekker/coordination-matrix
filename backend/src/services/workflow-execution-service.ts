@@ -689,19 +689,35 @@ class WorkflowExecutionService {
   private async onTaskStatusChanged(event: TaskEvent): Promise<void> {
     const task = event.task;
 
+    console.log(`[WorkflowExecutionService] onTaskStatusChanged: task=${task._id}, status=${task.status}, workflowRunId=${task.workflowRunId}, workflowStepId=${task.workflowStepId}`);
+
     // Only process workflow tasks
-    if (!task.workflowRunId || !task.workflowStepId) return;
+    if (!task.workflowRunId || !task.workflowStepId) {
+      console.log(`[WorkflowExecutionService] Skipping - not a workflow task (missing workflowRunId or workflowStepId)`);
+      return;
+    }
 
     // Only process completed or failed tasks
-    if (task.status !== 'completed' && task.status !== 'failed') return;
+    if (task.status !== 'completed' && task.status !== 'failed') {
+      console.log(`[WorkflowExecutionService] Skipping - status is ${task.status}, not completed/failed`);
+      return;
+    }
 
-    console.log(`[WorkflowExecutionService] Task ${task._id} (${task.title}) ${task.status}`);
+    console.log(`[WorkflowExecutionService] Processing task ${task._id} (${task.title}) ${task.status}`);
 
     const run = await this.workflowRuns.findOne({ _id: task.workflowRunId });
-    if (!run || run.status !== 'running') return;
+    console.log(`[WorkflowExecutionService] Found run: ${run ? run._id : 'NOT FOUND'}, status: ${run?.status}`);
+    if (!run || run.status !== 'running') {
+      console.log(`[WorkflowExecutionService] Skipping - run not found or not running`);
+      return;
+    }
 
     const workflow = await this.workflows.findOne({ _id: run.workflowId });
-    if (!workflow) return;
+    console.log(`[WorkflowExecutionService] Found workflow: ${workflow ? workflow.name : 'NOT FOUND'}`);
+    if (!workflow) {
+      console.log(`[WorkflowExecutionService] Skipping - workflow not found`);
+      return;
+    }
 
     // Publish step event
     await this.publish({
@@ -753,8 +769,15 @@ class WorkflowExecutionService {
     workflow: Workflow,
     completedTask: Task
   ): Promise<void> {
+    console.log(`[WorkflowExecutionService] advanceToNextStep called for task ${completedTask._id}, stepId: ${completedTask.workflowStepId}`);
+
     const currentStep = workflow.steps.find(s => s.id === completedTask.workflowStepId);
-    if (!currentStep) return;
+    if (!currentStep) {
+      console.log(`[WorkflowExecutionService] Current step not found in workflow steps. Available steps: ${workflow.steps.map(s => s.id).join(', ')}`);
+      return;
+    }
+
+    console.log(`[WorkflowExecutionService] Current step: ${currentStep.name} (${currentStep.id})`);
 
     // Mark step as completed
     await this.workflowRuns.updateOne(
@@ -767,25 +790,33 @@ class WorkflowExecutionService {
 
     // Find next step(s)
     const nextStepIds = currentStep.connections?.map(c => c.targetStepId) || [];
+    console.log(`[WorkflowExecutionService] Step connections: ${JSON.stringify(currentStep.connections)}`);
 
     // If no explicit connections, try to find next step in array
     if (nextStepIds.length === 0) {
       const currentIndex = workflow.steps.findIndex(s => s.id === currentStep.id);
       const nextStep = workflow.steps[currentIndex + 1];
+      console.log(`[WorkflowExecutionService] No connections, checking sequential. Current index: ${currentIndex}, next step: ${nextStep?.id || 'none'}`);
       if (nextStep) {
         nextStepIds.push(nextStep.id);
       }
     }
 
+    console.log(`[WorkflowExecutionService] Next step IDs to execute: ${nextStepIds.join(', ') || 'NONE'}`);
+
     if (nextStepIds.length === 0) {
       // No more steps - workflow complete
+      console.log(`[WorkflowExecutionService] No more steps - completing workflow`);
       await this.completeWorkflow(run);
       return;
     }
 
     // Get the parent task (root task) for creating new step tasks
     const rootTask = run.rootTaskId ? await this.tasks.findOne({ _id: run.rootTaskId }) : null;
-    if (!rootTask) return;
+    if (!rootTask) {
+      console.log(`[WorkflowExecutionService] Root task not found!`);
+      return;
+    }
 
     // Prepare output from completed task
     const outputPayload = completedTask.metadata || {};
@@ -794,7 +825,10 @@ class WorkflowExecutionService {
     for (const nextStepId of nextStepIds) {
       const nextStep = workflow.steps.find(s => s.id === nextStepId);
       if (nextStep) {
+        console.log(`[WorkflowExecutionService] Creating task for next step: ${nextStep.name} (${nextStep.id})`);
         await this.executeStep(run, workflow, nextStep, rootTask, outputPayload);
+      } else {
+        console.log(`[WorkflowExecutionService] WARNING: Next step ${nextStepId} not found in workflow!`);
       }
     }
   }

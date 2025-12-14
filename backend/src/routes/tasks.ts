@@ -416,7 +416,7 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     delete updates.createdAt;
 
     // Convert ID fields
-    const idFields = ['parentId', 'assigneeId', 'createdById', 'workflowId'];
+    const idFields = ['parentId', 'assigneeId', 'createdById', 'workflowId', 'workflowRunId'];
     for (const field of idFields) {
       if (updates[field] !== undefined) {
         updates[field] = updates[field] ? toObjectId(updates[field]) : null;
