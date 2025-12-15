@@ -396,7 +396,9 @@ class WorkflowExecutionService {
         break;
 
       case 'external':
-        // External step - make outbound HTTP call and wait for callback
+      case 'trigger':
+      case 'webhook':
+        // External/trigger/webhook steps - make outbound HTTP call and wait for callback
         await this.executeExternal(run, workflow, step, task, inputPayload);
         break;
 
