@@ -2,6 +2,8 @@
 
 Project context and conventions for Claude Code.
 
+**Note:** The `.claude/settings.local.json` file contains shared Claude Code permissions (auto-allowed commands) and should be committed to the repo so all developers have consistent settings.
+
 ## Git Workflow
 
 - **Main branch**: `main` - use this as the base for all PRs
