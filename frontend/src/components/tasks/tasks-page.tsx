@@ -6,13 +6,14 @@ import { TaskDataTable } from './task-data-table'
 import { TaskToolbar } from './task-toolbar'
 import { TaskModal } from './task-modal'
 import { ColumnConfigModal } from './column-config-modal'
-import { useTasks, useLookups, useFieldConfigs, useViews, useUsers, useCreateView, useUpdateView } from '@/hooks/use-tasks'
+import { useTasks, useTask, useLookups, useFieldConfigs, useViews, useUsers, useCreateView, useUpdateView } from '@/hooks/use-tasks'
 import { Task, View } from '@/lib/api'
 
 export function TasksPage() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const viewIdFromUrl = searchParams.get('viewId')
+  const taskIdFromUrl = searchParams.get('taskId')
 
   const [selectedView, setSelectedView] = useState<string | null>(viewIdFromUrl)
   const [filters, setFilters] = useState<Record<string, unknown>>({})
@@ -26,6 +27,9 @@ export function TasksPage() {
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false)
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState<string[]>([])
+
+  // Fetch task from URL if taskId is provided
+  const { data: taskFromUrl } = useTask(taskIdFromUrl)
 
   // Fetch data
   const { data: tasksData, isLoading: tasksLoading } = useTasks({
@@ -72,6 +76,15 @@ export function TasksPage() {
       }
     }
   }, [viewIdFromUrl, views, selectedView])
+
+  // Open modal when taskId is in URL and task data is loaded
+  useEffect(() => {
+    if (taskIdFromUrl && taskFromUrl?.data) {
+      setSelectedTask(taskFromUrl.data)
+      setParentTask(null)
+      setIsTaskModalOpen(true)
+    }
+  }, [taskIdFromUrl, taskFromUrl])
 
   // Memoized current view
   const currentView = useMemo(() => {
@@ -178,7 +191,11 @@ export function TasksPage() {
     setSelectedTask(task)
     setParentTask(null)
     setIsTaskModalOpen(true)
-  }, [])
+    // Update URL with taskId
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('taskId', task._id)
+    router.push(`/tasks?${params.toString()}`, { scroll: false })
+  }, [router, searchParams])
 
   const handleCreateSubtask = useCallback((parent: Task) => {
     setSelectedTask(null)
@@ -201,8 +218,14 @@ export function TasksPage() {
 
   const handleCloseTaskModal = useCallback(() => {
     setIsTaskModalOpen(false)
+    setSelectedTask(null)
     setParentTask(null)
-  }, [])
+    // Remove taskId from URL
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete('taskId')
+    const queryString = params.toString()
+    router.push(queryString ? `/tasks?${queryString}` : '/tasks', { scroll: false })
+  }, [router, searchParams])
 
   const handleCloseColumnConfig = useCallback(() => {
     setIsColumnConfigOpen(false)
