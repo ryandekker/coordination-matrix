@@ -139,6 +139,35 @@ export const tasksApi = {
     })
     return handleResponse(response)
   },
+
+  // Webhook task operations
+  executeWebhook: async (id: string): Promise<ApiResponse<WebhookAttempt>> => {
+    const response = await authFetch(`${API_BASE}/tasks/${id}/webhook/execute`, {
+      method: 'POST',
+    })
+    return handleResponse(response)
+  },
+
+  retryWebhook: async (id: string): Promise<ApiResponse<WebhookAttempt>> => {
+    const response = await authFetch(`${API_BASE}/tasks/${id}/webhook/retry`, {
+      method: 'POST',
+    })
+    return handleResponse(response)
+  },
+
+  getWebhookStatus: async (
+    id: string
+  ): Promise<ApiResponse<{ task: Task; attempts: WebhookAttempt[]; canRetry: boolean; lastError?: string }>> => {
+    const response = await authFetch(`${API_BASE}/tasks/${id}/webhook/status`)
+    return handleResponse(response)
+  },
+
+  cancelWebhookRetry: async (id: string): Promise<ApiResponse<{ success: boolean; message: string }>> => {
+    const response = await authFetch(`${API_BASE}/tasks/${id}/webhook/retry`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
 }
 
 // Lookups API
@@ -370,6 +399,43 @@ export const externalJobsApi = {
 }
 
 // Types
+export type TaskType =
+  | 'standard'
+  | 'trigger'
+  | 'decision'
+  | 'foreach'
+  | 'join'
+  | 'subflow'
+  | 'external'
+  | 'webhook'
+
+export type WebhookMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+
+export interface WebhookAttempt {
+  attemptNumber: number
+  startedAt: string
+  completedAt?: string
+  status: 'pending' | 'success' | 'failed'
+  httpStatus?: number
+  responseBody?: unknown
+  errorMessage?: string
+  durationMs?: number
+}
+
+export interface WebhookConfig {
+  url: string
+  method: WebhookMethod
+  headers?: Record<string, string>
+  body?: string
+  maxRetries?: number
+  retryDelayMs?: number
+  timeoutMs?: number
+  successStatusCodes?: number[]
+  attempts?: WebhookAttempt[]
+  lastAttemptAt?: string
+  nextRetryAt?: string
+}
+
 export interface Task {
   _id: string
   title: string
@@ -391,6 +457,8 @@ export interface Task {
   dueAt?: string | null
   metadata?: Record<string, unknown>
   children?: Task[]
+  taskType?: TaskType
+  webhookConfig?: WebhookConfig
   _resolved?: {
     assignee?: { _id: string; displayName: string }
     createdBy?: { _id: string; displayName: string }

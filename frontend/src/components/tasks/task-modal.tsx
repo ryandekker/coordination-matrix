@@ -20,10 +20,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Task, FieldConfig, LookupValue } from '@/lib/api'
+import { Task, FieldConfig, LookupValue, TaskType, WebhookConfig } from '@/lib/api'
 import { useCreateTask, useUpdateTask, useUsers, useWorkflows, useTasks } from '@/hooks/use-tasks'
 import { cn } from '@/lib/utils'
 import { TaskActivity } from './task-activity'
+import { WebhookTaskConfig } from './webhook-task-config'
 
 interface TaskModalProps {
   task: Task | null
@@ -46,6 +47,7 @@ export function TaskModal({
   const prevIsOpenRef = useRef(false)
   const [isMetadataEditMode, setIsMetadataEditMode] = useState(false)
   const [metadataError, setMetadataError] = useState<string | null>(null)
+  const [webhookConfig, setWebhookConfig] = useState<WebhookConfig | undefined>(undefined)
   const metadataTextareaRef = useRef<HTMLTextAreaElement>(null)
   const savedMetadataValueRef = useRef<string>('') // Track last saved value for reset
   const currentMetadataValueRef = useRef<string>('') // Track current textarea value to restore after re-renders
@@ -103,6 +105,7 @@ export function TaskModal({
     assigneeId: null,
     dueAt: null,
     tags: '',
+    taskType: 'standard',
   }
 
   const defaultValues = useMemo(() => {
@@ -190,6 +193,8 @@ export function TaskModal({
       reset(values)
       // Initialize last saved data ref when task loads
       lastSavedDataRef.current = JSON.stringify(values)
+      // Initialize webhook config from task
+      setWebhookConfig(task.webhookConfig)
     } else {
       const values = { ...defaultValues }
       if (parentTask) {
@@ -197,6 +202,7 @@ export function TaskModal({
       }
       reset(values)
       lastSavedDataRef.current = ''
+      setWebhookConfig(undefined)
     }
   }, [task, parentTask, reset, editableFields, defaultValues])
 
@@ -363,6 +369,11 @@ export function TaskModal({
 
     if (!task && parentTask) {
       taskData.parentId = parentTask._id
+    }
+
+    // Include webhookConfig if taskType is webhook
+    if (taskData.taskType === 'webhook' && webhookConfig) {
+      taskData.webhookConfig = webhookConfig
     }
 
     // Note: metadata is saved separately via its own Save button
@@ -765,6 +776,63 @@ export function TaskModal({
             className="h-8 text-sm"
           />
         </div>
+
+        {/* Task Type selector */}
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">Task Type</label>
+          <Controller
+            name="taskType"
+            control={control}
+            render={({ field }) => (
+              <Select
+                value={field.value as string || 'standard'}
+                onValueChange={(val) => {
+                  field.onChange(val)
+                  // Initialize webhook config when switching to webhook type
+                  if (val === 'webhook' && !webhookConfig) {
+                    setWebhookConfig({
+                      url: '',
+                      method: 'POST',
+                      maxRetries: 3,
+                      retryDelayMs: 1000,
+                      timeoutMs: 30000,
+                    })
+                  }
+                }}
+              >
+                <SelectTrigger className="h-8 text-sm">
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="standard">Standard</SelectItem>
+                  <SelectItem value="webhook">Webhook</SelectItem>
+                  <SelectItem value="external">External</SelectItem>
+                  <SelectItem value="trigger">Trigger</SelectItem>
+                  <SelectItem value="decision">Decision</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          />
+        </div>
+
+        {/* Webhook Configuration */}
+        {task && task.taskType === 'webhook' && (
+          <WebhookTaskConfig
+            task={task}
+            isEditMode={isEditMode}
+            webhookConfig={webhookConfig}
+            onConfigChange={(config) => {
+              setWebhookConfig(config)
+              // Auto-save webhook config changes for existing tasks
+              if (task) {
+                updateTask.mutateAsync({
+                  id: task._id,
+                  data: { webhookConfig: config },
+                })
+              }
+            }}
+          />
+        )}
 
         {/* Metadata - toggleable between visual and edit modes */}
         {isEditMode && (
