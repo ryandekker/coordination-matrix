@@ -21,6 +21,7 @@
     "cli": "node scripts/matrix-cli.mjs",
     "matrix": "node scripts/matrix-cli.mjs",
     "test:workflow": "node scripts/test-workflow-progression.mjs",
+    "migrate:defaults": "node scripts/migrate-defaults.mjs",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f"

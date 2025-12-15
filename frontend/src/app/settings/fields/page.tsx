@@ -36,7 +36,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { FieldConfig, LookupValue } from '@/lib/api'
+import { FieldConfig, LookupValue, authFetch } from '@/lib/api'
 import {
   Tooltip,
   TooltipContent,
@@ -83,19 +83,19 @@ const defaultColors = [
 
 // Field Configs API
 async function fetchFieldConfigs(): Promise<{ data: Record<string, FieldConfig[]> }> {
-  const response = await fetch(`${API_BASE}/field-configs`)
+  const response = await authFetch(`${API_BASE}/field-configs`)
   if (!response.ok) throw new Error('Failed to fetch field configs')
   return response.json()
 }
 
 async function fetchLookupTypes(): Promise<{ data: string[] }> {
-  const response = await fetch(`${API_BASE}/lookups/types`)
+  const response = await authFetch(`${API_BASE}/lookups/types`)
   if (!response.ok) throw new Error('Failed to fetch lookup types')
   return response.json()
 }
 
 async function createFieldConfig(data: Partial<FieldConfig>): Promise<{ data: FieldConfig }> {
-  const response = await fetch(`${API_BASE}/field-configs`, {
+  const response = await authFetch(`${API_BASE}/field-configs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -105,7 +105,7 @@ async function createFieldConfig(data: Partial<FieldConfig>): Promise<{ data: Fi
 }
 
 async function updateFieldConfig(id: string, data: Partial<FieldConfig>): Promise<{ data: FieldConfig }> {
-  const response = await fetch(`${API_BASE}/field-configs/${id}`, {
+  const response = await authFetch(`${API_BASE}/field-configs/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -115,14 +115,14 @@ async function updateFieldConfig(id: string, data: Partial<FieldConfig>): Promis
 }
 
 async function deleteFieldConfig(id: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/field-configs/${id}`, {
+  const response = await authFetch(`${API_BASE}/field-configs/${id}`, {
     method: 'DELETE',
   })
   if (!response.ok) throw new Error('Failed to delete field config')
 }
 
 async function reorderFieldConfigs(collection: string, order: { fieldPath: string; displayOrder: number }[]): Promise<void> {
-  const response = await fetch(`${API_BASE}/field-configs/${collection}/reorder`, {
+  const response = await authFetch(`${API_BASE}/field-configs/${collection}/reorder`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ order }),
@@ -132,13 +132,13 @@ async function reorderFieldConfigs(collection: string, order: { fieldPath: strin
 
 // Lookups API
 async function fetchLookups(): Promise<{ data: Record<string, LookupValue[]> }> {
-  const response = await fetch(`${API_BASE}/lookups`)
+  const response = await authFetch(`${API_BASE}/lookups`)
   if (!response.ok) throw new Error('Failed to fetch lookups')
   return response.json()
 }
 
 async function createLookup(data: Partial<LookupValue>): Promise<{ data: LookupValue }> {
-  const response = await fetch(`${API_BASE}/lookups`, {
+  const response = await authFetch(`${API_BASE}/lookups`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -148,7 +148,7 @@ async function createLookup(data: Partial<LookupValue>): Promise<{ data: LookupV
 }
 
 async function updateLookup(id: string, data: Partial<LookupValue>): Promise<{ data: LookupValue }> {
-  const response = await fetch(`${API_BASE}/lookups/${id}`, {
+  const response = await authFetch(`${API_BASE}/lookups/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -158,14 +158,14 @@ async function updateLookup(id: string, data: Partial<LookupValue>): Promise<{ d
 }
 
 async function deleteLookup(id: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/lookups/${id}`, {
+  const response = await authFetch(`${API_BASE}/lookups/${id}`, {
     method: 'DELETE',
   })
   if (!response.ok) throw new Error('Failed to delete lookup')
 }
 
 async function reorderLookups(type: string, order: { id: string; sortOrder: number }[]): Promise<void> {
-  const response = await fetch(`${API_BASE}/lookups/${type}/reorder`, {
+  const response = await authFetch(`${API_BASE}/lookups/${type}/reorder`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ order }),
