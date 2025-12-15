@@ -30,6 +30,8 @@ async function handleResponse<T>(response: Response): Promise<T> {
       localStorage.removeItem('auth_token')
       window.location.href = '/login'
     }
+    // Throw to prevent further processing
+    throw new Error('Unauthorized - redirecting to login')
   }
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'An error occurred' }))

@@ -105,9 +105,17 @@ workflowsRouter.get('/', async (_req: Request, res: Response, next: NextFunction
 });
 
 // GET /api/workflows/stats - Get workflow run statistics
-workflowsRouter.get('/stats', async (_req: Request, res: Response, next: NextFunction) => {
+workflowsRouter.get('/stats', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
+
+    // Check if workflowRuns collection exists to avoid errors on empty databases
+    const collections = await db.listCollections({ name: 'workflowRuns' }).toArray();
+    if (collections.length === 0) {
+      // Collection doesn't exist yet - return empty stats
+      res.json({ data: {} });
+      return;
+    }
 
     // Aggregate run statistics per workflow
     const stats = await db.collection('workflowRuns').aggregate([
@@ -135,12 +143,14 @@ workflowsRouter.get('/stats', async (_req: Request, res: Response, next: NextFun
     }> = {};
 
     for (const stat of stats) {
-      statsMap[stat._id.toString()] = {
-        runCount: stat.runCount,
-        lastRunAt: stat.lastRunAt,
-        completedCount: stat.completedCount,
-        failedCount: stat.failedCount
-      };
+      if (stat._id) {
+        statsMap[stat._id.toString()] = {
+          runCount: stat.runCount,
+          lastRunAt: stat.lastRunAt,
+          completedCount: stat.completedCount,
+          failedCount: stat.failedCount
+        };
+      }
     }
 
     res.json({ data: statsMap });
@@ -171,7 +181,7 @@ workflowsRouter.get('/:id', async (req: Request, res: Response, next: NextFuncti
 function ensureStepIds(steps: WorkflowStep[]): WorkflowStep[] {
   if (!steps || !Array.isArray(steps)) return [];
 
-  return steps.map((step, index) => {
+  return steps.map((step) => {
     if (!step.id) {
       // Generate a unique ID if missing
       return { ...step, id: new ObjectId().toString() };

@@ -87,8 +87,26 @@ export function TaskModal({
       .sort((a, b) => a.displayOrder - b.displayOrder)
   }, [fieldConfigs])
 
+  // Core fields that must always be in the form, regardless of field configs
+  const coreDefaultValues: Record<string, unknown> = {
+    title: '',
+    summary: '',
+    extraPrompt: '',
+    additionalInfo: '',
+    status: 'pending',
+    urgency: 'normal',
+    workflowId: null,
+    workflowStage: '',
+    assigneeId: null,
+    dueAt: null,
+    tags: '',
+  }
+
   const defaultValues = useMemo(() => {
-    const values: Record<string, unknown> = {}
+    // Start with core defaults to ensure form always works
+    const values: Record<string, unknown> = { ...coreDefaultValues }
+
+    // Override with field config values if available
     editableFields.forEach((fc) => {
       if (fc.defaultValue !== undefined) {
         values[fc.fieldPath] = fc.defaultValue
@@ -286,9 +304,33 @@ export function TaskModal({
       return
     }
 
+    // Build task data from form values
+    // Always include core fields, then process field config fields
     const taskData: Partial<Task> = {}
 
+    // Process core fields first (these always exist in the form)
+    const coreFields = Object.keys(coreDefaultValues)
+    coreFields.forEach((field) => {
+      const value = data[field]
+      if (field === 'tags' && typeof value === 'string') {
+        taskData[field as keyof Task] = value
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean) as never
+      } else if (field === 'dueAt') {
+        taskData[field as keyof Task] = (value ? new Date(value as string).toISOString() : null) as never
+      } else if (field === 'workflowId' || field === 'assigneeId') {
+        taskData[field as keyof Task] = (value || null) as never
+      } else {
+        taskData[field as keyof Task] = value as never
+      }
+    })
+
+    // Then process any additional fields from field configs
     editableFields.forEach((fc) => {
+      // Skip if already handled as a core field
+      if (coreFields.includes(fc.fieldPath)) return
+
       const value = data[fc.fieldPath]
 
       if (fc.fieldType === 'tags' && typeof value === 'string') {

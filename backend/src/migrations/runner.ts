@@ -9,7 +9,7 @@
  *   npm run db:migrate:status # Show migration status
  */
 
-import { Db, MongoClient } from 'mongodb';
+import { Db } from 'mongodb';
 
 export interface Migration {
   id: string;

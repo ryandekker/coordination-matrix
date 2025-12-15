@@ -246,7 +246,7 @@ export const migration: Migration = {
     console.log('[Migration] Updated tasks and workflow_runs validators');
   },
 
-  async down(db: Db): Promise<void> {
+  async down(_db: Db): Promise<void> {
     // Note: We don't remove fields from documents, just revert the validator
     // This allows rollback without data loss
     console.log('[Migration] Rolling back - validator changes only');

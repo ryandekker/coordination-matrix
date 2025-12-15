@@ -31,7 +31,6 @@ class WorkflowExecutionService {
 
   // Track processed events to prevent duplicate handling
   private processedEvents = new Set<string>();
-  private eventCleanupInterval: NodeJS.Timeout | null = null;
 
   initialize(): void {
     if (this.initialized) return;
@@ -51,7 +50,7 @@ class WorkflowExecutionService {
     });
 
     // Clean up old event IDs periodically (every 5 minutes)
-    this.eventCleanupInterval = setInterval(() => {
+    setInterval(() => {
       this.processedEvents.clear();
     }, 5 * 60 * 1000);
 

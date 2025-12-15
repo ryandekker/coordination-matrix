@@ -52,7 +52,7 @@ export const migration: Migration = {
         $pull: {
           visibleColumns: { $in: ['workflowId', 'workflowStage'] }
         }
-      }
+      } as never
     );
 
     // Revert field configs
