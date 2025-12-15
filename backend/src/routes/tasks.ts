@@ -415,6 +415,23 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     delete updates._id;
     delete updates.createdAt;
 
+    // Protect workflow metadata fields from being cleared accidentally
+    // These fields are set by the workflow system and shouldn't be modified via API
+    const workflowProtectedFields = ['workflowRunId', 'workflowStepId'];
+    for (const field of workflowProtectedFields) {
+      // Only allow setting these fields if they're not already set on the original task
+      // and the new value is not empty/null
+      if (updates[field] !== undefined) {
+        const hasExistingValue = (originalTask as Record<string, unknown>)[field];
+        const newValueIsEmpty = !updates[field];
+
+        if (hasExistingValue && newValueIsEmpty) {
+          // Don't allow clearing these fields once set
+          delete updates[field];
+        }
+      }
+    }
+
     // Convert ID fields
     const idFields = ['parentId', 'assigneeId', 'createdById', 'workflowId', 'workflowRunId'];
     for (const field of idFields) {

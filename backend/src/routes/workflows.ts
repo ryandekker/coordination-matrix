@@ -122,6 +122,19 @@ workflowsRouter.get('/:id', async (req: Request, res: Response, next: NextFuncti
   }
 });
 
+// Helper to ensure all steps have IDs
+function ensureStepIds(steps: WorkflowStep[]): WorkflowStep[] {
+  if (!steps || !Array.isArray(steps)) return [];
+
+  return steps.map((step, index) => {
+    if (!step.id) {
+      // Generate a unique ID if missing
+      return { ...step, id: new ObjectId().toString() };
+    }
+    return step;
+  });
+}
+
 // POST /api/workflows - Create a new workflow
 workflowsRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -137,7 +150,7 @@ workflowsRouter.post('/', async (req: Request, res: Response, next: NextFunction
       name,
       description: description || '',
       isActive: isActive ?? true,
-      steps: steps || [],
+      steps: ensureStepIds(steps || []),
       mermaidDiagram: mermaidDiagram || '',
       createdAt: now,
       updatedAt: now,
@@ -163,6 +176,11 @@ workflowsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
     delete updates._id;
     delete updates.createdAt;
     updates.updatedAt = new Date();
+
+    // Ensure step IDs are generated when updating steps
+    if (updates.steps) {
+      updates.steps = ensureStepIds(updates.steps);
+    }
 
     const result = await db.collection<Workflow>('workflows').findOneAndUpdate(
       { _id: workflowId },

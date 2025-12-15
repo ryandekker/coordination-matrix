@@ -29,12 +29,16 @@ class WorkflowExecutionService {
   private initialized = false;
   private handlers: Map<string, Set<WorkflowRunEventHandler>> = new Map();
 
+  // Track processed events to prevent duplicate handling
+  private processedEvents = new Set<string>();
+  private eventCleanupInterval: NodeJS.Timeout | null = null;
+
   initialize(): void {
     if (this.initialized) return;
 
     // Subscribe to task status changes to advance workflows
     eventBus.subscribe('task.status.changed', async (event: TaskEvent) => {
-      await this.onTaskStatusChanged(event);
+      await this.safeHandleTaskEvent(event);
     });
 
     // Also listen for general task updates (metadata changes, etc.)
@@ -42,12 +46,43 @@ class WorkflowExecutionService {
       // Only process if status changed to completed/failed
       const statusChange = event.changes?.find(c => c.field === 'status');
       if (statusChange && ['completed', 'failed'].includes(statusChange.newValue as string)) {
-        await this.onTaskStatusChanged(event);
+        await this.safeHandleTaskEvent(event);
       }
     });
 
+    // Clean up old event IDs periodically (every 5 minutes)
+    this.eventCleanupInterval = setInterval(() => {
+      this.processedEvents.clear();
+    }, 5 * 60 * 1000);
+
     this.initialized = true;
     console.log('[WorkflowExecutionService] Initialized and listening for task events');
+  }
+
+  /**
+   * Wrapper that adds error handling and deduplication to event processing
+   */
+  private async safeHandleTaskEvent(event: TaskEvent): Promise<void> {
+    // Create a unique key for this event to prevent duplicate processing
+    const eventKey = `${event.task._id}-${event.task.status}-${event.task.updatedAt}`;
+
+    if (this.processedEvents.has(eventKey)) {
+      console.log(`[WorkflowExecutionService] Skipping duplicate event for task ${event.task._id}`);
+      return;
+    }
+    this.processedEvents.add(eventKey);
+
+    try {
+      await this.onTaskStatusChanged(event);
+    } catch (error) {
+      console.error('[WorkflowExecutionService] Error handling task status change:', error);
+      console.error('[WorkflowExecutionService] Task details:', {
+        taskId: event.task._id,
+        status: event.task.status,
+        workflowRunId: event.task.workflowRunId,
+        workflowStepId: event.task.workflowStepId,
+      });
+    }
   }
 
   // ============================================================================
