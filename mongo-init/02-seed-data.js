@@ -11,9 +11,11 @@ const lookups = [
   // Task statuses
   { type: 'task_status', code: 'pending', displayName: 'Pending', color: '#6B7280', icon: 'clock', sortOrder: 1, isActive: true },
   { type: 'task_status', code: 'in_progress', displayName: 'In Progress', color: '#3B82F6', icon: 'play', sortOrder: 2, isActive: true },
-  { type: 'task_status', code: 'on_hold', displayName: 'On Hold', color: '#F59E0B', icon: 'pause', sortOrder: 3, isActive: true },
-  { type: 'task_status', code: 'completed', displayName: 'Completed', color: '#10B981', icon: 'check', sortOrder: 4, isActive: true },
-  { type: 'task_status', code: 'cancelled', displayName: 'Cancelled', color: '#9CA3AF', icon: 'ban', sortOrder: 5, isActive: true },
+  { type: 'task_status', code: 'waiting', displayName: 'Waiting', color: '#8B5CF6', icon: 'hourglass', sortOrder: 3, isActive: true },
+  { type: 'task_status', code: 'on_hold', displayName: 'On Hold', color: '#F59E0B', icon: 'pause', sortOrder: 4, isActive: true },
+  { type: 'task_status', code: 'completed', displayName: 'Completed', color: '#10B981', icon: 'check', sortOrder: 5, isActive: true },
+  { type: 'task_status', code: 'failed', displayName: 'Failed', color: '#EF4444', icon: 'x-circle', sortOrder: 6, isActive: true },
+  { type: 'task_status', code: 'cancelled', displayName: 'Cancelled', color: '#9CA3AF', icon: 'ban', sortOrder: 7, isActive: true },
 
   // Urgency levels
   { type: 'urgency', code: 'low', displayName: 'Low', color: '#6B7280', icon: 'arrow-down', sortOrder: 1, isActive: true },
