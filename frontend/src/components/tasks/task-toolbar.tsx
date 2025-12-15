@@ -187,7 +187,11 @@ export function TaskToolbar({
       result.push({ key: 'search', label: 'Search', value: search })
     }
 
-    const statusFilters = (filters.status as string[]) || []
+    // Helper to ensure filter values are always arrays (they can be string or string[])
+    const toArray = (val: unknown): string[] =>
+      Array.isArray(val) ? val : val ? [val as string] : []
+
+    const statusFilters = toArray(filters.status)
     statusFilters.forEach((status) => {
       const opt = statusOptions.find((s) => s.code === status)
       if (opt) {
@@ -195,7 +199,7 @@ export function TaskToolbar({
       }
     })
 
-    const urgencyFilters = (filters.urgency as string[]) || []
+    const urgencyFilters = toArray(filters.urgency)
     urgencyFilters.forEach((urgency) => {
       const opt = urgencyOptions.find((u) => u.code === urgency)
       if (opt) {
@@ -203,7 +207,7 @@ export function TaskToolbar({
       }
     })
 
-    const assigneeFilters = (filters.assigneeId as string[]) || []
+    const assigneeFilters = toArray(filters.assigneeId)
     assigneeFilters.forEach((assigneeId) => {
       const user = users.find((u) => u._id === assigneeId)
       if (user) {
@@ -211,7 +215,7 @@ export function TaskToolbar({
       }
     })
 
-    const tagFilters = (filters.tags as string[]) || []
+    const tagFilters = toArray(filters.tags)
     tagFilters.forEach((tag) => {
       result.push({ key: `tag-${tag}`, label: 'Tag', value: tag })
     })
