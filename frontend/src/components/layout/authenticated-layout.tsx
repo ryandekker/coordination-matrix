@@ -10,8 +10,8 @@ export function AuthenticatedLayout({ children }: { children: React.ReactNode })
   const { user, isLoading } = useAuth();
   const pathname = usePathname();
 
-  // Don't show layout on login page
-  if (pathname === '/login') {
+  // Don't show layout on login page (check both with and without trailing slash)
+  if (pathname === '/login' || pathname === '/login/') {
     return <>{children}</>;
   }
 
@@ -24,9 +24,13 @@ export function AuthenticatedLayout({ children }: { children: React.ReactNode })
     );
   }
 
-  // If not authenticated, the AuthProvider will redirect
+  // If not authenticated, show loading while AuthProvider redirects to login
   if (!user) {
-    return null;
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="text-muted-foreground">Redirecting to login...</div>
+      </div>
+    );
   }
 
   return (
