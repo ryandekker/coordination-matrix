@@ -22,6 +22,8 @@
     "jsonwebtoken": "^9.0.3",
     "mongodb": "^6.3.0",
     "morgan": "^1.10.0",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
     "yaml": "^2.3.4",
     "zod": "^3.22.4"
   },
@@ -32,6 +34,8 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/morgan": "^1.9.9",
     "@types/node": "^20.10.6",
+    "@types/swagger-jsdoc": "^6.0.4",
+    "@types/swagger-ui-express": "^4.1.8",
     "eslint": "^8.56.0",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",

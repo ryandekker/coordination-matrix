@@ -61,11 +61,45 @@ After making changes:
 2. Frontend changes auto-reload via Next.js fast refresh
 3. For database schema changes, run `npm run db:reset`
 
+## API Documentation
+
+Full API documentation is available at:
+- **Swagger UI**: http://localhost:3001/api-docs (interactive API explorer)
+- **OpenAPI Spec**: http://localhost:3001/api-docs.json
+- **Reference Doc**: [docs/API-endpoints.md](./docs/API-endpoints.md) (complete endpoint reference)
+
+### CLI Tool
+
+A CLI tool is available for easy API interaction:
+
+```bash
+# Show help
+npm run cli help
+
+# Login and store credentials
+npm run cli login
+
+# Or use API key
+npm run cli use-key cm_ak_live_xxxxx
+
+# List tasks
+npm run cli tasks --status pending --brief
+
+# Create a task
+npm run cli task:create --title "New task" --status pending
+
+# Generic API request
+npm run cli request /api/tasks --method GET
+```
+
+See `./scripts/matrix-cli.mjs --help` for all commands.
+
 ## Common Tasks
 
 **Add a new API endpoint:**
 1. Create route file in `backend/src/routes/`
 2. Register in `backend/src/index.ts`
+3. Add Swagger documentation in `backend/src/swagger.ts`
 
 **Add a new UI component:**
 1. Use `npx shadcn@latest add <component>` for shadcn components
