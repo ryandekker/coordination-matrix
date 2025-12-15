@@ -684,12 +684,12 @@ export default function WorkflowsPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-sm font-medium">Assignee</label>
-                  <Select value={runAssignee} onValueChange={setRunAssignee}>
+                  <Select value={runAssignee || "none"} onValueChange={(v) => setRunAssignee(v === "none" ? "" : v)}>
                     <SelectTrigger className="mt-1">
                       <SelectValue placeholder="Select assignee..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">No default assignee</SelectItem>
+                      <SelectItem value="none">No default assignee</SelectItem>
                       {users.map((user) => (
                         <SelectItem key={user._id} value={user._id}>
                           {user.displayName} {user.isAgent && '(Agent)'}
@@ -701,12 +701,12 @@ export default function WorkflowsPage() {
 
                 <div>
                   <label className="text-sm font-medium">Urgency</label>
-                  <Select value={runUrgency} onValueChange={setRunUrgency}>
+                  <Select value={runUrgency || "none"} onValueChange={(v) => setRunUrgency(v === "none" ? "" : v)}>
                     <SelectTrigger className="mt-1">
                       <SelectValue placeholder="Select urgency..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">No default urgency</SelectItem>
+                      <SelectItem value="none">No default urgency</SelectItem>
                       <SelectItem value="low">Low</SelectItem>
                       <SelectItem value="normal">Normal</SelectItem>
                       <SelectItem value="high">High</SelectItem>
