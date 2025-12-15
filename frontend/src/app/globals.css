@@ -122,5 +122,5 @@
 }
 
 .editable-cell:focus-within {
-  @apply ring-2 ring-ring ring-offset-1;
+  @apply border border-primary;
 }

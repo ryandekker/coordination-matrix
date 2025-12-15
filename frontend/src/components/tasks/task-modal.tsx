@@ -555,8 +555,8 @@ export function TaskModal({
             rows={2}
             className={cn(
               'flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm',
-              'ring-offset-background placeholder:text-muted-foreground resize-none',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1'
+              'placeholder:text-muted-foreground resize-none transition-colors',
+              'focus-visible:outline-none focus-visible:border-primary'
             )}
           />
         </div>
@@ -570,8 +570,8 @@ export function TaskModal({
             rows={2}
             className={cn(
               'flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm',
-              'ring-offset-background placeholder:text-muted-foreground resize-none',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1'
+              'placeholder:text-muted-foreground resize-none transition-colors',
+              'focus-visible:outline-none focus-visible:border-primary'
             )}
           />
         </div>
@@ -585,8 +585,8 @@ export function TaskModal({
             rows={2}
             className={cn(
               'flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm',
-              'ring-offset-background placeholder:text-muted-foreground resize-none',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1'
+              'placeholder:text-muted-foreground resize-none transition-colors',
+              'focus-visible:outline-none focus-visible:border-primary'
             )}
           />
         </div>
@@ -815,10 +815,9 @@ onClick={() => {
                   placeholder='{"key": "value"}'
                   rows={6}
                   className={cn(
-                    'flex w-full rounded-md border bg-background px-3 py-1.5 text-xs font-mono',
-                    'ring-offset-background placeholder:text-muted-foreground resize-y',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
-                    'border-input'
+                    'flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs font-mono',
+                    'placeholder:text-muted-foreground resize-y transition-colors',
+                    'focus-visible:outline-none focus-visible:border-primary'
                   )}
                 />
                 <p className="text-[10px] text-muted-foreground">Changes auto-save after 1 second</p>

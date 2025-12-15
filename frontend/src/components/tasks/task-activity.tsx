@@ -217,8 +217,8 @@ export function TaskActivity({ taskId, className, compact = false, pollInterval 
               onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSubmitComment()}
               placeholder="Add comment..."
               className={cn(
-                'flex-1 px-2 py-1 text-xs rounded border border-input bg-background',
-                'focus:outline-none focus:ring-1 focus:ring-ring'
+                'flex-1 px-2 py-1 text-xs rounded border border-input bg-background transition-colors',
+                'focus:outline-none focus:border-primary'
               )}
             />
             <Button
@@ -289,8 +289,8 @@ export function TaskActivity({ taskId, className, compact = false, pollInterval 
           onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSubmitComment()}
           placeholder="Add a comment..."
           className={cn(
-            'flex-1 px-3 py-1.5 text-sm rounded-md border border-input bg-background',
-            'focus:outline-none focus:ring-2 focus:ring-ring'
+            'flex-1 px-3 py-1.5 text-sm rounded-md border border-input bg-background transition-colors',
+            'focus:outline-none focus:border-primary'
           )}
         />
         <Button
