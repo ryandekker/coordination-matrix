@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useForm, Controller } from 'react-hook-form'
 import { useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceToNow } from 'date-fns'
+import { Check, Loader2 } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -46,6 +47,11 @@ export function TaskModal({
   const prevIsOpenRef = useRef(false)
   const [isMetadataEditMode, setIsMetadataEditMode] = useState(false)
   const metadataTextareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Auto-save state
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const lastSavedDataRef = useRef<string>('')
 
   const createTask = useCreateTask()
   const updateTask = useUpdateTask()
@@ -161,14 +167,119 @@ export function TaskModal({
         }
       })
       reset(values)
+      // Initialize last saved data ref when task loads
+      lastSavedDataRef.current = JSON.stringify(values)
     } else {
       const values = { ...defaultValues }
       if (parentTask) {
         values.parentId = parentTask._id
       }
       reset(values)
+      lastSavedDataRef.current = ''
     }
   }, [task, parentTask, reset, editableFields, defaultValues])
+
+  // Build task data from form values (shared between auto-save and submit)
+  const buildTaskData = useCallback((data: Record<string, unknown>): Partial<Task> => {
+    const taskData: Partial<Task> = {}
+
+    editableFields.forEach((fc) => {
+      const value = data[fc.fieldPath]
+
+      if (fc.fieldType === 'tags' && typeof value === 'string') {
+        taskData[fc.fieldPath as keyof Task] = value
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean) as never
+      } else if (fc.fieldType === 'datetime' && value) {
+        taskData[fc.fieldPath as keyof Task] = new Date(value as string).toISOString() as never
+      } else if (fc.fieldType === 'datetime' && !value) {
+        taskData[fc.fieldPath as keyof Task] = null as never
+      } else if (fc.fieldType === 'reference') {
+        taskData[fc.fieldPath as keyof Task] = (value || null) as never
+      } else if (fc.fieldType === 'number' && value !== '') {
+        taskData[fc.fieldPath as keyof Task] = Number(value) as never
+      } else if (fc.fieldType === 'boolean') {
+        taskData[fc.fieldPath as keyof Task] = Boolean(value) as never
+      } else {
+        taskData[fc.fieldPath as keyof Task] = value as never
+      }
+    })
+
+    return taskData
+  }, [editableFields])
+
+  // Auto-save function
+  const performAutoSave = useCallback(async (data: Record<string, unknown>) => {
+    if (!task) return
+
+    const currentDataStr = JSON.stringify(data)
+    if (currentDataStr === lastSavedDataRef.current) return
+
+    setAutoSaveStatus('saving')
+
+    try {
+      const taskData = buildTaskData(data)
+
+      // Include metadata if in edit mode
+      if (metadataTextareaRef.current) {
+        try {
+          const jsonValue = metadataTextareaRef.current.value.trim()
+          if (jsonValue) {
+            const parsed = JSON.parse(jsonValue)
+            if (typeof parsed === 'object' && !Array.isArray(parsed)) {
+              taskData.metadata = parsed
+            }
+          }
+        } catch {
+          // Invalid JSON - skip metadata update
+        }
+      }
+
+      await updateTask.mutateAsync({ id: task._id, data: taskData })
+      lastSavedDataRef.current = currentDataStr
+      setAutoSaveStatus('saved')
+
+      // Reset to idle after 2 seconds
+      setTimeout(() => setAutoSaveStatus('idle'), 2000)
+    } catch {
+      setAutoSaveStatus('idle')
+    }
+  }, [task, buildTaskData, updateTask])
+
+  // Watch form values for auto-save (edit mode only)
+  const watchedValues = watch()
+
+  useEffect(() => {
+    // Only auto-save in edit mode
+    if (!task || !isOpen) return
+
+    // Clear any pending auto-save timeout
+    if (autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current)
+    }
+
+    // Debounce auto-save by 1 second
+    autoSaveTimeoutRef.current = setTimeout(() => {
+      performAutoSave(watchedValues)
+    }, 1000)
+
+    return () => {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current)
+      }
+    }
+  }, [watchedValues, task, isOpen, performAutoSave])
+
+  // Cleanup on unmount or close
+  useEffect(() => {
+    if (!isOpen) {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current)
+      }
+      setAutoSaveStatus('idle')
+    }
+  }, [isOpen])
 
   const onSubmit = async (data: Record<string, unknown>) => {
     const taskData: Partial<Task> = {}
@@ -688,12 +799,41 @@ onClick={() => {
 
       {/* Footer - sticky at bottom */}
       <DialogFooter className="pt-3 mt-3 border-t flex-shrink-0">
-        <Button type="button" variant="outline" size="sm" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button type="submit" size="sm" disabled={isSubmitting}>
-          {isSubmitting ? 'Saving...' : task ? 'Update' : 'Create'}
-        </Button>
+        {isEditMode ? (
+          // Edit mode: show auto-save status and close button
+          <>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mr-auto">
+              {autoSaveStatus === 'saving' && (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <span>Saving...</span>
+                </>
+              )}
+              {autoSaveStatus === 'saved' && (
+                <>
+                  <Check className="h-3 w-3 text-green-500" />
+                  <span>Saved</span>
+                </>
+              )}
+              {autoSaveStatus === 'idle' && (
+                <span className="text-muted-foreground/50">Auto-save enabled</span>
+              )}
+            </div>
+            <Button type="button" variant="outline" size="sm" onClick={onClose}>
+              Close
+            </Button>
+          </>
+        ) : (
+          // Create mode: show cancel and create buttons
+          <>
+            <Button type="button" variant="outline" size="sm" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" size="sm" disabled={isSubmitting}>
+              {isSubmitting ? 'Creating...' : 'Create'}
+            </Button>
+          </>
+        )}
       </DialogFooter>
     </form>
   )
@@ -724,7 +864,7 @@ onClick={() => {
   // Edit mode - two column layout with integrated activity
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl h-[85vh] p-0 gap-0 flex flex-col">
+      <DialogContent className="max-w-6xl h-[90vh] p-0 gap-0 flex flex-col">
         {/* Header - fixed */}
         <div className="px-5 pt-5 pb-3 flex-shrink-0">
           <DialogHeader className="pb-3">
@@ -743,7 +883,7 @@ onClick={() => {
           </div>
 
           {/* Right column - Activity Feed */}
-          <div className="w-80 flex flex-col min-h-0 bg-muted/30">
+          <div className="w-96 flex flex-col min-h-0 bg-muted/30">
             <div className="px-4 py-2 border-b border-border bg-background/50 flex-shrink-0">
               <h3 className="text-sm font-medium">Activity</h3>
             </div>
