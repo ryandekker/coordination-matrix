@@ -506,6 +506,8 @@ class WorkflowExecutionService {
       'foreach': 'foreach',
       'join': 'join',
       'subflow': 'subflow',
+      'trigger': 'trigger',
+      'webhook': 'webhook',
     };
     return mapping[stepType] || 'standard';
   }
@@ -519,6 +521,8 @@ class WorkflowExecutionService {
       'foreach': 'immediate',
       'join': 'immediate',
       'subflow': 'automated',
+      'trigger': 'immediate',
+      'webhook': 'automated',
     };
     return mapping[stepType] || 'automated';
   }
@@ -537,12 +541,12 @@ class WorkflowExecutionService {
     const config = step.externalConfig;
     const callbackSecret = externalTask.externalConfig?.callbackSecret || this.generateSecret();
 
-    // Set task to waiting status
+    // Set task to in_progress status (waiting for external callback)
     await this.tasks.updateOne(
       { _id: externalTask._id },
       {
         $set: {
-          status: 'waiting' as TaskStatus,
+          status: 'in_progress' as TaskStatus,
           'externalConfig.callbackSecret': callbackSecret,
           'metadata.externalCallInitiated': false,
         },
@@ -1356,15 +1360,15 @@ class WorkflowExecutionService {
       throw new Error(`Workflow run ${runId} not found`);
     }
 
-    // Find the task for this step
+    // Find the task for this step (external tasks are in_progress while awaiting callback)
     const task = await this.tasks.findOne({
       workflowRunId: run._id,
       workflowStepId: stepId,
-      status: 'waiting',
+      status: 'in_progress',
     });
 
     if (!task) {
-      throw new Error(`Task for step ${stepId} not found or not waiting`);
+      throw new Error(`Task for step ${stepId} not found or not in_progress`);
     }
 
     // Verify secret
