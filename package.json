@@ -18,6 +18,7 @@
     "test": "cd backend && npm test",
     "cli": "node scripts/matrix-cli.mjs",
     "matrix": "node scripts/matrix-cli.mjs",
+    "test:workflow": "node scripts/test-workflow-progression.mjs",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f"
