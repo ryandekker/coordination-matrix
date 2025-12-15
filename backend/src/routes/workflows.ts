@@ -104,6 +104,51 @@ workflowsRouter.get('/', async (_req: Request, res: Response, next: NextFunction
   }
 });
 
+// GET /api/workflows/stats - Get workflow run statistics
+workflowsRouter.get('/stats', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+
+    // Aggregate run statistics per workflow
+    const stats = await db.collection('workflowRuns').aggregate([
+      {
+        $group: {
+          _id: '$workflowId',
+          runCount: { $sum: 1 },
+          lastRunAt: { $max: '$createdAt' },
+          completedCount: {
+            $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] }
+          },
+          failedCount: {
+            $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] }
+          }
+        }
+      }
+    ]).toArray();
+
+    // Convert to a map keyed by workflow ID
+    const statsMap: Record<string, {
+      runCount: number;
+      lastRunAt: Date | null;
+      completedCount: number;
+      failedCount: number;
+    }> = {};
+
+    for (const stat of stats) {
+      statsMap[stat._id.toString()] = {
+        runCount: stat.runCount,
+        lastRunAt: stat.lastRunAt,
+        completedCount: stat.completedCount,
+        failedCount: stat.failedCount
+      };
+    }
+
+    res.json({ data: statsMap });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/workflows/:id - Get a specific workflow
 workflowsRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {

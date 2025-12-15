@@ -1,9 +1,16 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, Fragment } from 'react'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import {
+  useReactTable,
+  getCoreRowModel,
+  getExpandedRowModel,
+  flexRender,
+  ColumnDef,
+} from '@tanstack/react-table'
 import {
   Workflow,
   Play,
@@ -23,9 +30,21 @@ import {
   FileText,
   Globe,
   Settings2,
+  Hash,
+  Calendar,
+  CheckCircle2,
+  XCircle,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -139,10 +158,30 @@ interface WorkflowData {
   updatedAt?: string
 }
 
+interface WorkflowStats {
+  runCount: number
+  lastRunAt: string | null
+  completedCount: number
+  failedCount: number
+}
+
+interface WorkflowWithStats extends WorkflowData {
+  steps: WorkflowStep[]
+  stats?: WorkflowStats
+}
+
 async function fetchWorkflows(): Promise<{ data: WorkflowData[] }> {
   const response = await authFetch(`${API_BASE}/workflows`)
   if (!response.ok) {
     throw new Error('Failed to fetch workflows')
+  }
+  return response.json()
+}
+
+async function fetchWorkflowStats(): Promise<{ data: Record<string, WorkflowStats> }> {
+  const response = await authFetch(`${API_BASE}/workflows/stats`)
+  if (!response.ok) {
+    throw new Error('Failed to fetch workflow stats')
   }
   return response.json()
 }
@@ -266,6 +305,90 @@ async function fetchUsers(): Promise<{ data: { _id: string; displayName: string;
   return response.json()
 }
 
+// Format relative time
+function formatRelativeTime(date: string | null): string {
+  if (!date) return 'Never'
+  const now = new Date()
+  const then = new Date(date)
+  const diffMs = now.getTime() - then.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+  const diffDays = Math.floor(diffMs / 86400000)
+
+  if (diffMins < 1) return 'Just now'
+  if (diffMins < 60) return `${diffMins}m ago`
+  if (diffHours < 24) return `${diffHours}h ago`
+  if (diffDays < 7) return `${diffDays}d ago`
+  return then.toLocaleDateString()
+}
+
+// Expanded row content showing steps
+function StepsDetail({ workflow }: { workflow: WorkflowWithStats }) {
+  if (!workflow.steps || workflow.steps.length === 0) {
+    return (
+      <div className="p-4 text-sm text-muted-foreground italic">
+        No steps defined
+      </div>
+    )
+  }
+
+  return (
+    <div className="p-4 bg-muted/30">
+      <div className="mb-2 text-sm font-medium text-muted-foreground">Workflow Steps</div>
+      <div className="flex items-center gap-2 overflow-x-auto pb-2">
+        {workflow.steps.map((step, index) => {
+          const effectiveType = step.stepType || (step.execution === 'manual' || step.type === 'manual' ? 'manual' : 'agent')
+          const getBorderStyle = () => {
+            switch (effectiveType) {
+              case 'agent': return 'border-blue-300 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-800'
+              case 'external': return 'border-orange-300 bg-orange-50 dark:bg-orange-950/30 dark:border-orange-800'
+              case 'manual': return 'border-purple-300 bg-purple-50 dark:bg-purple-950/30 dark:border-purple-800'
+              case 'decision': return 'border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800'
+              case 'foreach': return 'border-green-300 bg-green-50 dark:bg-green-950/30 dark:border-green-800'
+              case 'join': return 'border-indigo-300 bg-indigo-50 dark:bg-indigo-950/30 dark:border-indigo-800'
+              case 'subflow': return 'border-pink-300 bg-pink-50 dark:bg-pink-950/30 dark:border-pink-800'
+              default: return 'border-gray-200 bg-gray-50 dark:bg-gray-900/30 dark:border-gray-700'
+            }
+          }
+          return (
+            <div key={step.id || index} className="flex items-center">
+              <div
+                className={cn(
+                  'flex flex-col items-center gap-1 rounded-lg border p-3 min-w-[120px]',
+                  getBorderStyle()
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  {getStepIcon(step)}
+                  <span className="text-sm font-medium">{step.name}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Badge variant="outline" className="text-xs">
+                    {getStepTypeLabel(step)}
+                  </Badge>
+                  {(step.prompt || step.additionalInstructions) && (
+                    <span title="Has instructions">
+                      <FileText className="h-3 w-3 text-muted-foreground" />
+                    </span>
+                  )}
+                </div>
+              </div>
+              {index < workflow.steps.length - 1 && (
+                <ChevronRight className="h-5 w-5 text-muted-foreground mx-1 flex-shrink-0" />
+              )}
+            </div>
+          )
+        })}
+      </div>
+      {workflow.description && (
+        <div className="mt-3 text-sm text-muted-foreground">
+          {workflow.description}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function WorkflowsPage() {
   const router = useRouter()
   const queryClient = useQueryClient()
@@ -288,12 +411,19 @@ export default function WorkflowsPage() {
     queryFn: fetchWorkflows,
   })
 
+  const { data: statsData } = useQuery({
+    queryKey: ['workflow-stats'],
+    queryFn: fetchWorkflowStats,
+    staleTime: 30000, // Cache for 30 seconds
+  })
+
   const { data: usersData } = useQuery({
     queryKey: ['users'],
     queryFn: fetchUsers,
   })
 
   const users = usersData?.data || []
+  const statsMap = statsData?.data || {}
 
   const createMutation = useMutation({
     mutationFn: createWorkflow,
@@ -344,6 +474,7 @@ export default function WorkflowsPage() {
     onSuccess: (data) => {
       setRunDialog({ open: false, workflow: null })
       resetRunForm()
+      queryClient.invalidateQueries({ queryKey: ['workflow-stats'] })
       router.push(`/workflow-runs/${data.run._id}`)
     },
   })
@@ -385,9 +516,8 @@ export default function WorkflowsPage() {
     })
   }
 
-  // Normalize workflows to ensure steps array exists
-  // Legacy workflows may have 'stages' (string[]) instead of 'steps' (WorkflowStep[])
-  const workflows = (workflowsData?.data || []).map(w => ({
+  // Normalize workflows to ensure steps array exists and add stats
+  const workflows: WorkflowWithStats[] = (workflowsData?.data || []).map(w => ({
     ...w,
     steps: (w.steps || (w.stages?.map((name, i) => ({
       id: `stage-${i}`,
@@ -395,6 +525,7 @@ export default function WorkflowsPage() {
       type: 'manual' as const,
       hitlPhase: 'none',
     })) || [])) as WorkflowStep[],
+    stats: statsMap[w._id],
   }))
 
   const openCreateEditor = () => {
@@ -433,6 +564,198 @@ export default function WorkflowsPage() {
       data: { isActive: !workflow.isActive },
     })
   }
+
+  // Table columns
+  const columns: ColumnDef<WorkflowWithStats>[] = [
+    {
+      id: 'expander',
+      header: () => null,
+      cell: ({ row }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0"
+          onClick={(e) => {
+            e.stopPropagation()
+            row.toggleExpanded()
+          }}
+        >
+          {row.getIsExpanded() ? (
+            <ChevronDown className="h-4 w-4" />
+          ) : (
+            <ChevronRight className="h-4 w-4" />
+          )}
+        </Button>
+      ),
+    },
+    {
+      accessorKey: 'name',
+      header: 'Workflow',
+      cell: ({ row }) => (
+        <div className="font-medium">{row.original.name}</div>
+      ),
+    },
+    {
+      accessorKey: 'isActive',
+      header: 'Status',
+      cell: ({ row }) => (
+        <Badge
+          variant="outline"
+          className={cn(
+            'cursor-pointer',
+            row.original.isActive
+              ? 'text-green-600 border-green-600'
+              : 'text-gray-500 border-gray-500'
+          )}
+          onClick={(e) => {
+            e.stopPropagation()
+            handleToggleActive(row.original)
+          }}
+        >
+          {row.original.isActive ? (
+            <>
+              <Play className="mr-1 h-3 w-3" />
+              Active
+            </>
+          ) : (
+            <>
+              <Pause className="mr-1 h-3 w-3" />
+              Inactive
+            </>
+          )}
+        </Badge>
+      ),
+    },
+    {
+      id: 'steps',
+      header: 'Steps',
+      cell: ({ row }) => {
+        const steps = row.original.steps
+        const agentCount = steps.filter(
+          (s) => s.stepType === 'agent' || (!s.stepType && s.execution !== 'manual' && s.type !== 'manual')
+        ).length
+        const manualCount = steps.filter(
+          (s) => s.stepType === 'manual' || (!s.stepType && (s.execution === 'manual' || s.type === 'manual'))
+        ).length
+        const otherCount = steps.length - agentCount - manualCount
+
+        return (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">{steps.length}</span>
+            {agentCount > 0 && (
+              <span className="text-blue-600 flex items-center gap-1">
+                <Bot className="h-3 w-3" />
+                {agentCount}
+              </span>
+            )}
+            {manualCount > 0 && (
+              <span className="text-purple-600 flex items-center gap-1">
+                <User className="h-3 w-3" />
+                {manualCount}
+              </span>
+            )}
+            {otherCount > 0 && (
+              <span className="text-gray-500">+{otherCount}</span>
+            )}
+          </div>
+        )
+      },
+    },
+    {
+      id: 'runs',
+      header: 'Runs',
+      cell: ({ row }) => {
+        const stats = row.original.stats
+        if (!stats || stats.runCount === 0) {
+          return <span className="text-muted-foreground">-</span>
+        }
+        return (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="flex items-center gap-1">
+              <Hash className="h-3 w-3 text-muted-foreground" />
+              {stats.runCount}
+            </span>
+            {stats.completedCount > 0 && (
+              <span className="text-green-600 flex items-center gap-1">
+                <CheckCircle2 className="h-3 w-3" />
+                {stats.completedCount}
+              </span>
+            )}
+            {stats.failedCount > 0 && (
+              <span className="text-red-600 flex items-center gap-1">
+                <XCircle className="h-3 w-3" />
+                {stats.failedCount}
+              </span>
+            )}
+          </div>
+        )
+      },
+    },
+    {
+      id: 'lastRun',
+      header: 'Last Run',
+      cell: ({ row }) => {
+        const stats = row.original.stats
+        if (!stats || !stats.lastRunAt) {
+          return <span className="text-muted-foreground">Never</span>
+        }
+        return (
+          <span className="text-sm text-muted-foreground flex items-center gap-1">
+            <Calendar className="h-3 w-3" />
+            {formatRelativeTime(stats.lastRunAt)}
+          </span>
+        )
+      },
+    },
+    {
+      id: 'actions',
+      header: '',
+      cell: ({ row }) => (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {row.original.isActive && (
+              <>
+                <DropdownMenuItem onClick={() => setRunDialog({ open: true, workflow: row.original })}>
+                  <Play className="mr-2 h-4 w-4" />
+                  Run Workflow
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            )}
+            <DropdownMenuItem onClick={() => openEditEditor(row.original)}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Edit
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => duplicateMutation.mutate(row.original._id)}>
+              <Copy className="mr-2 h-4 w-4" />
+              Duplicate
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-destructive"
+              onClick={() => setDeleteConfirm(row.original)}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ),
+    },
+  ]
+
+  const table = useReactTable({
+    data: workflows,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
+    getRowCanExpand: () => true,
+  })
 
   return (
     <div className="space-y-6">
@@ -478,154 +801,45 @@ export default function WorkflowsPage() {
           </Button>
         </div>
       ) : (
-        <div className="grid gap-6">
-          {workflows.map((workflow) => {
-            // Count different step types
-            const agentCount = workflow.steps.filter(
-              (s) => s.stepType === 'agent' || (!s.stepType && s.execution !== 'manual' && s.type !== 'manual')
-            ).length
-            const externalCount = workflow.steps.filter(
-              (s) => s.stepType === 'external'
-            ).length
-            const manualCount = workflow.steps.filter(
-              (s) => s.stepType === 'manual' || (!s.stepType && (s.execution === 'manual' || s.type === 'manual'))
-            ).length
-            const promptCount = workflow.steps.filter((s) => s.prompt || s.additionalInstructions).length
-
-            return (
-              <div
-                key={workflow._id}
-                className="rounded-lg border bg-card p-6 space-y-4 overflow-hidden"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-3">
-                      <h3 className="text-lg font-semibold">{workflow.name}</h3>
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          'cursor-pointer',
-                          workflow.isActive
-                            ? 'text-green-600 border-green-600'
-                            : 'text-gray-500 border-gray-500'
-                        )}
-                        onClick={() => handleToggleActive(workflow)}
-                      >
-                        {workflow.isActive ? (
-                          <>
-                            <Play className="mr-1 h-3 w-3" />
-                            Active
-                          </>
-                        ) : (
-                          <>
-                            <Pause className="mr-1 h-3 w-3" />
-                            Inactive
-                          </>
-                        )}
-                      </Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground">{workflow.description}</p>
-                  </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm" className="h-8 w-8 p-0">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      {workflow.isActive && (
-                        <>
-                          <DropdownMenuItem onClick={() => setRunDialog({ open: true, workflow })}>
-                            <Play className="mr-2 h-4 w-4" />
-                            Run Workflow
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                        </>
-                      )}
-                      <DropdownMenuItem onClick={() => openEditEditor(workflow)}>
-                        <Pencil className="mr-2 h-4 w-4" />
-                        Edit
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => duplicateMutation.mutate(workflow._id)}>
-                        <Copy className="mr-2 h-4 w-4" />
-                        Duplicate
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        className="text-destructive"
-                        onClick={() => setDeleteConfirm(workflow)}
-                      >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-
-                {/* Step visualization */}
-                <div className="flex items-center gap-2 overflow-x-auto pb-2">
-                  {workflow.steps.map((step, index) => {
-                    // Determine step type for styling
-                    const effectiveType = step.stepType || (step.execution === 'manual' || step.type === 'manual' ? 'manual' : 'agent')
-                    const getBorderStyle = () => {
-                      switch (effectiveType) {
-                        case 'agent': return 'border-blue-300 bg-blue-50'
-                        case 'external': return 'border-orange-300 bg-orange-50'
-                        case 'manual': return 'border-purple-300 bg-purple-50'
-                        case 'decision': return 'border-amber-300 bg-amber-50'
-                        case 'foreach': return 'border-green-300 bg-green-50'
-                        case 'join': return 'border-indigo-300 bg-indigo-50'
-                        case 'subflow': return 'border-pink-300 bg-pink-50'
-                        default: return 'border-gray-200 bg-gray-50'
-                      }
-                    }
-                    return (
-                      <div key={step.id || index} className="flex items-center">
-                        <div
-                          className={cn(
-                            'flex flex-col items-center gap-1 rounded-lg border p-3 min-w-[140px]',
-                            getBorderStyle()
-                          )}
-                        >
-                          <div className="flex items-center gap-2">
-                            {getStepIcon(step)}
-                            <span className="text-sm font-medium">{step.name}</span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <Badge variant="outline" className="text-xs">
-                              {getStepTypeLabel(step)}
-                            </Badge>
-                            {(step.prompt || step.additionalInstructions) && (
-                              <span title="Has instructions">
-                                <FileText className="h-3 w-3 text-muted-foreground" />
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        {index < workflow.steps.length - 1 && (
-                          <ChevronRight className="h-5 w-5 text-muted-foreground mx-1 flex-shrink-0" />
-                        )}
-                      </div>
-                    )
-                  })}
-                  {workflow.steps.length === 0 && (
-                    <p className="text-sm text-muted-foreground italic">No steps defined</p>
+        <div className="rounded-lg border">
+          <Table>
+            <TableHeader>
+              {table.getHeaderGroups().map(headerGroup => (
+                <TableRow key={headerGroup.id}>
+                  {headerGroup.headers.map(header => (
+                    <TableHead key={header.id}>
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(header.column.columnDef.header, header.getContext())}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              ))}
+            </TableHeader>
+            <TableBody>
+              {table.getRowModel().rows.map(row => (
+                <Fragment key={row.id}>
+                  <TableRow
+                    className="cursor-pointer"
+                    onClick={() => row.toggleExpanded()}
+                  >
+                    {row.getVisibleCells().map(cell => (
+                      <TableCell key={cell.id}>
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                  {row.getIsExpanded() && (
+                    <TableRow>
+                      <TableCell colSpan={columns.length} className="p-0">
+                        <StepsDetail workflow={row.original} />
+                      </TableCell>
+                    </TableRow>
                   )}
-                </div>
-
-                {/* Stats */}
-                <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                  <span>{workflow.steps.length} steps</span>
-                  {agentCount > 0 && <span className="text-blue-600">{agentCount} agent</span>}
-                  {externalCount > 0 && <span className="text-orange-600">{externalCount} external</span>}
-                  {manualCount > 0 && <span className="text-purple-600">{manualCount} manual</span>}
-                  {promptCount > 0 && (
-                    <span className="text-green-600">{promptCount} with instructions</span>
-                  )}
-                </div>
-              </div>
-            )
-          })}
+                </Fragment>
+              ))}
+            </TableBody>
+          </Table>
         </div>
       )}
 
