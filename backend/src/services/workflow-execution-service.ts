@@ -17,7 +17,78 @@ import {
   TaskEvent,
 } from '../types/index.js';
 
+// Environment config for webhook URLs
+const BASE_URL = process.env.BASE_URL || 'http://localhost:3001';
+
 type WorkflowRunEventHandler = (event: WorkflowRunEvent) => void | Promise<void>;
+
+/**
+ * Resolves template variables in a string.
+ * Supported variables:
+ *   {{systemWebhookUrl}} - Base webhook URL for callbacks
+ *   {{callbackSecret}} - Task-specific callback secret
+ *   {{workflowRunId}} - Current workflow run ID
+ *   {{stepId}} - Current step ID
+ *   {{taskId}} - Current task ID
+ *   {{input.path.to.value}} - Value from input payload
+ */
+function resolveTemplateVariables(
+  template: string,
+  context: {
+    workflowRunId: ObjectId;
+    stepId: string;
+    taskId?: ObjectId;
+    callbackSecret?: string;
+    inputPayload?: Record<string, unknown>;
+  }
+): string {
+  let result = template;
+
+  // Replace system variables
+  // {{systemWebhookUrl}} generates the full callback URL with workflowRunId and stepId embedded
+  const callbackUrl = `${BASE_URL}/api/workflow-runs/${context.workflowRunId}/callback/${context.stepId}`;
+  result = result.replace(/\{\{systemWebhookUrl\}\}/g, callbackUrl);
+  result = result.replace(/\{\{workflowRunId\}\}/g, context.workflowRunId.toString());
+  result = result.replace(/\{\{stepId\}\}/g, context.stepId);
+
+  if (context.taskId) {
+    result = result.replace(/\{\{taskId\}\}/g, context.taskId.toString());
+  }
+
+  if (context.callbackSecret) {
+    result = result.replace(/\{\{callbackSecret\}\}/g, context.callbackSecret);
+  }
+
+  // Replace input payload variables ({{input.path.to.value}})
+  if (context.inputPayload) {
+    result = result.replace(/\{\{input\.([^}]+)\}\}/g, (_, path) => {
+      const value = getValueByPathStatic(context.inputPayload!, path);
+      return value !== undefined ? String(value) : '';
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Static version of getValueByPath for use outside the class
+ */
+function getValueByPathStatic(obj: Record<string, unknown> | undefined, path: string): unknown {
+  if (!obj || !path) return undefined;
+
+  // Remove leading $. or . if present
+  const cleanPath = path.replace(/^\$?\.?/, '');
+  const parts = cleanPath.split('.');
+
+  let current: unknown = obj;
+  for (const part of parts) {
+    if (current === null || current === undefined) return undefined;
+    if (typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+
+  return current;
+}
 
 /**
  * WorkflowExecutionService orchestrates workflow execution.
@@ -325,11 +396,8 @@ class WorkflowExecutionService {
         break;
 
       case 'external':
-        // External step - mark as waiting for callback
-        await this.tasks.updateOne(
-          { _id: task._id },
-          { $set: { status: 'waiting' as TaskStatus } }
-        );
+        // External step - make outbound HTTP call and wait for callback
+        await this.executeExternal(run, workflow, step, task, inputPayload);
         break;
 
       case 'foreach':
@@ -456,6 +524,141 @@ class WorkflowExecutionService {
   }
 
   // ============================================================================
+  // External Step Execution
+  // ============================================================================
+
+  private async executeExternal(
+    run: WorkflowRun,
+    _workflow: Workflow,
+    step: WorkflowStep,
+    externalTask: Task,
+    inputPayload?: Record<string, unknown>
+  ): Promise<void> {
+    const config = step.externalConfig;
+    const callbackSecret = externalTask.externalConfig?.callbackSecret || this.generateSecret();
+
+    // Set task to waiting status
+    await this.tasks.updateOne(
+      { _id: externalTask._id },
+      {
+        $set: {
+          status: 'waiting' as TaskStatus,
+          'externalConfig.callbackSecret': callbackSecret,
+          'metadata.externalCallInitiated': false,
+        },
+      }
+    );
+
+    // If no endpoint configured, just wait for callback
+    if (!config?.endpoint) {
+      console.log(`[WorkflowExecutionService] External step ${step.id} has no endpoint - waiting for manual callback`);
+      return;
+    }
+
+    // Resolve template variables in endpoint and payload
+    const templateContext = {
+      workflowRunId: run._id,
+      stepId: step.id,
+      taskId: externalTask._id,
+      callbackSecret,
+      inputPayload,
+    };
+
+    const endpoint = resolveTemplateVariables(config.endpoint, templateContext);
+
+    // Build request payload
+    let requestBody: Record<string, unknown> = {};
+    if (config.payloadTemplate) {
+      try {
+        const resolvedPayload = resolveTemplateVariables(config.payloadTemplate, templateContext);
+        requestBody = JSON.parse(resolvedPayload);
+      } catch (e) {
+        console.error(`[WorkflowExecutionService] Failed to parse payload template:`, e);
+        requestBody = { ...inputPayload };
+      }
+    } else {
+      // Default payload includes callback info
+      requestBody = {
+        ...inputPayload,
+        _callback: {
+          url: `${BASE_URL}/api/workflows/callback`,
+          workflowRunId: run._id.toString(),
+          stepId: step.id,
+          secret: callbackSecret,
+        },
+      };
+    }
+
+    // Build headers with template resolution
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (config.headers) {
+      for (const [key, value] of Object.entries(config.headers)) {
+        headers[key] = resolveTemplateVariables(value, templateContext);
+      }
+    }
+
+    console.log(`[WorkflowExecutionService] Making external HTTP call to ${endpoint}`);
+
+    try {
+      const response = await fetch(endpoint, {
+        method: config.method || 'POST',
+        headers,
+        body: JSON.stringify(requestBody),
+      });
+
+      const responseData = await response.json().catch(() => ({})) as Record<string, unknown>;
+
+      // Store response in task metadata
+      await this.tasks.updateOne(
+        { _id: externalTask._id },
+        {
+          $set: {
+            'metadata.externalCallInitiated': true,
+            'metadata.externalCallStatus': response.status,
+            'metadata.externalCallResponse': responseData,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        console.error(`[WorkflowExecutionService] External call failed with status ${response.status}:`, responseData);
+        // Don't fail the task - still wait for callback in case of async processing
+      } else {
+        console.log(`[WorkflowExecutionService] External call succeeded, waiting for callback`);
+
+        // If the response includes a count (for foreach scenarios), store it
+        if (config.responseMapping) {
+          const mappedData: Record<string, unknown> = {};
+          for (const [targetPath, sourcePath] of Object.entries(config.responseMapping)) {
+            const value = getValueByPathStatic(responseData, sourcePath);
+            if (value !== undefined) {
+              mappedData[targetPath] = value;
+            }
+          }
+          await this.tasks.updateOne(
+            { _id: externalTask._id },
+            { $set: { 'metadata.mappedResponse': mappedData } }
+          );
+        }
+      }
+    } catch (error) {
+      console.error(`[WorkflowExecutionService] External call error:`, error);
+      await this.tasks.updateOne(
+        { _id: externalTask._id },
+        {
+          $set: {
+            'metadata.externalCallInitiated': true,
+            'metadata.externalCallError': String(error),
+          },
+        }
+      );
+      // Still waiting for callback - don't fail the task
+    }
+  }
+
+  // ============================================================================
   // Foreach Execution
   // ============================================================================
 
@@ -551,7 +754,7 @@ class WorkflowExecutionService {
   private async executeJoin(
     run: WorkflowRun,
     _workflow: Workflow,
-    _step: WorkflowStep,
+    step: WorkflowStep,
     joinTask: Task
   ): Promise<void> {
     // Find the foreach task we're joining on (usually the previous step)
@@ -562,6 +765,39 @@ class WorkflowExecutionService {
       status: { $in: ['waiting', 'in_progress'] },
     });
 
+    // Determine expected count - can come from:
+    // 1. Step config (expectedCountPath to look up from previous step)
+    // 2. Join config static value
+    // 3. Foreach task's batchCounters
+    let expectedCount: number | undefined;
+
+    // Check if we should get expected count from a previous step's response
+    if (step.expectedCountPath) {
+      // Look for the most recent external task to get count from its response
+      const externalTask = await this.tasks.findOne({
+        workflowRunId: run._id,
+        taskType: 'external',
+        status: 'completed',
+      }, { sort: { createdAt: -1 } });
+
+      if (externalTask?.metadata) {
+        // Try to get from mappedResponse first, then from callbackPayload
+        const mappedResponse = externalTask.metadata.mappedResponse as Record<string, unknown> | undefined;
+        const callbackPayload = externalTask.metadata.callbackPayload as Record<string, unknown> | undefined;
+        const externalResponse = externalTask.metadata.externalCallResponse as Record<string, unknown> | undefined;
+
+        const countFromMapped = mappedResponse ? getValueByPathStatic(mappedResponse, step.expectedCountPath) : undefined;
+        const countFromCallback = callbackPayload ? getValueByPathStatic(callbackPayload, step.expectedCountPath) : undefined;
+        const countFromResponse = externalResponse ? getValueByPathStatic(externalResponse, step.expectedCountPath) : undefined;
+
+        const countValue = countFromMapped ?? countFromCallback ?? countFromResponse;
+        if (typeof countValue === 'number') {
+          expectedCount = countValue;
+          console.log(`[WorkflowExecutionService] Got expectedCount ${expectedCount} from path ${step.expectedCountPath}`);
+        }
+      }
+    }
+
     if (!foreachTask) {
       console.log('[WorkflowExecutionService] No foreach task to join on');
       await this.tasks.updateOne(
@@ -571,25 +807,35 @@ class WorkflowExecutionService {
       return;
     }
 
-    // Store reference to foreach task
+    // Get minSuccessPercent from step config or default to 100
+    const minSuccessPercent = step.minSuccessPercent ?? 100;
+
+    // Store reference to foreach task and join config
     await this.tasks.updateOne(
       { _id: joinTask._id },
       {
         $set: {
           'joinConfig.awaitTaskId': foreachTask._id,
           'joinConfig.scope': 'children',
+          'joinConfig.minSuccessPercent': minSuccessPercent,
+          'joinConfig.expectedCount': expectedCount,
           'metadata.awaitingForeachTask': foreachTask._id.toString(),
+          'metadata.minSuccessPercent': minSuccessPercent,
         },
       }
     );
 
-    // Check if all children are complete
+    // Check if join condition is met
     await this.checkJoinCondition(joinTask._id, foreachTask._id);
   }
 
   private async checkJoinCondition(joinTaskId: ObjectId, foreachTaskId: ObjectId): Promise<boolean> {
     const foreachTask = await this.tasks.findOne({ _id: foreachTaskId });
     if (!foreachTask || !foreachTask.batchCounters) return false;
+
+    // Get the join task to read its config
+    const joinTask = await this.tasks.findOne({ _id: joinTaskId });
+    if (!joinTask) return false;
 
     const children = await this.tasks.find({ parentId: foreachTaskId }).toArray();
     const completedCount = children.filter(c => c.status === 'completed').length;
@@ -607,33 +853,62 @@ class WorkflowExecutionService {
       }
     );
 
-    const expectedCount = foreachTask.batchCounters.expectedCount;
+    // Determine expected count - prefer joinConfig.expectedCount if set, else use batchCounters
+    const expectedCount = joinTask.joinConfig?.expectedCount ?? foreachTask.batchCounters.expectedCount;
 
-    if (totalDone >= expectedCount) {
-      // All children done - aggregate results and complete join
+    // Get minSuccessPercent from joinConfig, default to 100
+    const minSuccessPercent = joinTask.joinConfig?.minSuccessPercent ?? 100;
+
+    // Calculate the required number of completed tasks based on percentage
+    const requiredSuccessCount = Math.ceil((expectedCount * minSuccessPercent) / 100);
+
+    // Calculate current success percentage
+    const currentSuccessPercent = expectedCount > 0 ? (completedCount / expectedCount) * 100 : 0;
+
+    console.log(`[WorkflowExecutionService] Join check: ${completedCount}/${expectedCount} completed (${currentSuccessPercent.toFixed(1)}%), need ${minSuccessPercent}% (${requiredSuccessCount} tasks)`);
+
+    // Check if we've met the success threshold
+    // We can complete the join if:
+    // 1. We've achieved the required success percentage, OR
+    // 2. All tasks are done (even if below threshold - we fail gracefully)
+    const thresholdMet = completedCount >= requiredSuccessCount;
+    const allDone = totalDone >= expectedCount;
+
+    if (thresholdMet || allDone) {
+      // Aggregate results from completed tasks
       const results = children
         .filter(c => c.status === 'completed')
         .map(c => c.metadata);
+
+      const joinStatus: TaskStatus = thresholdMet ? 'completed' : 'failed';
+      const statusReason = thresholdMet
+        ? `Success threshold met: ${currentSuccessPercent.toFixed(1)}% >= ${minSuccessPercent}%`
+        : `Success threshold not met: ${currentSuccessPercent.toFixed(1)}% < ${minSuccessPercent}%`;
 
       await this.tasks.updateOne(
         { _id: joinTaskId },
         {
           $set: {
-            status: 'completed' as TaskStatus,
+            status: joinStatus,
             'metadata.aggregatedResults': results,
             'metadata.successCount': completedCount,
             'metadata.failedCount': failedCount,
+            'metadata.expectedCount': expectedCount,
+            'metadata.successPercent': currentSuccessPercent,
+            'metadata.requiredPercent': minSuccessPercent,
+            'metadata.statusReason': statusReason,
           },
         }
       );
 
-      // Also complete the foreach task
+      // Complete the foreach task
       await this.tasks.updateOne(
         { _id: foreachTaskId },
         { $set: { status: 'completed' as TaskStatus } }
       );
 
-      return true;
+      console.log(`[WorkflowExecutionService] Join ${joinStatus}: ${statusReason}`);
+      return joinStatus === 'completed';
     }
 
     return false;
@@ -860,11 +1135,110 @@ class WorkflowExecutionService {
       const nextStep = workflow.steps.find(s => s.id === nextStepId);
       if (nextStep) {
         console.log(`[WorkflowExecutionService] Creating task for next step: ${nextStep.name} (${nextStep.id})`);
-        await this.executeStep(run, workflow, nextStep, rootTask, outputPayload);
+
+        // If the next step has an inputPath, extract specific data using JSONPath
+        let stepInputPayload = outputPayload;
+        if (nextStep.inputPath) {
+          const extractedInput = await this.resolveInputPath(run, nextStep.inputPath, outputPayload);
+          if (extractedInput !== undefined) {
+            stepInputPayload = {
+              ...outputPayload,
+              _extractedInput: extractedInput,
+            };
+            console.log(`[WorkflowExecutionService] Extracted input using path ${nextStep.inputPath}`);
+          }
+        }
+
+        await this.executeStep(run, workflow, nextStep, rootTask, stepInputPayload);
       } else {
         console.log(`[WorkflowExecutionService] WARNING: Next step ${nextStepId} not found in workflow!`);
       }
     }
+  }
+
+  /**
+   * Resolve inputPath to extract data from previous steps.
+   * Supports paths like:
+   *   - "aggregatedResults" - direct path from completed task metadata
+   *   - "steps.step-1.metadata.results" - lookup from specific step
+   *   - "join.aggregatedResults" - lookup from most recent join task
+   */
+  private async resolveInputPath(
+    run: WorkflowRun,
+    inputPath: string,
+    currentPayload: Record<string, unknown>
+  ): Promise<unknown> {
+    // Check if path references a specific step by ID
+    if (inputPath.startsWith('steps.')) {
+      const pathParts = inputPath.split('.');
+      const stepId = pathParts[1];
+      const remainingPath = pathParts.slice(2).join('.');
+
+      // Find the task for that step
+      const stepTask = await this.tasks.findOne({
+        workflowRunId: run._id,
+        workflowStepId: stepId,
+        status: 'completed',
+      });
+
+      if (stepTask?.metadata) {
+        return remainingPath
+          ? getValueByPathStatic(stepTask.metadata, remainingPath)
+          : stepTask.metadata;
+      }
+      return undefined;
+    }
+
+    // Check if path references the join task
+    if (inputPath.startsWith('join.')) {
+      const remainingPath = inputPath.substring(5);
+      const joinTask = await this.tasks.findOne({
+        workflowRunId: run._id,
+        taskType: 'join',
+        status: 'completed',
+      }, { sort: { createdAt: -1 } });
+
+      if (joinTask?.metadata) {
+        return remainingPath
+          ? getValueByPathStatic(joinTask.metadata, remainingPath)
+          : joinTask.metadata;
+      }
+      return undefined;
+    }
+
+    // Check if path references external task
+    if (inputPath.startsWith('external.')) {
+      const remainingPath = inputPath.substring(9);
+      const externalTask = await this.tasks.findOne({
+        workflowRunId: run._id,
+        taskType: 'external',
+        status: 'completed',
+      }, { sort: { createdAt: -1 } });
+
+      if (externalTask?.metadata) {
+        return remainingPath
+          ? getValueByPathStatic(externalTask.metadata, remainingPath)
+          : externalTask.metadata;
+      }
+      return undefined;
+    }
+
+    // Check if path references all completed tasks (for aggregation)
+    if (inputPath === 'all' || inputPath === 'allResults') {
+      const completedTasks = await this.tasks.find({
+        workflowRunId: run._id,
+        status: 'completed',
+      }).toArray();
+
+      return completedTasks.map(t => ({
+        stepId: t.workflowStepId,
+        taskType: t.taskType,
+        metadata: t.metadata,
+      }));
+    }
+
+    // Default: look up path in current payload
+    return getValueByPathStatic(currentPayload, inputPath);
   }
 
   private async handleStepFailure(

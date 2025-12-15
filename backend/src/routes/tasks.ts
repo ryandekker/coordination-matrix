@@ -604,6 +604,54 @@ tasksRouter.put('/:id/move', async (req: Request, res: Response, next: NextFunct
   }
 });
 
+// POST /api/tasks/:id/webhook/execute - Execute a webhook task
+tasksRouter.post('/:id/webhook/execute', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { webhookTaskService } = await import('../services/webhook-task-service.js');
+    const taskId = toObjectId(req.params.id);
+    const attempt = await webhookTaskService.executeWebhook(taskId);
+    res.json({ data: attempt });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/tasks/:id/webhook/retry - Retry a failed webhook task
+tasksRouter.post('/:id/webhook/retry', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { webhookTaskService } = await import('../services/webhook-task-service.js');
+    const taskId = toObjectId(req.params.id);
+    const attempt = await webhookTaskService.retryWebhook(taskId);
+    res.json({ data: attempt });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/tasks/:id/webhook/status - Get webhook execution status
+tasksRouter.get('/:id/webhook/status', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { webhookTaskService } = await import('../services/webhook-task-service.js');
+    const taskId = toObjectId(req.params.id);
+    const status = await webhookTaskService.getWebhookStatus(taskId);
+    res.json({ data: status });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// DELETE /api/tasks/:id/webhook/retry - Cancel pending webhook retry
+tasksRouter.delete('/:id/webhook/retry', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { webhookTaskService } = await import('../services/webhook-task-service.js');
+    const taskId = toObjectId(req.params.id);
+    webhookTaskService.cancelRetry(taskId);
+    res.json({ success: true, message: 'Retry cancelled' });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // DELETE /api/tasks/:id - Delete a task
 tasksRouter.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {

@@ -115,8 +115,13 @@ interface WorkflowStep {
   itemVariable?: string
   maxItems?: number
 
+  // Data flow - general (applies to multiple step types)
+  inputPath?: string               // JSONPath to extract data from previous step(s)
+
   // Join fields
   awaitTag?: string
+  minSuccessPercent?: number       // Percentage of tasks that must succeed (0-100)
+  expectedCountPath?: string       // JSONPath to expected count from external step response
 
   // Subflow fields
   subflowId?: string
@@ -794,6 +799,23 @@ The agent will receive task context automatically.`}
                                       className="min-h-[100px] font-mono text-sm"
                                     />
                                   </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-sm font-medium flex items-center gap-2">
+                                      <Download className="h-4 w-4 text-muted-foreground" />
+                                      Input Path
+                                      <span className="text-xs text-muted-foreground">(optional)</span>
+                                    </label>
+                                    <Input
+                                      value={step.inputPath || ''}
+                                      onChange={(e) => updateStep(index, { inputPath: e.target.value })}
+                                      placeholder="e.g., output.analysis or aggregatedResults"
+                                      className="font-mono text-sm"
+                                    />
+                                    <p className="text-xs text-muted-foreground">
+                                      JSONPath to extract from the previous step&apos;s output. The extracted data is passed to the agent.
+                                    </p>
+                                  </div>
                                 </div>
                               )}
 
@@ -808,6 +830,27 @@ The agent will receive task context automatically.`}
                                         <p className="text-xs mt-1">
                                           This step calls an external API or webhook. Configure the endpoint and request details below.
                                         </p>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Callback URL info for async flows */}
+                                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
+                                    <div className="flex items-start gap-2">
+                                      <Link2 className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                                      <div className="text-blue-800">
+                                        <p className="font-medium">Callback URL (for async responses)</p>
+                                        <p className="text-xs mt-1 mb-2">
+                                          If the external service needs to send results back asynchronously (e.g., ActivePieces),
+                                          include these template variables in your payload:
+                                        </p>
+                                        <div className="bg-white/60 rounded p-2 font-mono text-xs space-y-1">
+                                          <p><span className="text-blue-600">{"{{systemWebhookUrl}}"}</span> - Webhook endpoint URL</p>
+                                          <p><span className="text-blue-600">{"{{callbackSecret}}"}</span> - Auth token for callback</p>
+                                          <p><span className="text-blue-600">{"{{workflowRunId}}"}</span> - Current workflow run ID</p>
+                                          <p><span className="text-blue-600">{"{{stepId}}"}</span> - This step&apos;s ID</p>
+                                          <p><span className="text-blue-600">{"{{taskId}}"}</span> - Current task ID</p>
+                                        </div>
                                       </div>
                                     </div>
                                   </div>
@@ -854,12 +897,18 @@ The agent will receive task context automatically.`}
                                         externalConfig: { ...step.externalConfig, payloadTemplate: e.target.value }
                                       })}
                                       placeholder={`{
-  "taskId": "{{task._id}}",
-  "title": "{{task.title}}",
-  "data": "{{previousStep.output}}"
+  "callbackUrl": "{{systemWebhookUrl}}",
+  "callbackSecret": "{{callbackSecret}}",
+  "workflowRunId": "{{workflowRunId}}",
+  "stepId": "{{stepId}}",
+  "taskId": "{{taskId}}",
+  "data": "{{input.previousStep.output}}"
 }`}
-                                      className="min-h-[80px] font-mono text-sm"
+                                      className="min-h-[100px] font-mono text-sm"
                                     />
+                                    <p className="text-xs text-muted-foreground">
+                                      Use {"{{input.path.to.value}}"} to reference data from previous steps
+                                    </p>
                                   </div>
                                 </div>
                               )}
@@ -981,25 +1030,81 @@ The agent will receive task context automatically.`}
                                       <div className="text-indigo-800">
                                         <p className="font-medium">Join / Aggregation Point</p>
                                         <p className="text-xs mt-1">
-                                          This step waits for all parallel tasks to complete and programmatically
-                                          aggregates their results into a single output.
+                                          This step waits for parallel tasks (from a ForEach loop) to complete
+                                          and aggregates their results. The system automatically finds tasks
+                                          from the preceding ForEach step.
                                         </p>
                                       </div>
                                     </div>
                                   </div>
 
+                                  <div className="grid grid-cols-2 gap-3">
+                                    <div className="space-y-1">
+                                      <label className="text-sm font-medium flex items-center gap-1">
+                                        Min Success %
+                                        <span className="text-xs text-muted-foreground">(optional)</span>
+                                      </label>
+                                      <Input
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        value={step.minSuccessPercent ?? ''}
+                                        onChange={(e) => updateStep(index, {
+                                          minSuccessPercent: e.target.value ? parseInt(e.target.value) : undefined
+                                        })}
+                                        placeholder="100"
+                                        className="font-mono text-sm"
+                                      />
+                                      <p className="text-xs text-muted-foreground">
+                                        Proceed when this % of tasks complete (default: 100%)
+                                      </p>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-sm font-medium flex items-center gap-1">
+                                        Expected Count Path
+                                        <span className="text-xs text-muted-foreground">(optional)</span>
+                                      </label>
+                                      <Input
+                                        value={step.expectedCountPath || ''}
+                                        onChange={(e) => updateStep(index, { expectedCountPath: e.target.value })}
+                                        placeholder="e.g., response.totalItems"
+                                        className="font-mono text-sm"
+                                      />
+                                      <p className="text-xs text-muted-foreground">
+                                        JSONPath to expected count from external step response
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-sm font-medium flex items-center gap-1">
+                                      Input Path
+                                      <span className="text-xs text-muted-foreground">(optional)</span>
+                                    </label>
+                                    <Input
+                                      value={step.inputPath || ''}
+                                      onChange={(e) => updateStep(index, { inputPath: e.target.value })}
+                                      placeholder="e.g., output.analysis or result.data"
+                                      className="font-mono text-sm"
+                                    />
+                                    <p className="text-xs text-muted-foreground">
+                                      JSONPath to extract from each completed task. Results are aggregated into an array.
+                                    </p>
+                                  </div>
+
                                   <div className="space-y-1">
                                     <label className="text-sm font-medium flex items-center gap-1">
                                       Await Tag Pattern
+                                      <span className="text-xs text-muted-foreground">(usually auto-detected)</span>
                                     </label>
                                     <Input
                                       value={step.awaitTag || ''}
                                       onChange={(e) => updateStep(index, { awaitTag: e.target.value })}
-                                      placeholder="e.g., foreach:{{parentId}}"
+                                      placeholder="Auto-detects from ForEach step"
                                       className="font-mono text-sm"
                                     />
                                     <p className="text-xs text-muted-foreground">
-                                      Pattern to match tasks to wait for. Use {"{{parentId}}"} to reference the loop&apos;s parent task.
+                                      Leave empty to auto-detect tasks from the preceding ForEach step.
                                     </p>
                                   </div>
                                 </>

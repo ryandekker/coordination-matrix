@@ -23,7 +23,8 @@ export type TaskType =
   | 'foreach'      // Fan-out iteration
   | 'join'         // Fan-in synchronization
   | 'subflow'      // Nested workflow
-  | 'external';    // Waiting for external callback
+  | 'external'     // Waiting for external callback
+  | 'webhook';     // Outbound HTTP call (fire-and-forget or await response)
 
 // How the task gets executed
 export type ExecutionMode =
@@ -47,6 +48,8 @@ export interface JoinConfig {
   awaitTaskId?: ObjectId;       // Task whose descendants we're waiting for
   scope: 'children' | 'descendants';
   minSuccessPercent?: number;
+  expectedCountPath?: string;   // JSONPath to get expected count from previous step output
+  expectedCount?: number;       // Static expected count (if not from previous step)
   deadlineAt?: Date;
 }
 
@@ -55,6 +58,43 @@ export interface ExternalConfig {
   callbackSecret?: string;
   expectedCallbacks?: number;
   timeoutAt?: Date;
+}
+
+// HTTP method for webhook calls
+export type WebhookMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
+// Webhook execution attempt record
+export interface WebhookAttempt {
+  attemptNumber: number;
+  startedAt: Date;
+  completedAt?: Date;
+  status: 'pending' | 'success' | 'failed';
+  httpStatus?: number;
+  responseBody?: unknown;
+  errorMessage?: string;
+  durationMs?: number;
+}
+
+// Webhook task configuration
+export interface WebhookConfig {
+  // Request configuration
+  url: string;                          // The endpoint URL (can contain template variables)
+  method: WebhookMethod;                // HTTP method
+  headers?: Record<string, string>;     // Custom headers (can contain template variables)
+  body?: string;                        // Request body template (JSON string with template variables)
+
+  // Retry configuration
+  maxRetries?: number;                  // Max retry attempts (default: 3)
+  retryDelayMs?: number;                // Delay between retries (default: 1000, exponential backoff)
+  timeoutMs?: number;                   // Request timeout (default: 30000)
+
+  // Success criteria
+  successStatusCodes?: number[];        // HTTP status codes considered success (default: [200-299])
+
+  // Execution tracking
+  attempts?: WebhookAttempt[];          // History of execution attempts
+  lastAttemptAt?: Date;                 // When the last attempt was made
+  nextRetryAt?: Date;                   // Scheduled time for next retry (if pending)
 }
 
 // Counters for foreach/batch tasks
@@ -98,6 +138,9 @@ export interface Task {
 
   // External callback configuration
   externalConfig?: ExternalConfig;
+
+  // Webhook task configuration (outbound HTTP calls)
+  webhookConfig?: WebhookConfig;
 
   // Decision result (which branch was taken)
   decisionResult?: string;
@@ -513,6 +556,11 @@ export interface WorkflowStep {
   awaitTag?: string;
   subflowId?: string;
   inputMapping?: Record<string, string>;
+  // Join step config
+  minSuccessPercent?: number;           // Percentage of tasks that must succeed (default: 100)
+  expectedCountPath?: string;           // JSONPath to get expected count from previous step
+  // Input aggregation
+  inputPath?: string;                   // JSONPath to extract input from previous steps
 }
 
 export interface Workflow {

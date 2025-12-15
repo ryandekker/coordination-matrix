@@ -23,6 +23,7 @@ import { activityLogService } from './services/activity-log.js';
 import { webhookService } from './services/webhook-service.js';
 import { batchJobService } from './services/batch-job-service.js';
 import { workflowExecutionService } from './services/workflow-execution-service.js';
+import { webhookTaskService } from './services/webhook-task-service.js';
 import { setupSwagger } from './swagger.js';
 
 const app = express();
@@ -47,6 +48,48 @@ setupSwagger(app);
 
 // Auth routes (public)
 app.use('/api/auth', authRouter);
+
+// Public callback endpoint for external services (requires X-Workflow-Secret header)
+app.post('/api/workflow-runs/:id/callback/:stepId', async (req, res) => {
+  try {
+    const { id, stepId } = req.params;
+    const { ObjectId } = await import('mongodb');
+
+    if (!ObjectId.isValid(id)) {
+      res.status(400).json({ error: 'Invalid workflow run ID' });
+      return;
+    }
+
+    const secret = req.headers['x-workflow-secret'] as string;
+    if (!secret) {
+      res.status(401).json({ error: 'Missing X-Workflow-Secret header' });
+      return;
+    }
+
+    const payload = req.body;
+    const task = await workflowExecutionService.handleExternalCallback(id, stepId, payload, secret);
+
+    res.json({
+      acknowledged: true,
+      taskId: task._id,
+      taskStatus: task.status,
+    });
+  } catch (error: unknown) {
+    console.error('[WorkflowRuns] Callback error:', error);
+    const message = error instanceof Error ? error.message : 'Failed to process callback';
+
+    if (message.includes('Invalid callback secret')) {
+      res.status(401).json({ error: message });
+      return;
+    }
+    if (message.includes('not found')) {
+      res.status(404).json({ error: message });
+      return;
+    }
+
+    res.status(500).json({ error: message });
+  }
+});
 
 // Protected API Routes - require authentication
 app.use('/api/tasks', requireAuth, tasksRouter);
@@ -86,6 +129,7 @@ const start = async () => {
     webhookService.initialize();
     batchJobService.initialize();
     workflowExecutionService.initialize();
+    webhookTaskService.initialize();
 
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
