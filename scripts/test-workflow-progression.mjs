@@ -2,197 +2,165 @@
 /**
  * Test script for workflow task auto-creation
  *
- * This script:
- * 1. Creates a test workflow with 3 steps
- * 2. Starts a workflow run
- * 3. Provides commands to complete tasks and verify progression
+ * Uses the API endpoints to test workflow progression.
  *
  * Usage:
- *   npm run test:workflow           # Run all tests
+ *   npm run test:workflow           # Run full test
  *   npm run test:workflow create    # Just create the workflow
  *   npm run test:workflow start     # Start a workflow run
  *   npm run test:workflow complete <taskId>  # Complete a task
+ *   npm run test:workflow status    # Show current status
  */
 
-import { MongoClient, ObjectId } from 'mongodb';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import os from 'os';
 
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017';
-const DB_NAME = 'coordination_matrix';
-
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const API_BASE = process.env.API_URL || 'http://localhost:3001';
+// Use the same config file as matrix-cli.mjs
+const CLI_CONFIG_FILE = path.join(os.homedir(), '.matrix-cli.json');
 const TEST_WORKFLOW_NAME = 'Test Workflow Progression';
 
-async function getDb() {
-  const client = await MongoClient.connect(MONGO_URI);
-  return { client, db: client.db(DB_NAME) };
+// Load stored credentials from CLI config
+function loadCredentials() {
+  try {
+    if (fs.existsSync(CLI_CONFIG_FILE)) {
+      return JSON.parse(fs.readFileSync(CLI_CONFIG_FILE, 'utf8'));
+    }
+  } catch (e) {
+    // Ignore
+  }
+  return null;
 }
 
-async function createTestWorkflow(db) {
+// Make authenticated API request
+async function apiRequest(endpoint, options = {}) {
+  const creds = loadCredentials();
+  const headers = {
+    'Content-Type': 'application/json',
+    ...options.headers,
+  };
+
+  if (creds?.token) {
+    headers['Authorization'] = `Bearer ${creds.token}`;
+  } else if (creds?.apiKey) {
+    headers['X-API-Key'] = creds.apiKey;
+  }
+
+  const url = `${API_BASE}${endpoint}`;
+  const response = await fetch(url, {
+    ...options,
+    headers,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`API error ${response.status}: ${text}`);
+  }
+
+  return response.json();
+}
+
+async function createTestWorkflow() {
   console.log('\n📋 Creating test workflow...\n');
 
-  // Check if test workflow already exists
-  const existing = await db.collection('workflows').findOne({ name: TEST_WORKFLOW_NAME });
+  // Check if workflow already exists
+  const { data: workflows } = await apiRequest('/api/workflows');
+  const existing = workflows.find(w => w.name === TEST_WORKFLOW_NAME);
+
   if (existing) {
-    console.log(`  Workflow "${TEST_WORKFLOW_NAME}" already exists (ID: ${existing._id})`);
+    console.log(`  Workflow "${TEST_WORKFLOW_NAME}" already exists`);
+    console.log(`  ID: ${existing._id}`);
     return existing;
   }
 
-  const now = new Date();
-  const step1Id = new ObjectId().toString();
-  const step2Id = new ObjectId().toString();
-  const step3Id = new ObjectId().toString();
-
-  const workflow = {
-    name: TEST_WORKFLOW_NAME,
-    description: 'A test workflow to verify task auto-creation on step completion',
-    isActive: true,
-    steps: [
-      {
-        id: step1Id,
-        name: 'Step 1: Initial Processing',
-        description: 'First step in the workflow',
-        stepType: 'agent',
-        connections: [{ targetStepId: step2Id }],
-      },
-      {
-        id: step2Id,
-        name: 'Step 2: Review',
-        description: 'Second step - should be auto-created when Step 1 completes',
-        stepType: 'manual',
-        connections: [{ targetStepId: step3Id }],
-      },
-      {
-        id: step3Id,
-        name: 'Step 3: Finalize',
-        description: 'Final step - should be auto-created when Step 2 completes',
-        stepType: 'agent',
-        // No connections - this is the last step
-      },
-    ],
-    mermaidDiagram: `flowchart TD
-    ${step1Id}["Step 1: Initial Processing"]
-    ${step2Id}("Step 2: Review")
-    ${step3Id}["Step 3: Finalize"]
-
-    ${step1Id} --> ${step2Id}
-    ${step2Id} --> ${step3Id}
-
-    classDef agent fill:#3B82F6,color:#fff
-    classDef manual fill:#8B5CF6,color:#fff
-    class ${step1Id},${step3Id} agent
-    class ${step2Id} manual`,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  const result = await db.collection('workflows').insertOne(workflow);
-  workflow._id = result.insertedId;
+  // Create workflow with 3 connected steps
+  const workflow = await apiRequest('/api/workflows', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: TEST_WORKFLOW_NAME,
+      description: 'Test workflow to verify task auto-creation on step completion',
+      isActive: true,
+      steps: [
+        {
+          id: 'step-1',
+          name: 'Step 1: Initial Processing',
+          description: 'First step in the workflow',
+          stepType: 'agent',
+          connections: [{ targetStepId: 'step-2' }],
+        },
+        {
+          id: 'step-2',
+          name: 'Step 2: Review',
+          description: 'Second step - should auto-create when Step 1 completes',
+          stepType: 'manual',
+          connections: [{ targetStepId: 'step-3' }],
+        },
+        {
+          id: 'step-3',
+          name: 'Step 3: Finalize',
+          description: 'Final step - should auto-create when Step 2 completes',
+          stepType: 'agent',
+        },
+      ],
+    }),
+  });
 
   console.log(`  ✅ Created workflow "${TEST_WORKFLOW_NAME}"`);
-  console.log(`     ID: ${workflow._id}`);
-  console.log(`     Steps: ${workflow.steps.map(s => s.name).join(' → ')}`);
+  console.log(`     ID: ${workflow.data._id}`);
+  console.log(`     Steps: Step 1 → Step 2 → Step 3`);
 
-  return workflow;
+  return workflow.data;
 }
 
-async function startWorkflowRun(db, workflowId) {
+async function startWorkflowRun(workflowId) {
   console.log('\n🚀 Starting workflow run...\n');
 
-  const workflow = await db.collection('workflows').findOne({ _id: new ObjectId(workflowId) });
-  if (!workflow) {
-    throw new Error(`Workflow ${workflowId} not found`);
+  // If no workflowId provided, find the test workflow
+  if (!workflowId) {
+    const { data: workflows } = await apiRequest('/api/workflows');
+    const workflow = workflows.find(w => w.name === TEST_WORKFLOW_NAME);
+    if (!workflow) {
+      console.log('  Test workflow not found. Creating it first...');
+      const created = await createTestWorkflow();
+      workflowId = created._id;
+    } else {
+      workflowId = workflow._id;
+    }
   }
 
-  const now = new Date();
-
-  // Create workflow run
-  const run = {
-    workflowId: workflow._id,
-    status: 'running',
-    currentStepIds: [],
-    completedStepIds: [],
-    inputPayload: { test: true, startedAt: now.toISOString() },
-    createdAt: now,
-    startedAt: now,
-  };
-
-  const runResult = await db.collection('workflow_runs').insertOne(run);
-  run._id = runResult.insertedId;
-
-  // Create root task
-  const rootTask = {
-    title: `Workflow: ${workflow.name}`,
-    summary: workflow.description,
-    status: 'in_progress',
-    parentId: null,
-    workflowId: workflow._id,
-    workflowRunId: run._id,
-    taskType: 'standard',
-    executionMode: 'automated',
-    createdAt: now,
-    updatedAt: now,
-    metadata: {
-      workflowRunId: run._id.toString(),
-      inputPayload: run.inputPayload,
-    },
-  };
-
-  const rootResult = await db.collection('tasks').insertOne(rootTask);
-  rootTask._id = rootResult.insertedId;
-
-  // Update run with root task ID
-  await db.collection('workflow_runs').updateOne(
-    { _id: run._id },
-    { $set: { rootTaskId: rootTask._id } }
-  );
-
-  // Create first step task
-  const firstStep = workflow.steps[0];
-  const firstStepTask = {
-    title: firstStep.name,
-    summary: firstStep.description,
-    status: 'pending',
-    parentId: rootTask._id,
-    workflowId: workflow._id,
-    workflowRunId: run._id,
-    workflowStepId: firstStep.id,
-    workflowStage: firstStep.name,
-    taskType: 'standard',
-    executionMode: firstStep.stepType === 'manual' ? 'manual' : 'automated',
-    createdAt: now,
-    updatedAt: now,
-    metadata: {
-      stepId: firstStep.id,
-      stepType: firstStep.stepType,
-    },
-  };
-
-  const firstStepResult = await db.collection('tasks').insertOne(firstStepTask);
-  firstStepTask._id = firstStepResult.insertedId;
-
-  // Update run with current step
-  await db.collection('workflow_runs').updateOne(
-    { _id: run._id },
-    { $addToSet: { currentStepIds: firstStep.id } }
-  );
+  const result = await apiRequest('/api/workflow-runs', {
+    method: 'POST',
+    body: JSON.stringify({
+      workflowId,
+      inputPayload: { test: true, startedAt: new Date().toISOString() },
+    }),
+  });
 
   console.log(`  ✅ Workflow run started`);
-  console.log(`     Run ID: ${run._id}`);
-  console.log(`     Root Task ID: ${rootTask._id}`);
-  console.log(`     First Step Task ID: ${firstStepTask._id}`);
-  console.log(`\n  📝 To test, complete the first step task:`);
-  console.log(`     npm run test:workflow complete ${firstStepTask._id}`);
+  console.log(`     Run ID: ${result.run._id}`);
+  console.log(`     Root Task ID: ${result.rootTask._id}`);
 
-  return { run, rootTask, firstStepTask };
-}
+  // Find the first step task
+  const { data: tasks } = await apiRequest(`/api/tasks?filters[workflowRunId]=${result.run._id}`);
+  const firstStepTask = tasks.find(t => t.workflowStepId === 'step-1');
 
-async function completeTask(db, taskId) {
-  console.log(`\n✅ Completing task ${taskId}...\n`);
-
-  const task = await db.collection('tasks').findOne({ _id: new ObjectId(taskId) });
-  if (!task) {
-    throw new Error(`Task ${taskId} not found`);
+  if (firstStepTask) {
+    console.log(`     First Step Task ID: ${firstStepTask._id}`);
+    console.log(`\n  📝 To test workflow progression, complete the first task:`);
+    console.log(`     npm run test:workflow complete ${firstStepTask._id}`);
   }
 
+  return result;
+}
+
+async function completeTask(taskId) {
+  console.log(`\n✅ Completing task ${taskId}...\n`);
+
+  // Get current task
+  const { data: task } = await apiRequest(`/api/tasks/${taskId}`);
   console.log(`  Task: "${task.title}"`);
   console.log(`  Current status: ${task.status}`);
 
@@ -201,171 +169,171 @@ async function completeTask(db, taskId) {
     return task;
   }
 
-  // Update task status
-  const now = new Date();
-  await db.collection('tasks').updateOne(
-    { _id: task._id },
-    {
-      $set: {
-        status: 'completed',
-        updatedAt: now,
-      }
-    }
-  );
+  // Update task status to completed
+  const { data: updated } = await apiRequest(`/api/tasks/${taskId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: 'completed' }),
+  });
 
   console.log(`  ✅ Task marked as completed`);
   console.log(`\n  ⏳ The workflow service should now create the next task...`);
-  console.log(`     (This happens automatically via event handlers when the server is running)`);
-  console.log(`\n  💡 If running with the server, check the server logs for:`);
-  console.log(`     [WorkflowExecutionService] onTaskStatusChanged: task=${taskId}...`);
-  console.log(`     [WorkflowExecutionService] Creating task for next step...`);
 
-  return task;
+  // Wait a moment for the event to process
+  await new Promise(resolve => setTimeout(resolve, 500));
+
+  // Check for new tasks
+  if (task.workflowRunId) {
+    console.log(`\n  📊 Checking for new tasks...`);
+    await showWorkflowStatus(task.workflowRunId);
+  }
+
+  return updated;
 }
 
-async function showWorkflowStatus(db, workflowName = TEST_WORKFLOW_NAME) {
-  console.log(`\n📊 Workflow Status: "${workflowName}"\n`);
+async function showWorkflowStatus(workflowRunId) {
+  // If no run ID provided, find the most recent run for the test workflow
+  if (!workflowRunId) {
+    const { data: workflows } = await apiRequest('/api/workflows');
+    const workflow = workflows.find(w => w.name === TEST_WORKFLOW_NAME);
 
-  const workflow = await db.collection('workflows').findOne({ name: workflowName });
-  if (!workflow) {
-    console.log(`  ❌ Workflow not found`);
-    return;
-  }
-
-  console.log(`  Workflow ID: ${workflow._id}`);
-  console.log(`  Steps: ${workflow.steps?.length || 0}`);
-
-  const runs = await db.collection('workflow_runs')
-    .find({ workflowId: workflow._id })
-    .sort({ createdAt: -1 })
-    .limit(5)
-    .toArray();
-
-  if (runs.length === 0) {
-    console.log(`\n  No workflow runs found. Start one with:`);
-    console.log(`  npm run test:workflow start ${workflow._id}`);
-    return;
-  }
-
-  console.log(`\n  Recent Runs:`);
-  for (const run of runs) {
-    console.log(`\n  Run: ${run._id}`);
-    console.log(`    Status: ${run.status}`);
-    console.log(`    Started: ${run.startedAt?.toISOString() || 'N/A'}`);
-    console.log(`    Completed Steps: ${run.completedStepIds?.length || 0}/${workflow.steps?.length || 0}`);
-
-    // Get tasks for this run
-    const tasks = await db.collection('tasks')
-      .find({ workflowRunId: run._id })
-      .sort({ createdAt: 1 })
-      .toArray();
-
-    console.log(`    Tasks:`);
-    for (const task of tasks) {
-      const isRoot = !task.workflowStepId;
-      const prefix = isRoot ? '    📁' : '      📄';
-      const statusEmoji = {
-        pending: '⏳',
-        in_progress: '🔄',
-        completed: '✅',
-        failed: '❌',
-        waiting: '⏸️',
-      }[task.status] || '❓';
-
-      console.log(`${prefix} ${statusEmoji} ${task.title} (${task.status})`);
-      if (!isRoot) {
-        console.log(`         ID: ${task._id}`);
-      }
+    if (!workflow) {
+      console.log('\n  ❌ Test workflow not found. Create it with:');
+      console.log('     npm run test:workflow create');
+      return;
     }
 
-    // Show next action
-    const pendingTask = tasks.find(t => t.workflowStepId && t.status === 'pending');
-    if (pendingTask) {
-      console.log(`\n    📝 Next action: Complete task "${pendingTask.title}"`);
-      console.log(`       npm run test:workflow complete ${pendingTask._id}`);
+    const { data: runs } = await apiRequest(`/api/workflow-runs?workflowId=${workflow._id}&limit=1`);
+    if (!runs || runs.length === 0) {
+      console.log('\n  No workflow runs found. Start one with:');
+      console.log('     npm run test:workflow start');
+      return;
     }
+    workflowRunId = runs[0]._id;
+  }
+
+  console.log(`\n📊 Workflow Run Status\n`);
+
+  // Get run details
+  const run = await apiRequest(`/api/workflow-runs/${workflowRunId}?includeTasks=true`);
+
+  console.log(`  Run ID: ${run.run._id}`);
+  console.log(`  Status: ${run.run.status}`);
+  console.log(`  Completed Steps: ${run.run.completedStepIds?.length || 0}/3`);
+
+  console.log(`\n  Tasks:`);
+
+  const statusEmoji = {
+    pending: '⏳',
+    in_progress: '🔄',
+    completed: '✅',
+    failed: '❌',
+    waiting: '⏸️',
+  };
+
+  // Sort tasks: root first, then by creation time
+  const sortedTasks = run.tasks.sort((a, b) => {
+    if (!a.workflowStepId) return -1;
+    if (!b.workflowStepId) return 1;
+    return new Date(a.createdAt) - new Date(b.createdAt);
+  });
+
+  for (const task of sortedTasks) {
+    const isRoot = !task.workflowStepId;
+    const prefix = isRoot ? '  📁' : '    📄';
+    const emoji = statusEmoji[task.status] || '❓';
+
+    console.log(`${prefix} ${emoji} ${task.title} (${task.status})`);
+    if (!isRoot) {
+      console.log(`       ID: ${task._id}`);
+      console.log(`       Step: ${task.workflowStepId}`);
+    }
+  }
+
+  // Find next action
+  const pendingTask = sortedTasks.find(t => t.workflowStepId && t.status === 'pending');
+  const inProgressTask = sortedTasks.find(t => t.workflowStepId && t.status === 'in_progress');
+  const nextTask = pendingTask || inProgressTask;
+
+  if (nextTask) {
+    console.log(`\n  📝 Next action: Complete task "${nextTask.title}"`);
+    console.log(`     npm run test:workflow complete ${nextTask._id}`);
+  } else if (run.run.status === 'completed') {
+    console.log(`\n  🎉 Workflow completed successfully!`);
+  } else if (run.run.status === 'running') {
+    console.log(`\n  ⚠️  No pending tasks found but workflow is still running.`);
+    console.log(`     This might indicate an issue with task auto-creation.`);
   }
 }
 
-async function runFullTest(db) {
-  console.log('\n🧪 Running Full Workflow Progression Test\n');
-  console.log('=' .repeat(50));
+async function runFullTest() {
+  console.log('\n🧪 Workflow Progression Test\n');
+  console.log('='.repeat(50));
 
   // Step 1: Create workflow
-  const workflow = await createTestWorkflow(db);
+  const workflow = await createTestWorkflow();
 
-  // Step 2: Show status
-  await showWorkflowStatus(db);
+  // Step 2: Start a run
+  await startWorkflowRun(workflow._id);
 
-  console.log('\n' + '=' .repeat(50));
-  console.log('\n📋 Test Instructions:\n');
-  console.log('1. Make sure the backend server is running:');
-  console.log('   npm run dev:backend\n');
-  console.log('2. Start a workflow run:');
-  console.log(`   npm run test:workflow start ${workflow._id}\n`);
-  console.log('3. Complete the first task (ID will be shown after starting)');
-  console.log('4. Check if the next task was auto-created:');
+  console.log('\n' + '='.repeat(50));
+  console.log('\n📋 What to do next:\n');
+  console.log('1. Complete the first task using the command shown above');
+  console.log('2. Check if Step 2 task was auto-created:');
   console.log('   npm run test:workflow status\n');
-  console.log('5. Repeat step 3-4 for each step to verify progression\n');
+  console.log('3. Repeat for each step to verify full progression\n');
 }
 
 async function main() {
   const args = process.argv.slice(2);
   const command = args[0] || 'test';
 
-  const { client, db } = await getDb();
+  // Check if API is reachable
+  try {
+    await fetch(`${API_BASE}/health`);
+  } catch (e) {
+    console.error(`\n❌ Cannot connect to API at ${API_BASE}`);
+    console.error('   Make sure the backend is running: npm run dev:backend\n');
+    process.exit(1);
+  }
+
+  // Check credentials
+  const creds = loadCredentials();
+  if (!creds?.token && !creds?.apiKey) {
+    console.log('\n⚠️  No credentials found. Login first:');
+    console.log('   npm run cli login\n');
+  }
 
   try {
     switch (command) {
       case 'create':
-        await createTestWorkflow(db);
+        await createTestWorkflow();
         break;
 
-      case 'start': {
-        const workflowId = args[1];
-        if (!workflowId) {
-          // Find test workflow
-          const workflow = await db.collection('workflows').findOne({ name: TEST_WORKFLOW_NAME });
-          if (!workflow) {
-            console.log('No test workflow found. Creating one first...');
-            const newWorkflow = await createTestWorkflow(db);
-            await startWorkflowRun(db, newWorkflow._id.toString());
-          } else {
-            await startWorkflowRun(db, workflow._id.toString());
-          }
-        } else {
-          await startWorkflowRun(db, workflowId);
-        }
+      case 'start':
+        await startWorkflowRun(args[1]);
         break;
-      }
 
-      case 'complete': {
-        const taskId = args[1];
-        if (!taskId) {
+      case 'complete':
+        if (!args[1]) {
           console.error('Usage: npm run test:workflow complete <taskId>');
           process.exit(1);
         }
-        await completeTask(db, taskId);
-        console.log('\n  📊 Current status:');
-        await showWorkflowStatus(db);
+        await completeTask(args[1]);
         break;
-      }
 
       case 'status':
-        await showWorkflowStatus(db, args[1] || TEST_WORKFLOW_NAME);
+        await showWorkflowStatus(args[1]);
         break;
 
       case 'test':
       default:
-        await runFullTest(db);
+        await runFullTest();
         break;
     }
-  } finally {
-    await client.close();
+  } catch (error) {
+    console.error('\n❌ Error:', error.message);
+    process.exit(1);
   }
 }
 
-main().catch((err) => {
-  console.error('Error:', err);
-  process.exit(1);
-});
+main();
