@@ -400,6 +400,7 @@ export function WorkflowEditor({
   }, [workflow, reset])
 
   // Update mermaid when steps change
+  // Extract primitive value to avoid infinite re-renders (watch function changes reference every render)
   const workflowName = watch('name')
   useEffect(() => {
     if (steps.length > 0) {

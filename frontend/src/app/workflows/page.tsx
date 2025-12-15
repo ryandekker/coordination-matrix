@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, Fragment, useMemo, useCallback } from 'react'
+import { useState, Fragment, useMemo, useCallback, memo } from 'react'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -322,8 +322,8 @@ function formatRelativeTime(date: string | null): string {
   return then.toLocaleDateString()
 }
 
-// Expanded row content showing steps
-function StepsDetail({ workflow }: { workflow: WorkflowWithStats }) {
+// Expanded row content showing steps - memoized to prevent unnecessary re-renders
+const StepsDetail = memo(function StepsDetail({ workflow }: { workflow: WorkflowWithStats }) {
   if (!workflow.steps || workflow.steps.length === 0) {
     return (
       <div className="p-4 text-sm text-muted-foreground italic">
@@ -387,7 +387,7 @@ function StepsDetail({ workflow }: { workflow: WorkflowWithStats }) {
       )}
     </div>
   )
-}
+})
 
 export default function WorkflowsPage() {
   const router = useRouter()
@@ -543,7 +543,7 @@ export default function WorkflowsPage() {
     setEditingWorkflow(null)
   }, [])
 
-  const handleSave = (workflow: {
+  const handleSave = useCallback((workflow: {
     _id?: string
     name: string
     description: string
@@ -556,7 +556,7 @@ export default function WorkflowsPage() {
     } else {
       createMutation.mutate(workflow)
     }
-  }
+  }, [updateMutation, createMutation])
 
   const handleToggleActive = useCallback((workflow: WorkflowData) => {
     updateMutation.mutate({
@@ -565,7 +565,7 @@ export default function WorkflowsPage() {
     })
   }, [updateMutation])
 
-  // Table columns - memoized to prevent infinite re-renders
+  // Table columns - memoized to prevent TanStack Table from reinitializing on every render
   const columns = useMemo<ColumnDef<WorkflowWithStats>[]>(() => [
     {
       id: 'expander',
@@ -747,7 +747,7 @@ export default function WorkflowsPage() {
         </DropdownMenu>
       ),
     },
-  ], [handleToggleActive, openEditEditor, duplicateMutation, setRunDialog, setDeleteConfirm])
+  ], [handleToggleActive, openEditEditor, duplicateMutation])
 
   const table = useReactTable({
     data: workflows,
