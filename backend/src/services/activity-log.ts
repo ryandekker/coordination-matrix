@@ -34,15 +34,22 @@ class ActivityLogService {
     try {
       const db = getDb();
 
+      // Build entry, omitting undefined fields to avoid MongoDB validation errors
       const entry: Omit<ActivityLogEntry, '_id'> = {
         taskId: event.taskId,
         eventType: event.type,
         actorId: event.actorId ?? null,
         actorType: event.actorType,
-        changes: event.changes,
         timestamp: event.timestamp,
-        metadata: event.metadata,
       };
+
+      // Only include optional fields if they have values
+      if (event.changes && event.changes.length > 0) {
+        entry.changes = event.changes;
+      }
+      if (event.metadata && Object.keys(event.metadata).length > 0) {
+        entry.metadata = event.metadata;
+      }
 
       const result = await db.collection('activity_logs').insertOne(entry);
       return { ...entry, _id: result.insertedId } as ActivityLogEntry;
