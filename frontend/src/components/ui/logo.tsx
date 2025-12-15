@@ -16,8 +16,8 @@ export function Logo({ className, size = 32 }: LogoProps) {
     >
       <defs>
         <linearGradient id="logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" style={{ stopColor: '#3b82f6', stopOpacity: 1 }} />
-          <stop offset="100%" style={{ stopColor: '#1e3a5f', stopOpacity: 1 }} />
+          <stop offset="0%" style={{ stopColor: '#37A7E7', stopOpacity: 1 }} />
+          <stop offset="100%" style={{ stopColor: '#0E1F2F', stopOpacity: 1 }} />
         </linearGradient>
       </defs>
 
@@ -37,7 +37,7 @@ export function Logo({ className, size = 32 }: LogoProps) {
       <circle cx="24" cy="8" r="3.5" fill="#fff" />
       <circle cx="8" cy="24" r="3.5" fill="#fff" />
       <circle cx="24" cy="24" r="3.5" fill="#fff" />
-      <circle cx="16" cy="16" r="4.5" fill="#60a5fa" />
+      <circle cx="16" cy="16" r="4.5" fill="#6ABFF0" />
 
       {/* Connection lines between nodes (workflow connections) */}
       <path
@@ -50,7 +50,7 @@ export function Logo({ className, size = 32 }: LogoProps) {
       {/* Diagonal connections (cross-coordination) */}
       <path
         d="M8 8 L24 24 M24 8 L8 24"
-        stroke="rgba(96,165,250,0.4)"
+        stroke="rgba(106,191,240,0.4)"
         strokeWidth="1"
         fill="none"
         strokeDasharray="2,2"
