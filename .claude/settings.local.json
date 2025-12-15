@@ -31,7 +31,8 @@
       "Bash(node /Users/ryandekker/src/coordination-matrix/scripts/task-daemon.mjs:*)",
       "mcp__playwright__browser_fill_form",
       "mcp__playwright__browser_wait_for",
-      "Bash(npm view:*)"
+      "Bash(npm view:*)",
+      "Bash(npm run test:workflow:*)"
     ],
     "deny": [],
     "ask": []

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, Fragment } from 'react'
+import { useState, Fragment, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -528,20 +528,20 @@ export default function WorkflowsPage() {
     stats: statsMap[w._id],
   }))
 
-  const openCreateEditor = () => {
+  const openCreateEditor = useCallback(() => {
     setEditingWorkflow(null)
     setIsEditorOpen(true)
-  }
+  }, [])
 
-  const openEditEditor = (workflow: WorkflowData) => {
+  const openEditEditor = useCallback((workflow: WorkflowData) => {
     setEditingWorkflow(workflow)
     setIsEditorOpen(true)
-  }
+  }, [])
 
-  const closeEditor = () => {
+  const closeEditor = useCallback(() => {
     setIsEditorOpen(false)
     setEditingWorkflow(null)
-  }
+  }, [])
 
   const handleSave = (workflow: {
     _id?: string
@@ -558,15 +558,15 @@ export default function WorkflowsPage() {
     }
   }
 
-  const handleToggleActive = (workflow: WorkflowData) => {
+  const handleToggleActive = useCallback((workflow: WorkflowData) => {
     updateMutation.mutate({
       id: workflow._id,
       data: { isActive: !workflow.isActive },
     })
-  }
+  }, [updateMutation])
 
-  // Table columns
-  const columns: ColumnDef<WorkflowWithStats>[] = [
+  // Table columns - memoized to prevent infinite re-renders
+  const columns = useMemo<ColumnDef<WorkflowWithStats>[]>(() => [
     {
       id: 'expander',
       header: () => null,
@@ -747,7 +747,7 @@ export default function WorkflowsPage() {
         </DropdownMenu>
       ),
     },
-  ]
+  ], [handleToggleActive, openEditEditor, duplicateMutation, setRunDialog, setDeleteConfirm])
 
   const table = useReactTable({
     data: workflows,
