@@ -93,6 +93,45 @@ db.createCollection('tasks', {
         metadata: {
           bsonType: 'object',
           description: 'Flexible metadata object for storing task outputs, results, and custom data'
+        },
+        // Workflow execution fields
+        workflowRunId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Associated workflow run instance'
+        },
+        workflowStepId: {
+          bsonType: 'string',
+          description: 'Step ID within workflow definition'
+        },
+        taskType: {
+          bsonType: 'string',
+          enum: ['standard', 'decision', 'foreach', 'join', 'external', 'subflow'],
+          description: 'Type of task for workflow execution'
+        },
+        executionMode: {
+          bsonType: 'string',
+          enum: ['manual', 'automated', 'immediate', 'external_callback'],
+          description: 'How the task should be executed'
+        },
+        foreachConfig: {
+          bsonType: 'object',
+          description: 'Configuration for foreach tasks'
+        },
+        externalConfig: {
+          bsonType: 'object',
+          description: 'Configuration for external callback tasks'
+        },
+        batchCounters: {
+          bsonType: 'object',
+          description: 'Counters for batch/foreach operations'
+        },
+        joinConfig: {
+          bsonType: 'object',
+          description: 'Configuration for join tasks'
+        },
+        decisionResult: {
+          bsonType: 'string',
+          description: 'Result of a decision task (selected step ID)'
         }
       }
     }
@@ -105,6 +144,7 @@ db.tasks.createIndex({ parentId: 1 });
 db.tasks.createIndex({ urgency: 1 });
 db.tasks.createIndex({ assigneeId: 1 });
 db.tasks.createIndex({ workflowId: 1 });
+db.tasks.createIndex({ workflowRunId: 1 });
 db.tasks.createIndex({ createdAt: -1 });
 db.tasks.createIndex({ tags: 1 });
 db.tasks.createIndex({ externalId: 1 });
@@ -235,6 +275,28 @@ db.createCollection('workflow_runs', {
         createdById: {
           bsonType: ['objectId', 'null'],
           description: 'User who triggered this run'
+        },
+
+        // Task defaults applied to all child tasks
+        taskDefaults: {
+          bsonType: 'object',
+          description: 'Default values for tasks created in this run'
+        },
+
+        // Execution options
+        executionOptions: {
+          bsonType: 'object',
+          description: 'Options controlling workflow execution'
+        },
+
+        // External correlation
+        externalId: {
+          bsonType: 'string',
+          description: 'External system reference ID'
+        },
+        source: {
+          bsonType: 'string',
+          description: 'Source system that triggered this run'
         },
 
         // Timestamps

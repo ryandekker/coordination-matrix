@@ -235,4 +235,67 @@ router.get('/status', async (_req: Request, res: Response): Promise<void> => {
   }
 });
 
+// POST /api/auth/dev-login - Development-only passwordless login
+// Only available when NODE_ENV !== 'production'
+const devLoginSchema = z.object({
+  email: z.string().email(),
+});
+
+router.post('/dev-login', async (req: Request, res: Response): Promise<void> => {
+  try {
+    // Only allow in development mode
+    if (process.env.NODE_ENV === 'production') {
+      res.status(403).json({ error: 'Dev login is not available in production' });
+      return;
+    }
+
+    const validation = devLoginSchema.safeParse(req.body);
+    if (!validation.success) {
+      res.status(400).json({ error: 'Invalid email format' });
+      return;
+    }
+
+    const { email } = validation.data;
+    const db = getDb();
+    const usersCollection = db.collection('users');
+
+    const user = await usersCollection.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    if (!user.isActive) {
+      res.status(401).json({ error: 'Account is disabled' });
+      return;
+    }
+
+    // Update last login
+    await usersCollection.updateOne(
+      { _id: user._id },
+      { $set: { lastLoginAt: new Date() } }
+    );
+
+    const token = generateToken({
+      userId: user._id.toString(),
+      email: user.email,
+      role: user.role || 'viewer',
+    });
+
+    res.json({
+      token,
+      user: {
+        id: user._id.toString(),
+        email: user.email,
+        displayName: user.displayName,
+        role: user.role || 'viewer',
+      },
+    });
+  } catch (error) {
+    console.error('Dev login error:', error);
+    res.status(500).json({ error: 'Dev login failed' });
+  }
+});
+
 export { router as authRouter };

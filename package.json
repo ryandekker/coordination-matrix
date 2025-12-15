@@ -12,6 +12,8 @@
     "db:stop": "docker compose -f docker-compose.dev.yml down",
     "db:reset": "docker compose -f docker-compose.dev.yml down -v && docker compose -f docker-compose.dev.yml up -d",
     "db:logs": "docker compose -f docker-compose.dev.yml logs -f mongodb",
+    "db:migrate": "cd backend && npm run db:migrate",
+    "db:migrate:status": "cd backend && npm run db:migrate:status",
     "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
     "build": "cd backend && npm run build && cd ../frontend && npm run build",
     "lint": "cd backend && npm run lint && cd ../frontend && npm run lint",

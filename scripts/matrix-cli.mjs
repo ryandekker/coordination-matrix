@@ -240,6 +240,31 @@ async function cmdLogin(args) {
   success(`Logged in as ${result.data.data.user.displayName} (${result.data.data.user.email})`);
 }
 
+async function cmdDevLogin(args) {
+  // Default to admin user if no email provided
+  const email = args.email || args._[0] || 'admin@example.com';
+
+  info(`Attempting dev login as ${email}...`);
+
+  const result = await api.post('/api/auth/dev-login', { email });
+
+  if (!result.ok) {
+    error(`Dev login failed: ${result.data?.error || result.error || 'Unknown error'}`);
+    if (result.status === 403) {
+      info('Dev login is only available in development mode (NODE_ENV != production)');
+    }
+    process.exit(1);
+  }
+
+  const config = loadConfig();
+  config.token = result.data.token;
+  config.user = result.data.user;
+  delete config.apiKey;
+  saveConfig(config);
+
+  success(`Dev login successful as ${result.data.user.displayName} (${result.data.user.email})`);
+}
+
 async function cmdLogout() {
   const config = loadConfig();
   delete config.token;
@@ -1176,6 +1201,7 @@ async function main() {
   const commands = {
     // Session
     'login': cmdLogin,
+    'dev-login': cmdDevLogin,
     'logout': cmdLogout,
     'use-key': cmdUseKey,
     'status': cmdStatus,

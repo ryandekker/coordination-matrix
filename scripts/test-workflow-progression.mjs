@@ -15,17 +15,19 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import os from 'os';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const API_BASE = process.env.API_URL || 'http://localhost:3001';
-const CREDENTIALS_FILE = path.join(__dirname, '.matrix-credentials.json');
+// Use the same config file as matrix-cli.mjs
+const CLI_CONFIG_FILE = path.join(os.homedir(), '.matrix-cli.json');
 const TEST_WORKFLOW_NAME = 'Test Workflow Progression';
 
-// Load stored credentials
+// Load stored credentials from CLI config
 function loadCredentials() {
   try {
-    if (fs.existsSync(CREDENTIALS_FILE)) {
-      return JSON.parse(fs.readFileSync(CREDENTIALS_FILE, 'utf8'));
+    if (fs.existsSync(CLI_CONFIG_FILE)) {
+      return JSON.parse(fs.readFileSync(CLI_CONFIG_FILE, 'utf8'));
     }
   } catch (e) {
     // Ignore

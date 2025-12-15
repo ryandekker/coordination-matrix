@@ -10,7 +10,9 @@
     "lint": "eslint src --ext .ts",
     "test": "vitest",
     "daemon": "tsx src/daemon/automation-daemon.ts",
-    "daemon:watch": "tsx watch src/daemon/automation-daemon.ts"
+    "daemon:watch": "tsx watch src/daemon/automation-daemon.ts",
+    "db:migrate": "tsx src/migrations/cli.ts run",
+    "db:migrate:status": "tsx src/migrations/cli.ts status"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
