@@ -104,11 +104,26 @@ tasksRouter.get('/', async (req: Request, res: Response, next: NextFunction) => 
       db.collection<Task>('tasks').countDocuments(filter),
     ]);
 
-    let resolvedTasks = tasks;
+    // Add child count to each task to enable expand/collapse UI
+    const taskIds = tasks.map(t => t._id);
+    const childCounts = await db.collection<Task>('tasks').aggregate([
+      { $match: { parentId: { $in: taskIds } } },
+      { $group: { _id: '$parentId', count: { $sum: 1 } } }
+    ]).toArray();
+
+    const childCountMap = new Map(childCounts.map(c => [c._id.toString(), c.count]));
+    const tasksWithChildInfo = tasks.map(task => ({
+      ...task,
+      children: childCountMap.get(task._id.toString())
+        ? Array(childCountMap.get(task._id.toString())).fill({})
+        : []
+    }));
+
+    let resolvedTasks = tasksWithChildInfo;
     if (resolveReferences === 'true') {
       const resolver = new ReferenceResolver();
       await resolver.loadFieldConfigs('tasks');
-      resolvedTasks = await resolver.resolveDocuments(tasks);
+      resolvedTasks = await resolver.resolveDocuments(tasksWithChildInfo);
     }
 
     const response: PaginatedResponse<Task> = {

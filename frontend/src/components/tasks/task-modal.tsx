@@ -779,7 +779,7 @@ onClick={() => {
                     'border-input'
                   )}
                 />
-                <p className="text-[10px] text-muted-foreground">Edit JSON and click Update to save</p>
+                <p className="text-[10px] text-muted-foreground">Changes auto-save after 1 second</p>
               </div>
             ) : (
               // View mode - key-value display

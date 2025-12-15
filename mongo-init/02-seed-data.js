@@ -268,12 +268,12 @@ const fieldConfigs = [
     width: 180,
     referenceCollection: 'workflows',
     referenceDisplayField: 'name',
-    defaultVisible: false,
+    defaultVisible: true,
   },
   {
     collectionName: 'tasks',
     fieldPath: 'workflowStage',
-    displayName: 'Workflow Stage',
+    displayName: 'Stage',
     fieldType: 'text',
     isRequired: false,
     isEditable: true,
@@ -282,7 +282,7 @@ const fieldConfigs = [
     isFilterable: true,
     displayOrder: 17,
     width: 150,
-    defaultVisible: false,
+    defaultVisible: true,
   },
 ];
 
@@ -300,7 +300,7 @@ const views = [
     isSystem: true,
     filters: {},
     sorting: [{ field: 'createdAt', direction: 'desc' }],
-    visibleColumns: ['title', 'status', 'urgency', 'assigneeId', 'tags', 'dueAt', 'createdAt'],
+    visibleColumns: ['title', 'status', 'urgency', 'assigneeId', 'workflowId', 'workflowStage', 'tags', 'dueAt', 'createdAt'],
     createdAt: new Date(),
   },
   {
