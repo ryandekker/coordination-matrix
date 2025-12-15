@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import {
-  LayoutDashboard,
   ListTodo,
   Users,
   Settings,
@@ -19,7 +18,9 @@ import {
   LogOut,
   Key,
   User,
+  LayoutDashboard,
 } from 'lucide-react'
+import { Logo } from '@/components/ui/logo'
 import { View } from '@/lib/api'
 import { useViews, useDeleteView } from '@/hooks/use-tasks'
 import { useAuth } from '@/lib/auth'
@@ -92,9 +93,7 @@ export function Sidebar() {
     <div className="flex h-full w-64 flex-col border-r bg-card">
       <div className="flex h-14 items-center border-b px-4">
         <Link href="/" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <LayoutDashboard className="h-4 w-4" />
-          </div>
+          <Logo size={32} />
           <span className="font-semibold">Coordination Matrix</span>
         </Link>
       </div>

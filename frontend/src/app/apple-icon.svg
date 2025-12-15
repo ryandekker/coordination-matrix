@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1e3a5f;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect x="0" y="0" width="180" height="180" rx="36" fill="url(#grad)"/>
+
+  <!-- Grid lines (matrix pattern) -->
+  <path d="M45 10 L45 170 M135 10 L135 170 M10 45 L170 45 M10 135 L170 135"
+        stroke="rgba(255,255,255,0.15)" stroke-width="2" fill="none"/>
+
+  <!-- Node circles at intersections (coordination points) -->
+  <circle cx="45" cy="45" r="20" fill="#fff"/>
+  <circle cx="135" cy="45" r="20" fill="#fff"/>
+  <circle cx="45" cy="135" r="20" fill="#fff"/>
+  <circle cx="135" cy="135" r="20" fill="#fff"/>
+  <circle cx="90" cy="90" r="25" fill="#60a5fa"/>
+
+  <!-- Connection lines between nodes (workflow connections) -->
+  <path d="M45 45 L90 90 M135 45 L90 90 M45 135 L90 90 M135 135 L90 90"
+        stroke="rgba(255,255,255,0.6)" stroke-width="4" fill="none"/>
+
+  <!-- Diagonal connections (cross-coordination) -->
+  <path d="M45 45 L135 135 M135 45 L45 135"
+        stroke="rgba(96,165,250,0.4)" stroke-width="2" fill="none" stroke-dasharray="8,8"/>
+</svg>

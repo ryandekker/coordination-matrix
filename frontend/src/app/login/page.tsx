@@ -4,8 +4,9 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Logo } from '@/components/ui/logo';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 export default function LoginPage() {
   const { login, register, user, isLoading } = useAuth();
@@ -68,6 +69,9 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="bg-card border rounded-lg p-8 shadow-lg">
           <div className="text-center mb-6">
+            <div className="flex justify-center mb-3">
+              <Logo size={48} />
+            </div>
             <h1 className="text-2xl font-bold">Coordination Matrix</h1>
             <p className="text-muted-foreground mt-1">
               {setupRequired
