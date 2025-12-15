@@ -7,7 +7,81 @@ import { TaskToolbar } from './task-toolbar'
 import { TaskModal } from './task-modal'
 import { ColumnConfigModal } from './column-config-modal'
 import { useTasks, useTask, useLookups, useFieldConfigs, useViews, useUsers, useCreateView, useUpdateView } from '@/hooks/use-tasks'
-import { Task, View } from '@/lib/api'
+import { Task, View, FieldConfig } from '@/lib/api'
+
+// Fallback field configs when API returns empty or fails - ensures basic functionality
+const FALLBACK_FIELD_CONFIGS: FieldConfig[] = [
+  {
+    _id: 'fallback-title',
+    collectionName: 'tasks',
+    fieldPath: 'title',
+    displayName: 'Title',
+    fieldType: 'text',
+    isRequired: true,
+    isEditable: true,
+    isSearchable: true,
+    isSortable: true,
+    isFilterable: false,
+    displayOrder: 1,
+    width: 300,
+    minWidth: 150,
+    defaultVisible: true,
+    renderAs: 'text',
+  },
+  {
+    _id: 'fallback-status',
+    collectionName: 'tasks',
+    fieldPath: 'status',
+    displayName: 'Status',
+    fieldType: 'lookup',
+    lookupType: 'status',
+    isRequired: true,
+    isEditable: true,
+    isSearchable: false,
+    isSortable: true,
+    isFilterable: true,
+    displayOrder: 2,
+    width: 120,
+    minWidth: 80,
+    defaultVisible: true,
+    renderAs: 'badge',
+  },
+  {
+    _id: 'fallback-urgency',
+    collectionName: 'tasks',
+    fieldPath: 'urgency',
+    displayName: 'Urgency',
+    fieldType: 'lookup',
+    lookupType: 'urgency',
+    isRequired: false,
+    isEditable: true,
+    isSearchable: false,
+    isSortable: true,
+    isFilterable: true,
+    displayOrder: 3,
+    width: 100,
+    minWidth: 80,
+    defaultVisible: true,
+    renderAs: 'badge',
+  },
+  {
+    _id: 'fallback-createdAt',
+    collectionName: 'tasks',
+    fieldPath: 'createdAt',
+    displayName: 'Created',
+    fieldType: 'datetime',
+    isRequired: false,
+    isEditable: false,
+    isSearchable: false,
+    isSortable: true,
+    isFilterable: false,
+    displayOrder: 4,
+    width: 150,
+    minWidth: 100,
+    defaultVisible: true,
+    renderAs: 'text',
+  },
+]
 
 export function TasksPage() {
   const searchParams = useSearchParams()
@@ -53,7 +127,10 @@ export function TasksPage() {
   const tasks = tasksData?.data || []
   const pagination = tasksData?.pagination
   const lookups = lookupsData?.data || {}
-  const fieldConfigs = fieldConfigsData?.data || []
+  // Use API field configs if available, otherwise fall back to defaults
+  const fieldConfigs = (fieldConfigsData?.data && fieldConfigsData.data.length > 0)
+    ? fieldConfigsData.data
+    : FALLBACK_FIELD_CONFIGS
   const views = viewsData?.data || []
   const users = usersData?.data || []
 
