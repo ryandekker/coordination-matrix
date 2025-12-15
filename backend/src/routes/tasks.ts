@@ -17,8 +17,16 @@ function toObjectId(id: string): ObjectId {
   return new ObjectId(id);
 }
 
+// Helper to resolve {{currentUserId}} placeholder
+function resolveUserPlaceholder(value: string, currentUserId?: string): string {
+  if (value === '{{currentUserId}}' && currentUserId) {
+    return currentUserId;
+  }
+  return value;
+}
+
 // Helper to build filter from query params
-function buildFilter(query: Record<string, unknown>): Filter<Task> {
+function buildFilter(query: Record<string, unknown>, currentUserId?: string): Filter<Task> {
   const filter: Filter<Task> = {};
   const { search, filters, parentId, rootOnly, status, urgency, assigneeId, tags } = query;
 
@@ -54,7 +62,11 @@ function buildFilter(query: Record<string, unknown>): Filter<Task> {
 
   // Assignee filter
   if (assigneeId) {
-    filter.assigneeId = toObjectId(assigneeId as string);
+    const resolvedAssigneeId = resolveUserPlaceholder(assigneeId as string, currentUserId);
+    // Skip if placeholder couldn't be resolved (no current user)
+    if (resolvedAssigneeId !== '{{currentUserId}}') {
+      filter.assigneeId = toObjectId(resolvedAssigneeId);
+    }
   }
 
   // Tags filter
@@ -96,7 +108,7 @@ tasksRouter.get('/', async (req: Request, res: Response, next: NextFunction) => 
     const limitNum = Math.min(200, Math.max(1, parseInt(limit as string, 10) || 50));
     const skip = (pageNum - 1) * limitNum;
 
-    const filter = buildFilter(req.query as Record<string, unknown>);
+    const filter = buildFilter(req.query as Record<string, unknown>, req.user?.userId);
     const sort: Sort = { [sortBy as string]: sortOrder === 'asc' ? 1 : -1 };
 
     const [tasks, total] = await Promise.all([
