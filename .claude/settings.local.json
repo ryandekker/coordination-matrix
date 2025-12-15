@@ -33,7 +33,8 @@
       "mcp__playwright__browser_wait_for",
       "Bash(npm view:*)",
       "Bash(npm run test:workflow:*)",
-      "Bash(npm run cli:*)"
+      "Bash(npm run cli:*)",
+      "mcp__playwright__browser_evaluate"
     ],
     "deny": [],
     "ask": []

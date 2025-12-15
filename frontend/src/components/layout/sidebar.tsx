@@ -9,7 +9,6 @@ import {
   Users,
   Settings,
   Workflow,
-  Cog,
   Bookmark,
   ChevronDown,
   ChevronRight,
@@ -19,6 +18,9 @@ import {
   Key,
   User,
   LayoutDashboard,
+  Database,
+  Palette,
+  Webhook,
 } from 'lucide-react'
 import { Logo } from '@/components/ui/logo'
 import { View } from '@/lib/api'
@@ -49,8 +51,13 @@ const bottomNavigation: NavItem[] = [
   { name: 'Workflows', href: '/workflows', icon: Workflow, exact: true },
   { name: 'Workflow Runs', href: '/workflow-runs', icon: Play, exact: false },
   { name: 'Users', href: '/users', icon: Users, exact: true },
-  { name: 'Settings', href: '/settings', icon: Settings, exact: true },
-  { name: 'Field Config', href: '/settings/fields', icon: Cog, exact: true },
+]
+
+const settingsNavigation: NavItem[] = [
+  { name: 'Field Configuration', href: '/settings/fields', icon: Database, exact: true },
+  { name: 'API Keys', href: '/settings/api-keys', icon: Key, exact: true },
+  { name: 'Webhooks', href: '/settings/webhooks', icon: Webhook, exact: true },
+  { name: 'Appearance', href: '/settings/appearance', icon: Palette, exact: true },
 ]
 
 export function Sidebar() {
@@ -58,6 +65,7 @@ export function Sidebar() {
   const searchParams = useSearchParams()
   const currentViewId = searchParams.get('viewId')
   const [savedSearchesExpanded, setSavedSearchesExpanded] = useState(true)
+  const [settingsExpanded, setSettingsExpanded] = useState(() => pathname.startsWith('/settings'))
   const [changePasswordOpen, setChangePasswordOpen] = useState(false)
   const { user, logout } = useAuth()
 
@@ -77,16 +85,24 @@ export function Sidebar() {
 
   const isStaticItemActive = (item: NavItem) => {
     const [itemPath] = item.href.split('?')
+    // Normalize paths by removing trailing slashes for comparison
+    const normalizedPathname = pathname.replace(/\/$/, '') || '/'
+    const normalizedItemPath = itemPath.replace(/\/$/, '') || '/'
 
     if (item.exact) {
-      return pathname === itemPath && !currentViewId
+      // For /tasks, also check that no viewId is selected (to distinguish from saved searches)
+      if (normalizedItemPath === '/tasks') {
+        return normalizedPathname === normalizedItemPath && !currentViewId
+      }
+      return normalizedPathname === normalizedItemPath
     }
 
-    return pathname.startsWith(itemPath)
+    return normalizedPathname.startsWith(normalizedItemPath)
   }
 
   const isViewActive = (view: View) => {
-    return pathname === '/tasks' && currentViewId === view._id
+    const normalizedPathname = pathname.replace(/\/$/, '') || '/'
+    return normalizedPathname === '/tasks' && currentViewId === view._id
   }
 
   return (
@@ -108,7 +124,7 @@ export function Sidebar() {
                 className={cn(
                   'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
                   isActive
-                    ? 'bg-primary text-primary-foreground'
+                    ? 'bg-primary/10 text-primary border-l-2 border-primary'
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 )}
               >
@@ -144,7 +160,7 @@ export function Sidebar() {
                         className={cn(
                           'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
                           isActive
-                            ? 'bg-primary text-primary-foreground'
+                            ? 'bg-primary/10 text-primary border-l-2 border-primary'
                             : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                         )}
                       >
@@ -161,7 +177,7 @@ export function Sidebar() {
                             className={cn(
                               'p-1 rounded',
                               isActive
-                                ? 'hover:bg-primary-foreground/20 text-primary-foreground'
+                                ? 'hover:bg-destructive/20 text-destructive'
                                 : 'hover:bg-destructive/20 text-destructive'
                             )}
                             title="Delete saved search"
@@ -189,7 +205,7 @@ export function Sidebar() {
                 className={cn(
                   'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
                   isActive
-                    ? 'bg-primary text-primary-foreground'
+                    ? 'bg-primary/10 text-primary border-l-2 border-primary'
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 )}
               >
@@ -198,13 +214,56 @@ export function Sidebar() {
               </Link>
             )
           })}
+
+          {/* Settings Section */}
+          <div className="mt-2">
+            <button
+              onClick={() => setSettingsExpanded(!settingsExpanded)}
+              className={cn(
+                'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                pathname.startsWith('/settings')
+                  ? 'bg-primary/10 text-primary border-l-2 border-primary'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              )}
+            >
+              <Settings className="h-4 w-4" />
+              <span className="flex-1 text-left">Settings</span>
+              {settingsExpanded ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )}
+            </button>
+            {settingsExpanded && (
+              <div className="mt-1 ml-4 space-y-1">
+                {settingsNavigation.map((item) => {
+                  const isActive = isStaticItemActive(item)
+                  return (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      className={cn(
+                        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                        isActive
+                          ? 'bg-primary/10 text-primary border-l-2 border-primary'
+                          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                      )}
+                    >
+                      <item.icon className="h-4 w-4" />
+                      {item.name}
+                    </Link>
+                  )
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </nav>
       <div className="border-t p-4">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button className="flex w-full items-center gap-3 rounded-lg p-2 hover:bg-muted transition-colors">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground">
                 <User className="h-4 w-4" />
               </div>
               <div className="flex-1 text-left text-sm">

@@ -151,6 +151,14 @@ export function TasksPage() {
           setSearch(view.filters.search as string)
         }
       }
+    } else if (!viewIdFromUrl && selectedView) {
+      // Clear view selection and reset to defaults when navigating to /tasks without viewId
+      setSelectedView(null)
+      setFilters({})
+      setSearch('')
+      setSortBy('createdAt')
+      setSortOrder('desc')
+      setVisibleColumns([])
     }
   }, [viewIdFromUrl, views, selectedView])
 

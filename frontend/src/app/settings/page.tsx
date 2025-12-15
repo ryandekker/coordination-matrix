@@ -34,7 +34,6 @@ const settingsItems = [
     description: 'Customize the look and feel of the application',
     href: '/settings/appearance',
     icon: Palette,
-    disabled: true,
   },
   {
     name: 'Notifications',
