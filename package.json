@@ -16,6 +16,8 @@
     "build": "cd backend && npm run build && cd ../frontend && npm run build",
     "lint": "cd backend && npm run lint && cd ../frontend && npm run lint",
     "test": "cd backend && npm test",
+    "cli": "node scripts/matrix-cli.mjs",
+    "matrix": "node scripts/matrix-cli.mjs",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f"

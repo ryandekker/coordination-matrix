@@ -22,6 +22,7 @@ import { activityLogService } from './services/activity-log.js';
 import { webhookService } from './services/webhook-service.js';
 import { batchJobService } from './services/batch-job-service.js';
 import { workflowExecutionService } from './services/workflow-execution-service.js';
+import { setupSwagger } from './swagger.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -39,6 +40,9 @@ app.use(express.json({ limit: '10mb' }));
 app.get('/health', (_, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
+
+// Swagger documentation
+setupSwagger(app);
 
 // Auth routes (public)
 app.use('/api/auth', authRouter);
