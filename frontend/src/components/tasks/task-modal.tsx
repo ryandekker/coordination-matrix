@@ -45,7 +45,10 @@ export function TaskModal({
   const queryClient = useQueryClient()
   const prevIsOpenRef = useRef(false)
   const [isMetadataEditMode, setIsMetadataEditMode] = useState(false)
+  const [metadataError, setMetadataError] = useState<string | null>(null)
   const metadataTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const savedMetadataValueRef = useRef<string>('') // Track last saved value for reset
+  const currentMetadataValueRef = useRef<string>('') // Track current textarea value to restore after re-renders
 
   // Auto-save refs (using refs to avoid re-renders during typing)
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -237,22 +240,7 @@ export function TaskModal({
 
     try {
       const taskData = buildTaskData(data)
-
-      // Include metadata if in edit mode
-      if (metadataTextareaRef.current) {
-        try {
-          const jsonValue = metadataTextareaRef.current.value.trim()
-          if (jsonValue) {
-            const parsed = JSON.parse(jsonValue)
-            if (typeof parsed === 'object' && !Array.isArray(parsed)) {
-              taskData.metadata = parsed
-            }
-          }
-        } catch {
-          // Invalid JSON - skip metadata update
-        }
-      }
-
+      // Note: metadata is saved separately via its own Save button
       await updateTask.mutateAsync({ id: task._id, data: taskData })
       lastSavedDataRef.current = currentDataStr
     } catch {
@@ -289,10 +277,30 @@ export function TaskModal({
     }
   }, [watch, task, isOpen, scheduleAutoSave])
 
+  // Validate metadata JSON and return parsed value or null if invalid
+  const parseMetadataJson = useCallback((value: string): { valid: boolean; parsed: unknown; error: string | null } => {
+    const trimmed = value.trim()
+    if (!trimmed) {
+      return { valid: true, parsed: {}, error: null }
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed)
+      return { valid: true, parsed, error: null }
+    } catch {
+      return { valid: false, parsed: null, error: 'Invalid JSON' }
+    }
+  }, [])
+
+
   // Cleanup on close
   useEffect(() => {
-    if (!isOpen && autoSaveTimeoutRef.current) {
-      clearTimeout(autoSaveTimeoutRef.current)
+    if (!isOpen) {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current)
+      }
+      setMetadataError(null)
+      setIsMetadataEditMode(false)
     }
   }, [isOpen])
 
@@ -357,21 +365,7 @@ export function TaskModal({
       taskData.parentId = parentTask._id
     }
 
-    // Include metadata from the textarea if in edit mode
-    if (task && metadataTextareaRef.current) {
-      try {
-        const jsonValue = metadataTextareaRef.current.value.trim()
-        if (jsonValue) {
-          const parsed = JSON.parse(jsonValue)
-          if (typeof parsed === 'object' && !Array.isArray(parsed)) {
-            taskData.metadata = parsed
-          }
-        }
-      } catch {
-        // Invalid JSON - don't include metadata update, let form submit continue
-        // The validation will show on next edit attempt
-      }
-    }
+    // Note: metadata is saved separately via its own Save button
 
     if (task) {
       await updateTask.mutateAsync({ id: task._id, data: taskData })
@@ -784,11 +778,15 @@ export function TaskModal({
                 className="h-5 px-1.5 text-[10px]"
 onClick={() => {
                   if (!isMetadataEditMode) {
-                    // Switching to edit mode - populate textarea after render
+                    // Switching to edit mode - store the initial value
+                    const initialValue = JSON.stringify(task?.metadata || {}, null, 2)
+                    savedMetadataValueRef.current = initialValue
+                    currentMetadataValueRef.current = initialValue
+                    setMetadataError(null)
+                    // Set textarea value after it mounts
                     setTimeout(() => {
                       if (metadataTextareaRef.current) {
-                        metadataTextareaRef.current.value = JSON.stringify(task?.metadata || {}, null, 2)
-                        metadataTextareaRef.current.focus()
+                        metadataTextareaRef.current.value = initialValue
                       }
                     }, 0)
                   }
@@ -800,12 +798,16 @@ onClick={() => {
             </div>
 
             {isMetadataEditMode ? (
-              // Edit mode - JSON textarea (uncontrolled to prevent cursor issues)
-              // Saves automatically when the main form Update button is clicked
+              // Edit mode - uncontrolled JSON textarea (ref-based to avoid re-render lag)
               <div className="space-y-1">
                 <textarea
                   ref={metadataTextareaRef}
-                  defaultValue={JSON.stringify(task?.metadata || {}, null, 2)}
+                  // Note: Do NOT use defaultValue here - it resets on re-renders.
+                  // The value is set via ref in the Edit button onClick handler.
+                  onInput={(e) => {
+                    // Track current value in ref so it survives re-renders
+                    currentMetadataValueRef.current = (e.target as HTMLTextAreaElement).value
+                  }}
                   onKeyDown={(e) => {
                     // Prevent form submission on Enter
                     if (e.key === 'Enter') {
@@ -815,12 +817,76 @@ onClick={() => {
                   placeholder='{"key": "value"}'
                   rows={6}
                   className={cn(
-                    'flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs font-mono',
+                    'flex w-full rounded-md border bg-background px-3 py-1.5 text-xs font-mono',
                     'placeholder:text-muted-foreground resize-y transition-colors',
-                    'focus-visible:outline-none focus-visible:border-primary'
+                    'focus-visible:outline-none',
+                    metadataError
+                      ? 'border-destructive focus-visible:border-destructive'
+                      : 'border-input focus-visible:border-primary'
                   )}
                 />
-                <p className="text-[10px] text-muted-foreground">Changes auto-save after 1 second</p>
+                <div className="flex items-center justify-between">
+                  {metadataError ? (
+                    <p className="text-[10px] text-destructive">{metadataError}</p>
+                  ) : (
+                    <p className="text-[10px] text-muted-foreground">&nbsp;</p>
+                  )}
+                  <div className="flex gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        // Update both refs to the saved value
+                        currentMetadataValueRef.current = savedMetadataValueRef.current
+                        if (metadataTextareaRef.current) {
+                          metadataTextareaRef.current.value = savedMetadataValueRef.current
+                        }
+                        setMetadataError(null)
+                        // Restore value after re-render clears the textarea
+                        setTimeout(() => {
+                          if (metadataTextareaRef.current) {
+                            metadataTextareaRef.current.value = currentMetadataValueRef.current
+                          }
+                        }, 0)
+                      }}
+                    >
+                      Reset
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="default"
+                      size="sm"
+                      className="h-5 px-2 text-[10px]"
+                      onClick={async () => {
+                        if (!task) return
+                        // Use ref value since textarea may be cleared by re-render
+                        const currentValue = currentMetadataValueRef.current
+                        const { valid, parsed, error } = parseMetadataJson(currentValue)
+                        setMetadataError(error)
+                        // Restore value after re-render clears the textarea
+                        setTimeout(() => {
+                          if (metadataTextareaRef.current) {
+                            metadataTextareaRef.current.value = currentMetadataValueRef.current
+                          }
+                        }, 0)
+                        if (!valid) return
+                        try {
+                          await updateTask.mutateAsync({ id: task._id, data: { metadata: parsed as Record<string, unknown> } })
+                          // Update saved value so Reset reflects the new saved state
+                          savedMetadataValueRef.current = currentValue
+                          // Return to view mode on successful save
+                          setIsMetadataEditMode(false)
+                        } catch {
+                          // Silently fail
+                        }
+                      }}
+                    >
+                      Save
+                    </Button>
+                  </div>
+                </div>
               </div>
             ) : (
               // View mode - key-value display
