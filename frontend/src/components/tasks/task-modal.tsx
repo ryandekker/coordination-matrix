@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useForm, Controller } from 'react-hook-form'
 import { useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceToNow } from 'date-fns'
-import { Check, Loader2 } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -21,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Task, FieldConfig, LookupValue, User, Workflow } from '@/lib/api'
+import { Task, FieldConfig, LookupValue } from '@/lib/api'
 import { useCreateTask, useUpdateTask, useUsers, useWorkflows, useTasks } from '@/hooks/use-tasks'
 import { cn } from '@/lib/utils'
 import { TaskActivity } from './task-activity'
@@ -48,10 +47,10 @@ export function TaskModal({
   const [isMetadataEditMode, setIsMetadataEditMode] = useState(false)
   const metadataTextareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Auto-save state
-  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
+  // Auto-save refs (using refs to avoid re-renders during typing)
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastSavedDataRef = useRef<string>('')
+  const pendingChangesRef = useRef<Record<string, unknown> | null>(null)
 
   const createTask = useCreateTask()
   const updateTask = useUpdateTask()
@@ -132,6 +131,7 @@ export function TaskModal({
     reset,
     watch,
     setValue,
+    getValues,
     formState: { isSubmitting },
   } = useForm({
     defaultValues,
@@ -209,14 +209,13 @@ export function TaskModal({
     return taskData
   }, [editableFields])
 
-  // Auto-save function
-  const performAutoSave = useCallback(async (data: Record<string, unknown>) => {
+  // Auto-save function (called on blur of fields)
+  const performAutoSave = useCallback(async () => {
     if (!task) return
 
+    const data = getValues()
     const currentDataStr = JSON.stringify(data)
     if (currentDataStr === lastSavedDataRef.current) return
-
-    setAutoSaveStatus('saving')
 
     try {
       const taskData = buildTaskData(data)
@@ -238,50 +237,55 @@ export function TaskModal({
 
       await updateTask.mutateAsync({ id: task._id, data: taskData })
       lastSavedDataRef.current = currentDataStr
-      setAutoSaveStatus('saved')
-
-      // Reset to idle after 2 seconds
-      setTimeout(() => setAutoSaveStatus('idle'), 2000)
     } catch {
-      setAutoSaveStatus('idle')
+      // Silently fail - user can retry
     }
-  }, [task, buildTaskData, updateTask])
+  }, [task, buildTaskData, updateTask, getValues])
 
-  // Watch form values for auto-save (edit mode only)
-  const watchedValues = watch()
+  // Schedule auto-save (debounced)
+  const scheduleAutoSave = useCallback(() => {
+    if (!task) return
 
-  useEffect(() => {
-    // Only auto-save in edit mode
-    if (!task || !isOpen) return
-
-    // Clear any pending auto-save timeout
     if (autoSaveTimeoutRef.current) {
       clearTimeout(autoSaveTimeoutRef.current)
     }
 
-    // Debounce auto-save by 1 second
     autoSaveTimeoutRef.current = setTimeout(() => {
-      performAutoSave(watchedValues)
-    }, 1000)
+      performAutoSave()
+    }, 800)
+  }, [task, performAutoSave])
+
+  // Use subscription-based watch to trigger auto-save without re-renders
+  useEffect(() => {
+    if (!task || !isOpen) return
+
+    const subscription = watch(() => {
+      scheduleAutoSave()
+    })
 
     return () => {
+      subscription.unsubscribe()
       if (autoSaveTimeoutRef.current) {
         clearTimeout(autoSaveTimeoutRef.current)
       }
     }
-  }, [watchedValues, task, isOpen, performAutoSave])
+  }, [watch, task, isOpen, scheduleAutoSave])
 
-  // Cleanup on unmount or close
+  // Cleanup on close
   useEffect(() => {
-    if (!isOpen) {
-      if (autoSaveTimeoutRef.current) {
-        clearTimeout(autoSaveTimeoutRef.current)
-      }
-      setAutoSaveStatus('idle')
+    if (!isOpen && autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current)
     }
   }, [isOpen])
 
   const onSubmit = async (data: Record<string, unknown>) => {
+    // Validate title is required for create
+    const title = data.title as string
+    if (!task && (!title || !title.trim())) {
+      // Title is required for new tasks - don't submit
+      return
+    }
+
     const taskData: Partial<Task> = {}
 
     editableFields.forEach((fc) => {
@@ -345,12 +349,21 @@ export function TaskModal({
   const currentUrgencyOption = urgencyOptions.find(u => u.code === currentUrgency)
   const currentAssignee = users.find(u => u._id === currentAssigneeId)
 
+  // Handle title blur - save on blur
+  const handleTitleBlur = useCallback(() => {
+    if (!task) return
+    const title = getValues('title')
+    if (title && title !== task.title) {
+      performAutoSave()
+    }
+  }, [task, getValues, performAutoSave])
+
   // Editable header with key fields for existing tasks
   const EditableHeader = () => {
     if (!task) return null
 
     return (
-      <div className="flex flex-wrap items-center gap-2 pb-3 border-b border-border">
+      <div className="flex flex-wrap items-center gap-2 pb-3 border-b border-border/50">
         {/* Status - inline select */}
         <Controller
           name="status"
@@ -483,11 +496,13 @@ export function TaskModal({
   const FormContent = ({ isEditMode = false }: { isEditMode?: boolean }) => (
     <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col h-full">
       <div className="flex-1 space-y-3 overflow-y-auto pr-1">
-        {/* Title */}
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Title *</label>
-          <Input {...register('title')} placeholder="Task title" className="h-8 text-sm" />
-        </div>
+        {/* Title - only show in create mode (edit mode has title in header) */}
+        {!isEditMode && (
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Title *</label>
+            <Input {...register('title')} placeholder="Task title" className="h-8 text-sm" />
+          </div>
+        )}
 
         {/* Summary */}
         <div className="space-y-1">
@@ -797,44 +812,17 @@ onClick={() => {
         )}
       </div>
 
-      {/* Footer - sticky at bottom */}
-      <DialogFooter className="pt-3 mt-3 border-t flex-shrink-0">
-        {isEditMode ? (
-          // Edit mode: show auto-save status and close button
-          <>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground mr-auto">
-              {autoSaveStatus === 'saving' && (
-                <>
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  <span>Saving...</span>
-                </>
-              )}
-              {autoSaveStatus === 'saved' && (
-                <>
-                  <Check className="h-3 w-3 text-green-500" />
-                  <span>Saved</span>
-                </>
-              )}
-              {autoSaveStatus === 'idle' && (
-                <span className="text-muted-foreground/50">Auto-save enabled</span>
-              )}
-            </div>
-            <Button type="button" variant="outline" size="sm" onClick={onClose}>
-              Close
-            </Button>
-          </>
-        ) : (
-          // Create mode: show cancel and create buttons
-          <>
-            <Button type="button" variant="outline" size="sm" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" size="sm" disabled={isSubmitting}>
-              {isSubmitting ? 'Creating...' : 'Create'}
-            </Button>
-          </>
-        )}
-      </DialogFooter>
+      {/* Footer - only show in create mode */}
+      {!isEditMode && (
+        <DialogFooter className="pt-3 mt-3 border-t flex-shrink-0">
+          <Button type="button" variant="outline" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" size="sm" disabled={isSubmitting}>
+            {isSubmitting ? 'Creating...' : 'Create'}
+          </Button>
+        </DialogFooter>
+      )}
     </form>
   )
 
@@ -842,7 +830,7 @@ onClick={() => {
   if (!task) {
     return (
       <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="max-w-lg max-h-[85vh] flex flex-col">
+        <DialogContent className="max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
           <DialogHeader className="pb-2 flex-shrink-0">
             <DialogTitle className="text-base">
               {parentTask ? `New Subtask` : 'New Task'}
@@ -853,7 +841,7 @@ onClick={() => {
               </p>
             )}
           </DialogHeader>
-          <div className="flex-1 min-h-0">
+          <div className="flex-1 min-h-0 overflow-y-auto">
             <FormContent isEditMode={false} />
           </div>
         </DialogContent>
@@ -864,30 +852,45 @@ onClick={() => {
   // Edit mode - two column layout with integrated activity
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-6xl h-[90vh] p-0 gap-0 flex flex-col">
+      <DialogContent className="max-w-6xl h-[90vh] p-0 gap-0 flex flex-col overflow-hidden">
+        {/* Accessibility: visually hidden title */}
+        <span className="sr-only">Edit Task</span>
+
         {/* Header - fixed */}
         <div className="px-5 pt-5 pb-3 flex-shrink-0">
-          <DialogHeader className="pb-3">
-            <DialogTitle className="text-base font-semibold truncate pr-8">
-              {task.title}
-            </DialogTitle>
-          </DialogHeader>
-          <EditableHeader />
+          {/* Editable title with underline style */}
+          <input
+            {...register('title', {
+              onBlur: handleTitleBlur,
+            })}
+            placeholder="Task title..."
+            className={cn(
+              'w-full text-lg font-semibold bg-transparent pr-8',
+              'border-0 border-b-2 border-transparent rounded-none',
+              'hover:border-muted-foreground/30 focus:border-primary',
+              'focus:outline-none focus:ring-0',
+              'transition-colors duration-150',
+              'placeholder:text-muted-foreground/50'
+            )}
+          />
+          <div className="mt-3">
+            <EditableHeader />
+          </div>
         </div>
 
         {/* Two-column content - both scrollable */}
-        <div className="flex flex-1 min-h-0">
+        <div className="flex flex-1 min-h-0 overflow-hidden">
           {/* Left column - Form */}
-          <div className="flex-1 px-5 pb-5 flex flex-col min-h-0 border-r border-border">
+          <div className="flex-1 px-5 pb-5 flex flex-col min-h-0 border-r border-border overflow-y-auto">
             <FormContent isEditMode={true} />
           </div>
 
           {/* Right column - Activity Feed */}
-          <div className="w-96 flex flex-col min-h-0 bg-muted/30">
+          <div className="w-96 flex-shrink-0 flex flex-col min-h-0 bg-muted/30">
             <div className="px-4 py-2 border-b border-border bg-background/50 flex-shrink-0">
               <h3 className="text-sm font-medium">Activity</h3>
             </div>
-            <div className="flex-1 min-h-0 overflow-hidden">
+            <div className="flex-1 min-h-0 overflow-y-auto">
               <TaskActivity taskId={task._id} className="h-full" compact />
             </div>
           </div>
