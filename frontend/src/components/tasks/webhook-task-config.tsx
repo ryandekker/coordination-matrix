@@ -16,7 +16,7 @@ import { Task, WebhookConfig, WebhookMethod, WebhookAttempt, tasksApi } from '@/
 import { cn } from '@/lib/utils'
 
 interface WebhookTaskConfigProps {
-  task: Task
+  task?: Task | null
   isEditMode: boolean
   webhookConfig?: WebhookConfig
   onConfigChange: (config: WebhookConfig) => void
@@ -41,12 +41,13 @@ export function WebhookTaskConfig({
   })
   const [headersError, setHeadersError] = useState<string | null>(null)
 
-  const isWebhookTask = task.taskType === 'webhook'
-  const canRetry = task.status === 'failed' && isWebhookTask
+  const isWebhookTask = task?.taskType === 'webhook'
+  const canRetry = task?.status === 'failed' && isWebhookTask
   const attempts = webhookConfig?.attempts || []
   const lastAttempt = attempts[attempts.length - 1]
 
   const handleExecute = async () => {
+    if (!task?._id) return
     setIsExecuting(true)
     try {
       await tasksApi.executeWebhook(task._id)
@@ -60,6 +61,7 @@ export function WebhookTaskConfig({
   }
 
   const handleRetry = async () => {
+    if (!task?._id) return
     setIsRetrying(true)
     try {
       await tasksApi.retryWebhook(task._id)
@@ -103,13 +105,14 @@ export function WebhookTaskConfig({
     }
   }
 
-  // Config editing section (only shown when editing)
-  if (isEditMode && isWebhookTask) {
+  // Config editing section - shown in edit mode or when creating a new webhook task
+  // The component is rendered when taskType is 'webhook', so always show config form
+  if (isEditMode || !task) {
     return (
       <div className="space-y-3 pt-2 border-t border-border/50">
         <div className="flex items-center justify-between">
           <label className="text-xs font-medium text-muted-foreground">Webhook Configuration</label>
-          {task.status === 'pending' && webhookConfig?.url && (
+          {task?.status === 'pending' && webhookConfig?.url && (
             <Button
               type="button"
               variant="outline"

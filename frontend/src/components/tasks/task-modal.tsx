@@ -162,6 +162,7 @@ export function TaskModal({
   })
 
   const selectedWorkflowId = watch('workflowId') as string | null
+  const currentTaskType = watch('taskType') as string
 
   // Memoize workflow lookup to prevent unnecessary recalculations
   const selectedWorkflow = useMemo(
@@ -405,12 +406,59 @@ export function TaskModal({
     }
   }, [task, getValues, performAutoSave])
 
+  // Task type display labels
+  const taskTypeLabels: Record<string, string> = {
+    standard: 'Standard',
+    webhook: 'Webhook',
+    external: 'External',
+    trigger: 'Trigger',
+    decision: 'Decision',
+    foreach: 'ForEach',
+    join: 'Join',
+    subflow: 'Subflow',
+  }
+
   // Editable header with key fields for existing tasks
   const EditableHeader = () => {
     if (!task) return null
 
     return (
       <div className="flex flex-wrap items-center gap-2 pb-3 border-b border-border/50">
+        {/* Task Type - inline select */}
+        <Controller
+          name="taskType"
+          control={control}
+          render={({ field }) => (
+            <Select
+              value={field.value as string || 'standard'}
+              onValueChange={(val) => {
+                field.onChange(val)
+                // Initialize webhook config when switching to webhook type
+                if (val === 'webhook' && !webhookConfig) {
+                  setWebhookConfig({
+                    url: '',
+                    method: 'POST',
+                    maxRetries: 3,
+                    retryDelayMs: 1000,
+                    timeoutMs: 30000,
+                  })
+                }
+              }}
+            >
+              <SelectTrigger className="h-7 w-auto gap-1.5 px-2 text-xs border-0 bg-transparent hover:bg-muted">
+                <span className="text-muted-foreground">{taskTypeLabels[field.value as string] || 'Standard'}</span>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="standard">Standard</SelectItem>
+                <SelectItem value="webhook">Webhook</SelectItem>
+                <SelectItem value="external">External</SelectItem>
+                <SelectItem value="trigger">Trigger</SelectItem>
+                <SelectItem value="decision">Decision</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+        />
+
         {/* Status - inline select */}
         <Controller
           name="status"
@@ -777,46 +825,48 @@ export function TaskModal({
           />
         </div>
 
-        {/* Task Type selector */}
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Task Type</label>
-          <Controller
-            name="taskType"
-            control={control}
-            render={({ field }) => (
-              <Select
-                value={field.value as string || 'standard'}
-                onValueChange={(val) => {
-                  field.onChange(val)
-                  // Initialize webhook config when switching to webhook type
-                  if (val === 'webhook' && !webhookConfig) {
-                    setWebhookConfig({
-                      url: '',
-                      method: 'POST',
-                      maxRetries: 3,
-                      retryDelayMs: 1000,
-                      timeoutMs: 30000,
-                    })
-                  }
-                }}
-              >
-                <SelectTrigger className="h-8 text-sm">
-                  <SelectValue placeholder="Select type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="standard">Standard</SelectItem>
-                  <SelectItem value="webhook">Webhook</SelectItem>
-                  <SelectItem value="external">External</SelectItem>
-                  <SelectItem value="trigger">Trigger</SelectItem>
-                  <SelectItem value="decision">Decision</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-          />
-        </div>
+        {/* Task Type selector - only show in create mode (edit mode has it in header) */}
+        {!isEditMode && (
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Task Type</label>
+            <Controller
+              name="taskType"
+              control={control}
+              render={({ field }) => (
+                <Select
+                  value={field.value as string || 'standard'}
+                  onValueChange={(val) => {
+                    field.onChange(val)
+                    // Initialize webhook config when switching to webhook type
+                    if (val === 'webhook' && !webhookConfig) {
+                      setWebhookConfig({
+                        url: '',
+                        method: 'POST',
+                        maxRetries: 3,
+                        retryDelayMs: 1000,
+                        timeoutMs: 30000,
+                      })
+                    }
+                  }}
+                >
+                  <SelectTrigger className="h-8 text-sm">
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="standard">Standard</SelectItem>
+                    <SelectItem value="webhook">Webhook</SelectItem>
+                    <SelectItem value="external">External</SelectItem>
+                    <SelectItem value="trigger">Trigger</SelectItem>
+                    <SelectItem value="decision">Decision</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </div>
+        )}
 
-        {/* Webhook Configuration */}
-        {task && task.taskType === 'webhook' && (
+        {/* Webhook Configuration - show when taskType is webhook (from form value) */}
+        {currentTaskType === 'webhook' && (
           <WebhookTaskConfig
             task={task}
             isEditMode={isEditMode}
