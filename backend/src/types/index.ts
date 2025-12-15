@@ -25,15 +25,15 @@ export type TaskType =
   | 'foreach'      // Fan-out iteration (spawns subtasks)
   | 'join'         // Fan-in synchronization (awaits boundary conditions)
   | 'subflow'      // Nested workflow
-  | 'external'     // Waiting for external callback
-  | 'webhook';     // Outbound HTTP call (fire-and-forget or await response)
+  | 'external'     // Outbound HTTP call with callback
+  | 'webhook';     // Outbound HTTP call (fire-and-forget)
 
 // How the task gets executed
 export type ExecutionMode =
-  | 'immediate'           // Runs immediately (trigger tasks)
+  | 'immediate'           // Runs immediately (trigger, decision, foreach, join)
   | 'automated'           // System/AI executes
   | 'manual'              // Human executes
-  | 'external_callback';  // Waits for webhook callback
+  | 'external_callback';  // Waits for external callback
 
 // Foreach task configuration
 export interface ForeachConfig {

@@ -401,13 +401,11 @@ export const externalJobsApi = {
 // Types
 export type TaskType =
   | 'standard'
-  | 'trigger'
   | 'decision'
   | 'foreach'
   | 'join'
   | 'subflow'
   | 'external'
-  | 'webhook'
 
 export type WebhookMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 

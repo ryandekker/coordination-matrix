@@ -77,11 +77,10 @@ const TASK_STATUS_CONFIG: Record<string, { color: string; bgColor: string }> = {
   cancelled: { color: 'text-gray-400', bgColor: 'bg-gray-50' },
 }
 
-type TaskType = 'standard' | 'trigger' | 'decision' | 'foreach' | 'join' | 'subflow' | 'external'
+type TaskType = 'standard' | 'decision' | 'foreach' | 'join' | 'subflow' | 'external'
 
 const TASK_TYPE_CONFIG: Record<TaskType, { icon: React.ElementType; color: string; label: string }> = {
   standard: { icon: Bot, color: 'text-blue-500', label: 'Agent' },
-  trigger: { icon: Play, color: 'text-green-500', label: 'Trigger' },
   decision: { icon: GitBranch, color: 'text-amber-500', label: 'Decision' },
   foreach: { icon: Repeat, color: 'text-green-500', label: 'ForEach' },
   join: { icon: Merge, color: 'text-indigo-500', label: 'Join' },
