@@ -423,7 +423,8 @@ export default function WorkflowsPage() {
   })
 
   const users = usersData?.data || []
-  const statsMap = statsData?.data || {}
+  // Use the data directly from query to avoid creating new object references
+  const statsMap = statsData?.data
 
   const createMutation = useMutation({
     mutationFn: createWorkflow,
@@ -517,16 +518,19 @@ export default function WorkflowsPage() {
   }
 
   // Normalize workflows to ensure steps array exists and add stats
-  const workflows: WorkflowWithStats[] = (workflowsData?.data || []).map(w => ({
-    ...w,
-    steps: (w.steps || (w.stages?.map((name, i) => ({
-      id: `stage-${i}`,
-      name,
-      type: 'manual' as const,
-      hitlPhase: 'none',
-    })) || [])) as WorkflowStep[],
-    stats: statsMap[w._id],
-  }))
+  // Memoized to prevent TanStack Table from reinitializing on every render
+  const workflows = useMemo<WorkflowWithStats[]>(() => {
+    return (workflowsData?.data || []).map(w => ({
+      ...w,
+      steps: (w.steps || (w.stages?.map((name, i) => ({
+        id: `stage-${i}`,
+        name,
+        type: 'manual' as const,
+        hitlPhase: 'none',
+      })) || [])) as WorkflowStep[],
+      stats: statsMap?.[w._id],
+    }))
+  }, [workflowsData?.data, statsMap])
 
   const openCreateEditor = useCallback(() => {
     setEditingWorkflow(null)
