@@ -11,7 +11,7 @@ const DEFAULT_SUCCESS_STATUS_CODES = [200, 201, 202, 204];
 /**
  * WebhookTaskService handles execution of webhook tasks with retry logic.
  *
- * It executes HTTP calls for tasks with taskType='webhook' and webhookConfig,
+ * It executes HTTP calls for tasks with taskType='external' and webhookConfig,
  * tracks attempts, handles retries with exponential backoff, and updates
  * task status on success/failure.
  */
@@ -29,8 +29,8 @@ class WebhookTaskService {
     // Listen for webhook tasks that need execution
     eventBus.subscribe('task.created', async (event) => {
       const task = event.task;
-      if (task.taskType === 'webhook' && task.webhookConfig && task.status === 'pending') {
-        console.log(`[WebhookTaskService] New webhook task created: ${task._id}`);
+      if (task.taskType === 'external' && task.webhookConfig && task.status === 'pending') {
+        console.log(`[WebhookTaskService] New external task created: ${task._id}`);
         await this.executeWebhook(task._id);
       }
     });
@@ -38,7 +38,7 @@ class WebhookTaskService {
     // Also check for pending retries on status changes
     eventBus.subscribe('task.status.changed', async (event) => {
       const task = event.task;
-      if (task.taskType === 'webhook' && task.webhookConfig && task.status === 'pending') {
+      if (task.taskType === 'external' && task.webhookConfig && task.status === 'pending') {
         // Check if there's a scheduled retry
         const config = task.webhookConfig;
         if (config.nextRetryAt && new Date(config.nextRetryAt) <= new Date()) {
@@ -62,8 +62,8 @@ class WebhookTaskService {
       throw new Error(`Task not found: ${id}`);
     }
 
-    if (task.taskType !== 'webhook' || !task.webhookConfig) {
-      throw new Error(`Task ${id} is not a webhook task`);
+    if (task.taskType !== 'external' || !task.webhookConfig) {
+      throw new Error(`Task ${id} is not an external task`);
     }
 
     const config = task.webhookConfig;
@@ -253,8 +253,8 @@ class WebhookTaskService {
       throw new Error(`Task not found: ${id}`);
     }
 
-    if (task.taskType !== 'webhook' || !task.webhookConfig) {
-      throw new Error(`Task ${id} is not a webhook task`);
+    if (task.taskType !== 'external' || !task.webhookConfig) {
+      throw new Error(`Task ${id} is not an external task`);
     }
 
     if (task.status !== 'failed') {
@@ -343,8 +343,8 @@ class WebhookTaskService {
       throw new Error(`Task not found: ${id}`);
     }
 
-    if (task.taskType !== 'webhook' || !task.webhookConfig) {
-      throw new Error(`Task ${id} is not a webhook task`);
+    if (task.taskType !== 'external' || !task.webhookConfig) {
+      throw new Error(`Task ${id} is not an external task`);
     }
 
     const attempts = task.webhookConfig.attempts || [];

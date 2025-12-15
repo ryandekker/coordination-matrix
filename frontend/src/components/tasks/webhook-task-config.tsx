@@ -41,7 +41,7 @@ export function WebhookTaskConfig({
   })
   const [headersError, setHeadersError] = useState<string | null>(null)
 
-  const isWebhookTask = task?.taskType === 'webhook'
+  const isWebhookTask = task?.taskType === 'external'
   const canRetry = task?.status === 'failed' && isWebhookTask
   const attempts = webhookConfig?.attempts || []
   const lastAttempt = attempts[attempts.length - 1]
@@ -106,7 +106,7 @@ export function WebhookTaskConfig({
   }
 
   // Config editing section - shown in edit mode or when creating a new webhook task
-  // The component is rendered when taskType is 'webhook', so always show config form
+  // The component is rendered when taskType is 'external', so always show config form
   if (isEditMode || !task) {
     return (
       <div className="space-y-3 pt-2 border-t border-border/50">

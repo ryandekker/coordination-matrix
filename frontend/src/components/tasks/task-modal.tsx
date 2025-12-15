@@ -372,8 +372,8 @@ export function TaskModal({
       taskData.parentId = parentTask._id
     }
 
-    // Include webhookConfig if taskType is webhook
-    if (taskData.taskType === 'webhook' && webhookConfig) {
+    // Include webhookConfig if taskType is external
+    if (taskData.taskType === 'external' && webhookConfig) {
       taskData.webhookConfig = webhookConfig
     }
 
@@ -433,8 +433,8 @@ export function TaskModal({
               value={field.value as string || 'standard'}
               onValueChange={(val) => {
                 field.onChange(val)
-                // Initialize webhook config when switching to webhook type
-                if (val === 'webhook' && !webhookConfig) {
+                // Initialize webhook config when switching to external type
+                if (val === 'external' && !webhookConfig) {
                   setWebhookConfig({
                     url: '',
                     method: 'POST',
@@ -450,9 +450,7 @@ export function TaskModal({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="standard">Standard</SelectItem>
-                <SelectItem value="webhook">Webhook</SelectItem>
                 <SelectItem value="external">External</SelectItem>
-                <SelectItem value="trigger">Trigger</SelectItem>
                 <SelectItem value="decision">Decision</SelectItem>
               </SelectContent>
             </Select>
@@ -837,8 +835,8 @@ export function TaskModal({
                   value={field.value as string || 'standard'}
                   onValueChange={(val) => {
                     field.onChange(val)
-                    // Initialize webhook config when switching to webhook type
-                    if (val === 'webhook' && !webhookConfig) {
+                    // Initialize webhook config when switching to external type
+                    if (val === 'external' && !webhookConfig) {
                       setWebhookConfig({
                         url: '',
                         method: 'POST',
@@ -854,9 +852,7 @@ export function TaskModal({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="standard">Standard</SelectItem>
-                    <SelectItem value="webhook">Webhook</SelectItem>
                     <SelectItem value="external">External</SelectItem>
-                    <SelectItem value="trigger">Trigger</SelectItem>
                     <SelectItem value="decision">Decision</SelectItem>
                   </SelectContent>
                 </Select>
@@ -865,8 +861,8 @@ export function TaskModal({
           </div>
         )}
 
-        {/* Webhook Configuration - show when taskType is webhook (from form value) */}
-        {currentTaskType === 'webhook' && (
+        {/* Webhook Configuration - show when taskType is external (from form value) */}
+        {currentTaskType === 'external' && (
           <WebhookTaskConfig
             task={task}
             isEditMode={isEditMode}

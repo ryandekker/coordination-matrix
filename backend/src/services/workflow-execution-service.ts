@@ -396,9 +396,7 @@ class WorkflowExecutionService {
         break;
 
       case 'external':
-      case 'trigger':
-      case 'webhook':
-        // External/trigger/webhook steps - make outbound HTTP call and wait for callback
+        // External steps - make outbound HTTP call and wait for callback
         await this.executeExternal(run, workflow, step, task, inputPayload);
         break;
 
@@ -503,13 +501,13 @@ class WorkflowExecutionService {
     const mapping: Record<string, TaskType> = {
       'agent': 'standard',
       'external': 'external',
+      'trigger': 'external',
+      'webhook': 'external',
       'manual': 'standard',
       'decision': 'decision',
       'foreach': 'foreach',
       'join': 'join',
       'subflow': 'subflow',
-      'trigger': 'trigger',
-      'webhook': 'webhook',
     };
     return mapping[stepType] || 'standard';
   }
@@ -518,13 +516,13 @@ class WorkflowExecutionService {
     const mapping: Record<string, ExecutionMode> = {
       'agent': 'automated',
       'external': 'external_callback',
+      'trigger': 'external_callback',
+      'webhook': 'external_callback',
       'manual': 'manual',
-      'decision': 'immediate',
-      'foreach': 'immediate',
-      'join': 'immediate',
+      'decision': 'automated',
+      'foreach': 'automated',
+      'join': 'automated',
       'subflow': 'automated',
-      'trigger': 'immediate',
-      'webhook': 'automated',
     };
     return mapping[stepType] || 'automated';
   }

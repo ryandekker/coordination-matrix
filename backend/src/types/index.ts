@@ -18,20 +18,17 @@ export type Urgency = 'low' | 'normal' | 'high' | 'urgent';
 // Task types that map to workflow step types
 export type TaskType =
   | 'standard'     // Regular task (default)
-  | 'trigger'      // Entry point / trigger step
   | 'decision'     // Conditional branching
   | 'foreach'      // Fan-out iteration
   | 'join'         // Fan-in synchronization
   | 'subflow'      // Nested workflow
-  | 'external'     // Waiting for external callback
-  | 'webhook';     // Outbound HTTP call (fire-and-forget or await response)
+  | 'external';    // Outbound HTTP call with callback
 
 // How the task gets executed
 export type ExecutionMode =
-  | 'immediate'           // Runs immediately (trigger tasks)
   | 'automated'           // System/AI executes
   | 'manual'              // Human executes
-  | 'external_callback';  // Waits for webhook callback
+  | 'external_callback';  // Waits for external callback
 
 // Foreach task configuration
 export interface ForeachConfig {
