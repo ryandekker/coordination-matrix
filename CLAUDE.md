@@ -61,6 +61,19 @@ After making changes:
 2. Frontend changes auto-reload via Next.js fast refresh
 3. For database schema changes, run `npm run db:reset`
 
+**For API testing (preferred method):** Use the CLI tool rather than the web UI, as the web UI requires authentication setup. The CLI stores credentials in `~/.matrix-cli.json`:
+
+```bash
+# Check if already authenticated
+npm run cli status
+
+# List workflows to verify API works
+npm run cli workflows --brief
+
+# List tasks
+npm run cli tasks --status pending --brief
+```
+
 ## API Documentation
 
 Full API documentation is available at:
