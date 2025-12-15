@@ -5,15 +5,17 @@ import { createError } from '../middleware/error-handler.js';
 
 export const workflowsRouter = Router();
 
-// Step types for workflow routing
+// Step types for workflow routing - maps 1:1 to TaskType
+// - trigger: Entry point / workflow start
 // - agent: AI agent task (Claude, GPT, etc.) - optional additional instructions
-// - external: External service/webhook call - no prompting, has endpoint config
 // - manual: Human-in-the-loop task
+// - external: External service call - waits for callback
+// - webhook: Outbound HTTP call (fire-and-forget or await response)
 // - decision: Routing based on conditions from previous step output
-// - foreach: Fan-out loop over collection
-// - join: Fan-in aggregation point
+// - foreach: Fan-out loop over collection (spawns subtasks)
+// - join: Fan-in aggregation point (awaits boundary conditions)
 // - subflow: Delegate to another workflow
-type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'subflow';
+type WorkflowStepType = 'trigger' | 'agent' | 'manual' | 'external' | 'webhook' | 'decision' | 'foreach' | 'join' | 'subflow';
 
 // Connection between steps (for non-linear flows)
 interface StepConnection {
@@ -22,13 +24,32 @@ interface StepConnection {
   label?: string;             // Display label for the connection
 }
 
-// External service configuration
+// External service configuration (waits for callback)
 interface ExternalConfig {
   endpoint?: string;          // URL to call
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   headers?: Record<string, string>;
   payloadTemplate?: string;   // JSON template with {{variable}} interpolation
   responseMapping?: Record<string, string>;  // Map response fields to output
+}
+
+// Webhook step configuration (outbound HTTP call, does not wait for callback)
+interface WebhookConfig {
+  url?: string;               // URL to call
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  headers?: Record<string, string>;
+  bodyTemplate?: string;      // JSON template with {{variable}} interpolation
+  maxRetries?: number;        // Max retry attempts (default: 3)
+  timeoutMs?: number;         // Request timeout (default: 30000)
+  successStatusCodes?: number[];  // HTTP status codes considered success
+}
+
+// Join boundary conditions
+interface JoinBoundary {
+  minCount?: number;          // Minimum tasks that must complete
+  minPercent?: number;        // Minimum percentage (default: 100)
+  maxWaitMs?: number;         // Maximum time to wait
+  failOnTimeout?: boolean;    // Fail or continue with partial results
 }
 
 interface WorkflowStep {
@@ -43,29 +64,39 @@ interface WorkflowStep {
   // If empty/undefined for non-decision steps, assumes linear flow to next step in array
   connections?: StepConnection[];
 
-  // Agent step configuration
+  // Agent/manual step configuration
   additionalInstructions?: string;  // Extra context for the agent (not required)
   defaultAssigneeId?: string;       // Agent or user to assign to
 
-  // External step configuration
+  // External step configuration (waits for callback)
   externalConfig?: ExternalConfig;
+
+  // Webhook step configuration (outbound HTTP call)
+  webhookConfig?: WebhookConfig;
 
   // Decision step configuration
   // Uses connections[] with conditions for routing
   // Each connection.condition is evaluated against previous step output
   defaultConnection?: string;       // targetStepId for when no conditions match
 
-  // ForEach configuration
+  // ForEach configuration - spawns subtasks
   itemsPath?: string;               // JSONPath to array in previous output
   itemVariable?: string;            // Template variable name for each item
   maxItems?: number;                // Safety limit (default: 100)
 
-  // Join configuration
-  awaitTag?: string;                // Tag pattern: "foreach:{{parentId}}"
+  // Join configuration - explicit reference to which step's tasks to await
+  awaitStepId?: string;             // Step ID whose tasks we're waiting for (can be earlier in flow)
+  awaitTag?: string;                // Alternative: await tasks with this tag
+  joinBoundary?: JoinBoundary;      // Boundary conditions for when the join fires
+  minSuccessPercent?: number;       // Legacy: percentage of tasks that must succeed
+  expectedCountPath?: string;       // JSONPath to get expected count from previous step
 
   // Subflow configuration
   subflowId?: string;
   inputMapping?: Record<string, string>;
+
+  // Input aggregation
+  inputPath?: string;               // JSONPath to extract input from previous steps
 
   // Legacy fields (kept for compatibility)
   execution?: 'automated' | 'manual';

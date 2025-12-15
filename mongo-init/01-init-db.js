@@ -105,13 +105,18 @@ db.createCollection('tasks', {
         },
         taskType: {
           bsonType: 'string',
-          enum: ['standard', 'decision', 'foreach', 'join', 'external', 'subflow'],
-          description: 'Type of task for workflow execution'
+          enum: ['standard', 'trigger', 'agent', 'manual', 'decision', 'foreach', 'join', 'external', 'webhook', 'subflow'],
+          description: 'Type of task for workflow execution - maps 1:1 to workflow step types'
         },
         executionMode: {
           bsonType: 'string',
           enum: ['manual', 'automated', 'immediate', 'external_callback'],
           description: 'How the task should be executed'
+        },
+        // Expected quantity of subtasks/results this task produces
+        expectedQuantity: {
+          bsonType: 'int',
+          description: 'Expected number of subtasks/results this task will produce'
         },
         foreachConfig: {
           bsonType: 'object',
@@ -121,13 +126,17 @@ db.createCollection('tasks', {
           bsonType: 'object',
           description: 'Configuration for external callback tasks'
         },
+        webhookConfig: {
+          bsonType: 'object',
+          description: 'Configuration for webhook tasks (outbound HTTP calls)'
+        },
         batchCounters: {
           bsonType: 'object',
           description: 'Counters for batch/foreach operations'
         },
         joinConfig: {
           bsonType: 'object',
-          description: 'Configuration for join tasks'
+          description: 'Configuration for join tasks (includes awaitStepId, boundary conditions)'
         },
         decisionResult: {
           bsonType: 'string',
@@ -145,6 +154,8 @@ db.tasks.createIndex({ urgency: 1 });
 db.tasks.createIndex({ assigneeId: 1 });
 db.tasks.createIndex({ workflowId: 1 });
 db.tasks.createIndex({ workflowRunId: 1 });
+db.tasks.createIndex({ workflowStepId: 1 });  // For join step lookups
+db.tasks.createIndex({ taskType: 1 });  // For filtering by task type
 db.tasks.createIndex({ createdAt: -1 });
 db.tasks.createIndex({ tags: 1 });
 db.tasks.createIndex({ externalId: 1 });

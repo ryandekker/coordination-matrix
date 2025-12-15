@@ -15,13 +15,15 @@ export type TaskStatus =
 
 export type Urgency = 'low' | 'normal' | 'high' | 'urgent';
 
-// Task types that map to workflow step types
+// Task types that map 1:1 to workflow step types
 export type TaskType =
-  | 'standard'     // Regular task (default)
+  | 'standard'     // Regular task (default, for backward compatibility)
   | 'trigger'      // Entry point / trigger step
+  | 'agent'        // Automated/AI execution
+  | 'manual'       // Human execution
   | 'decision'     // Conditional branching
-  | 'foreach'      // Fan-out iteration
-  | 'join'         // Fan-in synchronization
+  | 'foreach'      // Fan-out iteration (spawns subtasks)
+  | 'join'         // Fan-in synchronization (awaits boundary conditions)
   | 'subflow'      // Nested workflow
   | 'external'     // Waiting for external callback
   | 'webhook';     // Outbound HTTP call (fire-and-forget or await response)
@@ -43,14 +45,29 @@ export interface ForeachConfig {
   deadlineAt?: Date;            // Timeout for receiving all items
 }
 
+// Join boundary conditions - defines when the join step fires
+export interface JoinBoundary {
+  minCount?: number;           // Minimum tasks that must complete
+  minPercent?: number;         // Minimum percentage of expected that must complete (default: 100)
+  maxWaitMs?: number;          // Maximum time to wait before firing (soft deadline)
+  failOnTimeout?: boolean;     // If true, fail when maxWait exceeded; if false, continue with partial results
+}
+
 // Join task configuration
 export interface JoinConfig {
-  awaitTaskId?: ObjectId;       // Task whose descendants we're waiting for
-  scope: 'children' | 'descendants';
-  minSuccessPercent?: number;
+  // Reference to what we're joining on
+  awaitStepId?: string;         // Step ID whose tasks we're waiting for (can reference earlier steps)
+  awaitTaskId?: ObjectId;       // Runtime-resolved task ID whose descendants we're waiting for
+  scope: 'children' | 'descendants' | 'step_tasks';  // step_tasks: all tasks from awaitStepId
+
+  // Boundary conditions for when the join fires
+  boundary?: JoinBoundary;
+
+  // Legacy fields (maintained for backward compatibility)
+  minSuccessPercent?: number;   // Use boundary.minPercent instead
   expectedCountPath?: string;   // JSONPath to get expected count from previous step output
   expectedCount?: number;       // Static expected count (if not from previous step)
-  deadlineAt?: Date;
+  deadlineAt?: Date;            // Use boundary.maxWaitMs instead
 }
 
 // External task configuration
@@ -128,6 +145,11 @@ export interface Task {
   // Task type and execution mode (for workflow tasks)
   taskType?: TaskType;
   executionMode?: ExecutionMode;
+
+  // Expected quantity of subtasks/results this task will produce
+  // Set by foreach tasks to indicate how many child tasks will be created
+  // Used by join tasks to know when all expected results have arrived
+  expectedQuantity?: number;
 
   // Foreach/batch configuration
   foreachConfig?: ForeachConfig;
@@ -527,8 +549,17 @@ export type WorkflowRunStatus =
   | 'failed'      // Failed with error
   | 'cancelled';  // Manually cancelled
 
-// Workflow step types (from mermaid)
-export type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'subflow';
+// Workflow step types - maps 1:1 to TaskType
+export type WorkflowStepType =
+  | 'trigger'      // Entry point / workflow start
+  | 'agent'        // Automated/AI execution
+  | 'manual'       // Human execution
+  | 'external'     // Wait for external callback
+  | 'webhook'      // Outbound HTTP call
+  | 'decision'     // Conditional branching
+  | 'foreach'      // Fan-out iteration (spawns subtasks)
+  | 'join'         // Fan-in synchronization (awaits boundary conditions)
+  | 'subflow';     // Nested workflow
 
 export interface WorkflowStep {
   id: string;
@@ -540,8 +571,12 @@ export interface WorkflowStep {
     condition?: string | null;
     label?: string;
   }>;
+
+  // Agent/manual step config
   additionalInstructions?: string;
   defaultAssigneeId?: string;
+
+  // External step config (waits for callback)
   externalConfig?: {
     endpoint?: string;
     method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -549,16 +584,37 @@ export interface WorkflowStep {
     payloadTemplate?: string;
     responseMapping?: Record<string, string>;
   };
+
+  // Webhook step config (outbound HTTP call)
+  webhookConfig?: {
+    url?: string;
+    method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+    headers?: Record<string, string>;
+    bodyTemplate?: string;
+    maxRetries?: number;
+    timeoutMs?: number;
+    successStatusCodes?: number[];
+  };
+
+  // Decision step config
   defaultConnection?: string;
-  itemsPath?: string;
-  itemVariable?: string;
-  maxItems?: number;
-  awaitTag?: string;
+
+  // Foreach step config
+  itemsPath?: string;                   // JSONPath to items array in previous output
+  itemVariable?: string;                // Template variable name for each item
+  maxItems?: number;                    // Safety limit (default: 100)
+
+  // Join step config - explicit reference to which step's tasks to await
+  awaitStepId?: string;                 // Step ID whose tasks we're waiting for (can reference earlier steps)
+  awaitTag?: string;                    // Alternative: await tasks with this tag
+  joinBoundary?: JoinBoundary;          // Boundary conditions for when the join fires
+  minSuccessPercent?: number;           // Legacy: percentage of tasks that must succeed (default: 100)
+  expectedCountPath?: string;           // JSONPath to get expected count from previous step
+
+  // Subflow step config
   subflowId?: string;
   inputMapping?: Record<string, string>;
-  // Join step config
-  minSuccessPercent?: number;           // Percentage of tasks that must succeed (default: 100)
-  expectedCountPath?: string;           // JSONPath to get expected count from previous step
+
   // Input aggregation
   inputPath?: string;                   // JSONPath to extract input from previous steps
 }

@@ -389,6 +389,14 @@ class WorkflowExecutionService {
 
     // Handle step type-specific execution
     switch (step.stepType) {
+      case 'trigger':
+        // Trigger steps complete immediately - they just initiate the workflow
+        await this.tasks.updateOne(
+          { _id: task._id },
+          { $set: { status: 'completed' as TaskStatus } }
+        );
+        break;
+
       case 'agent':
       case 'manual':
         // These wait for external completion (AI agent or human)
@@ -398,6 +406,11 @@ class WorkflowExecutionService {
       case 'external':
         // External step - make outbound HTTP call and wait for callback
         await this.executeExternal(run, workflow, step, task, inputPayload);
+        break;
+
+      case 'webhook':
+        // Webhook step - outbound HTTP call with retry logic
+        await this.executeWebhook(run, workflow, step, task, inputPayload);
         break;
 
       case 'foreach':
@@ -498,10 +511,13 @@ class WorkflowExecutionService {
   }
 
   private mapStepTypeToTaskType(stepType: string): TaskType {
+    // 1:1 mapping between step types and task types
     const mapping: Record<string, TaskType> = {
-      'agent': 'standard',
+      'trigger': 'trigger',
+      'agent': 'agent',
+      'manual': 'manual',
       'external': 'external',
-      'manual': 'standard',
+      'webhook': 'webhook',
       'decision': 'decision',
       'foreach': 'foreach',
       'join': 'join',
@@ -512,9 +528,11 @@ class WorkflowExecutionService {
 
   private mapStepTypeToExecutionMode(stepType: string): ExecutionMode {
     const mapping: Record<string, ExecutionMode> = {
+      'trigger': 'immediate',
       'agent': 'automated',
-      'external': 'external_callback',
       'manual': 'manual',
+      'external': 'external_callback',
+      'webhook': 'automated',
       'decision': 'immediate',
       'foreach': 'immediate',
       'join': 'immediate',
@@ -659,6 +677,151 @@ class WorkflowExecutionService {
   }
 
   // ============================================================================
+  // Webhook Step Execution
+  // ============================================================================
+
+  private async executeWebhook(
+    run: WorkflowRun,
+    _workflow: Workflow,
+    step: WorkflowStep,
+    webhookTask: Task,
+    inputPayload?: Record<string, unknown>
+  ): Promise<void> {
+    const config = step.webhookConfig;
+
+    if (!config?.url) {
+      console.error(`[WorkflowExecutionService] Webhook step ${step.id} has no URL configured`);
+      await this.tasks.updateOne(
+        { _id: webhookTask._id },
+        { $set: { status: 'failed' as TaskStatus, 'metadata.error': 'No webhook URL configured' } }
+      );
+      return;
+    }
+
+    // Build webhook configuration for the task
+    const webhookConfig = {
+      url: config.url,
+      method: config.method || 'POST',
+      headers: config.headers || {},
+      body: config.bodyTemplate,
+      maxRetries: config.maxRetries ?? 3,
+      retryDelayMs: 1000,
+      timeoutMs: config.timeoutMs ?? 30000,
+      successStatusCodes: config.successStatusCodes || [200, 201, 202, 204],
+      attempts: [],
+    };
+
+    // Update the task with webhook config and set to in_progress
+    await this.tasks.updateOne(
+      { _id: webhookTask._id },
+      {
+        $set: {
+          status: 'in_progress' as TaskStatus,
+          webhookConfig,
+          'metadata.inputPayload': inputPayload,
+        },
+      }
+    );
+
+    // Execute the webhook call
+    const templateContext = {
+      workflowRunId: run._id,
+      stepId: step.id,
+      taskId: webhookTask._id,
+      inputPayload,
+    };
+
+    try {
+      const resolvedUrl = resolveTemplateVariables(config.url, templateContext);
+      let resolvedBody: string | undefined;
+
+      if (config.bodyTemplate) {
+        resolvedBody = resolveTemplateVariables(config.bodyTemplate, templateContext);
+      } else if (inputPayload) {
+        resolvedBody = JSON.stringify(inputPayload);
+      }
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...config.headers,
+      };
+
+      // Resolve template variables in headers
+      for (const [key, value] of Object.entries(headers)) {
+        headers[key] = resolveTemplateVariables(value, templateContext);
+      }
+
+      console.log(`[WorkflowExecutionService] Executing webhook: ${config.method || 'POST'} ${resolvedUrl}`);
+
+      const response = await fetch(resolvedUrl, {
+        method: config.method || 'POST',
+        headers,
+        body: resolvedBody,
+        signal: AbortSignal.timeout(config.timeoutMs || 30000),
+      });
+
+      const responseBody = await response.text();
+      let parsedResponse: unknown;
+      try {
+        parsedResponse = JSON.parse(responseBody);
+      } catch {
+        parsedResponse = responseBody;
+      }
+
+      const isSuccess = (config.successStatusCodes || [200, 201, 202, 204]).includes(response.status);
+
+      // Record the attempt
+      const attempt = {
+        attemptNumber: 1,
+        startedAt: new Date(),
+        completedAt: new Date(),
+        status: isSuccess ? 'success' : 'failed',
+        httpStatus: response.status,
+        responseBody: parsedResponse,
+      };
+
+      if (isSuccess) {
+        await this.tasks.updateOne(
+          { _id: webhookTask._id },
+          {
+            $set: {
+              status: 'completed' as TaskStatus,
+              'webhookConfig.attempts': [attempt],
+              'webhookConfig.lastAttemptAt': new Date(),
+              'metadata.response': parsedResponse,
+            },
+          }
+        );
+        console.log(`[WorkflowExecutionService] Webhook completed successfully: ${response.status}`);
+      } else {
+        await this.tasks.updateOne(
+          { _id: webhookTask._id },
+          {
+            $set: {
+              status: 'failed' as TaskStatus,
+              'webhookConfig.attempts': [attempt],
+              'webhookConfig.lastAttemptAt': new Date(),
+              'metadata.error': `HTTP ${response.status}: ${responseBody}`,
+            },
+          }
+        );
+        console.error(`[WorkflowExecutionService] Webhook failed: ${response.status}`);
+      }
+    } catch (error) {
+      console.error(`[WorkflowExecutionService] Webhook execution error:`, error);
+      await this.tasks.updateOne(
+        { _id: webhookTask._id },
+        {
+          $set: {
+            status: 'failed' as TaskStatus,
+            'metadata.error': String(error),
+          },
+        }
+      );
+    }
+  }
+
+  // ============================================================================
   // Foreach Execution
   // ============================================================================
 
@@ -694,11 +857,12 @@ class WorkflowExecutionService {
     const maxItems = step.maxItems || 100;
     const itemsToProcess = items.slice(0, maxItems);
 
-    // Update foreach task with expected count
+    // Update foreach task with expected count (both top-level and in batchCounters)
     await this.tasks.updateOne(
       { _id: foreachTask._id },
       {
         $set: {
+          expectedQuantity: itemsToProcess.length,  // Top-level field for easy access
           'batchCounters.expectedCount': itemsToProcess.length,
           'metadata.itemCount': itemsToProcess.length,
         },
@@ -753,17 +917,28 @@ class WorkflowExecutionService {
 
   private async executeJoin(
     run: WorkflowRun,
-    _workflow: Workflow,
+    workflow: Workflow,
     step: WorkflowStep,
     joinTask: Task
   ): Promise<void> {
-    // Find the foreach task we're joining on (usually the previous step)
-    // For now, look for the most recent foreach task in this run
-    const foreachTask = await this.tasks.findOne({
-      workflowRunId: run._id,
-      taskType: 'foreach',
-      status: { $in: ['waiting', 'in_progress'] },
-    });
+    // Find the task to join on using awaitStepId if specified
+    let foreachTask: Task | null = null;
+
+    if (step.awaitStepId) {
+      // Use explicit awaitStepId to find the task to join on
+      foreachTask = await this.tasks.findOne({
+        workflowRunId: run._id,
+        workflowStepId: step.awaitStepId,
+      });
+      console.log(`[WorkflowExecutionService] Join using awaitStepId: ${step.awaitStepId}`);
+    } else {
+      // Fall back to finding the most recent foreach task in this run
+      foreachTask = await this.tasks.findOne({
+        workflowRunId: run._id,
+        taskType: 'foreach',
+        status: { $in: ['waiting', 'in_progress'] },
+      });
+    }
 
     // Determine expected count - can come from:
     // 1. Step config (expectedCountPath to look up from previous step)
@@ -807,19 +982,30 @@ class WorkflowExecutionService {
       return;
     }
 
-    // Get minSuccessPercent from step config or default to 100
-    const minSuccessPercent = step.minSuccessPercent ?? 100;
+    // Get minSuccessPercent from joinBoundary, step config, or default to 100
+    const minSuccessPercent = step.joinBoundary?.minPercent ?? step.minSuccessPercent ?? 100;
 
-    // Store reference to foreach task and join config
+    // Determine the scope based on configuration
+    const scope = step.awaitStepId ? 'step_tasks' : 'children';
+
+    // Store reference to foreach task and join config with full boundary settings
     await this.tasks.updateOne(
       { _id: joinTask._id },
       {
         $set: {
+          'joinConfig.awaitStepId': step.awaitStepId,
           'joinConfig.awaitTaskId': foreachTask._id,
-          'joinConfig.scope': 'children',
+          'joinConfig.scope': scope,
           'joinConfig.minSuccessPercent': minSuccessPercent,
           'joinConfig.expectedCount': expectedCount,
+          'joinConfig.boundary': step.joinBoundary ? {
+            minCount: step.joinBoundary.minCount,
+            minPercent: step.joinBoundary.minPercent ?? minSuccessPercent,
+            maxWaitMs: step.joinBoundary.maxWaitMs,
+            failOnTimeout: step.joinBoundary.failOnTimeout ?? true,
+          } : undefined,
           'metadata.awaitingForeachTask': foreachTask._id.toString(),
+          'metadata.awaitStepId': step.awaitStepId,
           'metadata.minSuccessPercent': minSuccessPercent,
         },
       }
