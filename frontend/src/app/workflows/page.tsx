@@ -344,7 +344,7 @@ export default function WorkflowsPage() {
     onSuccess: (data) => {
       setRunDialog({ open: false, workflow: null })
       resetRunForm()
-      router.push(`/workflow-runs/${data.run._id}`)
+      router.push(`/workflow-runs?id=${data.run._id}`)
     },
   })
 
