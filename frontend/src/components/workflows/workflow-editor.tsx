@@ -206,62 +206,6 @@ function detectLoopScopes(steps: WorkflowStep[]): LoopScope[] {
   return scopes
 }
 
-// Get data flow description for a step (with source step awareness)
-function getDataFlowDescription(
-  step: WorkflowStep,
-  prevStep?: WorkflowStep,
-  allSteps?: WorkflowStep[]
-): { input?: string; output?: string; sourceStep?: string } {
-  const result: { input?: string; output?: string; sourceStep?: string } = {}
-
-  // Parse input path to determine source
-  const { source, path } = parseInputPath(step.inputPath)
-
-  // Determine source step name
-  if (source === 'trigger') {
-    result.sourceStep = 'Trigger'
-  } else if (source !== 'previous' && allSteps) {
-    const srcStep = allSteps.find(s => s.id === source)
-    if (srcStep) {
-      result.sourceStep = srcStep.name
-    }
-  }
-
-  // Determine input description
-  if (step.stepType === 'foreach' && step.itemsPath) {
-    result.input = `iterate: ${step.itemsPath}`
-  } else if (step.stepType === 'join') {
-    if (step.inputPath) {
-      result.input = `aggregate: ${path || step.inputPath}`
-    } else {
-      result.input = 'aggregate all results'
-    }
-  } else if (step.inputPath) {
-    if (result.sourceStep) {
-      result.input = `${result.sourceStep}.${path}`
-    } else {
-      result.input = path || step.inputPath
-    }
-  } else if (prevStep) {
-    result.input = `${prevStep.name}.output`
-  }
-
-  // Determine output
-  if (step.stepType === 'foreach') {
-    result.output = step.itemVariable ? `{{${step.itemVariable}}}` : '{{item}}'
-  } else if (step.stepType === 'join') {
-    result.output = 'aggregatedResults[]'
-  } else if (step.stepType === 'external') {
-    result.output = 'output (response)'
-  } else if (step.stepType === 'agent' || step.stepType === 'manual') {
-    result.output = 'output (result)'
-  } else if (step.stepType === 'decision') {
-    result.output = 'routes to branch'
-  }
-
-  return result
-}
-
 // Get available outputs from a step (for variable picker)
 function getStepOutputs(step: WorkflowStep): { path: string; description: string }[] {
   const outputs: { path: string; description: string }[] = []
@@ -878,28 +822,17 @@ export function WorkflowEditor({
                       const loopScope = stepInLoop.get(index)
                       const isInLoop = !!loopScope
                       const prevStep = index > 0 ? steps[index - 1] : undefined
-                      const nextStep = index < steps.length - 1 ? steps[index + 1] : undefined
-                      const dataFlow = getDataFlowDescription(step, prevStep, steps)
 
                       // Check if this step starts or ends a loop scope
                       const startsLoop = loopScopes.some(s => s.foreachIndex === index)
                       const endsLoop = loopScopes.some(s => s.joinIndex === index)
-                      const isFirstInLoop = loopScopes.some(s => s.foreachIndex + 1 === index)
-                      const isLastInLoop = loopScopes.some(s => s.joinIndex - 1 === index)
 
                       return (
                         <div key={step.id} className="relative">
-                          {/* Data flow indicator from previous step */}
+                          {/* Arrow between steps */}
                           {index > 0 && (
                             <div className="flex items-center justify-center py-1">
-                              <div className="flex flex-col items-center text-xs text-muted-foreground">
-                                <ArrowDown className="h-4 w-4" />
-                                {dataFlow.input && (
-                                  <span className="font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded mt-0.5">
-                                    {dataFlow.input}
-                                  </span>
-                                )}
-                              </div>
+                              <ArrowDown className="h-4 w-4 text-muted-foreground" />
                             </div>
                           )}
 
@@ -908,11 +841,6 @@ export function WorkflowEditor({
                             <div className="mb-1 ml-4 flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
                               <Repeat className="h-3 w-3" />
                               <span className="font-medium">Loop Start</span>
-                              {step.itemsPath && (
-                                <span className="font-mono bg-green-100 dark:bg-green-900/30 px-1.5 py-0.5 rounded">
-                                  iterating: {step.itemsPath}
-                                </span>
-                              )}
                             </div>
                           )}
 
@@ -1847,14 +1775,6 @@ The agent will receive task context automatically.`}
                             </div>
                           )}
 
-                          {/* Data output indicator */}
-                          {dataFlow.output && index < steps.length - 1 && (
-                            <div className="flex justify-center pt-1">
-                              <span className="font-mono text-[10px] text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">
-                                outputs: {dataFlow.output}
-                              </span>
-                            </div>
-                          )}
                         </div>
                       )
                     })
