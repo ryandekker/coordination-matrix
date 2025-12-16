@@ -20,11 +20,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs'
 import { Task, FieldConfig, LookupValue, TaskType, WebhookConfig } from '@/lib/api'
 import { useCreateTask, useUpdateTask, useUsers, useWorkflows, useTasks } from '@/hooks/use-tasks'
 import { cn } from '@/lib/utils'
 import { TaskActivity } from './task-activity'
 import { WebhookTaskConfig } from './webhook-task-config'
+import {
+  TASK_TYPE_CONFIG,
+  getTaskTypeConfig,
+  TASK_MODAL_TAB_KEY,
+  TASK_MODAL_TABS,
+  DEFAULT_TASK_MODAL_TAB,
+  type TaskModalTab,
+} from '@/lib/task-type-config'
+import { Settings2, Database, Activity } from 'lucide-react'
 
 interface TaskModalProps {
   task: Task | null
@@ -51,6 +66,26 @@ export function TaskModal({
   const metadataTextareaRef = useRef<HTMLTextAreaElement>(null)
   const savedMetadataValueRef = useRef<string>('') // Track last saved value for reset
   const currentMetadataValueRef = useRef<string>('') // Track current textarea value to restore after re-renders
+
+  // Right sidebar tab state - persisted to localStorage
+  const [activeTab, setActiveTab] = useState<TaskModalTab>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(TASK_MODAL_TAB_KEY)
+      if (stored && Object.values(TASK_MODAL_TABS).includes(stored as TaskModalTab)) {
+        return stored as TaskModalTab
+      }
+    }
+    return DEFAULT_TASK_MODAL_TAB
+  })
+
+  // Persist tab selection to localStorage
+  const handleTabChange = useCallback((value: string) => {
+    const tab = value as TaskModalTab
+    setActiveTab(tab)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(TASK_MODAL_TAB_KEY, tab)
+    }
+  }, [])
 
   // Auto-save refs (using refs to avoid re-renders during typing)
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -420,17 +455,8 @@ export function TaskModal({
     }
   }, [task, getValues, performAutoSave])
 
-  // Task type display labels
-  const taskTypeLabels: Record<string, string> = {
-    standard: 'Standard',
-    webhook: 'Webhook',
-    external: 'External',
-    trigger: 'Trigger',
-    decision: 'Decision',
-    foreach: 'ForEach',
-    join: 'Join',
-    subflow: 'Subflow',
-  }
+  // Get task type config for current type
+  const currentTypeConfig = getTaskTypeConfig(currentTaskType)
 
   // Editable header with key fields for existing tasks
   const EditableHeader = () => {
@@ -439,40 +465,58 @@ export function TaskModal({
     return (
       <>
       <div className="flex flex-wrap items-center gap-2 pb-3 border-b border-border/50">
-        {/* Task Type - inline select */}
+        {/* Task Type - inline select with icon */}
         <Controller
           name="taskType"
           control={control}
-          render={({ field }) => (
-            <Select
-              value={field.value as string || 'standard'}
-              onValueChange={(val) => {
-                field.onChange(val)
-                // Initialize webhook config when switching to external type
-                if (val === 'external' && !webhookConfig) {
-                  setWebhookConfig({
-                    url: '',
-                    method: 'POST',
-                    maxRetries: 3,
-                    retryDelayMs: 1000,
-                    timeoutMs: 30000,
-                  })
-                }
-              }}
-            >
-              <SelectTrigger className="h-7 w-auto gap-1.5 px-2 text-xs border-0 bg-transparent hover:bg-muted">
-                <span className="text-muted-foreground">{taskTypeLabels[field.value as string] || 'Standard'}</span>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="standard">Standard</SelectItem>
-                <SelectItem value="external">External</SelectItem>
-                <SelectItem value="decision">Decision</SelectItem>
-                <SelectItem value="foreach">ForEach</SelectItem>
-                <SelectItem value="join">Join</SelectItem>
-                <SelectItem value="subflow">Subflow</SelectItem>
-              </SelectContent>
-            </Select>
-          )}
+          render={({ field }) => {
+            const typeConfig = getTaskTypeConfig(field.value as string)
+            const TypeIcon = typeConfig.icon
+            return (
+              <Select
+                value={field.value as string || 'standard'}
+                onValueChange={(val) => {
+                  field.onChange(val)
+                  // Initialize webhook config when switching to external type
+                  if (val === 'external' && !webhookConfig) {
+                    setWebhookConfig({
+                      url: '',
+                      method: 'POST',
+                      maxRetries: 3,
+                      retryDelayMs: 1000,
+                      timeoutMs: 30000,
+                    })
+                  }
+                }}
+              >
+                <SelectTrigger
+                  className="h-7 w-auto gap-1.5 px-2 text-xs border-0 hover:bg-muted"
+                  style={{
+                    backgroundColor: `${typeConfig.hexColor}15`,
+                    color: typeConfig.hexColor,
+                  }}
+                >
+                  <TypeIcon className="h-3.5 w-3.5" />
+                  <span>{typeConfig.label}</span>
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(TASK_TYPE_CONFIG)
+                    .filter(([key]) => !['webhook', 'trigger', 'manual'].includes(key)) // Filter out legacy/special types
+                    .map(([key, config]) => {
+                      const Icon = config.icon
+                      return (
+                        <SelectItem key={key} value={key}>
+                          <div className="flex items-center gap-2">
+                            <Icon className={cn('h-4 w-4', config.color)} />
+                            <span>{config.label}</span>
+                          </div>
+                        </SelectItem>
+                      )
+                    })}
+                </SelectContent>
+              </Select>
+            )
+          }}
         />
 
         {/* Status - inline select */}
@@ -905,218 +949,16 @@ export function TaskModal({
           </div>
         )}
 
-        {/* Webhook Configuration - show when taskType is external (from form value) */}
-        {currentTaskType === 'external' && (
+        {/* Webhook Configuration - only in create mode (edit mode moves to sidebar) */}
+        {currentTaskType === 'external' && !isEditMode && (
           <WebhookTaskConfig
             task={task}
             isEditMode={isEditMode}
             webhookConfig={webhookConfig}
             onConfigChange={(config) => {
               setWebhookConfig(config)
-              // Auto-save webhook config changes for existing tasks
-              if (task) {
-                updateTask.mutateAsync({
-                  id: task._id,
-                  data: { webhookConfig: config },
-                })
-              }
             }}
           />
-        )}
-
-        {/* ForEach Configuration - show when taskType is foreach */}
-        {currentTaskType === 'foreach' && isEditMode && task && (
-          <div className="space-y-2 p-3 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg">
-            <label className="text-xs font-medium text-green-800 dark:text-green-200">ForEach Configuration</label>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="space-y-1">
-                <label className="text-[10px] text-muted-foreground">Expected Subtasks</label>
-                <Input
-                  type="number"
-                  min="0"
-                  className="h-7 text-sm"
-                  defaultValue={(task as any).batchCounters?.expectedCount || 0}
-                  onBlur={(e) => {
-                    const newValue = parseInt(e.target.value, 10) || 0
-                    const currentCounters = (task as any).batchCounters || {}
-                    if (newValue !== currentCounters.expectedCount) {
-                      updateTask.mutateAsync({
-                        id: task._id,
-                        data: {
-                          batchCounters: {
-                            ...currentCounters,
-                            expectedCount: newValue,
-                          },
-                        },
-                      })
-                    }
-                  }}
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] text-muted-foreground">Processed</label>
-                <div className="h-7 px-3 py-1 text-sm bg-muted rounded-md border flex items-center">
-                  {(task as any).batchCounters?.processedCount || 0}
-                </div>
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] text-muted-foreground">Failed</label>
-                <div className={cn(
-                  "h-7 px-3 py-1 text-sm rounded-md border flex items-center",
-                  ((task as any).batchCounters?.failedCount || 0) > 0
-                    ? "bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400"
-                    : "bg-muted"
-                )}>
-                  {(task as any).batchCounters?.failedCount || 0}
-                </div>
-              </div>
-            </div>
-            <p className="text-[10px] text-muted-foreground">
-              This ForEach task is waiting for {(task as any).batchCounters?.expectedCount || '?'} subtasks to complete.
-            </p>
-          </div>
-        )}
-
-        {/* Metadata - toggleable between visual and edit modes */}
-        {isEditMode && (
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-medium text-muted-foreground">Metadata</label>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-5 px-1.5 text-[10px]"
-onClick={() => {
-                  if (!isMetadataEditMode) {
-                    // Switching to edit mode - store the initial value
-                    const initialValue = JSON.stringify(task?.metadata || {}, null, 2)
-                    savedMetadataValueRef.current = initialValue
-                    currentMetadataValueRef.current = initialValue
-                    setMetadataError(null)
-                    // Set textarea value after it mounts
-                    setTimeout(() => {
-                      if (metadataTextareaRef.current) {
-                        metadataTextareaRef.current.value = initialValue
-                      }
-                    }, 0)
-                  }
-                  setIsMetadataEditMode(!isMetadataEditMode)
-                }}
-              >
-                {isMetadataEditMode ? 'View' : 'Edit'}
-              </Button>
-            </div>
-
-            {isMetadataEditMode ? (
-              // Edit mode - uncontrolled JSON textarea (ref-based to avoid re-render lag)
-              <div className="space-y-1">
-                <textarea
-                  ref={metadataTextareaRef}
-                  // Note: Do NOT use defaultValue here - it resets on re-renders.
-                  // The value is set via ref in the Edit button onClick handler.
-                  onInput={(e) => {
-                    // Track current value in ref so it survives re-renders
-                    currentMetadataValueRef.current = (e.target as HTMLTextAreaElement).value
-                  }}
-                  onKeyDown={(e) => {
-                    // Prevent form submission on Enter
-                    if (e.key === 'Enter') {
-                      e.stopPropagation()
-                    }
-                  }}
-                  placeholder='{"key": "value"}'
-                  rows={6}
-                  className={cn(
-                    'flex w-full rounded-md border bg-background px-3 py-1.5 text-xs font-mono',
-                    'placeholder:text-muted-foreground resize-y transition-colors',
-                    'focus-visible:outline-none',
-                    metadataError
-                      ? 'border-destructive focus-visible:border-destructive'
-                      : 'border-input focus-visible:border-primary'
-                  )}
-                />
-                <div className="flex items-center justify-between">
-                  {metadataError ? (
-                    <p className="text-[10px] text-destructive">{metadataError}</p>
-                  ) : (
-                    <p className="text-[10px] text-muted-foreground">&nbsp;</p>
-                  )}
-                  <div className="flex gap-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
-                      onClick={() => {
-                        // Update both refs to the saved value
-                        currentMetadataValueRef.current = savedMetadataValueRef.current
-                        if (metadataTextareaRef.current) {
-                          metadataTextareaRef.current.value = savedMetadataValueRef.current
-                        }
-                        setMetadataError(null)
-                        // Restore value after re-render clears the textarea
-                        setTimeout(() => {
-                          if (metadataTextareaRef.current) {
-                            metadataTextareaRef.current.value = currentMetadataValueRef.current
-                          }
-                        }, 0)
-                      }}
-                    >
-                      Reset
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="default"
-                      size="sm"
-                      className="h-5 px-2 text-[10px]"
-                      onClick={async () => {
-                        if (!task) return
-                        // Use ref value since textarea may be cleared by re-render
-                        const currentValue = currentMetadataValueRef.current
-                        const { valid, parsed, error } = parseMetadataJson(currentValue)
-                        setMetadataError(error)
-                        // Restore value after re-render clears the textarea
-                        setTimeout(() => {
-                          if (metadataTextareaRef.current) {
-                            metadataTextareaRef.current.value = currentMetadataValueRef.current
-                          }
-                        }, 0)
-                        if (!valid) return
-                        try {
-                          await updateTask.mutateAsync({ id: task._id, data: { metadata: parsed as Record<string, unknown> } })
-                          // Update saved value so Reset reflects the new saved state
-                          savedMetadataValueRef.current = currentValue
-                          // Return to view mode on successful save
-                          setIsMetadataEditMode(false)
-                        } catch {
-                          // Silently fail
-                        }
-                      }}
-                    >
-                      Save
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              // View mode - key-value display
-              <div className="px-3 py-2 text-sm bg-muted/50 rounded-md border space-y-1.5 max-h-40 overflow-y-auto">
-                {task?.metadata && Object.keys(task.metadata).length > 0 ? (
-                  Object.entries(task.metadata).map(([key, value]) => (
-                    <div key={key} className="flex gap-2">
-                      <span className="text-xs font-medium text-muted-foreground min-w-[80px]">{key}:</span>
-                      <span className="text-xs break-all">
-                        {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                      </span>
-                    </div>
-                  ))
-                ) : (
-                  <span className="text-xs text-muted-foreground italic">No metadata</span>
-                )}
-              </div>
-            )}
-          </div>
         )}
 
         {/* Parent Task (for subtask creation) */}
@@ -1167,15 +1009,276 @@ onClick={() => {
     )
   }
 
-  // Edit mode - two column layout with integrated activity
+  // Type-specific configuration content for sidebar
+  const TypeConfigContent = () => {
+    const typeConfig = getTaskTypeConfig(currentTaskType)
+    const TypeIcon = typeConfig.icon
+
+    return (
+      <div className="p-4 space-y-4">
+        {/* Task type display */}
+        <div
+          className="p-3 rounded-lg border"
+          style={{
+            backgroundColor: `${typeConfig.hexColor}10`,
+            borderColor: `${typeConfig.hexColor}30`,
+          }}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <TypeIcon className="h-5 w-5" style={{ color: typeConfig.hexColor }} />
+            <span className="font-medium" style={{ color: typeConfig.hexColor }}>
+              {typeConfig.label} Task
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">{typeConfig.description}</p>
+        </div>
+
+        {/* Webhook Configuration - show when taskType is external */}
+        {currentTaskType === 'external' && (
+          <WebhookTaskConfig
+            task={task}
+            isEditMode={true}
+            webhookConfig={webhookConfig}
+            onConfigChange={(config) => {
+              setWebhookConfig(config)
+              // Auto-save webhook config changes for existing tasks
+              if (task) {
+                updateTask.mutateAsync({
+                  id: task._id,
+                  data: { webhookConfig: config },
+                })
+              }
+            }}
+          />
+        )}
+
+        {/* ForEach Configuration - show when taskType is foreach */}
+        {currentTaskType === 'foreach' && task && (
+          <div className="space-y-2 p-3 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg">
+            <label className="text-xs font-medium text-green-800 dark:text-green-200">Batch Progress</label>
+            <div className="space-y-2">
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">Expected Subtasks</label>
+                <Input
+                  type="number"
+                  min="0"
+                  className="h-7 text-sm"
+                  defaultValue={(task as any).batchCounters?.expectedCount || 0}
+                  onBlur={(e) => {
+                    const newValue = parseInt(e.target.value, 10) || 0
+                    const currentCounters = (task as any).batchCounters || {}
+                    if (newValue !== currentCounters.expectedCount) {
+                      updateTask.mutateAsync({
+                        id: task._id,
+                        data: {
+                          batchCounters: {
+                            ...currentCounters,
+                            expectedCount: newValue,
+                          },
+                        },
+                      })
+                    }
+                  }}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground">Processed</label>
+                  <div className="h-7 px-3 py-1 text-sm bg-muted rounded-md border flex items-center">
+                    {(task as any).batchCounters?.processedCount || 0}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground">Failed</label>
+                  <div className={cn(
+                    "h-7 px-3 py-1 text-sm rounded-md border flex items-center",
+                    ((task as any).batchCounters?.failedCount || 0) > 0
+                      ? "bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400"
+                      : "bg-muted"
+                  )}>
+                    {(task as any).batchCounters?.failedCount || 0}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              Waiting for {(task as any).batchCounters?.expectedCount || '?'} subtasks to complete.
+            </p>
+          </div>
+        )}
+
+        {/* Standard task - no special config */}
+        {currentTaskType === 'standard' && (
+          <p className="text-xs text-muted-foreground italic">
+            Standard tasks have no additional configuration.
+          </p>
+        )}
+
+        {/* Decision task */}
+        {currentTaskType === 'decision' && (
+          <p className="text-xs text-muted-foreground italic">
+            Decision tasks route based on conditions from previous step output.
+          </p>
+        )}
+
+        {/* Join task */}
+        {currentTaskType === 'join' && (
+          <p className="text-xs text-muted-foreground italic">
+            Join tasks aggregate results from multiple parallel tasks.
+          </p>
+        )}
+
+        {/* Subflow task */}
+        {currentTaskType === 'subflow' && (
+          <p className="text-xs text-muted-foreground italic">
+            Subflow tasks delegate to another workflow.
+          </p>
+        )}
+      </div>
+    )
+  }
+
+  // Metadata content for sidebar
+  const MetadataContent = () => (
+    <div className="p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <label className="text-xs font-medium text-muted-foreground">Task Metadata</label>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-5 px-1.5 text-[10px]"
+          onClick={() => {
+            if (!isMetadataEditMode) {
+              // Switching to edit mode - store the initial value
+              const initialValue = JSON.stringify(task?.metadata || {}, null, 2)
+              savedMetadataValueRef.current = initialValue
+              currentMetadataValueRef.current = initialValue
+              setMetadataError(null)
+              // Set textarea value after it mounts
+              setTimeout(() => {
+                if (metadataTextareaRef.current) {
+                  metadataTextareaRef.current.value = initialValue
+                }
+              }, 0)
+            }
+            setIsMetadataEditMode(!isMetadataEditMode)
+          }}
+        >
+          {isMetadataEditMode ? 'View' : 'Edit'}
+        </Button>
+      </div>
+
+      {isMetadataEditMode ? (
+        // Edit mode - uncontrolled JSON textarea (ref-based to avoid re-render lag)
+        <div className="space-y-1">
+          <textarea
+            ref={metadataTextareaRef}
+            onInput={(e) => {
+              currentMetadataValueRef.current = (e.target as HTMLTextAreaElement).value
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.stopPropagation()
+              }
+            }}
+            placeholder='{"key": "value"}'
+            rows={12}
+            className={cn(
+              'flex w-full rounded-md border bg-background px-3 py-1.5 text-xs font-mono',
+              'placeholder:text-muted-foreground resize-y transition-colors',
+              'focus-visible:outline-none',
+              metadataError
+                ? 'border-destructive focus-visible:border-destructive'
+                : 'border-input focus-visible:border-primary'
+            )}
+          />
+          <div className="flex items-center justify-between">
+            {metadataError ? (
+              <p className="text-[10px] text-destructive">{metadataError}</p>
+            ) : (
+              <p className="text-[10px] text-muted-foreground">&nbsp;</p>
+            )}
+            <div className="flex gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  currentMetadataValueRef.current = savedMetadataValueRef.current
+                  if (metadataTextareaRef.current) {
+                    metadataTextareaRef.current.value = savedMetadataValueRef.current
+                  }
+                  setMetadataError(null)
+                  setTimeout(() => {
+                    if (metadataTextareaRef.current) {
+                      metadataTextareaRef.current.value = currentMetadataValueRef.current
+                    }
+                  }, 0)
+                }}
+              >
+                Reset
+              </Button>
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                className="h-5 px-2 text-[10px]"
+                onClick={async () => {
+                  if (!task) return
+                  const currentValue = currentMetadataValueRef.current
+                  const { valid, parsed, error } = parseMetadataJson(currentValue)
+                  setMetadataError(error)
+                  setTimeout(() => {
+                    if (metadataTextareaRef.current) {
+                      metadataTextareaRef.current.value = currentMetadataValueRef.current
+                    }
+                  }, 0)
+                  if (!valid) return
+                  try {
+                    await updateTask.mutateAsync({ id: task._id, data: { metadata: parsed as Record<string, unknown> } })
+                    savedMetadataValueRef.current = currentValue
+                    setIsMetadataEditMode(false)
+                  } catch {
+                    // Silently fail
+                  }
+                }}
+              >
+                Save
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        // View mode - key-value display
+        <div className="px-3 py-2 text-sm bg-muted/50 rounded-md border space-y-1.5 max-h-[calc(100vh-300px)] overflow-y-auto">
+          {task?.metadata && Object.keys(task.metadata).length > 0 ? (
+            Object.entries(task.metadata).map(([key, value]) => (
+              <div key={key} className="flex gap-2">
+                <span className="text-xs font-medium text-muted-foreground min-w-[80px]">{key}:</span>
+                <span className="text-xs break-all">
+                  {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                </span>
+              </div>
+            ))
+          ) : (
+            <span className="text-xs text-muted-foreground italic">No metadata</span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+
+  // Edit mode - two column layout with tabbed sidebar
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-6xl h-[90vh] p-0 gap-0 flex flex-col overflow-hidden">
         {/* Accessibility: visually hidden title */}
         <span className="sr-only">Edit Task</span>
 
-        {/* Header - fixed */}
-        <div className="px-5 pt-5 pb-3 flex-shrink-0">
+        {/* Header - fixed, with border that connects to columns */}
+        <div className="px-5 pt-5 pb-3 flex-shrink-0 border-b border-border">
           {/* Editable title with underline style */}
           <input
             {...register('title', {
@@ -1196,21 +1299,52 @@ onClick={() => {
           </div>
         </div>
 
-        {/* Two-column content - both scrollable */}
+        {/* Two-column content - flush with header border */}
         <div className="flex flex-1 min-h-0 overflow-hidden">
           {/* Left column - Form */}
-          <div className="flex-1 px-5 pb-5 flex flex-col min-h-0 border-r border-border overflow-y-auto">
+          <div className="flex-1 px-5 py-4 flex flex-col min-h-0 border-r border-border overflow-y-auto">
             <FormContent isEditMode={true} />
           </div>
 
-          {/* Right column - Activity Feed */}
-          <div className="w-96 flex-shrink-0 flex flex-col min-h-0 bg-muted/30">
-            <div className="px-4 py-2 border-b border-border bg-background/50 flex-shrink-0">
-              <h3 className="text-sm font-medium">Activity</h3>
-            </div>
-            <div className="flex-1 min-h-0 overflow-y-auto">
-              <TaskActivity taskId={task._id} className="h-full" compact />
-            </div>
+          {/* Right column - Tabbed sidebar */}
+          <div className="w-[420px] flex-shrink-0 flex flex-col min-h-0 bg-muted/20">
+            <Tabs value={activeTab} onValueChange={handleTabChange} className="flex flex-col h-full">
+              <TabsList className="flex-shrink-0 w-full justify-start rounded-none border-b border-border bg-background/50 p-0 h-auto">
+                <TabsTrigger
+                  value={TASK_MODAL_TABS.TYPE_CONFIG}
+                  className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent py-2.5"
+                >
+                  <Settings2 className="h-3.5 w-3.5" />
+                  <span className="text-xs">Config</span>
+                </TabsTrigger>
+                <TabsTrigger
+                  value={TASK_MODAL_TABS.METADATA}
+                  className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent py-2.5"
+                >
+                  <Database className="h-3.5 w-3.5" />
+                  <span className="text-xs">Metadata</span>
+                </TabsTrigger>
+                <TabsTrigger
+                  value={TASK_MODAL_TABS.ACTIVITY}
+                  className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent py-2.5"
+                >
+                  <Activity className="h-3.5 w-3.5" />
+                  <span className="text-xs">Activity</span>
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value={TASK_MODAL_TABS.TYPE_CONFIG} className="flex-1 min-h-0 overflow-y-auto mt-0">
+                <TypeConfigContent />
+              </TabsContent>
+
+              <TabsContent value={TASK_MODAL_TABS.METADATA} className="flex-1 min-h-0 overflow-y-auto mt-0">
+                <MetadataContent />
+              </TabsContent>
+
+              <TabsContent value={TASK_MODAL_TABS.ACTIVITY} className="flex-1 min-h-0 overflow-y-auto mt-0">
+                <TaskActivity taskId={task._id} className="h-full" compact />
+              </TabsContent>
+            </Tabs>
           </div>
         </div>
       </DialogContent>
