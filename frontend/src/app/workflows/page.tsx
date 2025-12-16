@@ -476,7 +476,7 @@ export default function WorkflowsPage() {
       setRunDialog({ open: false, workflow: null })
       resetRunForm()
       queryClient.invalidateQueries({ queryKey: ['workflow-stats'] })
-      router.push(`/workflow-runs/${data.run._id}`)
+      router.push(`/workflow-runs?id=${data.run._id}`)
     },
   })
 

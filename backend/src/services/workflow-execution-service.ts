@@ -504,6 +504,20 @@ class WorkflowExecutionService {
       task.externalConfig = {
         callbackSecret: this.generateSecret(),
       };
+      // Also add webhookConfig if the step has it configured
+      if (step.webhookConfig?.url) {
+        task.webhookConfig = {
+          url: step.webhookConfig.url,
+          method: step.webhookConfig.method || 'POST',
+          headers: step.webhookConfig.headers || {},
+          body: step.webhookConfig.bodyTemplate,
+          maxRetries: step.webhookConfig.maxRetries ?? 3,
+          retryDelayMs: 1000,
+          timeoutMs: step.webhookConfig.timeoutMs ?? 30000,
+          successStatusCodes: step.webhookConfig.successStatusCodes || [200, 201, 202, 204],
+          attempts: [],
+        };
+      }
     }
 
     const result = await this.tasks.insertOne(task as Task);
@@ -552,6 +566,15 @@ class WorkflowExecutionService {
     externalTask: Task,
     inputPayload?: Record<string, unknown>
   ): Promise<void> {
+    // Check if we have a URL (either webhookConfig.url or externalConfig.endpoint)
+    // If so, execute as fire-and-complete webhook
+    const webhookUrl = step.webhookConfig?.url || step.externalConfig?.endpoint;
+    if (webhookUrl) {
+      await this.executeExternalAsWebhook(run, step, externalTask, inputPayload);
+      return;
+    }
+
+    // Otherwise, use the legacy external callback flow (no URL configured)
     const config = step.externalConfig;
     const callbackSecret = externalTask.externalConfig?.callbackSecret || this.generateSecret();
 
@@ -673,6 +696,158 @@ class WorkflowExecutionService {
         }
       );
       // Still waiting for callback - don't fail the task
+    }
+  }
+
+  /**
+   * Execute external step as a fire-and-complete webhook (no callback required).
+   * This is used when an external step has webhookConfig or externalConfig with a URL.
+   * Supports both config structures for backward compatibility.
+   */
+  private async executeExternalAsWebhook(
+    run: WorkflowRun,
+    step: WorkflowStep,
+    externalTask: Task,
+    inputPayload?: Record<string, unknown>
+  ): Promise<void> {
+    // Support both webhookConfig and externalConfig structures
+    const webhookCfg = step.webhookConfig;
+    const externalCfg = step.externalConfig;
+
+    // Determine the URL (prefer webhookConfig if both exist)
+    const url = webhookCfg?.url || externalCfg?.endpoint;
+    const method = webhookCfg?.method || externalCfg?.method || 'POST';
+    const headers = webhookCfg?.headers || externalCfg?.headers || {};
+    const bodyTemplate = webhookCfg?.bodyTemplate || externalCfg?.payloadTemplate;
+    const timeoutMs = webhookCfg?.timeoutMs || 30000;
+    const successStatusCodes = webhookCfg?.successStatusCodes || [200, 201, 202, 204];
+
+    console.log(`[WorkflowExecutionService] Executing external step as webhook: ${method} ${url}`);
+
+    // Resolve template variables
+    const templateContext = {
+      workflowRunId: run._id,
+      stepId: step.id,
+      taskId: externalTask._id,
+      callbackSecret: externalTask.externalConfig?.callbackSecret,
+      systemWebhookUrl: `${process.env.BASE_URL || 'http://localhost:3001'}/api/workflow-callback`,
+      inputPayload,
+    };
+
+    const resolvedUrl = resolveTemplateVariables(url!, templateContext);
+    let resolvedBody: string | undefined;
+
+    if (bodyTemplate) {
+      resolvedBody = resolveTemplateVariables(bodyTemplate, templateContext);
+    } else if (inputPayload) {
+      resolvedBody = JSON.stringify(inputPayload);
+    }
+
+    const resolvedHeaders: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...headers,
+    };
+
+    // Resolve template variables in headers
+    for (const [key, value] of Object.entries(resolvedHeaders)) {
+      resolvedHeaders[key] = resolveTemplateVariables(value, templateContext);
+    }
+
+    const startTime = Date.now();
+
+    try {
+      const response = await fetch(resolvedUrl, {
+        method,
+        headers: resolvedHeaders,
+        body: resolvedBody,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+
+      const durationMs = Date.now() - startTime;
+      const responseBody = await response.text();
+      let parsedResponse: unknown;
+      try {
+        parsedResponse = JSON.parse(responseBody);
+      } catch {
+        parsedResponse = responseBody;
+      }
+
+      const isSuccess = successStatusCodes.includes(response.status);
+
+      // Record the attempt
+      const attempt = {
+        attemptNumber: 1,
+        startedAt: new Date(startTime),
+        completedAt: new Date(),
+        status: isSuccess ? 'success' : 'failed',
+        httpStatus: response.status,
+        responseBody: parsedResponse,
+        durationMs,
+      };
+
+      if (isSuccess) {
+        await this.tasks.updateOne(
+          { _id: externalTask._id },
+          {
+            $set: {
+              status: 'completed' as TaskStatus,
+              'webhookConfig.attempts': [attempt],
+              'webhookConfig.lastAttemptAt': new Date(),
+              'metadata.response': parsedResponse,
+              'metadata.requestUrl': resolvedUrl,
+              'metadata.requestMethod': method,
+              'metadata.requestHeaders': resolvedHeaders,
+              'metadata.requestBody': resolvedBody,
+            },
+          }
+        );
+        console.log(`[WorkflowExecutionService] External webhook completed successfully: ${response.status}`);
+      } else {
+        await this.tasks.updateOne(
+          { _id: externalTask._id },
+          {
+            $set: {
+              status: 'failed' as TaskStatus,
+              'webhookConfig.attempts': [attempt],
+              'webhookConfig.lastAttemptAt': new Date(),
+              'metadata.error': `HTTP ${response.status}: ${responseBody}`,
+              'metadata.requestUrl': resolvedUrl,
+              'metadata.requestMethod': method,
+              'metadata.requestHeaders': resolvedHeaders,
+              'metadata.requestBody': resolvedBody,
+            },
+          }
+        );
+        console.error(`[WorkflowExecutionService] External webhook failed: ${response.status}`);
+      }
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      console.error(`[WorkflowExecutionService] External webhook execution error:`, error);
+
+      const attempt = {
+        attemptNumber: 1,
+        startedAt: new Date(startTime),
+        completedAt: new Date(),
+        status: 'failed' as const,
+        errorMessage: String(error),
+        durationMs,
+      };
+
+      await this.tasks.updateOne(
+        { _id: externalTask._id },
+        {
+          $set: {
+            status: 'failed' as TaskStatus,
+            'webhookConfig.attempts': [attempt],
+            'webhookConfig.lastAttemptAt': new Date(),
+            'metadata.error': String(error),
+            'metadata.requestUrl': resolvedUrl,
+            'metadata.requestMethod': method,
+            'metadata.requestHeaders': resolvedHeaders,
+            'metadata.requestBody': resolvedBody,
+          },
+        }
+      );
     }
   }
 
