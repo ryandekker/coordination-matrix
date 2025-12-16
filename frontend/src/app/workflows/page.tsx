@@ -715,40 +715,67 @@ export default function WorkflowsPage() {
       id: 'actions',
       header: '',
       cell: ({ row }) => (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {row.original.isActive && (
-              <>
-                <DropdownMenuItem onClick={() => setRunDialog({ open: true, workflow: row.original })}>
-                  <Play className="mr-2 h-4 w-4" />
-                  Run Workflow
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-              </>
-            )}
-            <DropdownMenuItem onClick={() => openEditEditor(row.original)}>
-              <Pencil className="mr-2 h-4 w-4" />
-              Edit
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => duplicateMutation.mutate(row.original._id)}>
-              <Copy className="mr-2 h-4 w-4" />
-              Duplicate
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="text-destructive"
-              onClick={() => setDeleteConfirm(row.original)}
+        <div className="flex items-center gap-1">
+          {/* Direct Edit button */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 px-2"
+            onClick={(e) => { e.stopPropagation(); openEditEditor(row.original) }}
+          >
+            <Pencil className="h-4 w-4 mr-1" />
+            Edit
+          </Button>
+
+          {/* Direct Run button (if active) */}
+          {row.original.isActive && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-green-600 hover:text-green-700 hover:bg-green-50"
+              onClick={(e) => { e.stopPropagation(); setRunDialog({ open: true, workflow: row.original }) }}
             >
-              <Trash2 className="mr-2 h-4 w-4" />
-              Delete
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              <Play className="h-4 w-4 mr-1" />
+              Run
+            </Button>
+          )}
+
+          {/* More actions dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => duplicateMutation.mutate(row.original._id)}>
+                <Copy className="mr-2 h-4 w-4" />
+                Duplicate
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleToggleActive(row.original)}>
+                {row.original.isActive ? (
+                  <>
+                    <Pause className="mr-2 h-4 w-4" />
+                    Deactivate
+                  </>
+                ) : (
+                  <>
+                    <Play className="mr-2 h-4 w-4" />
+                    Activate
+                  </>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-destructive"
+                onClick={() => setDeleteConfirm(row.original)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       ),
     },
   ], [handleToggleActive, openEditEditor, duplicateMutation])
