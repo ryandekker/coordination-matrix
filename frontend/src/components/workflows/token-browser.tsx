@@ -23,7 +23,6 @@ import {
   Hash,
   Search,
   Clock,
-  ChevronRight,
   Loader2,
 } from 'lucide-react'
 
@@ -87,10 +86,11 @@ export function TokenBrowser({
   const [search, setSearch] = useState('')
   const [sampleData, setSampleData] = useState<SampleData[]>([])
   const [loadingSamples, setLoadingSamples] = useState(false)
+  const [fetchError, setFetchError] = useState<string | null>(null)
 
   // Fetch sample data from past workflow runs when popover opens
   useEffect(() => {
-    if (open && workflowId && sampleData.length === 0) {
+    if (open && workflowId && sampleData.length === 0 && !fetchError) {
       fetchSampleData()
     }
   }, [open, workflowId])
@@ -99,10 +99,12 @@ export function TokenBrowser({
     if (!workflowId) return
 
     setLoadingSamples(true)
+    setFetchError(null)
     try {
       // Get recent completed runs
       const runsRes = await fetch(`${API_BASE}/workflow-runs?workflowId=${workflowId}&status=completed&limit=1`)
       if (!runsRes.ok) {
+        setFetchError(`Failed to fetch runs: ${runsRes.status}`)
         setLoadingSamples(false)
         return
       }
@@ -111,6 +113,7 @@ export function TokenBrowser({
       const runs = runsData.data || []
 
       if (runs.length === 0) {
+        setFetchError('No completed runs yet')
         setLoadingSamples(false)
         return
       }
@@ -119,6 +122,7 @@ export function TokenBrowser({
       const runId = runs[0]._id
       const runRes = await fetch(`${API_BASE}/workflow-runs/${runId}?includeTasks=true`)
       if (!runRes.ok) {
+        setFetchError(`Failed to fetch run details: ${runRes.status}`)
         setLoadingSamples(false)
         return
       }
@@ -126,18 +130,23 @@ export function TokenBrowser({
       const runData = await runRes.json()
       const tasks = runData.tasks || []
 
-      // Extract output data from each task
+      // Extract output data from each task - data is in `metadata` field
       const samples: SampleData[] = tasks
-        .filter((task: { output?: unknown }) => task.output)
-        .map((task: { stepId?: string; title?: string; output?: unknown }) => ({
-          stepId: task.stepId || '',
+        .filter((task: { metadata?: unknown }) => task.metadata && Object.keys(task.metadata as object).length > 0)
+        .map((task: { workflowStepId?: string; title?: string; metadata?: unknown }) => ({
+          stepId: task.workflowStepId || '',
           stepName: task.title || 'Unknown Step',
-          output: task.output,
+          output: task.metadata,
         }))
+
+      if (samples.length === 0) {
+        setFetchError('No task outputs found in runs')
+      }
 
       setSampleData(samples)
     } catch (error) {
       console.error('Failed to fetch sample data:', error)
+      setFetchError('Network error')
     } finally {
       setLoadingSamples(false)
     }
@@ -226,20 +235,19 @@ export function TokenBrowser({
     let stepTokens: Token[] = []
 
     if (stepSample) {
-      // Use actual sample data to build tokens
-      stepTokens = extractPaths(stepSample.output, 'result')
+      // Use actual sample data to build tokens - prefix with "output" to match actual path
+      stepTokens = extractPaths(stepSample.output, 'output')
       if (stepTokens.length === 0) {
-        stepTokens.push({ path: 'result', description: 'Step output', fromRun: true })
+        stepTokens.push({ path: 'output', description: 'Step output', fromRun: true })
       }
     } else {
-      // Fallback to type-based suggestions
+      // Fallback to type-based suggestions - all use "output" prefix
       switch (prevStep.stepType) {
         case 'external':
           stepTokens = [
-            { path: 'result', description: 'Full response from external call' },
-            { path: 'result.data', description: 'Response data field' },
-            { path: 'result.status', description: 'Response status code' },
-            { path: 'result.items', description: 'Items array (if returned)' },
+            { path: 'output', description: 'Full response from external call' },
+            { path: 'output.data', description: 'Response data field' },
+            { path: 'output.items', description: 'Items array (if returned)' },
           ]
           break
         case 'foreach':
@@ -251,18 +259,18 @@ export function TokenBrowser({
           break
         case 'join':
           stepTokens = [
-            { path: 'aggregatedResults', description: 'Array of all completed results' },
-            { path: 'aggregatedResults[0]', description: 'First result' },
-            { path: 'completedCount', description: 'Number of completed tasks' },
-            { path: 'expectedCount', description: 'Total expected tasks' },
+            { path: 'output.aggregatedResults', description: 'Array of all completed results' },
+            { path: 'output.aggregatedResults[0]', description: 'First result' },
+            { path: 'output.completedCount', description: 'Number of completed tasks' },
+            { path: 'output.expectedCount', description: 'Total expected tasks' },
           ]
           break
         case 'agent':
         case 'manual':
         default:
           stepTokens = [
-            { path: 'result', description: 'Task output/result' },
-            { path: 'result.data', description: 'Result data (if structured)' },
+            { path: 'output', description: 'Task output' },
+            { path: 'output.data', description: 'Output data (if structured)' },
           ]
       }
     }
@@ -283,11 +291,11 @@ export function TokenBrowser({
       const otherStepTokens: Token[] = previousSteps.slice(0, -1).flatMap(step => {
         const sample = sampleData.find(s => s.stepId === step.id)
         if (sample) {
-          const paths = extractPaths(sample.output, `steps.${step.id}`)
+          const paths = extractPaths(sample.output, `steps.${step.id}.output`)
           if (paths.length > 0) return paths.slice(0, 3) // Limit to top 3 paths
         }
         return [{
-          path: `steps.${step.id}.result`,
+          path: `steps.${step.id}.output`,
           description: `Output from "${step.name}"`,
         }]
       })
@@ -423,13 +431,13 @@ export function TokenBrowser({
 
         <div className="border-t p-2 bg-muted/30">
           <p className="text-xs text-muted-foreground">
-            <strong>result</strong> = previous step output<br />
-            <strong>steps.id</strong> = specific step output<br />
+            <strong>output</strong> = previous step&apos;s output<br />
+            <strong>steps.id.output</strong> = specific step&apos;s output<br />
             <strong>trigger</strong> = initial workflow payload
           </p>
-          {workflowId && sampleData.length === 0 && !loadingSamples && (
+          {workflowId && sampleData.length === 0 && !loadingSamples && fetchError && (
             <p className="text-xs text-amber-600 mt-1">
-              Run the workflow once to see actual data paths
+              {fetchError}
             </p>
           )}
         </div>
