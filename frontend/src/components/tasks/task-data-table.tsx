@@ -13,14 +13,6 @@ import {
   Copy,
   ExternalLink,
   Plus,
-  FileText,
-  Globe,
-  Webhook,
-  GitBranch,
-  Repeat,
-  Merge,
-  Workflow,
-  Zap,
 } from 'lucide-react'
 import {
   Table,
@@ -51,22 +43,11 @@ import { EditableCell } from './editable-cell'
 import { Task, FieldConfig, LookupValue, User } from '@/lib/api'
 import { useTaskChildren, useUpdateTask, useDeleteTask } from '@/hooks/use-tasks'
 import { formatDateTime, cn } from '@/lib/utils'
+import { TASK_TYPE_CONFIG, getTaskTypeConfig } from '@/lib/task-type-config'
 
-// Task type icon mapping with labels
-const taskTypeConfig: Record<string, { icon: React.ElementType; label: string; color: string }> = {
-  standard: { icon: FileText, label: 'Standard', color: 'text-gray-500' },
-  external: { icon: Globe, label: 'External', color: 'text-blue-500' },
-  webhook: { icon: Webhook, label: 'Webhook', color: 'text-purple-500' },
-  trigger: { icon: Zap, label: 'Trigger', color: 'text-yellow-500' },
-  decision: { icon: GitBranch, label: 'Decision', color: 'text-orange-500' },
-  foreach: { icon: Repeat, label: 'ForEach', color: 'text-green-500' },
-  join: { icon: Merge, label: 'Join', color: 'text-cyan-500' },
-  subflow: { icon: Workflow, label: 'Subflow', color: 'text-pink-500' },
-}
-
-// Task type icon component with tooltip
+// Task type icon component with tooltip - uses shared config
 const TaskTypeIcon = memo(function TaskTypeIcon({ taskType, batchCounters }: { taskType?: string; batchCounters?: { completedCount?: number; expectedCount?: number } }) {
-  const config = taskTypeConfig[taskType || 'standard'] || taskTypeConfig.standard
+  const config = getTaskTypeConfig(taskType)
   const Icon = config.icon
 
   // For foreach tasks, show progress if available
