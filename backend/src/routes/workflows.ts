@@ -96,7 +96,8 @@ interface WorkflowStep {
   inputMapping?: Record<string, string>;
 
   // Input aggregation
-  inputPath?: string;               // JSONPath to extract input from previous steps
+  inputSource?: string;             // Step ID to get input from (default: previous step)
+  inputPath?: string;               // JSONPath to extract input from source step
 
   // Legacy fields (kept for compatibility)
   execution?: 'automated' | 'manual';
@@ -610,6 +611,7 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
         if (savedConfig.description) step.description = savedConfig.description as string;
         if (savedConfig.additionalInstructions) step.additionalInstructions = savedConfig.additionalInstructions as string;
         if (savedConfig.defaultAssigneeId) step.defaultAssigneeId = savedConfig.defaultAssigneeId as string;
+        if (savedConfig.inputSource) step.inputSource = savedConfig.inputSource as string;
         if (savedConfig.inputPath) step.inputPath = savedConfig.inputPath as string;
 
         // External config

@@ -120,7 +120,8 @@ interface WorkflowStep {
   expectedCountPath?: string  // JSONPath to get expected count from input (alternative to items.length)
 
   // Data flow - general (applies to multiple step types)
-  inputPath?: string               // JSONPath to extract data from previous step(s)
+  inputSource?: string               // Step ID to get input from (default: previous step)
+  inputPath?: string                 // JSONPath to extract data from source step
 
   // Join fields
   awaitTag?: string
@@ -204,23 +205,44 @@ function detectLoopScopes(steps: WorkflowStep[]): LoopScope[] {
   return scopes
 }
 
-// Get data flow description for a step
-function getDataFlowDescription(step: WorkflowStep, prevStep?: WorkflowStep): { input?: string; output?: string } {
-  const result: { input?: string; output?: string } = {}
+// Get data flow description for a step (with source step awareness)
+function getDataFlowDescription(
+  step: WorkflowStep,
+  prevStep?: WorkflowStep,
+  allSteps?: WorkflowStep[]
+): { input?: string; output?: string; sourceStep?: string } {
+  const result: { input?: string; output?: string; sourceStep?: string } = {}
 
-  // Determine input
+  // Parse input path to determine source
+  const { source, path } = parseInputPath(step.inputPath)
+
+  // Determine source step name
+  if (source === 'trigger') {
+    result.sourceStep = 'Trigger'
+  } else if (source !== 'previous' && allSteps) {
+    const srcStep = allSteps.find(s => s.id === source)
+    if (srcStep) {
+      result.sourceStep = srcStep.name
+    }
+  }
+
+  // Determine input description
   if (step.stepType === 'foreach' && step.itemsPath) {
-    result.input = `items from: ${step.itemsPath}`
+    result.input = `iterate: ${step.itemsPath}`
   } else if (step.stepType === 'join') {
     if (step.inputPath) {
-      result.input = `aggregate: ${step.inputPath}`
+      result.input = `aggregate: ${path || step.inputPath}`
     } else {
       result.input = 'aggregate all results'
     }
   } else if (step.inputPath) {
-    result.input = step.inputPath
+    if (result.sourceStep) {
+      result.input = `${result.sourceStep}.${path}`
+    } else {
+      result.input = path || step.inputPath
+    }
   } else if (prevStep) {
-    result.input = 'previous output'
+    result.input = `${prevStep.name}.output`
   }
 
   // Determine output
@@ -229,14 +251,87 @@ function getDataFlowDescription(step: WorkflowStep, prevStep?: WorkflowStep): { 
   } else if (step.stepType === 'join') {
     result.output = 'aggregatedResults[]'
   } else if (step.stepType === 'external') {
-    result.output = 'webhook response'
+    result.output = 'output (response)'
   } else if (step.stepType === 'agent' || step.stepType === 'manual') {
-    result.output = 'task output'
+    result.output = 'output (result)'
   } else if (step.stepType === 'decision') {
     result.output = 'routes to branch'
   }
 
   return result
+}
+
+// Get available outputs from a step (for variable picker)
+function getStepOutputs(step: WorkflowStep): { path: string; description: string }[] {
+  const outputs: { path: string; description: string }[] = []
+
+  switch (step.stepType) {
+    case 'external':
+      outputs.push(
+        { path: 'output', description: 'Full webhook response' },
+        { path: 'output.data', description: 'Response data field' },
+        { path: 'output.status', description: 'Response status' },
+      )
+      break
+    case 'foreach':
+      outputs.push(
+        { path: step.itemVariable || 'item', description: 'Current loop item' },
+        { path: '_index', description: 'Current item index (0-based)' },
+        { path: '_total', description: 'Total items in loop' },
+      )
+      break
+    case 'join':
+      outputs.push(
+        { path: 'aggregatedResults', description: 'Array of all completed task outputs' },
+        { path: 'aggregatedResults[0]', description: 'First result' },
+        { path: 'completedCount', description: 'Number of completed tasks' },
+        { path: 'expectedCount', description: 'Total expected tasks' },
+      )
+      break
+    case 'agent':
+    case 'manual':
+      outputs.push(
+        { path: 'output', description: 'Task output/response' },
+        { path: 'output.result', description: 'Result field (if set)' },
+        { path: 'metadata', description: 'Full task metadata' },
+      )
+      break
+    case 'decision':
+      outputs.push(
+        { path: 'selectedBranch', description: 'Which branch was selected' },
+        { path: 'condition', description: 'Evaluated condition' },
+      )
+      break
+    default:
+      outputs.push({ path: 'output', description: 'Step output' })
+  }
+
+  return outputs
+}
+
+// Get the full input path with step reference
+function buildInputPath(sourceStepId: string | undefined, path: string): string {
+  if (!sourceStepId || sourceStepId === 'previous') {
+    return path
+  }
+  if (sourceStepId === 'trigger') {
+    return `trigger.${path}`
+  }
+  return `steps.${sourceStepId}.${path}`
+}
+
+// Parse input path to extract source and path
+function parseInputPath(inputPath: string | undefined): { source: string; path: string } {
+  if (!inputPath) return { source: 'previous', path: '' }
+
+  if (inputPath.startsWith('steps.')) {
+    const parts = inputPath.split('.')
+    return { source: parts[1], path: parts.slice(2).join('.') }
+  }
+  if (inputPath.startsWith('trigger.')) {
+    return { source: 'trigger', path: inputPath.slice(8) }
+  }
+  return { source: 'previous', path: inputPath }
 }
 
 function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string {
@@ -336,26 +431,48 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     if (!connectedFrom.has(nodeId)) {
       const nextNodeId = nextStep.id || `step${i + 1}`
 
-      // Add data flow label for key transitions
+      // Determine edge label based on data flow
       let edgeLabel = ''
-      if (step.stepType === 'foreach') {
-        // Show that ForEach spawns parallel tasks
-        const itemVar = step.itemVariable || 'item'
-        edgeLabel = `|"spawns N tasks (${itemVar})"| `
-      } else if (step.stepType === 'external' && nextStep.stepType === 'foreach') {
-        const itemsPath = nextStep.itemsPath || 'response'
-        edgeLabel = `|"${itemsPath}"| `
-      } else if (step.stepType === 'join') {
-        edgeLabel = '|"aggregatedResults"| '
-      }
 
-      // Check if this connects ForEach directly to Join (parallel execution)
-      if (step.stepType === 'foreach' && nextStep.stepType === 'join') {
-        // Show the parallel nature with a special edge style
-        const pct = nextStep.minSuccessPercent !== undefined ? `@${nextStep.minSuccessPercent}%` : '@100%'
-        lines.push(`    ${nodeId} -.->|"parallel tasks ${pct}"| ${nextNodeId}`)
+      // Check if next step has explicit input source
+      const { source, path } = parseInputPath(nextStep.inputPath)
+      if (source !== 'previous' && source !== step.id) {
+        // Next step reads from a different source - show dotted line
+        if (step.stepType === 'foreach' && nextStep.stepType === 'join') {
+          const pct = nextStep.minSuccessPercent !== undefined ? `@${nextStep.minSuccessPercent}%` : '@100%'
+          lines.push(`    ${nodeId} -.->|"parallel ${pct}"| ${nextNodeId}`)
+        } else {
+          lines.push(`    ${nodeId} --> ${nextNodeId}`)
+        }
+        // Add explicit data flow edge from source
+        if (source === 'trigger') {
+          lines.push(`    trigger_data[/"Trigger Data"/] -.->|"${path || 'payload'}"| ${nextNodeId}`)
+        } else {
+          const srcStep = steps.find(s => s.id === source)
+          if (srcStep) {
+            lines.push(`    ${source} -.->|"${path || 'output'}"| ${nextNodeId}`)
+          }
+        }
       } else {
-        lines.push(`    ${nodeId} -->${edgeLabel}${nextNodeId}`)
+        // Normal sequential flow
+        if (step.stepType === 'foreach') {
+          const itemVar = step.itemVariable || 'item'
+          edgeLabel = `|"N×(${itemVar})"| `
+        } else if (step.stepType === 'external' && nextStep.stepType === 'foreach') {
+          const itemsPath = nextStep.itemsPath || 'response'
+          edgeLabel = `|"${itemsPath}"| `
+        } else if (step.stepType === 'join') {
+          edgeLabel = '|"aggregatedResults"| '
+        } else if (nextStep.inputPath && path) {
+          edgeLabel = `|"${path}"| `
+        }
+
+        if (step.stepType === 'foreach' && nextStep.stepType === 'join') {
+          const pct = nextStep.minSuccessPercent !== undefined ? `@${nextStep.minSuccessPercent}%` : '@100%'
+          lines.push(`    ${nodeId} -.->|"parallel ${pct}"| ${nextNodeId}`)
+        } else {
+          lines.push(`    ${nodeId} -->${edgeLabel}${nextNodeId}`)
+        }
       }
     }
   }
@@ -432,6 +549,7 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     if (step.description) config.description = step.description
     if (step.additionalInstructions) config.additionalInstructions = step.additionalInstructions
     if (step.defaultAssigneeId) config.defaultAssigneeId = step.defaultAssigneeId
+    if (step.inputSource) config.inputSource = step.inputSource
     if (step.inputPath) config.inputPath = step.inputPath
 
     // External config
@@ -797,7 +915,7 @@ export function WorkflowEditor({
                       const isInLoop = !!loopScope
                       const prevStep = index > 0 ? steps[index - 1] : undefined
                       const nextStep = index < steps.length - 1 ? steps[index + 1] : undefined
-                      const dataFlow = getDataFlowDescription(step, prevStep)
+                      const dataFlow = getDataFlowDescription(step, prevStep, steps)
 
                       // Check if this step starts or ends a loop scope
                       const startsLoop = loopScopes.some(s => s.foreachIndex === index)
@@ -1493,6 +1611,108 @@ The agent will receive task context automatically.`}
                                     </p>
                                   </div>
                                 </>
+                              )}
+
+                              {/* Input Source - for steps that receive data */}
+                              {index > 0 && step.stepType !== 'foreach' && (
+                                <div className="space-y-2 border-t pt-3 mt-3">
+                                  <div className="flex items-center gap-2">
+                                    <Database className="h-4 w-4 text-muted-foreground" />
+                                    <label className="text-sm font-medium">Input Data Source</label>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div className="space-y-1">
+                                      <label className="text-xs text-muted-foreground">From Step</label>
+                                      <Select
+                                        value={step.inputSource || 'previous'}
+                                        onValueChange={(val) => updateStep(index, { inputSource: val })}
+                                      >
+                                        <SelectTrigger className="h-8 text-sm">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="previous">
+                                            <span className="flex items-center gap-2">
+                                              <ArrowDown className="h-3 w-3" />
+                                              Previous Step ({steps[index - 1]?.name || 'N/A'})
+                                            </span>
+                                          </SelectItem>
+                                          <SelectItem value="trigger">
+                                            <span className="flex items-center gap-2">
+                                              <Zap className="h-3 w-3" />
+                                              Workflow Trigger (initial payload)
+                                            </span>
+                                          </SelectItem>
+                                          {steps.slice(0, index).map((s, i) => (
+                                            <SelectItem key={s.id} value={s.id}>
+                                              <span className="flex items-center gap-2 text-xs">
+                                                {(() => {
+                                                  const ti = getStepTypeInfo(s.stepType)
+                                                  const Icon = ti.icon
+                                                  return <Icon className={cn('h-3 w-3', ti.color)} />
+                                                })()}
+                                                Step {i + 1}: {s.name}
+                                              </span>
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-xs text-muted-foreground">Data Path</label>
+                                      <div className="flex gap-1">
+                                        <Input
+                                          value={parseInputPath(step.inputPath).path}
+                                          onChange={(e) => {
+                                            const newPath = buildInputPath(step.inputSource, e.target.value)
+                                            updateStep(index, { inputPath: newPath })
+                                          }}
+                                          placeholder="e.g., output.data"
+                                          className="h-8 text-sm font-mono"
+                                        />
+                                        <Select
+                                          value=""
+                                          onValueChange={(val) => {
+                                            const newPath = buildInputPath(step.inputSource, val)
+                                            updateStep(index, { inputPath: newPath })
+                                          }}
+                                        >
+                                          <SelectTrigger className="h-8 w-8 p-0 flex-shrink-0">
+                                            <ChevronDown className="h-3 w-3" />
+                                          </SelectTrigger>
+                                          <SelectContent align="end">
+                                            {(() => {
+                                              const sourceStep = step.inputSource === 'previous'
+                                                ? steps[index - 1]
+                                                : step.inputSource === 'trigger'
+                                                ? null
+                                                : steps.find(s => s.id === step.inputSource)
+                                              if (!sourceStep) {
+                                                return (
+                                                  <>
+                                                    <SelectItem value="payload">payload (full trigger data)</SelectItem>
+                                                    <SelectItem value="payload.data">payload.data</SelectItem>
+                                                  </>
+                                                )
+                                              }
+                                              return getStepOutputs(sourceStep).map(out => (
+                                                <SelectItem key={out.path} value={out.path}>
+                                                  <span className="font-mono text-xs">{out.path}</span>
+                                                  <span className="text-muted-foreground ml-2">- {out.description}</span>
+                                                </SelectItem>
+                                              ))
+                                            })()}
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  {step.inputPath && (
+                                    <div className="text-xs font-mono bg-muted/50 px-2 py-1 rounded text-muted-foreground">
+                                      Full path: {step.inputPath}
+                                    </div>
+                                  )}
+                                </div>
                               )}
 
                               {/* Description - for all types */}
