@@ -168,6 +168,20 @@ export const tasksApi = {
     })
     return handleResponse(response)
   },
+
+  // Get all webhook task attempts across all tasks
+  getWebhookAttempts: async (params?: {
+    status?: 'pending' | 'success' | 'failed'
+    limit?: number
+    offset?: number
+  }): Promise<{ data: WebhookTaskAttempt[]; pagination: { limit: number; offset: number; total: number } }> => {
+    const searchParams = new URLSearchParams()
+    if (params?.status) searchParams.append('status', params.status)
+    if (params?.limit) searchParams.append('limit', String(params.limit))
+    if (params?.offset) searchParams.append('offset', String(params.offset))
+    const response = await authFetch(`${API_BASE}/tasks/webhook-attempts?${searchParams}`)
+    return handleResponse(response)
+  },
 }
 
 // Lookups API
@@ -758,6 +772,27 @@ export interface WebhookDelivery {
   nextRetryAt?: string | null
   createdAt: string
   completedAt?: string | null
+  // Added from aggregation lookup
+  webhookName?: string
+  webhookUrl?: string
+}
+
+// Webhook task attempt (from tasks with webhookConfig)
+export interface WebhookTaskAttempt {
+  _id: string
+  taskId: string
+  taskTitle: string
+  taskStatus: string
+  attemptNumber: number
+  status: 'pending' | 'success' | 'failed'
+  httpStatus?: number
+  responseBody?: unknown
+  errorMessage?: string
+  durationMs?: number
+  url: string
+  method: string
+  startedAt: string
+  completedAt?: string
 }
 
 // Activity Logs API
@@ -1046,6 +1081,20 @@ export const webhooksApi = {
     const response = await authFetch(`${API_BASE}/webhooks/deliveries/${deliveryId}/retry`, {
       method: 'POST',
     })
+    return handleResponse(response)
+  },
+
+  // Get all webhook deliveries across all webhooks
+  getAllDeliveries: async (params?: {
+    status?: 'pending' | 'success' | 'failed' | 'retrying'
+    limit?: number
+    offset?: number
+  }): Promise<{ data: WebhookDelivery[]; pagination: { limit: number; offset: number; total: number } }> => {
+    const searchParams = new URLSearchParams()
+    if (params?.status) searchParams.append('status', params.status)
+    if (params?.limit) searchParams.append('limit', String(params.limit))
+    if (params?.offset) searchParams.append('offset', String(params.offset))
+    const response = await authFetch(`${API_BASE}/webhooks/deliveries?${searchParams}`)
     return handleResponse(response)
   },
 }

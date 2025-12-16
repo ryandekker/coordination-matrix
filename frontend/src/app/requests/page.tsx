@@ -70,6 +70,8 @@ import {
   batchJobsApi,
   externalJobsApi,
   workflowsApi,
+  webhooksApi,
+  tasksApi,
   BatchJob,
   BatchJobStatus,
   BatchItem,
@@ -77,11 +79,13 @@ import {
   ReviewDecision,
   Workflow,
   ExternalJob,
+  WebhookDelivery,
+  WebhookTaskAttempt,
 } from '@/lib/api'
 
 // Unified request type for the list
-type RequestType = 'external' | 'batch'
-type RequestStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'awaiting_responses' | 'manual_review'
+type RequestType = 'external' | 'batch' | 'webhook_delivery' | 'webhook_task'
+type RequestStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'awaiting_responses' | 'manual_review' | 'success' | 'retrying'
 
 interface UnifiedRequest {
   _id: string
@@ -105,7 +109,18 @@ interface UnifiedRequest {
   failedCount?: number
   workflowId?: string
   requiresManualReview?: boolean
-  original: ExternalJob | BatchJob
+  // Webhook delivery fields
+  webhookName?: string
+  webhookUrl?: string
+  eventType?: string
+  statusCode?: number
+  // Webhook task attempt fields
+  taskTitle?: string
+  httpStatus?: number
+  durationMs?: number
+  url?: string
+  method?: string
+  original: ExternalJob | BatchJob | WebhookDelivery | WebhookTaskAttempt
 }
 
 // Status configurations
@@ -114,7 +129,9 @@ const STATUS_CONFIG: Record<string, { icon: React.ElementType; color: string; bg
   processing: { icon: Loader2, color: 'text-blue-500', bgColor: 'bg-blue-50 dark:bg-blue-950/50', label: 'Processing' },
   awaiting_responses: { icon: ArrowLeftRight, color: 'text-amber-500', bgColor: 'bg-amber-50 dark:bg-amber-950/50', label: 'Awaiting' },
   completed: { icon: CheckCircle, color: 'text-green-500', bgColor: 'bg-green-50 dark:bg-green-950/50', label: 'Completed' },
+  success: { icon: CheckCircle, color: 'text-green-500', bgColor: 'bg-green-50 dark:bg-green-950/50', label: 'Success' },
   failed: { icon: XCircle, color: 'text-red-500', bgColor: 'bg-red-50 dark:bg-red-950/50', label: 'Failed' },
+  retrying: { icon: RefreshCw, color: 'text-amber-500', bgColor: 'bg-amber-50 dark:bg-amber-950/50', label: 'Retrying' },
   cancelled: { icon: Ban, color: 'text-gray-500', bgColor: 'bg-gray-50 dark:bg-gray-800/50', label: 'Cancelled' },
   manual_review: { icon: Eye, color: 'text-purple-500', bgColor: 'bg-purple-50 dark:bg-purple-950/50', label: 'Review Needed' },
 }
@@ -198,6 +215,47 @@ function toBatchUnifiedRequest(job: BatchJob): UnifiedRequest {
     taskId: job.taskId,
     requiresManualReview: job.requiresManualReview,
     original: job,
+  }
+}
+
+// Convert webhook delivery to unified format
+function toWebhookDeliveryUnifiedRequest(delivery: WebhookDelivery): UnifiedRequest {
+  return {
+    _id: delivery._id,
+    type: 'webhook_delivery',
+    name: delivery.webhookName || `Webhook ${delivery.webhookId.slice(-8)}`,
+    status: delivery.status as RequestStatus,
+    createdAt: delivery.createdAt,
+    completedAt: delivery.completedAt ?? undefined,
+    webhookName: delivery.webhookName,
+    webhookUrl: delivery.webhookUrl,
+    eventType: delivery.eventType,
+    statusCode: delivery.statusCode,
+    error: delivery.error,
+    attempts: delivery.attempts,
+    maxAttempts: delivery.maxAttempts,
+    payload: delivery.payload,
+    original: delivery,
+  }
+}
+
+// Convert webhook task attempt to unified format
+function toWebhookTaskUnifiedRequest(attempt: WebhookTaskAttempt): UnifiedRequest {
+  return {
+    _id: attempt._id,
+    type: 'webhook_task',
+    name: attempt.taskTitle || `Webhook Task`,
+    status: attempt.status as RequestStatus,
+    createdAt: attempt.startedAt,
+    completedAt: attempt.completedAt,
+    taskId: attempt.taskId,
+    taskTitle: attempt.taskTitle,
+    httpStatus: attempt.httpStatus,
+    durationMs: attempt.durationMs,
+    url: attempt.url,
+    method: attempt.method,
+    error: attempt.errorMessage,
+    original: attempt,
   }
 }
 
@@ -743,11 +801,332 @@ function BatchJobDetail({ requestId }: { requestId: string }) {
 }
 
 // ============================================================================
+// Webhook Delivery Detail View
+// ============================================================================
+function WebhookDeliveryDetail({ deliveryId }: { deliveryId: string }) {
+  const router = useRouter()
+
+  const { data: deliveriesData, isLoading, error, refetch } = useQuery({
+    queryKey: ['webhook-delivery', deliveryId],
+    queryFn: () => webhooksApi.getAllDeliveries({ limit: 100 }),
+    refetchInterval: (query) => {
+      const deliveries = query.state.data?.data || []
+      const delivery = deliveries.find((d: WebhookDelivery) => d._id === deliveryId)
+      if (delivery && (delivery.status === 'pending' || delivery.status === 'retrying')) {
+        return 3000
+      }
+      return false
+    },
+  })
+
+  const delivery: WebhookDelivery | undefined = deliveriesData?.data?.find((d: WebhookDelivery) => d._id === deliveryId)
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    )
+  }
+
+  if (error || !delivery) {
+    return (
+      <div className="space-y-4">
+        <Button variant="ghost" onClick={() => router.push('/requests')}>
+          <ChevronLeft className="h-4 w-4 mr-2" />
+          Back to List
+        </Button>
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-8 text-center">
+          <p className="text-destructive">Failed to load webhook delivery</p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>
+            Retry
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  const statusConfig = STATUS_CONFIG[delivery.status] || STATUS_CONFIG.pending
+  const StatusIcon = statusConfig.icon
+  const isActive = delivery.status === 'pending' || delivery.status === 'retrying'
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" onClick={() => router.push('/requests')}>
+            <ChevronLeft className="h-4 w-4 mr-2" />
+            Back
+          </Button>
+          <div>
+            <div className="flex items-center gap-3">
+              <Badge variant="outline" className="text-xs">
+                <Send className="h-3 w-3 mr-1" />
+                Webhook Delivery
+              </Badge>
+              <h1 className="text-2xl font-bold">{delivery.webhookName || 'Webhook'}</h1>
+              <Badge variant="outline" className={cn('text-sm', statusConfig.color)}>
+                <StatusIcon className={cn('h-4 w-4 mr-1', isActive && 'animate-spin')} />
+                {statusConfig.label}
+              </Badge>
+              {isActive && (
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-blue-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                </span>
+              )}
+            </div>
+            <p className="text-muted-foreground text-sm">ID: {delivery._id}</p>
+          </div>
+        </div>
+
+        <Button variant="outline" size="sm" onClick={() => refetch()}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Refresh
+        </Button>
+      </div>
+
+      {/* Stats grid */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="rounded-lg border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Event Type</p>
+          <p className="font-medium">{delivery.eventType}</p>
+        </div>
+        <div className="rounded-lg border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Created</p>
+          <p className="font-medium">{formatDate(delivery.createdAt)}</p>
+        </div>
+        <div className="rounded-lg border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Completed</p>
+          <p className="font-medium">{formatDate(delivery.completedAt)}</p>
+        </div>
+        <div className="rounded-lg border bg-card p-4">
+          <p className="text-sm text-muted-foreground">HTTP Status</p>
+          <p className="font-medium">{delivery.statusCode || '-'}</p>
+        </div>
+      </div>
+
+      {/* Webhook URL */}
+      <div className="rounded-lg border bg-card p-4">
+        <h2 className="font-semibold mb-2">Webhook URL</h2>
+        <p className="font-mono text-sm break-all">{delivery.webhookUrl || '-'}</p>
+      </div>
+
+      {/* Attempts info */}
+      <div className="rounded-lg border bg-card p-4">
+        <h2 className="font-semibold mb-2">Delivery Status</h2>
+        <div className="flex items-center gap-4 text-sm">
+          <span>Attempts: {delivery.attempts} / {delivery.maxAttempts}</span>
+          {delivery.nextRetryAt && (
+            <span>Next Retry: {formatDate(delivery.nextRetryAt)}</span>
+          )}
+        </div>
+      </div>
+
+      {/* Error info */}
+      {delivery.error && (
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium text-destructive">Error</p>
+              <p className="text-sm text-destructive/80 mt-1">{delivery.error}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payload */}
+      {delivery.payload && Object.keys(delivery.payload).length > 0 && (
+        <div className="rounded-lg border bg-card p-4">
+          <h2 className="font-semibold mb-2">Payload</h2>
+          <pre className="text-sm bg-muted rounded p-3 overflow-auto max-h-64">
+            {JSON.stringify(delivery.payload, null, 2)}
+          </pre>
+        </div>
+      )}
+
+      {/* Response */}
+      {delivery.responseBody && (
+        <div className="rounded-lg border bg-card p-4">
+          <h2 className="font-semibold mb-2">Response</h2>
+          <pre className="text-sm bg-muted rounded p-3 overflow-auto max-h-64">
+            {delivery.responseBody}
+          </pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ============================================================================
+// Webhook Task Attempt Detail View
+// ============================================================================
+function WebhookTaskDetail({ attemptId }: { attemptId: string }) {
+  const router = useRouter()
+
+  const { data: attemptsData, isLoading, error, refetch } = useQuery({
+    queryKey: ['webhook-attempt', attemptId],
+    queryFn: () => tasksApi.getWebhookAttempts({ limit: 100 }),
+    refetchInterval: (query) => {
+      const attempts = query.state.data?.data || []
+      const attempt = attempts.find((a: WebhookTaskAttempt) => a._id === attemptId)
+      if (attempt && attempt.status === 'pending') {
+        return 3000
+      }
+      return false
+    },
+  })
+
+  const attempt: WebhookTaskAttempt | undefined = attemptsData?.data?.find((a: WebhookTaskAttempt) => a._id === attemptId)
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    )
+  }
+
+  if (error || !attempt) {
+    return (
+      <div className="space-y-4">
+        <Button variant="ghost" onClick={() => router.push('/requests')}>
+          <ChevronLeft className="h-4 w-4 mr-2" />
+          Back to List
+        </Button>
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-8 text-center">
+          <p className="text-destructive">Failed to load webhook attempt</p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>
+            Retry
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  const statusConfig = STATUS_CONFIG[attempt.status] || STATUS_CONFIG.pending
+  const StatusIcon = statusConfig.icon
+  const isActive = attempt.status === 'pending'
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" onClick={() => router.push('/requests')}>
+            <ChevronLeft className="h-4 w-4 mr-2" />
+            Back
+          </Button>
+          <div>
+            <div className="flex items-center gap-3">
+              <Badge variant="outline" className="text-xs">
+                <ArrowLeftRight className="h-3 w-3 mr-1" />
+                Webhook Task
+              </Badge>
+              <h1 className="text-2xl font-bold">{attempt.taskTitle}</h1>
+              <Badge variant="outline" className={cn('text-sm', statusConfig.color)}>
+                <StatusIcon className={cn('h-4 w-4 mr-1', isActive && 'animate-spin')} />
+                {statusConfig.label}
+              </Badge>
+              {isActive && (
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-blue-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                </span>
+              )}
+            </div>
+            <p className="text-muted-foreground text-sm">Attempt #{attempt.attemptNumber}</p>
+          </div>
+        </div>
+
+        <Button variant="outline" size="sm" onClick={() => refetch()}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Refresh
+        </Button>
+      </div>
+
+      {/* Stats grid */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="rounded-lg border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Started</p>
+          <p className="font-medium">{formatDate(attempt.startedAt)}</p>
+        </div>
+        <div className="rounded-lg border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Completed</p>
+          <p className="font-medium">{formatDate(attempt.completedAt)}</p>
+        </div>
+        <div className="rounded-lg border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Duration</p>
+          <p className="font-medium">{attempt.durationMs !== undefined ? `${attempt.durationMs}ms` : '-'}</p>
+        </div>
+        <div className="rounded-lg border bg-card p-4">
+          <p className="text-sm text-muted-foreground">HTTP Status</p>
+          <p className="font-medium">{attempt.httpStatus || '-'}</p>
+        </div>
+      </div>
+
+      {/* Request details */}
+      <div className="rounded-lg border bg-card p-4">
+        <h2 className="font-semibold mb-2">Request</h2>
+        <div className="flex items-center gap-2 text-sm">
+          <Badge variant="secondary">{attempt.method}</Badge>
+          <span className="font-mono break-all">{attempt.url}</span>
+        </div>
+      </div>
+
+      {/* Related task */}
+      {attempt.taskId && (
+        <div className="rounded-lg border bg-card p-4">
+          <h2 className="font-semibold mb-2">Related Task</h2>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium">{attempt.taskTitle}</p>
+              <p className="text-sm text-muted-foreground">Status: {attempt.taskStatus}</p>
+            </div>
+            <Link
+              href={`/tasks?taskId=${attempt.taskId}`}
+              className="text-primary hover:underline flex items-center gap-1"
+            >
+              View Task <ExternalLink className="h-3 w-3" />
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Error info */}
+      {attempt.errorMessage && (
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium text-destructive">Error</p>
+              <p className="text-sm text-destructive/80 mt-1">{attempt.errorMessage}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Response Body */}
+      {attempt.responseBody !== undefined && attempt.responseBody !== null && (
+        <div className="rounded-lg border bg-card p-4">
+          <h2 className="font-semibold mb-2">Response Body</h2>
+          <pre className="text-sm bg-muted rounded p-3 overflow-auto max-h-64">
+            {typeof attempt.responseBody === 'string'
+              ? attempt.responseBody
+              : JSON.stringify(attempt.responseBody, null, 2)}
+          </pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ============================================================================
 // Unified Request List
 // ============================================================================
 function RequestsList() {
   const queryClient = useQueryClient()
-  const [typeFilter, setTypeFilter] = useState<'all' | 'external' | 'batch'>('all')
+  const [typeFilter, setTypeFilter] = useState<'all' | 'external' | 'batch' | 'webhook_delivery' | 'webhook_task'>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [cancelConfirm, setCancelConfirm] = useState<BatchJob | null>(null)
 
@@ -765,6 +1144,22 @@ function RequestsList() {
     queryFn: () => batchJobsApi.list({ limit: 100 }),
     refetchInterval: 5000,
     enabled: typeFilter === 'all' || typeFilter === 'batch',
+  })
+
+  // Fetch webhook deliveries
+  const { data: webhookDeliveriesData, isLoading: deliveriesLoading, refetch: refetchDeliveries } = useQuery({
+    queryKey: ['webhook-deliveries-list'],
+    queryFn: () => webhooksApi.getAllDeliveries({ limit: 100 }),
+    refetchInterval: 5000,
+    enabled: typeFilter === 'all' || typeFilter === 'webhook_delivery',
+  })
+
+  // Fetch webhook task attempts
+  const { data: webhookAttemptsData, isLoading: attemptsLoading, refetch: refetchAttempts } = useQuery({
+    queryKey: ['webhook-attempts-list'],
+    queryFn: () => tasksApi.getWebhookAttempts({ limit: 100 }),
+    refetchInterval: 5000,
+    enabled: typeFilter === 'all' || typeFilter === 'webhook_task',
   })
 
   // Fetch workflows for batch job names
@@ -803,6 +1198,16 @@ function RequestsList() {
       requests.push(...batchJobsData.data.map(toBatchUnifiedRequest))
     }
 
+    // Add webhook deliveries
+    if ((typeFilter === 'all' || typeFilter === 'webhook_delivery') && webhookDeliveriesData?.data) {
+      requests.push(...webhookDeliveriesData.data.map(toWebhookDeliveryUnifiedRequest))
+    }
+
+    // Add webhook task attempts
+    if ((typeFilter === 'all' || typeFilter === 'webhook_task') && webhookAttemptsData?.data) {
+      requests.push(...webhookAttemptsData.data.map(toWebhookTaskUnifiedRequest))
+    }
+
     // Filter by status
     let filtered = requests
     if (statusFilter !== 'all') {
@@ -811,18 +1216,20 @@ function RequestsList() {
 
     // Sort by createdAt descending
     return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-  }, [externalJobsData, batchJobsData, typeFilter, statusFilter])
+  }, [externalJobsData, batchJobsData, webhookDeliveriesData, webhookAttemptsData, typeFilter, statusFilter])
 
-  const isLoading = externalLoading || batchLoading
+  const isLoading = externalLoading || batchLoading || deliveriesLoading || attemptsLoading
 
   const handleRefresh = () => {
     refetchExternal()
     refetchBatch()
+    refetchDeliveries()
+    refetchAttempts()
   }
 
   // Count active requests
   const activeCount = unifiedRequests.filter(r =>
-    r.status === 'pending' || r.status === 'processing' || r.status === 'awaiting_responses'
+    r.status === 'pending' || r.status === 'processing' || r.status === 'awaiting_responses' || r.status === 'retrying'
   ).length
 
   return (
@@ -830,7 +1237,7 @@ function RequestsList() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Requests</h1>
-          <p className="text-muted-foreground">Track external jobs and batch callbacks</p>
+          <p className="text-muted-foreground">Track external jobs, batch callbacks, and webhooks</p>
         </div>
         <div className="flex items-center gap-2">
           {activeCount > 0 && (
@@ -849,8 +1256,8 @@ function RequestsList() {
       <div className="flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Type:</span>
-          <Select value={typeFilter} onValueChange={(v: 'all' | 'external' | 'batch') => setTypeFilter(v)}>
-            <SelectTrigger className="w-[160px]">
+          <Select value={typeFilter} onValueChange={(v: 'all' | 'external' | 'batch' | 'webhook_delivery' | 'webhook_task') => setTypeFilter(v)}>
+            <SelectTrigger className="w-[180px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -865,6 +1272,18 @@ function RequestsList() {
                 <div className="flex items-center gap-2">
                   <Layers className="h-4 w-4" />
                   Batch Jobs
+                </div>
+              </SelectItem>
+              <SelectItem value="webhook_delivery">
+                <div className="flex items-center gap-2">
+                  <Send className="h-4 w-4" />
+                  Webhook Deliveries
+                </div>
+              </SelectItem>
+              <SelectItem value="webhook_task">
+                <div className="flex items-center gap-2">
+                  <ArrowLeftRight className="h-4 w-4" />
+                  Webhook Tasks
                 </div>
               </SelectItem>
             </SelectContent>
@@ -910,13 +1329,25 @@ function RequestsList() {
           {unifiedRequests.map((request) => {
             const statusConfig = STATUS_CONFIG[request.status] || STATUS_CONFIG.pending
             const StatusIcon = statusConfig.icon
-            const isActive = request.status === 'pending' || request.status === 'processing' || request.status === 'awaiting_responses'
+            const isActive = request.status === 'pending' || request.status === 'processing' || request.status === 'awaiting_responses' || request.status === 'retrying'
             const needsReview = request.status === 'manual_review'
             const isBatch = request.type === 'batch'
+            const isExternal = request.type === 'external'
+            const isWebhookDelivery = request.type === 'webhook_delivery'
+            const isWebhookTask = request.type === 'webhook_task'
             const batchJob = isBatch ? request.original as BatchJob : null
             const progressPercent = batchJob && batchJob.expectedCount > 0
               ? Math.round((batchJob.processedCount / batchJob.expectedCount) * 100)
               : 0
+
+            // Get type badge content
+            const getTypeBadge = () => {
+              if (isBatch) return <><Layers className="h-3 w-3 mr-1" />Batch</>
+              if (isExternal) return <><Globe className="h-3 w-3 mr-1" />External</>
+              if (isWebhookDelivery) return <><Send className="h-3 w-3 mr-1" />Webhook</>
+              if (isWebhookTask) return <><ArrowLeftRight className="h-3 w-3 mr-1" />Task Webhook</>
+              return null
+            }
 
             return (
               <div
@@ -930,17 +1361,13 @@ function RequestsList() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
                     <div className={cn('p-2 rounded-lg', statusConfig.bgColor)}>
-                      <StatusIcon className={cn('h-5 w-5', statusConfig.color, request.status === 'processing' && 'animate-spin')} />
+                      <StatusIcon className={cn('h-5 w-5', statusConfig.color, (request.status === 'processing' || request.status === 'retrying') && 'animate-spin')} />
                     </div>
 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <Badge variant="outline" className="text-xs">
-                          {isBatch ? (
-                            <><Layers className="h-3 w-3 mr-1" />Batch</>
-                          ) : (
-                            <><Globe className="h-3 w-3 mr-1" />External</>
-                          )}
+                          {getTypeBadge()}
                         </Badge>
                         <Link
                           href={`/requests?type=${request.type}&id=${request._id}`}
@@ -969,8 +1396,23 @@ function RequestsList() {
                         {isBatch && batchJob?.workflowId && (
                           <span>Workflow: {getWorkflowName(batchJob.workflowId)}</span>
                         )}
-                        {!isBatch && request.attempts !== undefined && (
+                        {isExternal && request.attempts !== undefined && (
                           <span>Attempts: {request.attempts}/{request.maxAttempts}</span>
+                        )}
+                        {isWebhookDelivery && request.eventType && (
+                          <span>Event: {request.eventType}</span>
+                        )}
+                        {isWebhookDelivery && request.statusCode && (
+                          <span>HTTP {request.statusCode}</span>
+                        )}
+                        {isWebhookTask && request.method && request.url && (
+                          <span className="font-mono text-xs">{request.method} {new URL(request.url).hostname}</span>
+                        )}
+                        {isWebhookTask && request.httpStatus && (
+                          <span>HTTP {request.httpStatus}</span>
+                        )}
+                        {isWebhookTask && request.durationMs !== undefined && (
+                          <span>{request.durationMs}ms</span>
                         )}
                         {request.error && (
                           <span className="text-destructive truncate max-w-[200px]" title={request.error}>
@@ -1057,6 +1499,13 @@ function RequestsContent() {
     if (requestType === 'external') {
       return <ExternalJobDetail jobId={requestId} />
     }
+    if (requestType === 'webhook_delivery') {
+      return <WebhookDeliveryDetail deliveryId={requestId} />
+    }
+    if (requestType === 'webhook_task') {
+      return <WebhookTaskDetail attemptId={requestId} />
+    }
+    // Default to batch
     return <BatchJobDetail requestId={requestId} />
   }
 

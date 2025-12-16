@@ -275,6 +275,62 @@ webhooksRouter.post('/:id/test', async (req: Request, res: Response, next: NextF
   }
 });
 
+// GET /api/webhooks/deliveries - Get all webhook deliveries across all webhooks
+webhooksRouter.get('/deliveries', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { status, limit = '50', offset = '0' } = req.query;
+
+    const filter: Record<string, unknown> = {};
+    if (status) {
+      filter.status = status;
+    }
+
+    const [deliveries, total] = await Promise.all([
+      db
+        .collection('webhook_deliveries')
+        .aggregate([
+          { $match: filter },
+          { $sort: { createdAt: -1 } },
+          { $skip: parseInt(offset as string, 10) },
+          { $limit: parseInt(limit as string, 10) },
+          {
+            $lookup: {
+              from: 'webhooks',
+              localField: 'webhookId',
+              foreignField: '_id',
+              as: 'webhook',
+            },
+          },
+          {
+            $addFields: {
+              webhookName: { $arrayElemAt: ['$webhook.name', 0] },
+              webhookUrl: { $arrayElemAt: ['$webhook.url', 0] },
+            },
+          },
+          {
+            $project: {
+              webhook: 0,
+            },
+          },
+        ])
+        .toArray(),
+      db.collection('webhook_deliveries').countDocuments(filter),
+    ]);
+
+    res.json({
+      data: deliveries,
+      pagination: {
+        limit: parseInt(limit as string, 10),
+        offset: parseInt(offset as string, 10),
+        total,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/webhooks/:id/deliveries - Get delivery history for a webhook
 webhooksRouter.get(
   '/:id/deliveries',
