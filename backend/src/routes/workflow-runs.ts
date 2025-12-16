@@ -151,6 +151,61 @@ router.post('/:id/cancel', async (req: Request, res: Response): Promise<void> =>
 });
 
 // ============================================================================
+// Foreach Item Callback (Streaming)
+// POST /api/workflow-runs/:id/foreach/:stepId/item
+// Accepts individual items to add as children to a waiting foreach task
+// ============================================================================
+router.post('/:id/foreach/:stepId/item', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id, stepId } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      res.status(400).json({ error: 'Invalid workflow run ID' });
+      return;
+    }
+
+    const secret = req.headers['x-workflow-secret'] as string;
+    if (!secret) {
+      res.status(401).json({ error: 'Missing X-Workflow-Secret header' });
+      return;
+    }
+
+    const { item, expectedCount, complete } = req.body;
+
+    // Validate payload
+    if (item === undefined && expectedCount === undefined && !complete) {
+      res.status(400).json({
+        error: 'Request body must include at least one of: item, expectedCount, or complete'
+      });
+      return;
+    }
+
+    const result = await workflowExecutionService.handleForeachItemCallback(
+      id,
+      stepId,
+      { item, expectedCount, complete },
+      secret
+    );
+
+    res.json(result);
+  } catch (error: unknown) {
+    console.error('[WorkflowRuns] Foreach item callback error:', error);
+    const message = error instanceof Error ? error.message : 'Failed to process foreach item';
+
+    if (message.includes('Invalid callback secret') || message.includes('secret')) {
+      res.status(401).json({ error: message });
+      return;
+    }
+    if (message.includes('not found')) {
+      res.status(404).json({ error: message });
+      return;
+    }
+
+    res.status(500).json({ error: message });
+  }
+});
+
+// ============================================================================
 // External Callback
 // POST /api/workflow-runs/:id/callback/:stepId
 // ============================================================================

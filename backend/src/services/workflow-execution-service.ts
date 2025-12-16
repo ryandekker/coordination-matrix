@@ -25,7 +25,8 @@ type WorkflowRunEventHandler = (event: WorkflowRunEvent) => void | Promise<void>
 /**
  * Resolves template variables in a string.
  * Supported variables:
- *   {{systemWebhookUrl}} - Base webhook URL for callbacks
+ *   {{systemWebhookUrl}} - Base webhook URL for callbacks (points to current step)
+ *   {{foreachWebhookUrl}} - Webhook URL for streaming items to the next foreach step
  *   {{callbackSecret}} - Task-specific callback secret
  *   {{workflowRunId}} - Current workflow run ID
  *   {{stepId}} - Current step ID
@@ -40,6 +41,7 @@ function resolveTemplateVariables(
     taskId?: ObjectId;
     callbackSecret?: string;
     inputPayload?: Record<string, unknown>;
+    nextForeachStepId?: string;
   }
 ): string {
   let result = template;
@@ -48,6 +50,15 @@ function resolveTemplateVariables(
   // {{systemWebhookUrl}} generates the full callback URL with workflowRunId and stepId embedded
   const callbackUrl = `${BASE_URL}/api/workflow-runs/${context.workflowRunId}/callback/${context.stepId}`;
   result = result.replace(/\{\{systemWebhookUrl\}\}/g, callbackUrl);
+
+  // {{foreachWebhookUrl}} generates the callback URL for streaming items to the next foreach step
+  if (context.nextForeachStepId) {
+    const foreachCallbackUrl = `${BASE_URL}/api/workflow-runs/${context.workflowRunId}/foreach/${context.nextForeachStepId}/item`;
+    result = result.replace(/\{\{foreachWebhookUrl\}\}/g, foreachCallbackUrl);
+  } else {
+    // Remove the placeholder if no foreach step follows
+    result = result.replace(/\{\{foreachWebhookUrl\}\}/g, '');
+  }
   result = result.replace(/\{\{workflowRunId\}\}/g, context.workflowRunId.toString());
   result = result.replace(/\{\{stepId\}\}/g, context.stepId);
 
@@ -572,7 +583,7 @@ class WorkflowExecutionService {
 
   private async executeExternal(
     run: WorkflowRun,
-    _workflow: Workflow,
+    workflow: Workflow,
     step: WorkflowStep,
     externalTask: Task,
     inputPayload?: Record<string, unknown>
@@ -581,7 +592,7 @@ class WorkflowExecutionService {
     // If so, execute as fire-and-complete webhook
     const webhookUrl = step.webhookConfig?.url || step.externalConfig?.endpoint;
     if (webhookUrl) {
-      await this.executeExternalAsWebhook(run, step, externalTask, inputPayload);
+      await this.executeExternalAsWebhook(run, workflow, step, externalTask, inputPayload);
       return;
     }
 
@@ -717,6 +728,7 @@ class WorkflowExecutionService {
    */
   private async executeExternalAsWebhook(
     run: WorkflowRun,
+    workflow: Workflow,
     step: WorkflowStep,
     externalTask: Task,
     inputPayload?: Record<string, unknown>
@@ -735,14 +747,36 @@ class WorkflowExecutionService {
 
     console.log(`[WorkflowExecutionService] Executing external step as webhook: ${method} ${url}`);
 
+    // Find next foreach step for {{foreachWebhookUrl}} template variable
+    // Look at explicit connections first, then fall back to sequential step
+    let nextForeachStepId: string | undefined;
+    const nextStepIds = step.connections?.map(c => c.targetStepId) || [];
+    if (nextStepIds.length === 0) {
+      // No explicit connections, check sequential next step
+      const currentIndex = workflow.steps.findIndex(s => s.id === step.id);
+      const nextStep = workflow.steps[currentIndex + 1];
+      if (nextStep) {
+        nextStepIds.push(nextStep.id);
+      }
+    }
+    // Check if any of the next steps is a foreach
+    for (const nextStepId of nextStepIds) {
+      const nextStep = workflow.steps.find(s => s.id === nextStepId);
+      if (nextStep?.stepType === 'foreach') {
+        nextForeachStepId = nextStep.id;
+        console.log(`[WorkflowExecutionService] Found next foreach step: ${nextStep.name} (${nextStep.id})`);
+        break;
+      }
+    }
+
     // Resolve template variables
     const templateContext = {
       workflowRunId: run._id,
       stepId: step.id,
       taskId: externalTask._id,
-      callbackSecret: externalTask.externalConfig?.callbackSecret,
-      systemWebhookUrl: `${process.env.BASE_URL || 'http://localhost:3001'}/api/workflow-callback`,
+      callbackSecret: externalTask.externalConfig?.callbackSecret || run.callbackSecret,
       inputPayload,
+      nextForeachStepId,
     };
 
     const resolvedUrl = resolveTemplateVariables(url!, templateContext);
@@ -1818,6 +1852,187 @@ class WorkflowExecutionService {
 
     const updatedTask = await this.tasks.findOne({ _id: task._id });
     return updatedTask!;
+  }
+
+  // ============================================================================
+  // Foreach Item Callback Handler (Streaming)
+  // ============================================================================
+
+  async handleForeachItemCallback(
+    runId: string,
+    stepId: string,
+    payload: { item?: unknown; expectedCount?: number; complete?: boolean },
+    secret: string
+  ): Promise<{
+    acknowledged: boolean;
+    foreachTaskId: string;
+    childTaskId?: string;
+    receivedCount: number;
+    expectedCount: number;
+    isComplete: boolean;
+  }> {
+    const run = await this.workflowRuns.findOne({ _id: new ObjectId(runId) });
+    if (!run) {
+      throw new Error(`Workflow run ${runId} not found`);
+    }
+
+    // Find the foreach task for this step (should be in waiting or in_progress status)
+    const foreachTask = await this.tasks.findOne({
+      workflowRunId: run._id,
+      workflowStepId: stepId,
+      taskType: 'foreach',
+      status: { $in: ['waiting', 'in_progress'] },
+    });
+
+    if (!foreachTask) {
+      throw new Error(`Foreach task for step ${stepId} not found or already completed`);
+    }
+
+    // Verify secret using the workflow run's callback secret
+    if (run.callbackSecret !== secret) {
+      throw new Error('Invalid callback secret');
+    }
+
+    const workflow = await this.workflows.findOne({ _id: run.workflowId });
+    if (!workflow) {
+      throw new Error(`Workflow ${run.workflowId} not found`);
+    }
+
+    const step = workflow.steps.find(s => s.id === stepId);
+    if (!step) {
+      throw new Error(`Step ${stepId} not found in workflow`);
+    }
+
+    let childTaskId: string | undefined;
+    let currentReceivedCount = foreachTask.batchCounters?.receivedCount || 0;
+    let currentExpectedCount = foreachTask.batchCounters?.expectedCount || 0;
+
+    // Handle expectedCount update
+    if (payload.expectedCount !== undefined && payload.expectedCount >= 0) {
+      currentExpectedCount = payload.expectedCount;
+      await this.tasks.updateOne(
+        { _id: foreachTask._id },
+        {
+          $set: {
+            'batchCounters.expectedCount': currentExpectedCount,
+            expectedQuantity: currentExpectedCount,
+            status: 'in_progress' as TaskStatus,
+            updatedAt: new Date(),
+          },
+        }
+      );
+      console.log(`[WorkflowExecutionService] Foreach ${foreachTask._id} expectedCount set to ${currentExpectedCount}`);
+    }
+
+    // Handle item addition
+    if (payload.item !== undefined) {
+      // Find the next step(s) inside the foreach
+      const nextStepId = step.connections?.[0]?.targetStepId;
+      const nextStep = nextStepId ? workflow.steps.find(s => s.id === nextStepId) : null;
+
+      if (!nextStep) {
+        throw new Error(`Foreach step ${stepId} has no connected child step`);
+      }
+
+      // Build item payload
+      const itemPayload = {
+        [step.itemVariable || 'item']: payload.item,
+        _index: currentReceivedCount,
+        _total: currentExpectedCount,
+      };
+
+      // Create child task for this item
+      const childTask = await this.createTaskForStep(run, workflow, nextStep, foreachTask, itemPayload);
+      childTaskId = childTask._id.toString();
+
+      // Increment received count
+      currentReceivedCount++;
+      await this.tasks.updateOne(
+        { _id: foreachTask._id },
+        {
+          $set: {
+            'batchCounters.receivedCount': currentReceivedCount,
+            status: 'in_progress' as TaskStatus,
+            updatedAt: new Date(),
+          },
+        }
+      );
+
+      console.log(`[WorkflowExecutionService] Foreach ${foreachTask._id} received item ${currentReceivedCount}/${currentExpectedCount}`);
+
+      // Execute the child task based on its step type
+      await this.executeStepForTask(run, workflow, nextStep, childTask, itemPayload);
+    }
+
+    // Check if we should mark as complete
+    const isComplete = payload.complete === true ||
+      (currentExpectedCount > 0 && currentReceivedCount >= currentExpectedCount);
+
+    if (isComplete && foreachTask.status !== 'completed') {
+      // Mark foreach task as in_progress (it will complete when all children complete)
+      await this.tasks.updateOne(
+        { _id: foreachTask._id },
+        {
+          $set: {
+            status: 'in_progress' as TaskStatus,
+            'metadata.allItemsReceived': true,
+            updatedAt: new Date(),
+          },
+        }
+      );
+      console.log(`[WorkflowExecutionService] Foreach ${foreachTask._id} all items received, waiting for children to complete`);
+    }
+
+    return {
+      acknowledged: true,
+      foreachTaskId: foreachTask._id.toString(),
+      childTaskId,
+      receivedCount: currentReceivedCount,
+      expectedCount: currentExpectedCount,
+      isComplete,
+    };
+  }
+
+  // Helper method to execute a task's step type
+  private async executeStepForTask(
+    run: WorkflowRun,
+    workflow: Workflow,
+    step: WorkflowStep,
+    task: Task,
+    inputPayload?: Record<string, unknown>
+  ): Promise<void> {
+    // Publish step started event
+    await this.publish({
+      id: this.generateEventId(),
+      type: 'workflow.run.step.started',
+      workflowRunId: run._id,
+      workflowRun: run,
+      stepId: step.id,
+      taskId: task._id,
+      actorId: null,
+      actorType: 'system',
+      timestamp: new Date(),
+    });
+
+    // Handle step type-specific execution
+    switch (step.stepType) {
+      case 'agent':
+      case 'manual':
+        // These wait for external completion
+        break;
+
+      case 'external':
+        await this.executeExternal(run, workflow, step, task, inputPayload);
+        break;
+
+      case 'webhook':
+        await this.executeWebhook(run, workflow, step, task, inputPayload);
+        break;
+
+      case 'decision':
+        await this.executeDecision(run, workflow, step, task, inputPayload);
+        break;
+    }
   }
 
   // ============================================================================
