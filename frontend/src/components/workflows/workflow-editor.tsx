@@ -423,7 +423,7 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     }
   }
 
-  // Add linear connections with data flow annotations
+  // Add linear connections
   for (let i = 0; i < steps.length - 1; i++) {
     const step = steps[i]
     const nodeId = step.id || `step${i}`
@@ -432,48 +432,11 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     if (!connectedFrom.has(nodeId)) {
       const nextNodeId = nextStep.id || `step${i + 1}`
 
-      // Determine edge label based on data flow
-      let edgeLabel = ''
-
-      // Check if next step has explicit input source
-      const { source, path } = parseInputPath(nextStep.inputPath)
-      if (source !== 'previous' && source !== step.id) {
-        // Next step reads from a different source - show dotted line
-        if (step.stepType === 'foreach' && nextStep.stepType === 'join') {
-          const pct = nextStep.minSuccessPercent !== undefined ? `@${nextStep.minSuccessPercent}%` : '@100%'
-          lines.push(`    ${nodeId} -.->|"parallel ${pct}"| ${nextNodeId}`)
-        } else {
-          lines.push(`    ${nodeId} --> ${nextNodeId}`)
-        }
-        // Add explicit data flow edge from source
-        if (source === 'trigger') {
-          lines.push(`    trigger_data[/"Trigger Data"/] -.->|"${path || 'payload'}"| ${nextNodeId}`)
-        } else {
-          const srcStep = steps.find(s => s.id === source)
-          if (srcStep) {
-            lines.push(`    ${source} -.->|"${path || 'output'}"| ${nextNodeId}`)
-          }
-        }
+      if (step.stepType === 'foreach' && nextStep.stepType === 'join') {
+        // Dashed line for parallel execution
+        lines.push(`    ${nodeId} -.-> ${nextNodeId}`)
       } else {
-        // Normal sequential flow
-        if (step.stepType === 'foreach') {
-          const itemVar = step.itemVariable || 'item'
-          edgeLabel = `|"N×(${itemVar})"| `
-        } else if (step.stepType === 'external' && nextStep.stepType === 'foreach') {
-          const itemsPath = nextStep.itemsPath || 'response'
-          edgeLabel = `|"${itemsPath}"| `
-        } else if (step.stepType === 'join') {
-          edgeLabel = '|"aggregatedResults"| '
-        } else if (nextStep.inputPath && path) {
-          edgeLabel = `|"${path}"| `
-        }
-
-        if (step.stepType === 'foreach' && nextStep.stepType === 'join') {
-          const pct = nextStep.minSuccessPercent !== undefined ? `@${nextStep.minSuccessPercent}%` : '@100%'
-          lines.push(`    ${nodeId} -.->|"parallel ${pct}"| ${nextNodeId}`)
-        } else {
-          lines.push(`    ${nodeId} -->${edgeLabel}${nextNodeId}`)
-        }
+        lines.push(`    ${nodeId} --> ${nextNodeId}`)
       }
     }
   }
