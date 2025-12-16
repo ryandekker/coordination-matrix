@@ -504,17 +504,18 @@ class WorkflowExecutionService {
       task.externalConfig = {
         callbackSecret: this.generateSecret(),
       };
-      // Also add webhookConfig if the step has it configured
-      if (step.webhookConfig?.url) {
+      // Populate webhookConfig from either step.webhookConfig or step.externalConfig
+      const webhookUrl = step.webhookConfig?.url || step.externalConfig?.endpoint;
+      if (webhookUrl) {
         task.webhookConfig = {
-          url: step.webhookConfig.url,
-          method: step.webhookConfig.method || 'POST',
-          headers: step.webhookConfig.headers || {},
-          body: step.webhookConfig.bodyTemplate,
-          maxRetries: step.webhookConfig.maxRetries ?? 3,
+          url: webhookUrl,
+          method: step.webhookConfig?.method || step.externalConfig?.method || 'POST',
+          headers: step.webhookConfig?.headers || step.externalConfig?.headers || {},
+          body: step.webhookConfig?.bodyTemplate || step.externalConfig?.payloadTemplate,
+          maxRetries: step.webhookConfig?.maxRetries ?? 3,
           retryDelayMs: 1000,
-          timeoutMs: step.webhookConfig.timeoutMs ?? 30000,
-          successStatusCodes: step.webhookConfig.successStatusCodes || [200, 201, 202, 204],
+          timeoutMs: step.webhookConfig?.timeoutMs ?? 30000,
+          successStatusCodes: step.webhookConfig?.successStatusCodes || [200, 201, 202, 204],
           attempts: [],
         };
       }
@@ -802,6 +803,25 @@ class WorkflowExecutionService {
           }
         );
         console.log(`[WorkflowExecutionService] External webhook completed successfully: ${response.status}`);
+
+        // Fetch the updated task to get full object for event
+        const updatedTask = await this.tasks.findOne({ _id: externalTask._id });
+        if (updatedTask) {
+          // Publish task status change event to trigger workflow advancement
+          await eventBus.publish({
+            type: 'task.status.changed',
+            taskId: updatedTask._id,
+            task: updatedTask,
+            changes: [{
+              field: 'status',
+              oldValue: 'in_progress',
+              newValue: 'completed',
+            }],
+            actorId: null,
+            actorType: 'system',
+          });
+          console.log(`[WorkflowExecutionService] Published task.status.changed event for task ${updatedTask._id}`);
+        }
       } else {
         await this.tasks.updateOne(
           { _id: externalTask._id },
@@ -1016,16 +1036,37 @@ class WorkflowExecutionService {
     const items = this.getValueByPath(inputPayload, step.itemsPath);
 
     if (!Array.isArray(items)) {
-      console.warn(`[WorkflowExecutionService] Items at ${step.itemsPath} is not an array`);
+      console.warn(`[WorkflowExecutionService] Items at ${step.itemsPath} is not an array. Input payload keys: ${Object.keys(inputPayload || {}).join(', ')}`);
+      // Set to waiting status - items may arrive via external callback
+      // Do NOT set to completed, as that would trigger workflow advancement
       await this.tasks.updateOne(
         { _id: foreachTask._id },
         {
           $set: {
-            status: 'completed' as TaskStatus,
+            status: 'waiting' as TaskStatus,
             'batchCounters.expectedCount': 0,
+            'metadata.waitingReason': `Items not found at path: ${step.itemsPath}. Waiting for external data.`,
           }
         }
       );
+      console.log(`[WorkflowExecutionService] Foreach task ${foreachTask._id} set to waiting - items not found at path`);
+      return;
+    }
+
+    // If we have an empty array, also set to waiting - items may arrive later
+    if (items.length === 0) {
+      console.warn(`[WorkflowExecutionService] Items array at ${step.itemsPath} is empty`);
+      await this.tasks.updateOne(
+        { _id: foreachTask._id },
+        {
+          $set: {
+            status: 'waiting' as TaskStatus,
+            'batchCounters.expectedCount': 0,
+            'metadata.waitingReason': `Items array at path ${step.itemsPath} is empty. Waiting for external data.`,
+          }
+        }
+      );
+      console.log(`[WorkflowExecutionService] Foreach task ${foreachTask._id} set to waiting - empty items array`);
       return;
     }
 
@@ -1489,7 +1530,13 @@ class WorkflowExecutionService {
     }
 
     // Prepare output from completed task
-    const outputPayload = completedTask.metadata || {};
+    // Wrap the metadata in an 'output' key so paths like 'output.emails' work correctly
+    // Also include the response directly for backward compatibility
+    const taskMetadata = completedTask.metadata || {};
+    const outputPayload: Record<string, unknown> = {
+      ...taskMetadata,
+      output: taskMetadata.response || taskMetadata,
+    };
 
     // Execute next steps
     for (const nextStepId of nextStepIds) {

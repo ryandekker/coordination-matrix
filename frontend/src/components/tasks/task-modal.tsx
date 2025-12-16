@@ -179,6 +179,20 @@ export function TaskModal({
   useEffect(() => {
     if (task) {
       const values: Record<string, unknown> = {}
+
+      // First, load core fields from the task (like taskType)
+      Object.keys(coreDefaultValues).forEach((field) => {
+        const value = (task as unknown as Record<string, unknown>)[field]
+        if (field === 'tags' && Array.isArray(value)) {
+          values[field] = value.join(', ')
+        } else if (field === 'dueAt' && value) {
+          values[field] = new Date(value as string).toISOString().slice(0, 16)
+        } else {
+          values[field] = value ?? coreDefaultValues[field]
+        }
+      })
+
+      // Then load editable fields (may override some core fields)
       editableFields.forEach((fc) => {
         const value = (task as unknown as Record<string, unknown>)[fc.fieldPath]
         if (fc.fieldType === 'tags' && Array.isArray(value)) {
@@ -452,6 +466,9 @@ export function TaskModal({
                 <SelectItem value="standard">Standard</SelectItem>
                 <SelectItem value="external">External</SelectItem>
                 <SelectItem value="decision">Decision</SelectItem>
+                <SelectItem value="foreach">ForEach</SelectItem>
+                <SelectItem value="join">Join</SelectItem>
+                <SelectItem value="subflow">Subflow</SelectItem>
               </SelectContent>
             </Select>
           )}

@@ -13,6 +13,14 @@ import {
   Copy,
   ExternalLink,
   Plus,
+  FileText,
+  Globe,
+  Webhook,
+  GitBranch,
+  Repeat,
+  Merge,
+  Workflow,
+  Zap,
 } from 'lucide-react'
 import {
   Table,
@@ -33,10 +41,58 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { EditableCell } from './editable-cell'
 import { Task, FieldConfig, LookupValue, User } from '@/lib/api'
 import { useTaskChildren, useUpdateTask, useDeleteTask } from '@/hooks/use-tasks'
 import { formatDateTime, cn } from '@/lib/utils'
+
+// Task type icon mapping with labels
+const taskTypeConfig: Record<string, { icon: React.ElementType; label: string; color: string }> = {
+  standard: { icon: FileText, label: 'Standard', color: 'text-gray-500' },
+  external: { icon: Globe, label: 'External', color: 'text-blue-500' },
+  webhook: { icon: Webhook, label: 'Webhook', color: 'text-purple-500' },
+  trigger: { icon: Zap, label: 'Trigger', color: 'text-yellow-500' },
+  decision: { icon: GitBranch, label: 'Decision', color: 'text-orange-500' },
+  foreach: { icon: Repeat, label: 'ForEach', color: 'text-green-500' },
+  join: { icon: Merge, label: 'Join', color: 'text-cyan-500' },
+  subflow: { icon: Workflow, label: 'Subflow', color: 'text-pink-500' },
+}
+
+// Task type icon component with tooltip
+const TaskTypeIcon = memo(function TaskTypeIcon({ taskType, batchCounters }: { taskType?: string; batchCounters?: { completedCount?: number; expectedCount?: number } }) {
+  const config = taskTypeConfig[taskType || 'standard'] || taskTypeConfig.standard
+  const Icon = config.icon
+
+  // For foreach tasks, show progress if available
+  const showProgress = taskType === 'foreach' && batchCounters?.expectedCount
+  const progressText = showProgress
+    ? `${batchCounters?.completedCount || 0}/${batchCounters?.expectedCount}`
+    : null
+
+  return (
+    <TooltipProvider>
+      <Tooltip delayDuration={300}>
+        <TooltipTrigger asChild>
+          <div className="flex items-center gap-1">
+            <Icon className={cn('h-4 w-4', config.color)} />
+            {progressText && (
+              <span className="text-xs text-muted-foreground">{progressText}</span>
+            )}
+          </div>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>{config.label}{progressText ? ` (${progressText})` : ''}</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+})
 
 interface TaskDataTableProps {
   tasks: Task[]
@@ -214,6 +270,9 @@ const TaskRow = memo(function TaskRow({
       >
         <TableCell className="text-center">
           <Checkbox checked={isSelected} onCheckedChange={onToggleSelect} className="h-5 w-5" />
+        </TableCell>
+        <TableCell className="w-10 text-center">
+          <TaskTypeIcon taskType={task.taskType} batchCounters={task.batchCounters} />
         </TableCell>
         {fieldConfigs.map((fc) => (
           <TableCell
@@ -500,6 +559,18 @@ export function TaskDataTable({
                   className="h-5 w-5"
                 />
               </TableHead>
+              <TableHead className="w-10 text-center">
+                <TooltipProvider>
+                  <Tooltip delayDuration={300}>
+                    <TooltipTrigger asChild>
+                      <span className="text-xs text-muted-foreground">Type</span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Task Type</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </TableHead>
               {visibleFieldConfigs.map((fc) => (
                 <TableHead
                   key={fc.fieldPath}
@@ -520,7 +591,7 @@ export function TaskDataTable({
             {tasks.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={visibleFieldConfigs.length + 3}
+                  colSpan={visibleFieldConfigs.length + 4}
                   className="h-24 text-center text-muted-foreground"
                 >
                   No tasks found.

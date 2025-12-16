@@ -457,6 +457,11 @@ export interface Task {
   children?: Task[]
   taskType?: TaskType
   webhookConfig?: WebhookConfig
+  batchCounters?: {
+    expectedCount?: number
+    completedCount?: number
+    failedCount?: number
+  }
   _resolved?: {
     assignee?: { _id: string; displayName: string }
     createdBy?: { _id: string; displayName: string }
