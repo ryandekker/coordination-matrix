@@ -112,6 +112,10 @@ export interface WebhookConfig {
   attempts?: WebhookAttempt[];          // History of execution attempts
   lastAttemptAt?: Date;                 // When the last attempt was made
   nextRetryAt?: Date;                   // Scheduled time for next retry (if pending)
+
+  // Workflow management flag - if true, webhook is executed by WorkflowExecutionService
+  // and WebhookTaskService should not also execute it
+  workflowManaged?: boolean;
 }
 
 // Counters for foreach/batch tasks

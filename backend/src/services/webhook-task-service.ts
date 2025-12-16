@@ -29,6 +29,11 @@ class WebhookTaskService {
     // Listen for webhook tasks that need execution
     eventBus.subscribe('task.created', async (event) => {
       const task = event.task;
+      // Skip workflow-managed webhooks - they are executed by WorkflowExecutionService
+      if (task.webhookConfig?.workflowManaged) {
+        console.log(`[WebhookTaskService] Skipping workflow-managed webhook task: ${task._id}`);
+        return;
+      }
       if (task.taskType === 'external' && task.webhookConfig && task.status === 'pending') {
         console.log(`[WebhookTaskService] New external task created: ${task._id}`);
         await this.executeWebhook(task._id);

@@ -522,6 +522,8 @@ class WorkflowExecutionService {
           timeoutMs: step.webhookConfig?.timeoutMs ?? 30000,
           successStatusCodes: step.webhookConfig?.successStatusCodes || [200, 201, 202, 204],
           attempts: [],
+          // Mark as workflow-managed so WebhookTaskService doesn't also execute it
+          workflowManaged: true,
         };
       }
     }
