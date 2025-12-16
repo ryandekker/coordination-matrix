@@ -49,7 +49,60 @@ setupSwagger(app);
 // Auth routes (public)
 app.use('/api/auth', authRouter);
 
-// Public callback endpoint for external services (requires X-Workflow-Secret header)
+// Public callback endpoints for external services (requires X-Workflow-Secret header)
+// Foreach item callback - for streaming items to foreach steps
+app.post('/api/workflow-runs/:id/foreach/:stepId/item', async (req, res) => {
+  try {
+    const { id, stepId } = req.params;
+    const { ObjectId } = await import('mongodb');
+
+    if (!ObjectId.isValid(id)) {
+      res.status(400).json({ error: 'Invalid workflow run ID' });
+      return;
+    }
+
+    const secret = req.headers['x-workflow-secret'] as string;
+    if (!secret) {
+      res.status(401).json({ error: 'Missing X-Workflow-Secret header' });
+      return;
+    }
+
+    const { item, expectedCount, complete } = req.body;
+
+    // Validate payload
+    if (item === undefined && expectedCount === undefined && !complete) {
+      res.status(400).json({
+        error: 'Request body must include at least one of: item, expectedCount, or complete'
+      });
+      return;
+    }
+
+    const result = await workflowExecutionService.handleForeachItemCallback(
+      id,
+      stepId,
+      { item, expectedCount, complete },
+      secret
+    );
+
+    res.json(result);
+  } catch (error: unknown) {
+    console.error('[WorkflowRuns] Foreach item callback error:', error);
+    const message = error instanceof Error ? error.message : 'Failed to process foreach item';
+
+    if (message.includes('Invalid callback secret') || message.includes('secret')) {
+      res.status(401).json({ error: message });
+      return;
+    }
+    if (message.includes('not found')) {
+      res.status(404).json({ error: message });
+      return;
+    }
+
+    res.status(500).json({ error: message });
+  }
+});
+
+// General step callback
 app.post('/api/workflow-runs/:id/callback/:stepId', async (req, res) => {
   try {
     const { id, stepId } = req.params;

@@ -474,10 +474,10 @@ class WorkflowExecutionService {
     // Apply run-level task defaults, then step-specific overrides
     const runDefaults = this.applyTaskDefaults(run, now);
 
+    // Build task object, only including optional string fields if they have values
+    // This prevents MongoDB validation errors for undefined string fields
     const task: Omit<Task, '_id'> = {
       title: step.name,
-      summary: step.description,
-      extraPrompt: step.additionalInstructions,
       status: initialStatus,
       parentId: parentTask._id,
       workflowId: workflow._id,
@@ -499,6 +499,14 @@ class WorkflowExecutionService {
         inputPayload,
       },
     };
+
+    // Only add optional string fields if they have values
+    if (step.description) {
+      task.summary = step.description;
+    }
+    if (step.additionalInstructions) {
+      task.extraPrompt = step.additionalInstructions;
+    }
 
     // Add foreach config if applicable
     if (step.stepType === 'foreach' && step.itemsPath) {
@@ -1929,7 +1937,19 @@ class WorkflowExecutionService {
     // Handle item addition
     if (payload.item !== undefined) {
       // Find the next step(s) inside the foreach
-      const nextStepId = step.connections?.[0]?.targetStepId;
+      let nextStepId = step.connections?.[0]?.targetStepId;
+
+      // Fallback: parse from mermaid diagram if connections not populated
+      if (!nextStepId && workflow.mermaidDiagram) {
+        // Look for patterns like: step-id -->|"label"| target-step-id or step-id -->target-step-id
+        const mermaidRegex = new RegExp(`${step.id}\\s*-->(?:\\|[^|]*\\|)?\\s*(step-\\d+)`, 'g');
+        const match = mermaidRegex.exec(workflow.mermaidDiagram);
+        if (match) {
+          nextStepId = match[1];
+          console.log(`[WorkflowExecutionService] Derived connection from mermaid: ${step.id} -> ${nextStepId}`);
+        }
+      }
+
       const nextStep = nextStepId ? workflow.steps.find(s => s.id === nextStepId) : null;
 
       if (!nextStep) {
