@@ -59,9 +59,12 @@ import {
   Lightbulb,
   RefreshCw,
   ArrowRight,
+  ArrowDown,
   Globe,
   Link2,
   Zap,
+  Database,
+  CornerDownRight,
 } from 'lucide-react'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
@@ -122,7 +125,7 @@ interface WorkflowStep {
   // Join fields
   awaitTag?: string
   minSuccessPercent?: number       // Percentage of tasks that must succeed (0-100)
-  expectedCountPath?: string       // JSONPath to expected count from external step response
+  // Note: expectedCountPath is shared with ForEach (defined above)
 
   // Subflow fields
   subflowId?: string
@@ -171,61 +174,161 @@ const STEP_TYPES: { type: WorkflowStepType; label: string; description: string; 
   { type: 'subflow', label: 'Subflow', description: 'Run sub-workflow', icon: WorkflowIcon, color: 'text-pink-500', bgColor: 'bg-pink-50' },
 ]
 
+// Detect loop scopes (ForEach → Join boundaries)
+interface LoopScope {
+  foreachIndex: number
+  joinIndex: number
+  foreachStep: WorkflowStep
+  joinStep: WorkflowStep
+}
+
+function detectLoopScopes(steps: WorkflowStep[]): LoopScope[] {
+  const scopes: LoopScope[] = []
+  const foreachStack: { index: number; step: WorkflowStep }[] = []
+
+  steps.forEach((step, index) => {
+    if (step.stepType === 'foreach') {
+      foreachStack.push({ index, step })
+    } else if (step.stepType === 'join' && foreachStack.length > 0) {
+      // Match this join with the most recent foreach
+      const foreach = foreachStack.pop()!
+      scopes.push({
+        foreachIndex: foreach.index,
+        joinIndex: index,
+        foreachStep: foreach.step,
+        joinStep: step,
+      })
+    }
+  })
+
+  return scopes
+}
+
+// Get data flow description for a step
+function getDataFlowDescription(step: WorkflowStep, prevStep?: WorkflowStep): { input?: string; output?: string } {
+  const result: { input?: string; output?: string } = {}
+
+  // Determine input
+  if (step.stepType === 'foreach' && step.itemsPath) {
+    result.input = `items from: ${step.itemsPath}`
+  } else if (step.stepType === 'join') {
+    if (step.inputPath) {
+      result.input = `aggregate: ${step.inputPath}`
+    } else {
+      result.input = 'aggregate all results'
+    }
+  } else if (step.inputPath) {
+    result.input = step.inputPath
+  } else if (prevStep) {
+    result.input = 'previous output'
+  }
+
+  // Determine output
+  if (step.stepType === 'foreach') {
+    result.output = step.itemVariable ? `{{${step.itemVariable}}}` : '{{item}}'
+  } else if (step.stepType === 'join') {
+    result.output = 'aggregatedResults[]'
+  } else if (step.stepType === 'external') {
+    result.output = 'webhook response'
+  } else if (step.stepType === 'agent' || step.stepType === 'manual') {
+    result.output = 'task output'
+  } else if (step.stepType === 'decision') {
+    result.output = 'routes to branch'
+  }
+
+  return result
+}
+
 function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string {
   if (steps.length === 0) return ''
 
   const lines: string[] = ['flowchart TD']
+  const loopScopes = detectLoopScopes(steps)
 
-  // Generate node definitions - use quoted labels to handle special chars
+  // Build a map of which steps are in which loop scope
+  const stepLoopScope = new Map<number, LoopScope>()
+  for (const scope of loopScopes) {
+    // Steps between foreach (exclusive) and join (exclusive) are in the loop
+    for (let i = scope.foreachIndex + 1; i < scope.joinIndex; i++) {
+      stepLoopScope.set(i, scope)
+    }
+  }
+
+  // Track which steps are already rendered in subgraphs
+  const renderedInSubgraph = new Set<number>()
+
+  // Generate node definitions with subgraphs for loops
+  let currentScopeId: string | null = null
+
   steps.forEach((step, i) => {
     const nodeId = step.id || `step${i}`
-    // Escape quotes in labels
     const label = step.name.replace(/"/g, '#quot;')
+    const scope = stepLoopScope.get(i)
+    const scopeId = scope ? scope.foreachStep.id : null
+
+    // Handle subgraph transitions
+    if (scopeId !== currentScopeId) {
+      if (currentScopeId !== null) {
+        lines.push('    end')
+      }
+      if (scopeId !== null) {
+        const foreachName = scope?.foreachStep.name.replace(/"/g, '') || 'Loop'
+        const itemVar = scope?.foreachStep.itemVariable || 'item'
+        lines.push(`    subgraph loop_${scopeId}["🔄 Loop: ${foreachName}"]`)
+        lines.push(`    direction TB`)
+      }
+      currentScopeId = scopeId
+    }
+
+    const indent = scopeId ? '        ' : '    '
 
     switch (step.stepType) {
       case 'agent':
-        // Square brackets for agent tasks (AI)
-        lines.push(`    ${nodeId}["${label}"]`)
+        lines.push(`${indent}${nodeId}["${label}"]`)
         break
       case 'external':
-        // Hexagon for external/API tasks
-        lines.push(`    ${nodeId}{{"${label}"}}`)
+        lines.push(`${indent}${nodeId}{{"Trigger: ${label}"}}`)
         break
       case 'manual':
-        // Round brackets for manual/HITL tasks
-        lines.push(`    ${nodeId}("${label}")`)
+        lines.push(`${indent}${nodeId}("${label}")`)
         break
       case 'decision':
-        // Diamond for decision/routing
-        lines.push(`    ${nodeId}{"${label}"}`)
+        lines.push(`${indent}${nodeId}{"${label}"}`)
         break
       case 'foreach':
-        lines.push(`    ${nodeId}[["Each: ${label}"]]`)
+        const itemsPath = step.itemsPath ? ` (${step.itemsPath})` : ''
+        lines.push(`${indent}${nodeId}[["Each: ${label}${itemsPath}"]]`)
         break
       case 'join':
-        lines.push(`    ${nodeId}[["Join: ${label}"]]`)
+        const pct = step.minSuccessPercent !== undefined ? ` @${step.minSuccessPercent}%` : ''
+        lines.push(`${indent}${nodeId}[["Join: ${label}${pct}"]]`)
         break
       case 'subflow':
-        lines.push(`    ${nodeId}[["Run: ${label}"]]`)
+        lines.push(`${indent}${nodeId}[["Run: ${label}"]]`)
         break
       default:
-        // Legacy support: check execution mode
         const execution = step.execution || step.type || 'automated'
         if (execution === 'manual') {
-          // Stadium shape with quoted label for manual tasks
-          lines.push(`    ${nodeId}(["${label}"])`)
+          lines.push(`${indent}${nodeId}(["${label}"])`)
         } else {
-          lines.push(`    ${nodeId}["${label}"]`)
+          lines.push(`${indent}${nodeId}["${label}"]`)
         }
     }
   })
 
-  // Generate connections - use explicit connections if available, otherwise linear
+  // Close any open subgraph
+  if (currentScopeId !== null) {
+    lines.push('    end')
+  }
+
+  // Generate connections with data flow labels
   lines.push('')
   const connectedFrom = new Set<string>()
+
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i]
     const nodeId = step.id || `step${i}`
+    const nextStep = steps[i + 1]
 
     // Use explicit connections if defined
     if (step.connections && step.connections.length > 0) {
@@ -251,28 +354,41 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     }
   }
 
-  // Add linear connections for nodes without explicit connections
+  // Add linear connections with data flow annotations
   for (let i = 0; i < steps.length - 1; i++) {
     const step = steps[i]
     const nodeId = step.id || `step${i}`
+    const nextStep = steps[i + 1]
 
     if (!connectedFrom.has(nodeId)) {
-      const nextNodeId = steps[i + 1].id || `step${i + 1}`
-      lines.push(`    ${nodeId} --> ${nextNodeId}`)
+      const nextNodeId = nextStep.id || `step${i + 1}`
+
+      // Add data flow label for key transitions
+      let edgeLabel = ''
+      if (step.stepType === 'foreach') {
+        edgeLabel = step.itemVariable ? `|"{{${step.itemVariable}}}"| ` : '|"{{item}}"| '
+      } else if (step.stepType === 'external' && nextStep.stepType === 'foreach') {
+        const itemsPath = nextStep.itemsPath || 'response'
+        edgeLabel = `|"${itemsPath}"| `
+      } else if (step.stepType === 'join') {
+        edgeLabel = '|"aggregatedResults"| '
+      }
+
+      lines.push(`    ${nodeId} -->${edgeLabel}${nextNodeId}`)
     }
   }
 
-  // Add styling classes with distinct colors for each type
+  // Add styling classes with distinct colors
   lines.push('')
-  lines.push('    classDef agent fill:#3B82F6,color:#fff,stroke:#2563EB')       // Blue - AI agent
-  lines.push('    classDef external fill:#F97316,color:#fff,stroke:#EA580C')    // Orange - External/API
-  lines.push('    classDef manual fill:#8B5CF6,color:#fff,stroke:#7C3AED')      // Purple - Human/HITL
-  lines.push('    classDef decision fill:#F59E0B,color:#fff,stroke:#D97706')    // Amber - Decision
-  lines.push('    classDef foreach fill:#10B981,color:#fff,stroke:#059669')     // Green - Loop
-  lines.push('    classDef join fill:#6366F1,color:#fff,stroke:#4F46E5')        // Indigo - Join
-  lines.push('    classDef subflow fill:#EC4899,color:#fff,stroke:#DB2777')     // Pink - Subflow
+  lines.push('    classDef agent fill:#3B82F6,color:#fff,stroke:#2563EB')
+  lines.push('    classDef external fill:#F97316,color:#fff,stroke:#EA580C')
+  lines.push('    classDef manual fill:#8B5CF6,color:#fff,stroke:#7C3AED')
+  lines.push('    classDef decision fill:#F59E0B,color:#fff,stroke:#D97706')
+  lines.push('    classDef foreach fill:#10B981,color:#fff,stroke:#059669')
+  lines.push('    classDef join fill:#6366F1,color:#fff,stroke:#4F46E5')
+  lines.push('    classDef subflow fill:#EC4899,color:#fff,stroke:#DB2777')
 
-  // Apply classes to nodes (grouped for efficiency)
+  // Apply classes to nodes
   const classGroups: Record<string, string[]> = {
     agent: [],
     external: [],
@@ -309,7 +425,6 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
         classGroups.subflow.push(nodeId)
         break
       default:
-        // Legacy support
         const execution = step.execution || step.type || 'automated'
         if (execution === 'manual') {
           classGroups.manual.push(nodeId)
@@ -325,6 +440,53 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
       lines.push(`    class ${nodeIds.join(',')} ${className}`)
     }
   }
+
+  // Add step configuration as comments (preserved on import)
+  lines.push('')
+  lines.push('    %% Step configuration (preserved on import)')
+  steps.forEach((step) => {
+    const config: Record<string, unknown> = {}
+
+    if (step.description) config.description = step.description
+    if (step.additionalInstructions) config.additionalInstructions = step.additionalInstructions
+    if (step.defaultAssigneeId) config.defaultAssigneeId = step.defaultAssigneeId
+    if (step.inputPath) config.inputPath = step.inputPath
+
+    // External config
+    if (step.externalConfig && Object.keys(step.externalConfig).length > 0) {
+      config.externalConfig = step.externalConfig
+    }
+
+    // ForEach config
+    if (step.stepType === 'foreach') {
+      if (step.itemsPath) config.itemsPath = step.itemsPath
+      if (step.itemVariable) config.itemVariable = step.itemVariable
+      if (step.maxItems) config.maxItems = step.maxItems
+      if (step.expectedCountPath) config.expectedCountPath = step.expectedCountPath
+    }
+
+    // Join config
+    if (step.stepType === 'join') {
+      if (step.awaitTag) config.awaitTag = step.awaitTag
+      if (step.minSuccessPercent !== undefined) config.minSuccessPercent = step.minSuccessPercent
+      if (step.expectedCountPath) config.expectedCountPath = step.expectedCountPath
+    }
+
+    // Subflow config
+    if (step.stepType === 'subflow') {
+      if (step.subflowId) config.subflowId = step.subflowId
+      if (step.inputMapping) config.inputMapping = step.inputMapping
+    }
+
+    // Decision connections are already in the diagram edges, but save for reference
+    if (step.connections && step.connections.length > 0) {
+      config.connections = step.connections
+    }
+
+    if (Object.keys(config).length > 0) {
+      lines.push(`    %% @step(${step.id}): ${JSON.stringify(config)}`)
+    }
+  })
 
   return lines.join('\n')
 }
@@ -628,30 +790,81 @@ export function WorkflowEditor({
 
             {/* Visual Editor Tab */}
             <TabsContent value="visual" className="flex-1 overflow-auto mt-0">
-              <div className="space-y-2 p-2 bg-muted/30 rounded-lg">
+              <div className="space-y-0 p-2 bg-muted/30 rounded-lg">
                 {steps.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
                     <p>No steps defined yet.</p>
                     <p className="text-sm">Add steps to build your workflow.</p>
                   </div>
                 ) : (
-                  steps.map((step, index) => {
-                    const typeInfo = getStepTypeInfo(step.stepType)
-                    const TypeIcon = typeInfo.icon
-                    const isExpanded = expandedSteps.has(step.id)
+                  (() => {
+                    // Compute loop scopes for visual grouping
+                    const loopScopes = detectLoopScopes(steps)
+                    const stepInLoop = new Map<number, LoopScope>()
+                    for (const scope of loopScopes) {
+                      for (let i = scope.foreachIndex + 1; i < scope.joinIndex; i++) {
+                        stepInLoop.set(i, scope)
+                      }
+                    }
 
-                    return (
-                      <Collapsible
-                        key={step.id}
-                        open={isExpanded}
-                        onOpenChange={() => toggleStepExpanded(step.id)}
-                      >
-                        <div
-                          className={cn(
-                            'bg-background rounded-lg border',
-                            step.execution === 'manual' && 'border-purple-300'
+                    return steps.map((step, index) => {
+                      const typeInfo = getStepTypeInfo(step.stepType)
+                      const TypeIcon = typeInfo.icon
+                      const isExpanded = expandedSteps.has(step.id)
+                      const loopScope = stepInLoop.get(index)
+                      const isInLoop = !!loopScope
+                      const prevStep = index > 0 ? steps[index - 1] : undefined
+                      const nextStep = index < steps.length - 1 ? steps[index + 1] : undefined
+                      const dataFlow = getDataFlowDescription(step, prevStep)
+
+                      // Check if this step starts or ends a loop scope
+                      const startsLoop = loopScopes.some(s => s.foreachIndex === index)
+                      const endsLoop = loopScopes.some(s => s.joinIndex === index)
+                      const isFirstInLoop = loopScopes.some(s => s.foreachIndex + 1 === index)
+                      const isLastInLoop = loopScopes.some(s => s.joinIndex - 1 === index)
+
+                      return (
+                        <div key={step.id} className="relative">
+                          {/* Data flow indicator from previous step */}
+                          {index > 0 && (
+                            <div className="flex items-center justify-center py-1">
+                              <div className="flex flex-col items-center text-xs text-muted-foreground">
+                                <ArrowDown className="h-4 w-4" />
+                                {dataFlow.input && (
+                                  <span className="font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded mt-0.5">
+                                    {dataFlow.input}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                           )}
-                        >
+
+                          {/* Loop scope start indicator */}
+                          {startsLoop && (
+                            <div className="mb-1 ml-4 flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
+                              <Repeat className="h-3 w-3" />
+                              <span className="font-medium">Loop Start</span>
+                              {step.itemsPath && (
+                                <span className="font-mono bg-green-100 dark:bg-green-900/30 px-1.5 py-0.5 rounded">
+                                  iterating: {step.itemsPath}
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          <Collapsible
+                            open={isExpanded}
+                            onOpenChange={() => toggleStepExpanded(step.id)}
+                          >
+                            <div
+                              className={cn(
+                                'bg-background rounded-lg border transition-all',
+                                step.execution === 'manual' && 'border-purple-300',
+                                isInLoop && 'ml-6 border-l-4 border-l-green-400 dark:border-l-green-600',
+                                startsLoop && 'border-green-400 dark:border-green-600 border-2',
+                                endsLoop && 'border-indigo-400 dark:border-indigo-600 border-2'
+                              )}
+                            >
                           {/* Step Header */}
                           <div className="flex items-center gap-3 p-3">
                             <div className="flex flex-col gap-1">
@@ -1048,9 +1261,22 @@ The agent will receive task context automatically.`}
                                       <div className="text-indigo-800 dark:text-indigo-200">
                                         <p className="font-medium">Join / Aggregation Point</p>
                                         <p className="text-xs mt-1">
-                                          This step waits for parallel tasks (from a ForEach loop) to complete
-                                          and aggregates their results. The system automatically finds tasks
-                                          from the preceding ForEach step.
+                                          Waits for parallel tasks from a ForEach loop and aggregates results.
+                                          Works with routers inside loops - collects from <strong>all branches</strong>, not just one path.
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Multi-branch collection info */}
+                                  <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-2 text-sm">
+                                    <div className="flex items-start gap-2">
+                                      <GitBranch className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                                      <div className="text-amber-800 dark:text-amber-200 text-xs">
+                                        <p className="font-medium">Works with Routers</p>
+                                        <p className="mt-0.5">
+                                          If there&apos;s a Decision/Router inside the loop, results from ALL branches
+                                          are collected. Tasks are matched by the ForEach tag, regardless of which branch processed them.
                                         </p>
                                       </div>
                                     </div>
@@ -1137,26 +1363,106 @@ The agent will receive task context automatically.`}
                                       <div className="text-amber-800 dark:text-amber-200">
                                         <p className="font-medium">Decision / Router</p>
                                         <p className="text-xs mt-1">
-                                          This step evaluates conditions from the previous step&apos;s output and
-                                          routes to the appropriate branch. No AI prompting - purely programmatic.
+                                          Routes to different branches based on conditions. All branches can converge
+                                          back to the same Join step for aggregation.
                                         </p>
                                       </div>
                                     </div>
                                   </div>
 
+                                  {/* Connections Editor */}
+                                  <div className="space-y-2">
+                                    <label className="text-sm font-medium flex items-center gap-2">
+                                      <CornerDownRight className="h-4 w-4 text-muted-foreground" />
+                                      Branch Routes
+                                    </label>
+
+                                    {(step.connections || []).map((conn, connIdx) => (
+                                      <div key={connIdx} className="flex items-center gap-2 pl-4 border-l-2 border-amber-300">
+                                        <Input
+                                          value={conn.condition || conn.label || ''}
+                                          onChange={(e) => {
+                                            const newConns = [...(step.connections || [])]
+                                            newConns[connIdx] = { ...newConns[connIdx], condition: e.target.value, label: e.target.value }
+                                            updateStep(index, { connections: newConns })
+                                          }}
+                                          placeholder="e.g., output.category === 'urgent'"
+                                          className="font-mono text-sm flex-1"
+                                        />
+                                        <ArrowRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                                        <Select
+                                          value={conn.targetStepId}
+                                          onValueChange={(val) => {
+                                            const newConns = [...(step.connections || [])]
+                                            newConns[connIdx] = { ...newConns[connIdx], targetStepId: val }
+                                            updateStep(index, { connections: newConns })
+                                          }}
+                                        >
+                                          <SelectTrigger className="w-[180px]">
+                                            <SelectValue placeholder="Select target" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {steps.filter((_, i) => i > index).map(s => (
+                                              <SelectItem key={s.id} value={s.id}>
+                                                {s.name}
+                                              </SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-8 w-8 p-0 text-destructive"
+                                          onClick={() => {
+                                            const newConns = (step.connections || []).filter((_, i) => i !== connIdx)
+                                            updateStep(index, { connections: newConns })
+                                          }}
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </Button>
+                                      </div>
+                                    ))}
+
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => {
+                                        const newConns = [...(step.connections || []), { targetStepId: '', condition: '' }]
+                                        updateStep(index, { connections: newConns })
+                                      }}
+                                      className="ml-4"
+                                    >
+                                      <Plus className="h-3 w-3 mr-1" />
+                                      Add Branch
+                                    </Button>
+                                  </div>
+
+                                  {/* Info about loops */}
+                                  {isInLoop && (
+                                    <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg p-3 text-sm">
+                                      <div className="flex items-start gap-2">
+                                        <Repeat className="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5 flex-shrink-0" />
+                                        <div className="text-green-800 dark:text-green-200">
+                                          <p className="font-medium">Router Inside Loop</p>
+                                          <p className="text-xs mt-1">
+                                            All branches will be executed for each loop item. Results from all branches
+                                            are collected by the Join step - they don&apos;t need to converge to a single path.
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+
                                   <div className="space-y-1">
-                                    <label className="text-sm font-medium">Branch Conditions</label>
-                                    <p className="text-sm text-muted-foreground">
-                                      Define branches in the Mermaid diagram using edge labels with conditions:
+                                    <p className="text-xs text-muted-foreground">
+                                      Tip: You can also define branches in the Mermaid diagram tab:
                                     </p>
                                     <div className="bg-muted/50 rounded p-2 font-mono text-xs space-y-1">
-                                      <p>A --&gt;|&quot;output.status === &apos;approved&apos;&quot;| B</p>
-                                      <p>A --&gt;|&quot;output.score &gt;= 80&quot;| C</p>
-                                      <p>A --&gt;|&quot;default&quot;| D</p>
+                                      <p>Router --&gt;|&quot;output.category === &apos;urgent&apos;&quot;| UrgentHandler</p>
+                                      <p>Router --&gt;|&quot;default&quot;| NormalHandler</p>
                                     </div>
-                                    <p className="text-xs text-muted-foreground mt-2">
-                                      Conditions are evaluated in order. Use &quot;default&quot; for fallback routing.
-                                    </p>
                                   </div>
                                 </>
                               )}
@@ -1205,8 +1511,32 @@ The agent will receive task context automatically.`}
                           </CollapsibleContent>
                         </div>
                       </Collapsible>
-                    )
-                  })
+
+                          {/* Loop scope end indicator */}
+                          {endsLoop && (
+                            <div className="mt-1 ml-4 flex items-center gap-2 text-xs text-indigo-600 dark:text-indigo-400">
+                              <Merge className="h-3 w-3" />
+                              <span className="font-medium">Loop End - Results Aggregated</span>
+                              {step.minSuccessPercent !== undefined && step.minSuccessPercent < 100 && (
+                                <span className="font-mono bg-indigo-100 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded">
+                                  proceeds at {step.minSuccessPercent}% complete
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Data output indicator */}
+                          {dataFlow.output && index < steps.length - 1 && (
+                            <div className="flex justify-center pt-1">
+                              <span className="font-mono text-[10px] text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">
+                                outputs: {dataFlow.output}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })
+                  })()
                 )}
 
                 <Button
