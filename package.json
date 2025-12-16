@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "npm run db:start && concurrently -n api,web -c blue,green \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:restart": "pkill -f 'tsx watch' 2>/dev/null; pkill -f 'next dev' 2>/dev/null; sleep 1 && npm run dev",
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
     "dev:daemon": "cd backend && npm run daemon:watch",
