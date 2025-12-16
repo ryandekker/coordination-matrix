@@ -804,6 +804,175 @@ export const activityLogsApi = {
   },
 }
 
+// Batch Job Types
+export type BatchJobStatus =
+  | 'pending'
+  | 'processing'
+  | 'awaiting_responses'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'manual_review'
+
+export type BatchItemStatus = 'pending' | 'received' | 'processing' | 'completed' | 'failed' | 'skipped'
+
+export type ReviewDecision = 'approved' | 'rejected' | 'proceed_with_partial'
+
+export interface BatchItem {
+  _id: string
+  batchJobId: string
+  itemKey: string
+  externalId?: string
+  status: BatchItemStatus
+  inputData?: Record<string, unknown>
+  resultData?: Record<string, unknown>
+  error?: string
+  createdAt: string
+  receivedAt?: string
+  completedAt?: string
+}
+
+export interface BatchJob {
+  _id: string
+  name?: string
+  type?: string
+  status: BatchJobStatus
+  expectedCount: number
+  receivedCount: number
+  processedCount: number
+  failedCount: number
+  minSuccessPercent: number
+  workflowId?: string
+  workflowStepId?: string
+  taskId?: string
+  callbackUrl?: string
+  callbackSecret?: string
+  inputPayload?: Record<string, unknown>
+  aggregateResult?: Record<string, unknown>
+  requiresManualReview: boolean
+  reviewedById?: string
+  reviewDecision?: ReviewDecision
+  reviewNotes?: string
+  createdAt: string
+  completedAt?: string
+  _resolved?: {
+    workflow?: { _id: string; name: string }
+    task?: { _id: string; title: string }
+    reviewedBy?: { _id: string; displayName: string }
+  }
+}
+
+export interface BatchJobWithItems extends BatchJob {
+  items: BatchItem[]
+}
+
+// Batch Jobs API
+export const batchJobsApi = {
+  list: async (params?: {
+    status?: BatchJobStatus | BatchJobStatus[]
+    type?: string
+    workflowId?: string
+    taskId?: string
+    requiresManualReview?: boolean
+    page?: number
+    limit?: number
+  }): Promise<PaginatedResponse<BatchJob>> => {
+    const searchParams = new URLSearchParams()
+    if (params?.status) {
+      const statuses = Array.isArray(params.status) ? params.status : [params.status]
+      searchParams.append('status', statuses.join(','))
+    }
+    if (params?.type) searchParams.append('type', params.type)
+    if (params?.workflowId) searchParams.append('workflowId', params.workflowId)
+    if (params?.taskId) searchParams.append('taskId', params.taskId)
+    if (params?.requiresManualReview !== undefined) {
+      searchParams.append('requiresManualReview', String(params.requiresManualReview))
+    }
+    if (params?.page) searchParams.append('page', String(params.page))
+    if (params?.limit) searchParams.append('limit', String(params.limit))
+    const response = await authFetch(`${API_BASE}/batch-jobs?${searchParams}`)
+    return handleResponse(response)
+  },
+
+  get: async (id: string, includeItems = false): Promise<ApiResponse<BatchJob | BatchJobWithItems>> => {
+    const params = includeItems ? '?includeItems=true' : ''
+    const response = await authFetch(`${API_BASE}/batch-jobs/${id}${params}`)
+    return handleResponse(response)
+  },
+
+  create: async (data: {
+    name?: string
+    type?: string
+    expectedCount: number
+    minSuccessPercent?: number
+    workflowId?: string
+    workflowStepId?: string
+    taskId?: string
+    inputPayload?: Record<string, unknown>
+    items?: Array<{ itemKey: string; inputData?: Record<string, unknown> }>
+  }): Promise<ApiResponse<BatchJob & { callbackUrl: string; callbackSecretHint: string }>> => {
+    const response = await authFetch(`${API_BASE}/batch-jobs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  start: async (id: string): Promise<ApiResponse<BatchJob>> => {
+    const response = await authFetch(`${API_BASE}/batch-jobs/${id}/start`, {
+      method: 'POST',
+    })
+    return handleResponse(response)
+  },
+
+  cancel: async (id: string): Promise<ApiResponse<BatchJob>> => {
+    const response = await authFetch(`${API_BASE}/batch-jobs/${id}/cancel`, {
+      method: 'POST',
+    })
+    return handleResponse(response)
+  },
+
+  submitReview: async (
+    id: string,
+    decision: ReviewDecision,
+    notes?: string
+  ): Promise<ApiResponse<BatchJob>> => {
+    const response = await authFetch(`${API_BASE}/batch-jobs/${id}/review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision, notes }),
+    })
+    return handleResponse(response)
+  },
+
+  requestReview: async (id: string, reason?: string): Promise<ApiResponse<BatchJob>> => {
+    const response = await authFetch(`${API_BASE}/batch-jobs/${id}/request-review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    })
+    return handleResponse(response)
+  },
+
+  getAggregate: async (id: string): Promise<ApiResponse<{
+    totalItems: number
+    processedCount: number
+    failedCount: number
+    successPercent: number
+    results: Record<string, unknown>[]
+    aggregateResult?: Record<string, unknown>
+  }>> => {
+    const response = await authFetch(`${API_BASE}/batch-jobs/${id}/aggregate`)
+    return handleResponse(response)
+  },
+
+  getStats: async (): Promise<ApiResponse<{ byStatus: Record<string, number> }>> => {
+    const response = await authFetch(`${API_BASE}/batch-jobs/stats/summary`)
+    return handleResponse(response)
+  },
+}
+
 // Webhooks API
 export const webhooksApi = {
   list: async (params?: { isActive?: boolean; limit?: number; offset?: number }): Promise<{

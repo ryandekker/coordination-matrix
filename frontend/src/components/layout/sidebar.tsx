@@ -21,6 +21,7 @@ import {
   Database,
   Palette,
   Webhook,
+  ArrowLeftRight,
 } from 'lucide-react'
 import { Logo } from '@/components/ui/logo'
 import { View } from '@/lib/api'
@@ -50,6 +51,7 @@ const staticNavigation: NavItem[] = [
 const bottomNavigation: NavItem[] = [
   { name: 'Workflows', href: '/workflows', icon: Workflow, exact: true },
   { name: 'Workflow Runs', href: '/workflow-runs', icon: Play, exact: false },
+  { name: 'Requests', href: '/requests', icon: ArrowLeftRight, exact: false },
   { name: 'Users', href: '/users', icon: Users, exact: true },
 ]
 
