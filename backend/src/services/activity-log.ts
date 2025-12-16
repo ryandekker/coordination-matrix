@@ -32,6 +32,11 @@ class ActivityLogService {
    */
   async recordEvent(event: TaskEvent): Promise<ActivityLogEntry | null> {
     try {
+      // Skip comment events - they are already recorded directly by addComment()
+      if (event.type === 'task.comment.added') {
+        return null;
+      }
+
       const db = getDb();
 
       // Build entry, omitting undefined fields to avoid MongoDB validation errors
