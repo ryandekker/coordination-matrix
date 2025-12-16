@@ -254,72 +254,45 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     }
   }
 
-  // Track which steps are already rendered in subgraphs
-  const renderedInSubgraph = new Set<number>()
-
-  // Generate node definitions with subgraphs for loops
-  let currentScopeId: string | null = null
-
+  // Generate node definitions (no subgraphs - they break mermaid rendering)
   steps.forEach((step, i) => {
     const nodeId = step.id || `step${i}`
     const label = step.name.replace(/"/g, '#quot;')
-    const scope = stepLoopScope.get(i)
-    const scopeId = scope ? scope.foreachStep.id : null
-
-    // Handle subgraph transitions
-    if (scopeId !== currentScopeId) {
-      if (currentScopeId !== null) {
-        lines.push('    end')
-      }
-      if (scopeId !== null) {
-        const foreachName = scope?.foreachStep.name.replace(/"/g, '') || 'Loop'
-        const itemVar = scope?.foreachStep.itemVariable || 'item'
-        lines.push(`    subgraph loop_${scopeId}["🔄 Loop: ${foreachName}"]`)
-        lines.push(`    direction TB`)
-      }
-      currentScopeId = scopeId
-    }
-
-    const indent = scopeId ? '        ' : '    '
+    const isInLoop = stepLoopScope.has(i)
 
     switch (step.stepType) {
       case 'agent':
-        lines.push(`${indent}${nodeId}["${label}"]`)
+        lines.push(`    ${nodeId}["${label}"]`)
         break
       case 'external':
-        lines.push(`${indent}${nodeId}{{"Trigger: ${label}"}}`)
+        lines.push(`    ${nodeId}{{"${label}"}}`)
         break
       case 'manual':
-        lines.push(`${indent}${nodeId}("${label}")`)
+        lines.push(`    ${nodeId}("${label}")`)
         break
       case 'decision':
-        lines.push(`${indent}${nodeId}{"${label}"}`)
+        lines.push(`    ${nodeId}{"${label}"}`)
         break
       case 'foreach':
         const itemsPath = step.itemsPath ? ` (${step.itemsPath})` : ''
-        lines.push(`${indent}${nodeId}[["Each: ${label}${itemsPath}"]]`)
+        lines.push(`    ${nodeId}[["Each: ${label}${itemsPath}"]]`)
         break
       case 'join':
         const pct = step.minSuccessPercent !== undefined ? ` @${step.minSuccessPercent}%` : ''
-        lines.push(`${indent}${nodeId}[["Join: ${label}${pct}"]]`)
+        lines.push(`    ${nodeId}[["Join: ${label}${pct}"]]`)
         break
       case 'subflow':
-        lines.push(`${indent}${nodeId}[["Run: ${label}"]]`)
+        lines.push(`    ${nodeId}[["Run: ${label}"]]`)
         break
       default:
         const execution = step.execution || step.type || 'automated'
         if (execution === 'manual') {
-          lines.push(`${indent}${nodeId}(["${label}"])`)
+          lines.push(`${nodeId}(["${label}"])`)
         } else {
-          lines.push(`${indent}${nodeId}["${label}"]`)
+          lines.push(`    ${nodeId}["${label}"]`)
         }
     }
   })
-
-  // Close any open subgraph
-  if (currentScopeId !== null) {
-    lines.push('    end')
-  }
 
   // Generate connections with data flow labels
   lines.push('')
@@ -366,7 +339,9 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
       // Add data flow label for key transitions
       let edgeLabel = ''
       if (step.stepType === 'foreach') {
-        edgeLabel = step.itemVariable ? `|"{{${step.itemVariable}}}"| ` : '|"{{item}}"| '
+        // Show that ForEach spawns parallel tasks
+        const itemVar = step.itemVariable || 'item'
+        edgeLabel = `|"spawns N tasks (${itemVar})"| `
       } else if (step.stepType === 'external' && nextStep.stepType === 'foreach') {
         const itemsPath = nextStep.itemsPath || 'response'
         edgeLabel = `|"${itemsPath}"| `
@@ -374,7 +349,14 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
         edgeLabel = '|"aggregatedResults"| '
       }
 
-      lines.push(`    ${nodeId} -->${edgeLabel}${nextNodeId}`)
+      // Check if this connects ForEach directly to Join (parallel execution)
+      if (step.stepType === 'foreach' && nextStep.stepType === 'join') {
+        // Show the parallel nature with a special edge style
+        const pct = nextStep.minSuccessPercent !== undefined ? `@${nextStep.minSuccessPercent}%` : '@100%'
+        lines.push(`    ${nodeId} -.->|"parallel tasks ${pct}"| ${nextNodeId}`)
+      } else {
+        lines.push(`    ${nodeId} -->${edgeLabel}${nextNodeId}`)
+      }
     }
   }
 
@@ -1263,6 +1245,21 @@ The agent will receive task context automatically.`}
                                         <p className="text-xs mt-1">
                                           Waits for parallel tasks from a ForEach loop and aggregates results.
                                           Works with routers inside loops - collects from <strong>all branches</strong>, not just one path.
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* How completion tracking works */}
+                                  <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-2 text-sm">
+                                    <div className="flex items-start gap-2">
+                                      <Info className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+                                      <div className="text-blue-800 dark:text-blue-200 text-xs">
+                                        <p className="font-medium">How Join Knows Tasks Are Complete</p>
+                                        <p className="mt-0.5">
+                                          The ForEach step sets <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">expectedCount</code> when spawning tasks.
+                                          Each task completion increments <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">completedCount</code>.
+                                          Join fires when <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">completedCount/expectedCount &gt;= minSuccess%</code>.
                                         </p>
                                       </div>
                                     </div>
