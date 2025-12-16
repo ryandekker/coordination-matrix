@@ -652,6 +652,110 @@ tasksRouter.delete('/:id/webhook/retry', async (req: Request, res: Response, nex
   }
 });
 
+// GET /api/tasks/webhook-attempts - List all tasks with webhook attempts
+tasksRouter.get('/webhook-attempts', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { status, taskStatus, taskType, assigneeId, limit = '50', offset = '0' } = req.query;
+
+    // Find all tasks with webhookConfig that have attempts
+    const filter: Record<string, unknown> = {
+      'webhookConfig.attempts': { $exists: true, $ne: [] },
+    };
+
+    // Filter by webhook attempt status if provided
+    if (status) {
+      filter['webhookConfig.attempts.status'] = status;
+    }
+
+    // Filter by task status if provided
+    if (taskStatus) {
+      filter.status = taskStatus;
+    }
+
+    // Filter by task type if provided
+    if (taskType) {
+      filter.taskType = taskType;
+    }
+
+    // Filter by assignee if provided
+    if (assigneeId) {
+      filter.assigneeId = new ObjectId(assigneeId as string);
+    }
+
+    const [tasks, total] = await Promise.all([
+      db
+        .collection<Task>('tasks')
+        .find(filter)
+        .project({
+          _id: 1,
+          title: 1,
+          status: 1,
+          taskType: 1,
+          webhookConfig: 1,
+          createdAt: 1,
+          updatedAt: 1,
+        })
+        .sort({ 'webhookConfig.lastAttemptAt': -1, updatedAt: -1 })
+        .skip(parseInt(offset as string, 10))
+        .limit(parseInt(limit as string, 10))
+        .toArray(),
+      db.collection('tasks').countDocuments(filter),
+    ]);
+
+    // Transform to a more useful format
+    interface WebhookAttemptData {
+      attemptNumber: number;
+      status: string;
+      httpStatus?: number;
+      responseBody?: unknown;
+      errorMessage?: string;
+      durationMs?: number;
+      startedAt?: string;
+      completedAt?: string;
+    }
+    const webhookAttempts = tasks.flatMap((task) => {
+      const attempts: WebhookAttemptData[] = task.webhookConfig?.attempts || [];
+      return attempts.map((attempt: WebhookAttemptData, index: number) => ({
+        _id: `${task._id}-${index}`,
+        taskId: task._id,
+        taskTitle: task.title,
+        taskStatus: task.status,
+        attemptNumber: attempt.attemptNumber,
+        status: attempt.status,
+        httpStatus: attempt.httpStatus,
+        responseBody: attempt.responseBody,
+        errorMessage: attempt.errorMessage,
+        durationMs: attempt.durationMs,
+        startedAt: attempt.startedAt,
+        completedAt: attempt.completedAt,
+        url: task.webhookConfig?.url,
+        method: task.webhookConfig?.method,
+        maxRetries: task.webhookConfig?.maxRetries,
+        nextRetryAt: task.webhookConfig?.nextRetryAt,
+      }));
+    });
+
+    // Sort by startedAt descending
+    webhookAttempts.sort((a, b) => {
+      const dateA = a.startedAt ? new Date(a.startedAt).getTime() : 0;
+      const dateB = b.startedAt ? new Date(b.startedAt).getTime() : 0;
+      return dateB - dateA;
+    });
+
+    res.json({
+      data: webhookAttempts,
+      pagination: {
+        limit: parseInt(limit as string, 10),
+        offset: parseInt(offset as string, 10),
+        total,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // DELETE /api/tasks/:id - Delete a task
 tasksRouter.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {

@@ -187,35 +187,108 @@ class BatchJobService {
     workflowId?: string;
     taskId?: string;
     requiresManualReview?: boolean;
+    taskStatus?: string;
+    taskType?: string;
+    assigneeId?: string;
     page?: number;
     limit?: number;
   } = {}): Promise<{ jobs: BatchJob[]; total: number }> {
     const { page = 1, limit = 20 } = options;
-    const filter: Record<string, unknown> = {};
 
-    if (options.status) {
-      filter.status = Array.isArray(options.status)
-        ? { $in: options.status }
-        : options.status;
+    // Check if we need task-based filtering
+    const needsTaskLookup = options.taskStatus || options.taskType || options.assigneeId;
+
+    if (needsTaskLookup) {
+      // Use aggregation with $lookup for task-based filters
+      const pipeline: object[] = [];
+
+      // Initial match for batch job filters
+      const jobMatch: Record<string, unknown> = {};
+      if (options.status) {
+        jobMatch.status = Array.isArray(options.status)
+          ? { $in: options.status }
+          : options.status;
+      }
+      if (options.type) jobMatch.type = options.type;
+      if (options.workflowId) jobMatch.workflowId = new ObjectId(options.workflowId);
+      if (options.taskId) jobMatch.taskId = new ObjectId(options.taskId);
+      if (options.requiresManualReview !== undefined) {
+        jobMatch.requiresManualReview = options.requiresManualReview;
+      }
+      if (Object.keys(jobMatch).length > 0) {
+        pipeline.push({ $match: jobMatch });
+      }
+
+      // Lookup tasks
+      pipeline.push({
+        $lookup: {
+          from: 'tasks',
+          localField: 'taskId',
+          foreignField: '_id',
+          as: 'task',
+        },
+      });
+      pipeline.push({ $unwind: { path: '$task', preserveNullAndEmptyArrays: true } });
+
+      // Match task filters
+      const taskMatch: Record<string, unknown> = {};
+      if (options.taskStatus) {
+        taskMatch['task.status'] = options.taskStatus;
+      }
+      if (options.taskType) {
+        taskMatch['task.taskType'] = options.taskType;
+      }
+      if (options.assigneeId) {
+        taskMatch['task.assigneeId'] = new ObjectId(options.assigneeId);
+      }
+      if (Object.keys(taskMatch).length > 0) {
+        pipeline.push({ $match: taskMatch });
+      }
+
+      // Count total before pagination
+      const countPipeline = [...pipeline, { $count: 'total' }];
+      const countResult = await this.batchJobs.aggregate(countPipeline).toArray();
+      const total = countResult[0]?.total || 0;
+
+      // Sort, skip, limit
+      pipeline.push({ $sort: { createdAt: -1 } });
+      pipeline.push({ $skip: (page - 1) * limit });
+      pipeline.push({ $limit: limit });
+
+      // Remove task field from output
+      pipeline.push({ $project: { task: 0 } });
+
+      const jobs = await this.batchJobs.aggregate<BatchJob>(pipeline).toArray();
+
+      return { jobs, total };
+    } else {
+      // Original simple query (no task lookup needed)
+      const filter: Record<string, unknown> = {};
+
+      if (options.status) {
+        filter.status = Array.isArray(options.status)
+          ? { $in: options.status }
+          : options.status;
+      }
+      if (options.type) filter.type = options.type;
+      if (options.workflowId) filter.workflowId = new ObjectId(options.workflowId);
+      if (options.taskId) filter.taskId = new ObjectId(options.taskId);
+      if (options.requiresManualReview !== undefined) {
+        filter.requiresManualReview = options.requiresManualReview;
+      }
+
+      const [jobs, total] = await Promise.all([
+        this.batchJobs
+          .find(filter)
+          .sort({ createdAt: -1 })
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .toArray(),
+        this.batchJobs.countDocuments(filter),
+      ]);
+
+      return { jobs, total };
     }
-    if (options.type) filter.type = options.type;
-    if (options.workflowId) filter.workflowId = new ObjectId(options.workflowId);
-    if (options.taskId) filter.taskId = new ObjectId(options.taskId);
-    if (options.requiresManualReview !== undefined) {
-      filter.requiresManualReview = options.requiresManualReview;
-    }
-
-    const [jobs, total] = await Promise.all([
-      this.batchJobs
-        .find(filter)
-        .sort({ createdAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .toArray(),
-      this.batchJobs.countDocuments(filter),
-    ]);
-
-    return { jobs, total };
   }
 
   // ============================================================================

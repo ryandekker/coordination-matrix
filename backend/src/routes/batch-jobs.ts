@@ -119,6 +119,9 @@ router.get('/', async (req: Request, res: Response) => {
       workflowId,
       taskId,
       requiresManualReview,
+      taskStatus,
+      taskType,
+      assigneeId,
       page = '1',
       limit = '20',
     } = req.query;
@@ -136,6 +139,9 @@ router.get('/', async (req: Request, res: Response) => {
       workflowId: workflowId as string,
       taskId: taskId as string,
       requiresManualReview: requiresManualReview === 'true' ? true : undefined,
+      taskStatus: taskStatus as string,
+      taskType: taskType as string,
+      assigneeId: assigneeId as string,
       page: parseInt(page as string, 10),
       limit: parseInt(limit as string, 10),
     });
