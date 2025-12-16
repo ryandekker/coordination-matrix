@@ -11,18 +11,20 @@ import {
   AlertCircle,
   ChevronRight,
   ChevronLeft,
-  ChevronDown,
   RefreshCw,
   Ban,
   ArrowLeftRight,
   Eye,
-  Play,
   Loader2,
   AlertTriangle,
   ThumbsUp,
   ThumbsDown,
   SkipForward,
   ExternalLink,
+  Globe,
+  Layers,
+  Send,
+  Inbox,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -60,12 +62,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { cn } from '@/lib/utils'
 import {
   batchJobsApi,
+  externalJobsApi,
   workflowsApi,
   BatchJob,
   BatchJobStatus,
@@ -73,9 +77,11 @@ import {
   BatchJobWithItems,
   ReviewDecision,
   Workflow,
+  ExternalJob,
 } from '@/lib/api'
 
-const STATUS_CONFIG: Record<BatchJobStatus, { icon: React.ElementType; color: string; bgColor: string; label: string }> = {
+// Batch Job Status Config
+const BATCH_STATUS_CONFIG: Record<BatchJobStatus, { icon: React.ElementType; color: string; bgColor: string; label: string }> = {
   pending: { icon: Clock, color: 'text-gray-500', bgColor: 'bg-gray-50 dark:bg-gray-800/50', label: 'Pending' },
   processing: { icon: Loader2, color: 'text-blue-500', bgColor: 'bg-blue-50 dark:bg-blue-950/50', label: 'Processing' },
   awaiting_responses: { icon: ArrowLeftRight, color: 'text-amber-500', bgColor: 'bg-amber-50 dark:bg-amber-950/50', label: 'Awaiting' },
@@ -83,6 +89,15 @@ const STATUS_CONFIG: Record<BatchJobStatus, { icon: React.ElementType; color: st
   failed: { icon: XCircle, color: 'text-red-500', bgColor: 'bg-red-50 dark:bg-red-950/50', label: 'Failed' },
   cancelled: { icon: Ban, color: 'text-gray-500', bgColor: 'bg-gray-50 dark:bg-gray-800/50', label: 'Cancelled' },
   manual_review: { icon: Eye, color: 'text-purple-500', bgColor: 'bg-purple-50 dark:bg-purple-950/50', label: 'Review Needed' },
+}
+
+// External Job Status Config
+const EXTERNAL_STATUS_CONFIG: Record<string, { icon: React.ElementType; color: string; bgColor: string; label: string }> = {
+  pending: { icon: Clock, color: 'text-gray-500', bgColor: 'bg-gray-50 dark:bg-gray-800/50', label: 'Pending' },
+  processing: { icon: Loader2, color: 'text-blue-500', bgColor: 'bg-blue-50 dark:bg-blue-950/50', label: 'Processing' },
+  completed: { icon: CheckCircle, color: 'text-green-500', bgColor: 'bg-green-50 dark:bg-green-950/50', label: 'Completed' },
+  failed: { icon: XCircle, color: 'text-red-500', bgColor: 'bg-red-50 dark:bg-red-950/50', label: 'Failed' },
+  cancelled: { icon: Ban, color: 'text-gray-500', bgColor: 'bg-gray-50 dark:bg-gray-800/50', label: 'Cancelled' },
 }
 
 const ITEM_STATUS_CONFIG: Record<string, { color: string; bgColor: string }> = {
@@ -111,8 +126,177 @@ function formatDuration(start: string | null | undefined, end: string | null | u
   return `${Math.round(durationMs / 3600000)}h`
 }
 
-// Detail view component
-function RequestDetail({ requestId }: { requestId: string }) {
+// ============================================================================
+// External Job Detail View
+// ============================================================================
+function ExternalJobDetail({ jobId }: { jobId: string }) {
+  const router = useRouter()
+
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['external-job', jobId],
+    queryFn: async () => {
+      const response = await fetch(`/api/external-jobs/${jobId}`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('auth_token')}`,
+        },
+      })
+      if (!response.ok) throw new Error('Failed to fetch')
+      return response.json()
+    },
+    refetchInterval: (query) => {
+      const job = query.state.data as ExternalJob | undefined
+      if (job && (job.status === 'processing' || job.status === 'pending')) {
+        return 3000
+      }
+      return false
+    },
+  })
+
+  const job = data as ExternalJob | undefined
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    )
+  }
+
+  if (error || !job) {
+    return (
+      <div className="space-y-4">
+        <Button variant="ghost" onClick={() => router.push('/requests')}>
+          <ChevronLeft className="h-4 w-4 mr-2" />
+          Back to List
+        </Button>
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-8 text-center">
+          <p className="text-destructive">Failed to load external job</p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>
+            Retry
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  const statusConfig = EXTERNAL_STATUS_CONFIG[job.status] || EXTERNAL_STATUS_CONFIG.pending
+  const StatusIcon = statusConfig.icon
+  const isActive = job.status === 'processing' || job.status === 'pending'
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" onClick={() => router.push('/requests')}>
+            <ChevronLeft className="h-4 w-4 mr-2" />
+            Back
+          </Button>
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold">External Job: {job.type}</h1>
+              <Badge variant="outline" className={cn('text-sm', statusConfig.color)}>
+                <StatusIcon className={cn('h-4 w-4 mr-1', job.status === 'processing' && 'animate-spin')} />
+                {statusConfig.label}
+              </Badge>
+              {isActive && (
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-blue-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                </span>
+              )}
+            </div>
+            <p className="text-muted-foreground text-sm">ID: {job._id}</p>
+          </div>
+        </div>
+
+        <Button variant="outline" size="sm" onClick={() => refetch()}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Refresh
+        </Button>
+      </div>
+
+      {/* Stats grid */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="rounded-lg border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Created</p>
+          <p className="font-medium">{formatDate(job.createdAt)}</p>
+        </div>
+        <div className="rounded-lg border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Started</p>
+          <p className="font-medium">{formatDate(job.startedAt)}</p>
+        </div>
+        <div className="rounded-lg border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Completed</p>
+          <p className="font-medium">{formatDate(job.completedAt)}</p>
+        </div>
+        <div className="rounded-lg border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Duration</p>
+          <p className="font-medium">{formatDuration(job.startedAt, job.completedAt)}</p>
+        </div>
+      </div>
+
+      {/* Attempts info */}
+      <div className="rounded-lg border bg-card p-4">
+        <h2 className="font-semibold mb-2">Execution</h2>
+        <div className="flex items-center gap-4 text-sm">
+          <span>Attempts: {job.attempts} / {job.maxAttempts}</span>
+          <span>Type: {job.type}</span>
+        </div>
+      </div>
+
+      {/* Error info */}
+      {job.error && (
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium text-destructive">Error</p>
+              <p className="text-sm text-destructive/80 mt-1">{job.error}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Related task */}
+      {job.taskId && (
+        <div className="rounded-lg border bg-card p-4">
+          <h2 className="font-semibold mb-2">Related Task</h2>
+          <Link
+            href={`/tasks?taskId=${job.taskId}`}
+            className="text-primary hover:underline flex items-center gap-1"
+          >
+            View Task <ExternalLink className="h-3 w-3" />
+          </Link>
+        </div>
+      )}
+
+      {/* Payload and Result */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {job.payload && Object.keys(job.payload).length > 0 && (
+          <div className="rounded-lg border bg-card p-4">
+            <h2 className="font-semibold mb-2">Request Payload</h2>
+            <pre className="text-sm bg-muted rounded p-3 overflow-auto max-h-64">
+              {JSON.stringify(job.payload, null, 2)}
+            </pre>
+          </div>
+        )}
+        {job.result && Object.keys(job.result).length > 0 && (
+          <div className="rounded-lg border bg-card p-4">
+            <h2 className="font-semibold mb-2">Response Result</h2>
+            <pre className="text-sm bg-muted rounded p-3 overflow-auto max-h-64">
+              {JSON.stringify(job.result, null, 2)}
+            </pre>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// Batch Job Detail View
+// ============================================================================
+function BatchJobDetail({ requestId }: { requestId: string }) {
   const router = useRouter()
   const queryClient = useQueryClient()
   const [cancelConfirm, setCancelConfirm] = useState(false)
@@ -168,7 +352,7 @@ function RequestDetail({ requestId }: { requestId: string }) {
           Back to List
         </Button>
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-8 text-center">
-          <p className="text-destructive">Failed to load request</p>
+          <p className="text-destructive">Failed to load batch job</p>
           <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>
             Retry
           </Button>
@@ -177,7 +361,7 @@ function RequestDetail({ requestId }: { requestId: string }) {
     )
   }
 
-  const statusConfig = STATUS_CONFIG[job.status]
+  const statusConfig = BATCH_STATUS_CONFIG[job.status]
   const StatusIcon = statusConfig.icon
   const isActive = job.status === 'processing' || job.status === 'awaiting_responses' || job.status === 'pending'
   const needsReview = job.status === 'manual_review'
@@ -475,8 +659,180 @@ function RequestDetail({ requestId }: { requestId: string }) {
   )
 }
 
-// List view component
-function RequestsList() {
+// ============================================================================
+// External Jobs List
+// ============================================================================
+function ExternalJobsList() {
+  const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [page, setPage] = useState(1)
+
+  const { data: jobsData, isLoading, error, refetch } = useQuery({
+    queryKey: ['external-jobs', statusFilter, page],
+    queryFn: () => {
+      const params: Record<string, string> = {
+        page: String(page),
+        limit: '20',
+      }
+      if (statusFilter !== 'all') {
+        params.status = statusFilter
+      }
+      return externalJobsApi.list(params)
+    },
+    refetchInterval: 5000,
+  })
+
+  const jobs = jobsData?.data || []
+  const pagination = jobsData?.pagination
+
+  return (
+    <div className="space-y-4">
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Status:</span>
+          <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1) }}>
+            <SelectTrigger className="w-[150px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              {Object.entries(EXTERNAL_STATUS_CONFIG).map(([status, config]) => (
+                <SelectItem key={status} value={status}>
+                  <div className="flex items-center gap-2">
+                    <config.icon className={cn('h-4 w-4', config.color)} />
+                    {config.label}
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => refetch()}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Refresh
+        </Button>
+      </div>
+
+      {/* Content */}
+      {isLoading ? (
+        <div className="flex items-center justify-center p-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+        </div>
+      ) : error ? (
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-8 text-center">
+          <p className="text-destructive">Failed to load external jobs</p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>
+            Retry
+          </Button>
+        </div>
+      ) : jobs.length === 0 ? (
+        <div className="rounded-lg border border-dashed p-12 text-center">
+          <Globe className="mx-auto h-12 w-12 text-muted-foreground" />
+          <h3 className="mt-4 text-lg font-semibold">No external jobs</h3>
+          <p className="mt-2 text-sm text-muted-foreground">
+            External jobs from workflow tasks will appear here.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {jobs.map((job: ExternalJob) => {
+            const statusConfig = EXTERNAL_STATUS_CONFIG[job.status] || EXTERNAL_STATUS_CONFIG.pending
+            const StatusIcon = statusConfig.icon
+            const isActive = job.status === 'processing' || job.status === 'pending'
+
+            return (
+              <div
+                key={job._id}
+                className={cn(
+                  'rounded-lg border bg-card p-4 transition-colors hover:bg-muted/50',
+                  isActive && 'border-blue-300'
+                )}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className={cn('p-2 rounded-lg', statusConfig.bgColor)}>
+                      <StatusIcon className={cn('h-5 w-5', statusConfig.color, job.status === 'processing' && 'animate-spin')} />
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Link
+                          href={`/requests?type=external&id=${job._id}`}
+                          className="font-medium hover:underline"
+                        >
+                          {job.type}
+                        </Link>
+                        <Badge variant="outline" className={cn('text-xs', statusConfig.color)}>
+                          {statusConfig.label}
+                        </Badge>
+                        {isActive && (
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-blue-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1 flex-wrap">
+                        <span>ID: {job._id.slice(-8)}</span>
+                        <span>Attempts: {job.attempts}/{job.maxAttempts}</span>
+                        <span>Created: {formatDate(job.createdAt)}</span>
+                        {job.completedAt && <span>Completed: {formatDate(job.completedAt)}</span>}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {job.error && (
+                      <span className="text-sm text-destructive max-w-[200px] truncate" title={job.error}>
+                        {job.error}
+                      </span>
+                    )}
+                    <Link href={`/requests?type=external&id=${job._id}`}>
+                      <Button variant="ghost" size="sm">
+                        View Details
+                        <ChevronRight className="h-4 w-4 ml-1" />
+                      </Button>
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {pagination && pagination.totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+            disabled={page === 1}
+          >
+            Previous
+          </Button>
+          <span className="text-sm text-muted-foreground">
+            Page {page} of {pagination.totalPages}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPage(p => Math.min(pagination.totalPages, p + 1))}
+            disabled={page === pagination.totalPages}
+          >
+            Next
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ============================================================================
+// Batch Jobs List
+// ============================================================================
+function BatchJobsList() {
   const queryClient = useQueryClient()
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [workflowFilter, setWorkflowFilter] = useState<string>('all')
@@ -520,18 +876,7 @@ function RequestsList() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Requests</h1>
-          <p className="text-muted-foreground">Track batch requests and external callbacks</p>
-        </div>
-        <Button variant="outline" size="sm" onClick={() => refetch()}>
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
-      </div>
-
+    <div className="space-y-4">
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2">
@@ -542,7 +887,7 @@ function RequestsList() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Statuses</SelectItem>
-              {Object.entries(STATUS_CONFIG).map(([status, config]) => (
+              {Object.entries(BATCH_STATUS_CONFIG).map(([status, config]) => (
                 <SelectItem key={status} value={status}>
                   <div className="flex items-center gap-2">
                     <config.icon className={cn('h-4 w-4', config.color)} />
@@ -588,6 +933,11 @@ function RequestsList() {
             </SelectContent>
           </Select>
         </div>
+
+        <Button variant="outline" size="sm" onClick={() => refetch()}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Refresh
+        </Button>
       </div>
 
       {/* Content */}
@@ -597,23 +947,23 @@ function RequestsList() {
         </div>
       ) : error ? (
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-8 text-center">
-          <p className="text-destructive">Failed to load requests</p>
+          <p className="text-destructive">Failed to load batch jobs</p>
           <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>
             Retry
           </Button>
         </div>
       ) : requests.length === 0 ? (
         <div className="rounded-lg border border-dashed p-12 text-center">
-          <ArrowLeftRight className="mx-auto h-12 w-12 text-muted-foreground" />
-          <h3 className="mt-4 text-lg font-semibold">No requests yet</h3>
+          <Layers className="mx-auto h-12 w-12 text-muted-foreground" />
+          <h3 className="mt-4 text-lg font-semibold">No batch jobs</h3>
           <p className="mt-2 text-sm text-muted-foreground">
-            Batch requests will appear here when workflows create them.
+            Batch jobs will appear here when workflows create them.
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {requests.map((job: BatchJob) => {
-            const statusConfig = STATUS_CONFIG[job.status]
+            const statusConfig = BATCH_STATUS_CONFIG[job.status]
             const StatusIcon = statusConfig.icon
             const isActive = job.status === 'processing' || job.status === 'awaiting_responses' || job.status === 'pending'
             const needsReview = job.status === 'manual_review'
@@ -637,10 +987,10 @@ function RequestsList() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <Link
-                          href={`/requests?id=${job._id}`}
+                          href={`/requests?type=batch&id=${job._id}`}
                           className="font-medium hover:underline"
                         >
-                          {job.name || job.type || `Request ${job._id.slice(-8)}`}
+                          {job.name || job.type || `Batch ${job._id.slice(-8)}`}
                         </Link>
                         <Badge variant="outline" className={cn('text-xs', statusConfig.color)}>
                           {statusConfig.label}
@@ -675,7 +1025,7 @@ function RequestsList() {
                       </Button>
                     )}
 
-                    <Link href={`/requests?id=${job._id}`}>
+                    <Link href={`/requests?type=batch&id=${job._id}`}>
                       <Button variant="ghost" size="sm">
                         View Details
                         <ChevronRight className="h-4 w-4 ml-1" />
@@ -754,13 +1104,58 @@ function RequestsList() {
   )
 }
 
-// Main component that switches between views based on URL params
+// ============================================================================
+// Main List View with Tabs
+// ============================================================================
+function RequestsList() {
+  const searchParams = useSearchParams()
+  const defaultTab = searchParams.get('tab') || 'external'
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold">Requests</h1>
+        <p className="text-muted-foreground">Track external jobs and batch requests</p>
+      </div>
+
+      <Tabs defaultValue={defaultTab} className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="external" className="gap-2">
+            <Send className="h-4 w-4" />
+            External Jobs
+          </TabsTrigger>
+          <TabsTrigger value="batch" className="gap-2">
+            <Layers className="h-4 w-4" />
+            Batch Jobs
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="external">
+          <ExternalJobsList />
+        </TabsContent>
+
+        <TabsContent value="batch">
+          <BatchJobsList />
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}
+
+// ============================================================================
+// Main Component - Route based on query params
+// ============================================================================
 function RequestsContent() {
   const searchParams = useSearchParams()
   const requestId = searchParams.get('id')
+  const requestType = searchParams.get('type')
 
   if (requestId) {
-    return <RequestDetail requestId={requestId} />
+    if (requestType === 'external') {
+      return <ExternalJobDetail jobId={requestId} />
+    }
+    // Default to batch job detail (backward compatible)
+    return <BatchJobDetail requestId={requestId} />
   }
 
   return <RequestsList />
