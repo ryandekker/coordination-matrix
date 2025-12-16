@@ -102,6 +102,34 @@ function getValueByPathStatic(obj: Record<string, unknown> | undefined, path: st
 }
 
 /**
+ * Recursively strips undefined values from an object.
+ * MongoDB validation can fail if undefined values are present in documents.
+ */
+function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) {
+    return obj.map(item =>
+      typeof item === 'object' && item !== null
+        ? stripUndefined(item as Record<string, unknown>)
+        : item
+    ) as unknown as T;
+  }
+
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      if (typeof value === 'object' && value !== null && !(value instanceof Date) && !(value instanceof ObjectId)) {
+        result[key] = stripUndefined(value as Record<string, unknown>);
+      } else {
+        result[key] = value;
+      }
+    }
+  }
+  return result as T;
+}
+
+/**
  * WorkflowExecutionService orchestrates workflow execution.
  *
  * It listens for task events and advances workflows through their steps,
@@ -312,7 +340,6 @@ class WorkflowExecutionService {
 
     const task: Omit<Task, '_id'> = {
       title: `Workflow: ${workflow.name}`,
-      summary: workflow.description,
       status: 'in_progress',
       parentId: null,
       workflowId: workflow._id,
@@ -332,8 +359,15 @@ class WorkflowExecutionService {
       ...this.applyTaskDefaults(run, now),
     };
 
-    const result = await this.tasks.insertOne(task as Task);
-    const createdTask = { ...task, _id: result.insertedId } as Task;
+    // Only add optional string fields if they have values
+    if (workflow.description) {
+      task.summary = workflow.description;
+    }
+
+    // Strip undefined values before insertion to prevent MongoDB validation errors
+    const cleanTask = stripUndefined(task as unknown as Record<string, unknown>) as unknown as Task;
+    const result = await this.tasks.insertOne(cleanTask);
+    const createdTask = { ...cleanTask, _id: result.insertedId } as Task;
 
     // Publish task.created event for activity log tracking
     await publishTaskEvent('task.created', createdTask, { actorType: 'system' });
@@ -477,13 +511,11 @@ class WorkflowExecutionService {
     // Build task object, only including optional string fields if they have values
     // This prevents MongoDB validation errors for undefined string fields
     const task: Omit<Task, '_id'> = {
-      title: step.name,
+      title: step.name || `Step ${step.id || 'Unknown'}`,
       status: initialStatus,
       parentId: parentTask._id,
       workflowId: workflow._id,
       workflowRunId: run._id,
-      workflowStepId: step.id,
-      workflowStage: step.name,
       taskType,
       executionMode,
       // Apply run defaults first, then step-specific assignee overrides
@@ -501,6 +533,13 @@ class WorkflowExecutionService {
     };
 
     // Only add optional string fields if they have values
+    // MongoDB schema validation fails if these are explicitly set to undefined
+    if (step.id) {
+      task.workflowStepId = step.id;
+    }
+    if (step.name) {
+      task.workflowStage = step.name;
+    }
     if (step.description) {
       task.summary = step.description;
     }
@@ -547,8 +586,10 @@ class WorkflowExecutionService {
       }
     }
 
-    const result = await this.tasks.insertOne(task as Task);
-    const createdTask = { ...task, _id: result.insertedId } as Task;
+    // Strip undefined values before insertion to prevent MongoDB validation errors
+    const cleanTask = stripUndefined(task as unknown as Record<string, unknown>) as unknown as Task;
+    const result = await this.tasks.insertOne(cleanTask);
+    const createdTask = { ...cleanTask, _id: result.insertedId } as Task;
 
     // Publish task.created event for activity log tracking
     await publishTaskEvent('task.created', createdTask, { actorType: 'system' });
