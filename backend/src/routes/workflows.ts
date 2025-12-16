@@ -210,15 +210,29 @@ workflowsRouter.get('/:id', async (req: Request, res: Response, next: NextFuncti
 });
 
 // Helper to ensure all steps have IDs
+// Valid step types for normalization
+const VALID_STEP_TYPES: WorkflowStepType[] = ['trigger', 'agent', 'manual', 'external', 'webhook', 'decision', 'foreach', 'join', 'subflow'];
+
 function ensureStepIds(steps: WorkflowStep[]): WorkflowStep[] {
   if (!steps || !Array.isArray(steps)) return [];
 
   return steps.map((step) => {
-    if (!step.id) {
-      // Generate a unique ID if missing
-      return { ...step, id: new ObjectId().toString() };
+    const normalized = { ...step };
+
+    // Generate a unique ID if missing
+    if (!normalized.id) {
+      normalized.id = new ObjectId().toString();
     }
-    return step;
+
+    // Normalize 'type' to 'stepType' for backward compatibility
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const stepAny = step as any;
+    if (!normalized.stepType && stepAny.type && VALID_STEP_TYPES.includes(stepAny.type)) {
+      normalized.stepType = stepAny.type;
+      delete stepAny.type;
+    }
+
+    return normalized;
   });
 }
 

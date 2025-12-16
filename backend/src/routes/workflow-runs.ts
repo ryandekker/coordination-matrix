@@ -151,63 +151,19 @@ router.post('/:id/cancel', async (req: Request, res: Response): Promise<void> =>
 });
 
 // ============================================================================
-// Foreach Item Callback (Streaming)
-// POST /api/workflow-runs/:id/foreach/:stepId/item
-// Accepts individual items to add as children to a waiting foreach task
-// ============================================================================
-router.post('/:id/foreach/:stepId/item', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { id, stepId } = req.params;
-
-    if (!ObjectId.isValid(id)) {
-      res.status(400).json({ error: 'Invalid workflow run ID' });
-      return;
-    }
-
-    const secret = req.headers['x-workflow-secret'] as string;
-    if (!secret) {
-      res.status(401).json({ error: 'Missing X-Workflow-Secret header' });
-      return;
-    }
-
-    const { item, expectedCount, complete } = req.body;
-
-    // Validate payload
-    if (item === undefined && expectedCount === undefined && !complete) {
-      res.status(400).json({
-        error: 'Request body must include at least one of: item, expectedCount, or complete'
-      });
-      return;
-    }
-
-    const result = await workflowExecutionService.handleForeachItemCallback(
-      id,
-      stepId,
-      { item, expectedCount, complete },
-      secret
-    );
-
-    res.json(result);
-  } catch (error: unknown) {
-    console.error('[WorkflowRuns] Foreach item callback error:', error);
-    const message = error instanceof Error ? error.message : 'Failed to process foreach item';
-
-    if (message.includes('Invalid callback secret') || message.includes('secret')) {
-      res.status(401).json({ error: message });
-      return;
-    }
-    if (message.includes('not found')) {
-      res.status(404).json({ error: message });
-      return;
-    }
-
-    res.status(500).json({ error: message });
-  }
-});
-
-// ============================================================================
-// External Callback
+// Unified Callback Endpoint
 // POST /api/workflow-runs/:id/callback/:stepId
+//
+// Handles all callback types: single result, streaming items, batch items
+//
+// Payload detection (in order of precedence):
+// 1. If payload has `item` key → use that as the item
+// 2. If payload has `items` array → process each as an item
+// 3. Otherwise → the entire payload (minus workflowUpdate) IS the item
+//
+// Workflow controls (namespaced to avoid conflicts with external payloads):
+// - workflowUpdate.complete: boolean - Signal that no more items will be sent
+// - workflowUpdate.total: number - Set/update expected item count
 // ============================================================================
 router.post('/:id/callback/:stepId', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -225,18 +181,76 @@ router.post('/:id/callback/:stepId', async (req: Request, res: Response): Promis
     }
 
     const payload = req.body;
-    const task = await workflowExecutionService.handleExternalCallback(id, stepId, payload, secret);
+    const result = await workflowExecutionService.handleCallback(id, stepId, payload, secret);
 
-    res.json({
-      acknowledged: true,
-      taskId: task._id,
-      taskStatus: task.status,
-    });
+    res.json(result);
   } catch (error: unknown) {
     console.error('[WorkflowRuns] Callback error:', error);
     const message = error instanceof Error ? error.message : 'Failed to process callback';
 
-    if (message.includes('Invalid callback secret')) {
+    if (message.includes('Invalid callback secret') || message.includes('secret')) {
+      res.status(401).json({ error: message });
+      return;
+    }
+    if (message.includes('not found')) {
+      res.status(404).json({ error: message });
+      return;
+    }
+
+    res.status(500).json({ error: message });
+  }
+});
+
+// ============================================================================
+// Legacy Foreach Item Callback (DEPRECATED - use /callback/:stepId instead)
+// POST /api/workflow-runs/:id/foreach/:stepId/item
+// Kept for backward compatibility - internally redirects to unified handler
+// ============================================================================
+router.post('/:id/foreach/:stepId/item', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id, stepId } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      res.status(400).json({ error: 'Invalid workflow run ID' });
+      return;
+    }
+
+    const secret = req.headers['x-workflow-secret'] as string;
+    if (!secret) {
+      res.status(401).json({ error: 'Missing X-Workflow-Secret header' });
+      return;
+    }
+
+    // Convert legacy format to unified format
+    const { item, expectedCount, complete } = req.body;
+    const unifiedPayload: Record<string, unknown> = {};
+
+    if (item !== undefined) {
+      unifiedPayload.item = item;
+    }
+    if (expectedCount !== undefined || complete !== undefined) {
+      unifiedPayload.workflowUpdate = {
+        total: expectedCount,
+        complete: complete,
+      };
+    }
+
+    const result = await workflowExecutionService.handleCallback(id, stepId, unifiedPayload, secret);
+
+    // Return legacy response format for backward compatibility
+    res.json({
+      acknowledged: result.acknowledged,
+      foreachTaskId: result.taskId,
+      childTaskId: result.childTaskIds[0],
+      receivedCount: result.receivedCount,
+      expectedCount: result.expectedCount,
+      isComplete: result.isComplete,
+    });
+  } catch (error: unknown) {
+    console.error('[WorkflowRuns] Foreach item callback error:', error);
+    const message = error instanceof Error ? error.message : 'Failed to process foreach item';
+
+    if (message.includes('Invalid callback secret') || message.includes('secret')) {
       res.status(401).json({ error: message });
       return;
     }

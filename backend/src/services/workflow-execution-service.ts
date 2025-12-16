@@ -25,8 +25,9 @@ type WorkflowRunEventHandler = (event: WorkflowRunEvent) => void | Promise<void>
 /**
  * Resolves template variables in a string.
  * Supported variables:
- *   {{systemWebhookUrl}} - Base webhook URL for callbacks (points to current step)
- *   {{foreachWebhookUrl}} - Webhook URL for streaming items to the next foreach step
+ *   {{callbackUrl}} - Unified callback URL for all callback types (single result, streaming items)
+ *   {{systemWebhookUrl}} - Alias for callbackUrl (backward compatibility)
+ *   {{foreachWebhookUrl}} - Alias for callbackUrl (backward compatibility, deprecated)
  *   {{callbackSecret}} - Task-specific callback secret
  *   {{workflowRunId}} - Current workflow run ID
  *   {{stepId}} - Current step ID
@@ -46,18 +47,23 @@ function resolveTemplateVariables(
 ): string {
   let result = template;
 
-  // Replace system variables
-  // {{systemWebhookUrl}} generates the full callback URL with workflowRunId and stepId embedded
+  // Unified callback URL - same endpoint handles all callback types
   const callbackUrl = `${BASE_URL}/api/workflow-runs/${context.workflowRunId}/callback/${context.stepId}`;
+
+  // {{callbackUrl}} - the primary/preferred variable
+  result = result.replace(/\{\{callbackUrl\}\}/g, callbackUrl);
+
+  // {{systemWebhookUrl}} - backward compatibility alias
   result = result.replace(/\{\{systemWebhookUrl\}\}/g, callbackUrl);
 
-  // {{foreachWebhookUrl}} generates the callback URL for streaming items to the next foreach step
+  // {{foreachWebhookUrl}} - backward compatibility (points to same unified endpoint)
+  // If there's a next foreach step, use that step's callback URL
   if (context.nextForeachStepId) {
-    const foreachCallbackUrl = `${BASE_URL}/api/workflow-runs/${context.workflowRunId}/foreach/${context.nextForeachStepId}/item`;
-    result = result.replace(/\{\{foreachWebhookUrl\}\}/g, foreachCallbackUrl);
+    const nextStepCallbackUrl = `${BASE_URL}/api/workflow-runs/${context.workflowRunId}/callback/${context.nextForeachStepId}`;
+    result = result.replace(/\{\{foreachWebhookUrl\}\}/g, nextStepCallbackUrl);
   } else {
-    // Remove the placeholder if no foreach step follows
-    result = result.replace(/\{\{foreachWebhookUrl\}\}/g, '');
+    // Fall back to current step's callback URL
+    result = result.replace(/\{\{foreachWebhookUrl\}\}/g, callbackUrl);
   }
   result = result.replace(/\{\{workflowRunId\}\}/g, context.workflowRunId.toString());
   result = result.replace(/\{\{stepId\}\}/g, context.stepId);
@@ -1859,65 +1865,32 @@ class WorkflowExecutionService {
   }
 
   // ============================================================================
-  // External Callback Handler
+  // Unified Callback Handler
+  // Handles all callback types: single result, streaming items, batch items
   // ============================================================================
 
-  async handleExternalCallback(
+  /**
+   * Unified callback handler for workflow step callbacks.
+   *
+   * Payload detection (in order of precedence):
+   * 1. If payload has `item` key → use that as the item
+   * 2. If payload has `items` array → process each as an item
+   * 3. Otherwise → the entire payload (minus workflowUpdate) IS the item
+   *
+   * Workflow controls (namespaced to avoid conflicts with external payloads):
+   * - workflowUpdate.complete: boolean - Signal that no more items will be sent
+   * - workflowUpdate.total: number - Set/update expected item count
+   */
+  async handleCallback(
     runId: string,
     stepId: string,
     payload: Record<string, unknown>,
     secret: string
-  ): Promise<Task> {
-    const run = await this.workflowRuns.findOne({ _id: new ObjectId(runId) });
-    if (!run) {
-      throw new Error(`Workflow run ${runId} not found`);
-    }
-
-    // Find the task for this step (external tasks are in_progress while awaiting callback)
-    const task = await this.tasks.findOne({
-      workflowRunId: run._id,
-      workflowStepId: stepId,
-      status: 'in_progress',
-    });
-
-    if (!task) {
-      throw new Error(`Task for step ${stepId} not found or not in_progress`);
-    }
-
-    // Verify secret
-    if (task.externalConfig?.callbackSecret !== secret) {
-      throw new Error('Invalid callback secret');
-    }
-
-    // Update task with result and complete it
-    await this.tasks.updateOne(
-      { _id: task._id },
-      {
-        $set: {
-          status: 'completed' as TaskStatus,
-          metadata: { ...task.metadata, callbackPayload: payload },
-          updatedAt: new Date(),
-        },
-      }
-    );
-
-    const updatedTask = await this.tasks.findOne({ _id: task._id });
-    return updatedTask!;
-  }
-
-  // ============================================================================
-  // Foreach Item Callback Handler (Streaming)
-  // ============================================================================
-
-  async handleForeachItemCallback(
-    runId: string,
-    stepId: string,
-    payload: { item?: unknown; expectedCount?: number; complete?: boolean },
-    secret: string
   ): Promise<{
     acknowledged: boolean;
-    foreachTaskId: string;
-    childTaskId?: string;
+    taskId: string;
+    taskType: TaskType;
+    childTaskIds: string[];
     receivedCount: number;
     expectedCount: number;
     isComplete: boolean;
@@ -1927,20 +1900,24 @@ class WorkflowExecutionService {
       throw new Error(`Workflow run ${runId} not found`);
     }
 
-    // Find the foreach task for this step (should be in waiting or in_progress status)
-    const foreachTask = await this.tasks.findOne({
+    // Find the task for this step (could be any type: external, foreach, etc.)
+    // Look for tasks that are waiting for callbacks
+    const task = await this.tasks.findOne({
       workflowRunId: run._id,
       workflowStepId: stepId,
-      taskType: 'foreach',
       status: { $in: ['waiting', 'in_progress'] },
     });
 
-    if (!foreachTask) {
-      throw new Error(`Foreach task for step ${stepId} not found or already completed`);
+    if (!task) {
+      throw new Error(`Task for step ${stepId} not found or already completed`);
     }
 
-    // Verify secret using the workflow run's callback secret
-    if (run.callbackSecret !== secret) {
+    // Verify secret - check both task-specific and workflow run secrets
+    const validSecret =
+      task.externalConfig?.callbackSecret === secret ||
+      run.callbackSecret === secret;
+
+    if (!validSecret) {
       throw new Error('Invalid callback secret');
     }
 
@@ -1954,15 +1931,38 @@ class WorkflowExecutionService {
       throw new Error(`Step ${stepId} not found in workflow`);
     }
 
-    let childTaskId: string | undefined;
-    let currentReceivedCount = foreachTask.batchCounters?.receivedCount || 0;
-    let currentExpectedCount = foreachTask.batchCounters?.expectedCount || 0;
+    // Extract workflowUpdate controls (namespaced to avoid conflicts)
+    const workflowUpdate = payload.workflowUpdate as { complete?: boolean; total?: number } | undefined;
+    const signalComplete = workflowUpdate?.complete === true;
+    const newTotal = workflowUpdate?.total;
 
-    // Handle expectedCount update
-    if (payload.expectedCount !== undefined && payload.expectedCount >= 0) {
-      currentExpectedCount = payload.expectedCount;
+    // Create a copy of payload without workflowUpdate for item data
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { workflowUpdate: _, ...payloadData } = payload;
+
+    // Determine items from payload
+    let items: unknown[] = [];
+    if ('item' in payloadData && payloadData.item !== undefined) {
+      // Explicit single item
+      items = [payloadData.item];
+    } else if ('items' in payloadData && Array.isArray(payloadData.items)) {
+      // Explicit array of items
+      items = payloadData.items;
+    } else if (Object.keys(payloadData).length > 0) {
+      // Entire payload is the item (default case for external services)
+      items = [payloadData];
+    }
+
+    // Track counters
+    let currentReceivedCount = task.batchCounters?.receivedCount || 0;
+    let currentExpectedCount = task.batchCounters?.expectedCount || 0;
+    const childTaskIds: string[] = [];
+
+    // Handle total update from workflowUpdate
+    if (newTotal !== undefined && newTotal >= 0) {
+      currentExpectedCount = newTotal;
       await this.tasks.updateOne(
-        { _id: foreachTask._id },
+        { _id: task._id },
         {
           $set: {
             'batchCounters.expectedCount': currentExpectedCount,
@@ -1972,17 +1972,17 @@ class WorkflowExecutionService {
           },
         }
       );
-      console.log(`[WorkflowExecutionService] Foreach ${foreachTask._id} expectedCount set to ${currentExpectedCount}`);
+      console.log(`[WorkflowExecutionService] Task ${task._id} expectedCount set to ${currentExpectedCount}`);
     }
 
-    // Handle item addition
-    if (payload.item !== undefined) {
-      // Find the next step(s) inside the foreach
+    // Process items based on task type
+    if (task.taskType === 'foreach' && items.length > 0) {
+      // Foreach task: create child tasks for each item
+      // Find the next step for child tasks
       let nextStepId = step.connections?.[0]?.targetStepId;
 
       // Fallback: parse from mermaid diagram if connections not populated
       if (!nextStepId && workflow.mermaidDiagram) {
-        // Look for patterns like: step-id -->|"label"| target-step-id or step-id -->target-step-id
         const mermaidRegex = new RegExp(`${step.id}\\s*-->(?:\\|[^|]*\\|)?\\s*(step-\\d+)`, 'g');
         const match = mermaidRegex.exec(workflow.mermaidDiagram);
         if (match) {
@@ -1997,21 +1997,27 @@ class WorkflowExecutionService {
         throw new Error(`Foreach step ${stepId} has no connected child step`);
       }
 
-      // Build item payload
-      const itemPayload = {
-        [step.itemVariable || 'item']: payload.item,
-        _index: currentReceivedCount,
-        _total: currentExpectedCount,
-      };
+      // Create child task for each item
+      for (const item of items) {
+        const itemPayload = {
+          [step.itemVariable || 'item']: item,
+          _index: currentReceivedCount,
+          _total: currentExpectedCount,
+        };
 
-      // Create child task for this item
-      const childTask = await this.createTaskForStep(run, workflow, nextStep, foreachTask, itemPayload);
-      childTaskId = childTask._id.toString();
+        const childTask = await this.createTaskForStep(run, workflow, nextStep, task, itemPayload);
+        childTaskIds.push(childTask._id.toString());
+        currentReceivedCount++;
 
-      // Increment received count
-      currentReceivedCount++;
+        console.log(`[WorkflowExecutionService] Foreach ${task._id} received item ${currentReceivedCount}/${currentExpectedCount}`);
+
+        // Execute the child task based on its step type
+        await this.executeStepForTask(run, workflow, nextStep, childTask, itemPayload);
+      }
+
+      // Update received count
       await this.tasks.updateOne(
-        { _id: foreachTask._id },
+        { _id: task._id },
         {
           $set: {
             'batchCounters.receivedCount': currentReceivedCount,
@@ -2020,21 +2026,29 @@ class WorkflowExecutionService {
           },
         }
       );
-
-      console.log(`[WorkflowExecutionService] Foreach ${foreachTask._id} received item ${currentReceivedCount}/${currentExpectedCount}`);
-
-      // Execute the child task based on its step type
-      await this.executeStepForTask(run, workflow, nextStep, childTask, itemPayload);
+    } else if (items.length > 0) {
+      // Non-foreach task (external, etc.): store payload and complete
+      // For single-result callbacks, the payload becomes the task's metadata/output
+      await this.tasks.updateOne(
+        { _id: task._id },
+        {
+          $set: {
+            status: 'completed' as TaskStatus,
+            metadata: { ...task.metadata, callbackPayload: items.length === 1 ? items[0] : items },
+            updatedAt: new Date(),
+          },
+        }
+      );
+      console.log(`[WorkflowExecutionService] External task ${task._id} completed with callback data`);
     }
 
-    // Check if we should mark as complete
-    const isComplete = payload.complete === true ||
+    // Check if we should mark as complete (for foreach tasks)
+    const isComplete = signalComplete ||
       (currentExpectedCount > 0 && currentReceivedCount >= currentExpectedCount);
 
-    if (isComplete && foreachTask.status !== 'completed') {
-      // Mark foreach task as in_progress (it will complete when all children complete)
+    if (isComplete && task.taskType === 'foreach' && task.status !== 'completed') {
       await this.tasks.updateOne(
-        { _id: foreachTask._id },
+        { _id: task._id },
         {
           $set: {
             status: 'in_progress' as TaskStatus,
@@ -2043,16 +2057,66 @@ class WorkflowExecutionService {
           },
         }
       );
-      console.log(`[WorkflowExecutionService] Foreach ${foreachTask._id} all items received, waiting for children to complete`);
+      console.log(`[WorkflowExecutionService] Foreach ${task._id} all items received, waiting for children to complete`);
     }
 
     return {
       acknowledged: true,
-      foreachTaskId: foreachTask._id.toString(),
-      childTaskId,
+      taskId: task._id.toString(),
+      taskType: task.taskType,
+      childTaskIds,
       receivedCount: currentReceivedCount,
       expectedCount: currentExpectedCount,
       isComplete,
+    };
+  }
+
+  // Legacy method for backward compatibility
+  async handleExternalCallback(
+    runId: string,
+    stepId: string,
+    payload: Record<string, unknown>,
+    secret: string
+  ): Promise<Task> {
+    const result = await this.handleCallback(runId, stepId, payload, secret);
+    const task = await this.tasks.findOne({ _id: new ObjectId(result.taskId) });
+    return task!;
+  }
+
+  // Legacy method for backward compatibility
+  async handleForeachItemCallback(
+    runId: string,
+    stepId: string,
+    payload: { item?: unknown; expectedCount?: number; complete?: boolean },
+    secret: string
+  ): Promise<{
+    acknowledged: boolean;
+    foreachTaskId: string;
+    childTaskId?: string;
+    receivedCount: number;
+    expectedCount: number;
+    isComplete: boolean;
+  }> {
+    // Convert legacy payload format to unified format
+    const unifiedPayload: Record<string, unknown> = {};
+    if (payload.item !== undefined) {
+      unifiedPayload.item = payload.item;
+    }
+    if (payload.expectedCount !== undefined || payload.complete !== undefined) {
+      unifiedPayload.workflowUpdate = {
+        total: payload.expectedCount,
+        complete: payload.complete,
+      };
+    }
+
+    const result = await this.handleCallback(runId, stepId, unifiedPayload, secret);
+    return {
+      acknowledged: result.acknowledged,
+      foreachTaskId: result.taskId,
+      childTaskId: result.childTaskIds[0],
+      receivedCount: result.receivedCount,
+      expectedCount: result.expectedCount,
+      isComplete: result.isComplete,
     };
   }
 
