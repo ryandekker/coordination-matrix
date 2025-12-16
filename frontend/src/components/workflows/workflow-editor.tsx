@@ -1112,6 +1112,68 @@ export function WorkflowEditor({
 The agent will receive task context automatically.`}
                                       className="min-h-[100px] font-mono text-sm"
                                     />
+
+                                    {/* Token Browser for instructions */}
+                                    <div className="flex flex-wrap gap-1 mt-2">
+                                      <span className="text-xs text-muted-foreground mr-1">Insert token:</span>
+                                      {/* Show loop variable if inside a loop */}
+                                      {isInLoop && loopScope && (
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-6 text-xs font-mono px-2 border-green-300 text-green-700 hover:bg-green-50"
+                                          onClick={() => {
+                                            const token = `{{${loopScope.foreachStep.itemVariable || 'item'}}}`
+                                            const current = step.additionalInstructions || ''
+                                            updateStep(index, { additionalInstructions: current + token })
+                                          }}
+                                        >
+                                          {`{{${loopScope.foreachStep.itemVariable || 'item'}}}`}
+                                        </Button>
+                                      )}
+                                      {/* Show previous step output */}
+                                      {prevStep && (
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-6 text-xs font-mono px-2"
+                                          onClick={() => {
+                                            const token = '{{input.output}}'
+                                            const current = step.additionalInstructions || ''
+                                            updateStep(index, { additionalInstructions: current + token })
+                                          }}
+                                        >
+                                          {'{{input.output}}'}
+                                        </Button>
+                                      )}
+                                      {/* Common tokens */}
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-6 text-xs font-mono px-2"
+                                        onClick={() => {
+                                          const current = step.additionalInstructions || ''
+                                          updateStep(index, { additionalInstructions: current + '{{taskId}}' })
+                                        }}
+                                      >
+                                        {'{{taskId}}'}
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-6 text-xs font-mono px-2"
+                                        onClick={() => {
+                                          const current = step.additionalInstructions || ''
+                                          updateStep(index, { additionalInstructions: current + '{{workflowRunId}}' })
+                                        }}
+                                      >
+                                        {'{{workflowRunId}}'}
+                                      </Button>
+                                    </div>
                                   </div>
 
                                   <div className="space-y-1">
@@ -1280,12 +1342,55 @@ The agent will receive task context automatically.`}
                                       <div className="text-green-800 dark:text-green-200">
                                         <p className="font-medium">Loop Configuration</p>
                                         <p className="text-xs mt-1">
-                                          This step iterates over a collection from the previous step&apos;s output
-                                          and creates a subtask for each item. Routing is determined programmatically.
+                                          Iterates over a collection and creates a task for each item.
+                                          <strong> You need a step AFTER this</strong> that processes each item.
                                         </p>
                                       </div>
                                     </div>
                                   </div>
+
+                                  {/* Warning if no step between ForEach and Join */}
+                                  {(() => {
+                                    const nextStepIdx = index + 1
+                                    const nextStep = steps[nextStepIdx]
+                                    if (nextStep?.stepType === 'join') {
+                                      return (
+                                        <div className="bg-red-50 dark:bg-red-950/30 border border-red-300 dark:border-red-800 rounded-lg p-3 text-sm">
+                                          <div className="flex items-start gap-2">
+                                            <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
+                                            <div className="text-red-800 dark:text-red-200">
+                                              <p className="font-medium">Missing Loop Body Step!</p>
+                                              <p className="text-xs mt-1">
+                                                You need a step between ForEach and Join that processes each item.
+                                                Add an Agent or Manual step after this ForEach to handle each {step.itemVariable || 'item'}.
+                                              </p>
+                                              <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                className="mt-2 h-7 text-xs border-red-300 text-red-700 hover:bg-red-100"
+                                                onClick={() => {
+                                                  const newStep: WorkflowStep = {
+                                                    id: `step-${Date.now()}`,
+                                                    name: `Process ${step.itemVariable || 'Item'}`,
+                                                    stepType: 'agent',
+                                                    additionalInstructions: `Process the {{${step.itemVariable || 'item'}}} provided in the input.`,
+                                                  }
+                                                  const newSteps = [...steps]
+                                                  newSteps.splice(index + 1, 0, newStep)
+                                                  setSteps(newSteps)
+                                                }}
+                                              >
+                                                <Plus className="h-3 w-3 mr-1" />
+                                                Add Processing Step
+                                              </Button>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      )
+                                    }
+                                    return null
+                                  })()}
 
                                   <div className="grid grid-cols-2 gap-3">
                                     <div className="space-y-1">
@@ -1293,14 +1398,48 @@ The agent will receive task context automatically.`}
                                         Items Path
                                         <span className="text-xs text-muted-foreground">(JSONPath)</span>
                                       </label>
-                                      <Input
-                                        value={step.itemsPath || ''}
-                                        onChange={(e) => updateStep(index, { itemsPath: e.target.value })}
-                                        placeholder="e.g., output.files or results.items"
-                                        className="font-mono text-sm"
-                                      />
+                                      <div className="flex gap-1">
+                                        <Input
+                                          value={step.itemsPath || ''}
+                                          onChange={(e) => updateStep(index, { itemsPath: e.target.value })}
+                                          placeholder="e.g., output.emails"
+                                          className="font-mono text-sm"
+                                        />
+                                        {/* Token picker for items path */}
+                                        {prevStep && (
+                                          <Select
+                                            value=""
+                                            onValueChange={(val) => updateStep(index, { itemsPath: val })}
+                                          >
+                                            <SelectTrigger className="h-9 w-9 p-0 flex-shrink-0">
+                                              <Database className="h-3 w-3" />
+                                            </SelectTrigger>
+                                            <SelectContent align="end">
+                                              <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                                                From: {prevStep.name}
+                                              </div>
+                                              {prevStep.stepType === 'external' && (
+                                                <>
+                                                  <SelectItem value="output.data">output.data</SelectItem>
+                                                  <SelectItem value="output.items">output.items</SelectItem>
+                                                  <SelectItem value="output.results">output.results</SelectItem>
+                                                  <SelectItem value="output.emails">output.emails</SelectItem>
+                                                  <SelectItem value="output.records">output.records</SelectItem>
+                                                </>
+                                              )}
+                                              {prevStep.stepType === 'agent' && (
+                                                <>
+                                                  <SelectItem value="output.items">output.items</SelectItem>
+                                                  <SelectItem value="output.results">output.results</SelectItem>
+                                                  <SelectItem value="output.list">output.list</SelectItem>
+                                                </>
+                                              )}
+                                            </SelectContent>
+                                          </Select>
+                                        )}
+                                      </div>
                                       <p className="text-xs text-muted-foreground">
-                                        Path to the array in the previous step&apos;s output
+                                        Path to array in previous step&apos;s output
                                       </p>
                                     </div>
                                     <div className="space-y-1">
@@ -1310,11 +1449,11 @@ The agent will receive task context automatically.`}
                                       <Input
                                         value={step.itemVariable || ''}
                                         onChange={(e) => updateStep(index, { itemVariable: e.target.value })}
-                                        placeholder="e.g., file, item, record"
+                                        placeholder="e.g., email, item, record"
                                         className="font-mono text-sm"
                                       />
                                       <p className="text-xs text-muted-foreground">
-                                        Variable name available to downstream steps
+                                        Use <code className="bg-muted px-1 rounded">{`{{${step.itemVariable || 'item'}}}`}</code> in next steps
                                       </p>
                                     </div>
                                   </div>
