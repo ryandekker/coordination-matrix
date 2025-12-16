@@ -1117,6 +1117,7 @@ The agent will receive task context automatically.`}
                                     {/* Token Browser for instructions */}
                                     <div className="flex items-center gap-2 mt-2">
                                       <TokenBrowser
+                                        workflowId={workflow?._id}
                                         previousSteps={steps.slice(0, index).map(s => ({
                                           id: s.id,
                                           name: s.name,
@@ -1148,6 +1149,7 @@ The agent will receive task context automatically.`}
                                         className="font-mono text-sm"
                                       />
                                       <TokenBrowser
+                                        workflowId={workflow?._id}
                                         previousSteps={steps.slice(0, index).map(s => ({
                                           id: s.id,
                                           name: s.name,
@@ -1260,6 +1262,7 @@ The agent will receive task context automatically.`}
                                     />
                                     <div className="flex items-center gap-2 mt-1">
                                       <TokenBrowser
+                                        workflowId={workflow?._id}
                                         previousSteps={steps.slice(0, index).map(s => ({
                                           id: s.id,
                                           name: s.name,
@@ -1401,6 +1404,7 @@ The agent will receive task context automatically.`}
                                           className="font-mono text-sm"
                                         />
                                         <TokenBrowser
+                                          workflowId={workflow?._id}
                                           previousSteps={steps.slice(0, index).map(s => ({
                                             id: s.id,
                                             name: s.name,
@@ -1459,6 +1463,7 @@ The agent will receive task context automatically.`}
                                           className="font-mono text-sm"
                                         />
                                         <TokenBrowser
+                                          workflowId={workflow?._id}
                                           previousSteps={steps.slice(0, index).map(s => ({
                                             id: s.id,
                                             name: s.name,
@@ -1557,6 +1562,7 @@ The agent will receive task context automatically.`}
                                           className="font-mono text-sm"
                                         />
                                         <TokenBrowser
+                                          workflowId={workflow?._id}
                                           previousSteps={steps.slice(0, index).map(s => ({
                                             id: s.id,
                                             name: s.name,
@@ -1587,6 +1593,7 @@ The agent will receive task context automatically.`}
                                         className="font-mono text-sm"
                                       />
                                       <TokenBrowser
+                                        workflowId={workflow?._id}
                                         previousSteps={steps.slice(0, index).map(s => ({
                                           id: s.id,
                                           name: s.name,
@@ -1824,6 +1831,7 @@ The agent will receive task context automatically.`}
                                           className="h-8 text-sm font-mono"
                                         />
                                         <TokenBrowser
+                                          workflowId={workflow?._id}
                                           previousSteps={steps.slice(0, index).map(s => ({
                                             id: s.id,
                                             name: s.name,
