@@ -384,12 +384,30 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
   const nodes: Map<string, ParsedNode> = new Map();
   const connections: Array<{ from: string; to: string; label?: string }> = [];
 
+  // Step metadata from comments: %% @step(nodeId): {json}
+  const stepMetadata: Map<string, Record<string, unknown>> = new Map();
+
   for (const line of lines) {
-    // Skip diagram type declarations, styling, and comments
+    // Skip diagram type declarations and styling
     if (line.startsWith('graph') || line.startsWith('flowchart')) continue;
     if (line.startsWith('classDef') || line.startsWith('class ')) continue;
-    if (line.startsWith('%%')) continue;
     if (line.startsWith('subgraph') || line === 'end') continue;
+
+    // Parse step metadata comments: %% @step(nodeId): {json}
+    const stepMetaMatch = line.match(/^%%\s*@step\((\w+)\):\s*(.+)$/);
+    if (stepMetaMatch) {
+      const [, nodeId, jsonStr] = stepMetaMatch;
+      try {
+        const metadata = JSON.parse(jsonStr);
+        stepMetadata.set(nodeId, metadata);
+      } catch {
+        console.warn(`Failed to parse step metadata for ${nodeId}: ${jsonStr}`);
+      }
+      continue;
+    }
+
+    // Skip other comments
+    if (line.startsWith('%%')) continue;
 
     // Parse node definitions - order matters! More specific patterns first
 
@@ -563,6 +581,14 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
         stepType: node.stepType,
       };
 
+      // Apply metadata from @step comments if present
+      const metadata = stepMetadata.get(mermaidId);
+      if (metadata) {
+        // Merge metadata into step, but don't overwrite id/name/stepType (those come from node shape)
+        const { id: _id, name: _name, stepType: _stepType, ...safeMetadata } = metadata as Record<string, unknown>;
+        Object.assign(step, safeMetadata);
+      }
+
       // Build connections for this step (non-linear flow support)
       const stepConnections: StepConnection[] = [];
       for (const conn of connections) {
@@ -620,12 +646,56 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
   if (steps.length === 0) return '';
 
   const lines: string[] = ['flowchart TD'];
+  const metadataComments: string[] = [];  // Collect metadata comments to add at the end
 
   // Generate node definitions based on step type
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
     const nodeId = step.id || `step${i}`;
     const nodeName = step.name.replace(/"/g, "'");
+
+    // Collect step metadata to preserve in comments
+    // Exclude fields that are represented in the Mermaid shape itself
+    const metadata: Record<string, unknown> = {};
+
+    // Common fields
+    if (step.description) metadata.description = step.description;
+    if (step.defaultAssigneeId) metadata.defaultAssigneeId = step.defaultAssigneeId;
+    if (step.inputPath) metadata.inputPath = step.inputPath;
+
+    // Agent/manual step fields
+    if (step.additionalInstructions) metadata.additionalInstructions = step.additionalInstructions;
+
+    // External step fields
+    if (step.externalConfig) metadata.externalConfig = step.externalConfig;
+
+    // Webhook step fields
+    if (step.webhookConfig) metadata.webhookConfig = step.webhookConfig;
+
+    // Decision step fields
+    if (step.defaultConnection) metadata.defaultConnection = step.defaultConnection;
+
+    // ForEach step fields
+    if (step.itemsPath) metadata.itemsPath = step.itemsPath;
+    if (step.itemVariable) metadata.itemVariable = step.itemVariable;
+    if (step.maxItems) metadata.maxItems = step.maxItems;
+    if (step.stepType === 'foreach' && step.expectedCountPath) metadata.expectedCountPath = step.expectedCountPath;
+
+    // Join step fields
+    if (step.awaitStepId) metadata.awaitStepId = step.awaitStepId;
+    if (step.awaitTag) metadata.awaitTag = step.awaitTag;
+    if (step.joinBoundary) metadata.joinBoundary = step.joinBoundary;
+    if (step.minSuccessPercent) metadata.minSuccessPercent = step.minSuccessPercent;
+    if (step.stepType === 'join' && step.expectedCountPath) metadata.expectedCountPath = step.expectedCountPath;
+
+    // Subflow step fields
+    if (step.subflowId) metadata.subflowId = step.subflowId;
+    if (step.inputMapping) metadata.inputMapping = step.inputMapping;
+
+    // Queue metadata comment if there's any data to preserve (will add at the end)
+    if (Object.keys(metadata).length > 0) {
+      metadataComments.push(`    %% @step(${nodeId}): ${JSON.stringify(metadata)}`);
+    }
 
     switch (step.stepType) {
       case 'agent':
@@ -769,6 +839,13 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     if (nodeIds.length > 0) {
       lines.push(`    class ${nodeIds.join(',')} ${className}`);
     }
+  }
+
+  // Add step metadata comments at the end (keeps diagram structure clean at the top)
+  if (metadataComments.length > 0) {
+    lines.push('');
+    lines.push('    %% Step configuration (preserved on import)');
+    lines.push(...metadataComments);
   }
 
   return lines.join('\n');

@@ -114,7 +114,6 @@ interface WorkflowStep {
   itemsPath?: string
   itemVariable?: string
   maxItems?: number
-  expectedCountPath?: string  // JSONPath to get expected count from input (alternative to items.length)
 
   // Data flow - general (applies to multiple step types)
   inputPath?: string               // JSONPath to extract data from previous step(s)
@@ -122,7 +121,9 @@ interface WorkflowStep {
   // Join fields
   awaitTag?: string
   minSuccessPercent?: number       // Percentage of tasks that must succeed (0-100)
-  expectedCountPath?: string       // JSONPath to expected count from external step response
+
+  // Shared by ForEach and Join
+  expectedCountPath?: string       // JSONPath to expected count from input/external step response
 
   // Subflow fields
   subflowId?: string
@@ -175,12 +176,56 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
   if (steps.length === 0) return ''
 
   const lines: string[] = ['flowchart TD']
+  const metadataComments: string[] = []  // Collect metadata comments to add at the end
 
   // Generate node definitions - use quoted labels to handle special chars
   steps.forEach((step, i) => {
     const nodeId = step.id || `step${i}`
     // Escape quotes in labels
     const label = step.name.replace(/"/g, '#quot;')
+
+    // Collect step metadata to preserve in comments
+    // Exclude fields that are represented in the Mermaid shape itself (id, name, stepType, connections)
+    const metadata: Record<string, unknown> = {}
+
+    // Common fields
+    if (step.description) metadata.description = step.description
+    if (step.defaultAssigneeId) metadata.defaultAssigneeId = step.defaultAssigneeId
+    if (step.inputPath) metadata.inputPath = step.inputPath
+
+    // Agent/manual step fields
+    if (step.additionalInstructions) metadata.additionalInstructions = step.additionalInstructions
+
+    // External step fields
+    if (step.externalConfig && Object.keys(step.externalConfig).length > 0) {
+      metadata.externalConfig = step.externalConfig
+    }
+
+    // Decision step fields
+    if (step.defaultConnection) metadata.defaultConnection = step.defaultConnection
+
+    // ForEach step fields
+    if (step.itemsPath) metadata.itemsPath = step.itemsPath
+    if (step.itemVariable) metadata.itemVariable = step.itemVariable
+    if (step.maxItems) metadata.maxItems = step.maxItems
+
+    // Join step fields
+    if (step.awaitTag) metadata.awaitTag = step.awaitTag
+    if (step.minSuccessPercent) metadata.minSuccessPercent = step.minSuccessPercent
+
+    // Shared by ForEach and Join
+    if (step.expectedCountPath) metadata.expectedCountPath = step.expectedCountPath
+
+    // Subflow step fields
+    if (step.subflowId) metadata.subflowId = step.subflowId
+    if (step.inputMapping && Object.keys(step.inputMapping).length > 0) {
+      metadata.inputMapping = step.inputMapping
+    }
+
+    // Queue metadata comment if there's any data to preserve (will add at the end)
+    if (Object.keys(metadata).length > 0) {
+      metadataComments.push(`    %% @step(${nodeId}): ${JSON.stringify(metadata)}`)
+    }
 
     switch (step.stepType) {
       case 'agent':
@@ -324,6 +369,13 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     if (nodeIds.length > 0) {
       lines.push(`    class ${nodeIds.join(',')} ${className}`)
     }
+  }
+
+  // Add step metadata comments at the end (keeps diagram structure clean at the top)
+  if (metadataComments.length > 0) {
+    lines.push('')
+    lines.push('    %% Step configuration (preserved on import)')
+    lines.push(...metadataComments)
   }
 
   return lines.join('\n')
