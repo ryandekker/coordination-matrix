@@ -114,6 +114,7 @@ interface WorkflowStep {
   itemsPath?: string
   itemVariable?: string
   maxItems?: number
+  expectedCountPath?: string  // JSONPath to get expected count from input (alternative to items.length)
 
   // Data flow - general (applies to multiple step types)
   inputPath?: string               // JSONPath to extract data from previous step(s)
@@ -740,10 +741,10 @@ export function WorkflowEditor({
                               {/* Agent step configuration */}
                               {(step.stepType === 'agent' || (!step.stepType && step.execution !== 'manual')) && (
                                 <div className="space-y-3">
-                                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
+                                  <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3 text-sm">
                                     <div className="flex items-start gap-2">
-                                      <Bot className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
-                                      <div className="text-blue-800">
+                                      <Bot className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+                                      <div className="text-blue-800 dark:text-blue-200">
                                         <p className="font-medium">AI Agent Task</p>
                                         <p className="text-xs mt-1">
                                           This step is handled by an AI agent. The agent already knows how to handle most tasks -
@@ -822,10 +823,10 @@ The agent will receive task context automatically.`}
                               {/* External step configuration */}
                               {step.stepType === 'external' && (
                                 <div className="space-y-3">
-                                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-sm">
+                                  <div className="bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800 rounded-lg p-3 text-sm">
                                     <div className="flex items-start gap-2">
-                                      <Globe className="h-4 w-4 text-orange-600 mt-0.5 flex-shrink-0" />
-                                      <div className="text-orange-800">
+                                      <Globe className="h-4 w-4 text-orange-600 dark:text-orange-400 mt-0.5 flex-shrink-0" />
+                                      <div className="text-orange-800 dark:text-orange-200">
                                         <p className="font-medium">External Service Call</p>
                                         <p className="text-xs mt-1">
                                           This step calls an external API or webhook. Configure the endpoint and request details below.
@@ -835,16 +836,16 @@ The agent will receive task context automatically.`}
                                   </div>
 
                                   {/* Callback URL info for async flows */}
-                                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
+                                  <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3 text-sm">
                                     <div className="flex items-start gap-2">
-                                      <Link2 className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
-                                      <div className="text-blue-800">
+                                      <Link2 className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+                                      <div className="text-blue-800 dark:text-blue-200">
                                         <p className="font-medium">Callback URL (for async responses)</p>
                                         <p className="text-xs mt-1 mb-2">
                                           If the external service needs to send results back asynchronously (e.g., ActivePieces),
                                           include these template variables in your payload:
                                         </p>
-                                        <div className="bg-white/60 rounded p-2 font-mono text-xs space-y-1">
+                                        <div className="bg-muted/60 rounded p-2 font-mono text-xs space-y-1">
                                           <p><span className="text-blue-600">{"{{systemWebhookUrl}}"}</span> - Webhook endpoint URL</p>
                                           <p><span className="text-blue-600">{"{{callbackSecret}}"}</span> - Auth token for callback</p>
                                           <p><span className="text-blue-600">{"{{workflowRunId}}"}</span> - Current workflow run ID</p>
@@ -916,10 +917,10 @@ The agent will receive task context automatically.`}
                               {/* Manual step configuration */}
                               {step.stepType === 'manual' && (
                                 <div className="space-y-3">
-                                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-sm">
+                                  <div className="bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-lg p-3 text-sm">
                                     <div className="flex items-start gap-2">
-                                      <User className="h-4 w-4 text-purple-600 mt-0.5 flex-shrink-0" />
-                                      <div className="text-purple-800">
+                                      <User className="h-4 w-4 text-purple-600 dark:text-purple-400 mt-0.5 flex-shrink-0" />
+                                      <div className="text-purple-800 dark:text-purple-200">
                                         <p className="font-medium">Human Task</p>
                                         <p className="text-xs mt-1">
                                           This step requires human review or action. The task will wait for a person to complete it.
@@ -960,10 +961,10 @@ The agent will receive task context automatically.`}
                               {/* ForEach configuration */}
                               {step.stepType === 'foreach' && (
                                 <>
-                                  <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm">
+                                  <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg p-3 text-sm">
                                     <div className="flex items-start gap-2">
-                                      <Repeat className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
-                                      <div className="text-green-800">
+                                      <Repeat className="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5 flex-shrink-0" />
+                                      <div className="text-green-800 dark:text-green-200">
                                         <p className="font-medium">Loop Configuration</p>
                                         <p className="text-xs mt-1">
                                           This step iterates over a collection from the previous step&apos;s output
@@ -1005,18 +1006,35 @@ The agent will receive task context automatically.`}
                                     </div>
                                   </div>
 
-                                  <div className="space-y-1">
-                                    <label className="text-sm font-medium">Max Items</label>
-                                    <Input
-                                      type="number"
-                                      value={step.maxItems || ''}
-                                      onChange={(e) => updateStep(index, { maxItems: parseInt(e.target.value) || undefined })}
-                                      placeholder="100 (default)"
-                                      className="w-40"
-                                    />
-                                    <p className="text-xs text-muted-foreground">
-                                      Safety limit to prevent runaway loops
-                                    </p>
+                                  <div className="grid grid-cols-2 gap-3">
+                                    <div className="space-y-1">
+                                      <label className="text-sm font-medium">Max Items</label>
+                                      <Input
+                                        type="number"
+                                        value={step.maxItems || ''}
+                                        onChange={(e) => updateStep(index, { maxItems: parseInt(e.target.value) || undefined })}
+                                        placeholder="100 (default)"
+                                        className="font-mono text-sm"
+                                      />
+                                      <p className="text-xs text-muted-foreground">
+                                        Safety limit to prevent runaway loops
+                                      </p>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-sm font-medium flex items-center gap-1">
+                                        Expected Count Path
+                                        <span className="text-xs text-muted-foreground">(optional)</span>
+                                      </label>
+                                      <Input
+                                        value={step.expectedCountPath || ''}
+                                        onChange={(e) => updateStep(index, { expectedCountPath: e.target.value })}
+                                        placeholder="e.g., response.totalItems"
+                                        className="font-mono text-sm"
+                                      />
+                                      <p className="text-xs text-muted-foreground">
+                                        JSONPath to expected count from input payload (overrides items.length)
+                                      </p>
+                                    </div>
                                   </div>
                                 </>
                               )}
@@ -1024,10 +1042,10 @@ The agent will receive task context automatically.`}
                               {/* Join configuration */}
                               {step.stepType === 'join' && (
                                 <>
-                                  <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 text-sm">
+                                  <div className="bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-lg p-3 text-sm">
                                     <div className="flex items-start gap-2">
-                                      <Merge className="h-4 w-4 text-indigo-600 mt-0.5 flex-shrink-0" />
-                                      <div className="text-indigo-800">
+                                      <Merge className="h-4 w-4 text-indigo-600 dark:text-indigo-400 mt-0.5 flex-shrink-0" />
+                                      <div className="text-indigo-800 dark:text-indigo-200">
                                         <p className="font-medium">Join / Aggregation Point</p>
                                         <p className="text-xs mt-1">
                                           This step waits for parallel tasks (from a ForEach loop) to complete
@@ -1113,10 +1131,10 @@ The agent will receive task context automatically.`}
                               {/* Decision configuration */}
                               {step.stepType === 'decision' && (
                                 <>
-                                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
+                                  <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3 text-sm">
                                     <div className="flex items-start gap-2">
-                                      <GitBranch className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
-                                      <div className="text-amber-800">
+                                      <GitBranch className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                                      <div className="text-amber-800 dark:text-amber-200">
                                         <p className="font-medium">Decision / Router</p>
                                         <p className="text-xs mt-1">
                                           This step evaluates conditions from the previous step&apos;s output and
@@ -1146,10 +1164,10 @@ The agent will receive task context automatically.`}
                               {/* Subflow configuration */}
                               {step.stepType === 'subflow' && (
                                 <>
-                                  <div className="bg-pink-50 border border-pink-200 rounded-lg p-3 text-sm">
+                                  <div className="bg-pink-50 dark:bg-pink-950/30 border border-pink-200 dark:border-pink-800 rounded-lg p-3 text-sm">
                                     <div className="flex items-start gap-2">
-                                      <WorkflowIcon className="h-4 w-4 text-pink-600 mt-0.5 flex-shrink-0" />
-                                      <div className="text-pink-800">
+                                      <WorkflowIcon className="h-4 w-4 text-pink-600 dark:text-pink-400 mt-0.5 flex-shrink-0" />
+                                      <div className="text-pink-800 dark:text-pink-200">
                                         <p className="font-medium">Subflow / Nested Workflow</p>
                                         <p className="text-xs mt-1">
                                           Delegates execution to another workflow. Input is passed programmatically

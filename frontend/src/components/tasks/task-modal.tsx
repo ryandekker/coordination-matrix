@@ -437,6 +437,7 @@ export function TaskModal({
     if (!task) return null
 
     return (
+      <>
       <div className="flex flex-wrap items-center gap-2 pb-3 border-b border-border/50">
         {/* Task Type - inline select */}
         <Controller
@@ -599,6 +600,32 @@ export function TaskModal({
           </span>
         </div>
       </div>
+
+      {/* Waiting indicator with reason (shown below header when task is waiting) */}
+      {currentStatus === 'waiting' && (
+        <div className="mt-2 px-3 py-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md">
+          <div className="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-300">
+            <span className="font-medium">Waiting</span>
+            {(task as any).metadata?.waitingReason && (
+              <>
+                <span className="text-amber-400">•</span>
+                <span>{(task as any).metadata.waitingReason}</span>
+              </>
+            )}
+            {(task as any).taskType === 'foreach' && (task as any).batchCounters && (
+              <span className="ml-auto font-mono text-xs">
+                {(task as any).batchCounters.processedCount || 0}/{(task as any).batchCounters.expectedCount || '?'} processed
+                {(task as any).batchCounters.failedCount > 0 && (
+                  <span className="text-red-600 dark:text-red-400 ml-1">
+                    ({(task as any).batchCounters.failedCount} failed)
+                  </span>
+                )}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+      </>
     )
   }
 
@@ -895,6 +922,59 @@ export function TaskModal({
               }
             }}
           />
+        )}
+
+        {/* ForEach Configuration - show when taskType is foreach */}
+        {currentTaskType === 'foreach' && isEditMode && task && (
+          <div className="space-y-2 p-3 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg">
+            <label className="text-xs font-medium text-green-800 dark:text-green-200">ForEach Configuration</label>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">Expected Subtasks</label>
+                <Input
+                  type="number"
+                  min="0"
+                  className="h-7 text-sm"
+                  defaultValue={(task as any).batchCounters?.expectedCount || 0}
+                  onBlur={(e) => {
+                    const newValue = parseInt(e.target.value, 10) || 0
+                    const currentCounters = (task as any).batchCounters || {}
+                    if (newValue !== currentCounters.expectedCount) {
+                      updateTask.mutateAsync({
+                        id: task._id,
+                        data: {
+                          batchCounters: {
+                            ...currentCounters,
+                            expectedCount: newValue,
+                          },
+                        },
+                      })
+                    }
+                  }}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">Processed</label>
+                <div className="h-7 px-3 py-1 text-sm bg-muted rounded-md border flex items-center">
+                  {(task as any).batchCounters?.processedCount || 0}
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">Failed</label>
+                <div className={cn(
+                  "h-7 px-3 py-1 text-sm rounded-md border flex items-center",
+                  ((task as any).batchCounters?.failedCount || 0) > 0
+                    ? "bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400"
+                    : "bg-muted"
+                )}>
+                  {(task as any).batchCounters?.failedCount || 0}
+                </div>
+              </div>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              This ForEach task is waiting for {(task as any).batchCounters?.expectedCount || '?'} subtasks to complete.
+            </p>
+          </div>
         )}
 
         {/* Metadata - toggleable between visual and edit modes */}

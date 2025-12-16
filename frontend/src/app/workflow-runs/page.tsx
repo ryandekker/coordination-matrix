@@ -60,21 +60,21 @@ import { cn } from '@/lib/utils'
 import { workflowRunsApi, workflowsApi, WorkflowRun, WorkflowRunStatus, Task, Workflow as WorkflowType } from '@/lib/api'
 
 const STATUS_CONFIG: Record<WorkflowRunStatus, { icon: React.ElementType; color: string; bgColor: string; label: string }> = {
-  pending: { icon: Clock, color: 'text-gray-500', bgColor: 'bg-gray-50', label: 'Pending' },
-  running: { icon: Play, color: 'text-blue-500', bgColor: 'bg-blue-50', label: 'Running' },
-  paused: { icon: Pause, color: 'text-amber-500', bgColor: 'bg-amber-50', label: 'Paused' },
-  completed: { icon: CheckCircle, color: 'text-green-500', bgColor: 'bg-green-50', label: 'Completed' },
-  failed: { icon: XCircle, color: 'text-red-500', bgColor: 'bg-red-50', label: 'Failed' },
-  cancelled: { icon: Ban, color: 'text-gray-500', bgColor: 'bg-gray-50', label: 'Cancelled' },
+  pending: { icon: Clock, color: 'text-gray-500', bgColor: 'bg-gray-50 dark:bg-gray-800/50', label: 'Pending' },
+  running: { icon: Play, color: 'text-blue-500', bgColor: 'bg-blue-50 dark:bg-blue-950/50', label: 'Running' },
+  paused: { icon: Pause, color: 'text-amber-500', bgColor: 'bg-amber-50 dark:bg-amber-950/50', label: 'Paused' },
+  completed: { icon: CheckCircle, color: 'text-green-500', bgColor: 'bg-green-50 dark:bg-green-950/50', label: 'Completed' },
+  failed: { icon: XCircle, color: 'text-red-500', bgColor: 'bg-red-50 dark:bg-red-950/50', label: 'Failed' },
+  cancelled: { icon: Ban, color: 'text-gray-500', bgColor: 'bg-gray-50 dark:bg-gray-800/50', label: 'Cancelled' },
 }
 
 const TASK_STATUS_CONFIG: Record<string, { color: string; bgColor: string }> = {
-  pending: { color: 'text-gray-500', bgColor: 'bg-gray-50' },
-  in_progress: { color: 'text-blue-500', bgColor: 'bg-blue-50' },
-  blocked: { color: 'text-amber-500', bgColor: 'bg-amber-50' },
-  completed: { color: 'text-green-500', bgColor: 'bg-green-50' },
-  failed: { color: 'text-red-500', bgColor: 'bg-red-50' },
-  cancelled: { color: 'text-gray-400', bgColor: 'bg-gray-50' },
+  pending: { color: 'text-gray-500', bgColor: 'bg-gray-50 dark:bg-gray-800/50' },
+  in_progress: { color: 'text-blue-500', bgColor: 'bg-blue-50 dark:bg-blue-950/50' },
+  blocked: { color: 'text-amber-500', bgColor: 'bg-amber-50 dark:bg-amber-950/50' },
+  completed: { color: 'text-green-500', bgColor: 'bg-green-50 dark:bg-green-950/50' },
+  failed: { color: 'text-red-500', bgColor: 'bg-red-50 dark:bg-red-950/50' },
+  cancelled: { color: 'text-gray-400', bgColor: 'bg-gray-50 dark:bg-gray-800/50' },
 }
 
 type TaskType = 'standard' | 'decision' | 'foreach' | 'join' | 'subflow' | 'external'
@@ -172,6 +172,23 @@ function TaskNode({ task, depth, allTasks }: TaskNodeProps) {
           {hasChildren && (
             <span className="text-xs text-muted-foreground flex-shrink-0">
               {children.length} {children.length === 1 ? 'child' : 'children'}
+            </span>
+          )}
+
+          {/* ForEach batch progress */}
+          {taskType === 'foreach' && (task as any).batchCounters && (
+            <span className="text-xs text-muted-foreground flex-shrink-0 font-mono">
+              {(task as any).batchCounters.processedCount || 0}/{(task as any).batchCounters.expectedCount || '?'}
+              {(task as any).batchCounters.failedCount > 0 && (
+                <span className="text-destructive ml-1">({(task as any).batchCounters.failedCount} failed)</span>
+              )}
+            </span>
+          )}
+
+          {/* Waiting indicator with reason */}
+          {task.status === 'waiting' && (task as any).metadata?.waitingReason && (
+            <span className="text-xs text-amber-600 dark:text-amber-400 flex-shrink-0 max-w-[200px] truncate" title={(task as any).metadata.waitingReason}>
+              {(task as any).metadata.waitingReason}
             </span>
           )}
 

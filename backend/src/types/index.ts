@@ -603,13 +603,13 @@ export interface WorkflowStep {
   itemsPath?: string;                   // JSONPath to items array in previous output
   itemVariable?: string;                // Template variable name for each item
   maxItems?: number;                    // Safety limit (default: 100)
+  expectedCountPath?: string;           // JSONPath to get expected count from input (alternative to items.length)
 
   // Join step config - explicit reference to which step's tasks to await
   awaitStepId?: string;                 // Step ID whose tasks we're waiting for (can reference earlier steps)
   awaitTag?: string;                    // Alternative: await tasks with this tag
   joinBoundary?: JoinBoundary;          // Boundary conditions for when the join fires
   minSuccessPercent?: number;           // Legacy: percentage of tasks that must succeed (default: 100)
-  expectedCountPath?: string;           // JSONPath to get expected count from previous step
 
   // Subflow step config
   subflowId?: string;

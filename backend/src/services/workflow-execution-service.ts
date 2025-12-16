@@ -1,7 +1,7 @@
 import { ObjectId } from 'mongodb';
 import crypto from 'crypto';
 import { getDb } from '../db/connection.js';
-import { eventBus } from './event-bus.js';
+import { eventBus, publishTaskEvent } from './event-bus.js';
 import {
   Task,
   TaskStatus,
@@ -322,7 +322,12 @@ class WorkflowExecutionService {
     };
 
     const result = await this.tasks.insertOne(task as Task);
-    return { ...task, _id: result.insertedId } as Task;
+    const createdTask = { ...task, _id: result.insertedId } as Task;
+
+    // Publish task.created event for activity log tracking
+    await publishTaskEvent('task.created', createdTask, { actorType: 'system' });
+
+    return createdTask;
   }
 
   /**
@@ -522,7 +527,12 @@ class WorkflowExecutionService {
     }
 
     const result = await this.tasks.insertOne(task as Task);
-    return { ...task, _id: result.insertedId } as Task;
+    const createdTask = { ...task, _id: result.insertedId } as Task;
+
+    // Publish task.created event for activity log tracking
+    await publishTaskEvent('task.created', createdTask, { actorType: 'system' });
+
+    return createdTask;
   }
 
   private mapStepTypeToTaskType(stepType: string): TaskType {
@@ -1073,14 +1083,28 @@ class WorkflowExecutionService {
     const maxItems = step.maxItems || 100;
     const itemsToProcess = items.slice(0, maxItems);
 
+    // Determine expected count:
+    // 1. If expectedCountPath is set, use that value from input payload
+    // 2. Otherwise use the length of items being processed
+    let expectedCount = itemsToProcess.length;
+    if (step.expectedCountPath) {
+      const pathValue = this.getValueByPath(inputPayload, step.expectedCountPath);
+      if (typeof pathValue === 'number' && pathValue >= 0) {
+        expectedCount = pathValue;
+        console.log(`[WorkflowExecutionService] Using expectedCountPath "${step.expectedCountPath}" = ${expectedCount}`);
+      } else {
+        console.warn(`[WorkflowExecutionService] expectedCountPath "${step.expectedCountPath}" did not yield a valid number, falling back to items.length`);
+      }
+    }
+
     // Update foreach task with expected count (both top-level and in batchCounters)
     await this.tasks.updateOne(
       { _id: foreachTask._id },
       {
         $set: {
-          expectedQuantity: itemsToProcess.length,  // Top-level field for easy access
-          'batchCounters.expectedCount': itemsToProcess.length,
-          'metadata.itemCount': itemsToProcess.length,
+          expectedQuantity: expectedCount,  // Top-level field for easy access
+          'batchCounters.expectedCount': expectedCount,
+          'metadata.itemCount': itemsToProcess.length,  // Actual items being processed
         },
       }
     );
