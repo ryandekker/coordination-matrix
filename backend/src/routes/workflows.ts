@@ -96,7 +96,8 @@ interface WorkflowStep {
   inputMapping?: Record<string, string>;
 
   // Input aggregation
-  inputPath?: string;               // JSONPath to extract input from previous steps
+  inputSource?: string;             // Step ID to get input from (default: previous step)
+  inputPath?: string;               // JSONPath to extract input from source step
 
   // Legacy fields (kept for compatibility)
   execution?: 'automated' | 'manual';
@@ -388,56 +389,68 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
   const stepMetadata: Map<string, Record<string, unknown>> = new Map();
 
   for (const line of lines) {
-    // Skip diagram type declarations and styling
-    if (line.startsWith('graph') || line.startsWith('flowchart')) continue;
-    if (line.startsWith('classDef') || line.startsWith('class ')) continue;
-    if (line.startsWith('subgraph') || line === 'end') continue;
-
-    // Parse step metadata comments: %% @step(nodeId): {json}
-    const stepMetaMatch = line.match(/^%%\s*@step\((\w+)\):\s*(.+)$/);
-    if (stepMetaMatch) {
-      const [, nodeId, jsonStr] = stepMetaMatch;
+    // Parse step configuration comments first
+    const stepConfigMatch = line.match(/%% @step\(([^)]+)\):\s*(.+)/);
+    if (stepConfigMatch) {
       try {
-        const metadata = JSON.parse(jsonStr);
-        stepMetadata.set(nodeId, metadata);
+        const [, stepId, configJson] = stepConfigMatch;
+        const config = JSON.parse(configJson);
+        stepMetadata.set(stepId, config);
       } catch {
-        console.warn(`Failed to parse step metadata for ${nodeId}: ${jsonStr}`);
+        // Invalid JSON, skip
       }
       continue;
     }
 
-    // Skip other comments
+    // Skip diagram type declarations, styling, and other comments
+    if (line.startsWith('graph') || line.startsWith('flowchart')) continue;
+    if (line.startsWith('classDef') || line.startsWith('class ')) continue;
     if (line.startsWith('%%')) continue;
+    if (line.startsWith('subgraph') || line === 'end' || line.startsWith('direction')) continue;
 
     // Parse node definitions - order matters! More specific patterns first
 
     // Hexagon {{ }} - external service/API call
     // Pattern: ID{{"text"}} or ID{{text}}
-    const hexagonMatch = line.match(/^(\w+)\{\{["']?([^"}]+?)["']?\}\}/);
+    const hexagonMatch = line.match(/^([\w-]+)\{\{["']?([^"}]+?)["']?\}\}/);
     if (hexagonMatch) {
       const [, id, text] = hexagonMatch;
-      // Check for ext: or api: prefix
-      const cleanName = text.replace(/^(ext|api|webhook):\s*/i, '').trim();
+      // Check for ext:, api:, trigger:, or webhook: prefix
+      const cleanName = text.replace(/^(ext|api|webhook|trigger):\s*/i, '').trim();
       nodes.set(id, { id, name: cleanName, stepType: 'external' });
       continue;
     }
 
     // Double square brackets [[ ]] - foreach/join/subflow
     // Pattern: ID[["text"]] or ID[[text]]
-    const doubleSquareMatch = line.match(/^(\w+)\[\[["']?([^"\]]+?)["']?\]\]/);
+    const doubleSquareMatch = line.match(/^([\w-]+)\[\[["']?([^"\]]+?)["']?\]\]/);
     if (doubleSquareMatch) {
       const [, id, text] = doubleSquareMatch;
       const lowerText = text.toLowerCase();
 
       let stepType: WorkflowStepType = 'agent';
       let cleanName = text;
+      let itemsPath: string | undefined;
+      let minSuccessPercent: number | undefined;
 
       if (lowerText.startsWith('each:') || lowerText.startsWith('foreach:')) {
         stepType = 'foreach';
         cleanName = text.replace(/^(each|foreach):\s*/i, '').trim();
+        // Extract itemsPath from format: "Name (path.to.items)"
+        const itemsMatch = cleanName.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
+        if (itemsMatch) {
+          cleanName = itemsMatch[1].trim();
+          itemsPath = itemsMatch[2].trim();
+        }
       } else if (lowerText.startsWith('join:') || lowerText.startsWith('merge:')) {
         stepType = 'join';
         cleanName = text.replace(/^(join|merge):\s*/i, '').trim();
+        // Extract minSuccessPercent from format: "Name @95%"
+        const pctMatch = cleanName.match(/^(.+?)\s*@(\d+)%\s*$/);
+        if (pctMatch) {
+          cleanName = pctMatch[1].trim();
+          minSuccessPercent = parseInt(pctMatch[2]);
+        }
       } else if (lowerText.startsWith('run:') || lowerText.startsWith('subflow:')) {
         stepType = 'subflow';
         cleanName = text.replace(/^(run|subflow):\s*/i, '').trim();
@@ -447,13 +460,17 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
         cleanName = text;
       }
 
-      nodes.set(id, { id, name: cleanName, stepType });
+      // Store with extracted config (will be used when creating steps)
+      const node: ParsedNode & { itemsPath?: string; minSuccessPercent?: number } = {
+        id, name: cleanName, stepType, itemsPath, minSuccessPercent
+      };
+      nodes.set(id, node);
       continue;
     }
 
     // Diamond brackets { } - decision/routing
     // Pattern: ID{"text"} or ID{text}
-    const diamondMatch = line.match(/^(\w+)\{["']?([^"}]+?)["']?\}/);
+    const diamondMatch = line.match(/^([\w-]+)\{["']?([^"}]+?)["']?\}/);
     if (diamondMatch) {
       const [, id, text] = diamondMatch;
       nodes.set(id, { id, name: text, stepType: 'decision' });
@@ -462,7 +479,7 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
 
     // Double round brackets (( )) - manual/HITL task (stadium shape)
     // Pattern: ID(("text")) or ID((text))
-    const stadiumMatch = line.match(/^(\w+)\(\(["']?([^")]+?)["']?\)\)/);
+    const stadiumMatch = line.match(/^([\w-]+)\(\(["']?([^")]+?)["']?\)\)/);
     if (stadiumMatch) {
       const [, id, text] = stadiumMatch;
       nodes.set(id, { id, name: text, stepType: 'manual' });
@@ -471,7 +488,7 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
 
     // Single round brackets ( ) - manual/HITL task
     // Pattern: ID("text") or ID(text)
-    const roundMatch = line.match(/^(\w+)\(["']?([^")]+?)["']?\)/);
+    const roundMatch = line.match(/^([\w-]+)\(["']?([^")]+?)["']?\)/);
     if (roundMatch) {
       const [, id, text] = roundMatch;
       nodes.set(id, { id, name: text, stepType: 'manual' });
@@ -481,7 +498,7 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
     // Single square brackets [ ] - agent task (default)
     // Pattern: ID["text"] or ID[text]
     // Check for ext: prefix to make it external
-    const squareMatch = line.match(/^(\w+)\[["']?([^"\]]+?)["']?\]/);
+    const squareMatch = line.match(/^([\w-]+)\[["']?([^"\]]+?)["']?\]/);
     if (squareMatch) {
       const [, id, text] = squareMatch;
       const lowerText = text.toLowerCase();
@@ -497,7 +514,7 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
 
     // Parse connections
     // Labeled connections: A -->|"label"| B or A -->|label| B
-    const labeledConnMatch = line.match(/(\w+)\s*-->?\|["']?([^|"']+?)["']?\|\s*(\w+)/);
+    const labeledConnMatch = line.match(/([\w-]+)\s*-->?\|["']?([^|"']+?)["']?\|\s*([\w-]+)/);
     if (labeledConnMatch) {
       connections.push({
         from: labeledConnMatch[1],
@@ -508,7 +525,7 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
     }
 
     // Simple connections: A --> B
-    const simpleConnMatch = line.match(/(\w+)\s*-->\s*(\w+)/);
+    const simpleConnMatch = line.match(/([\w-]+)\s*-->\s*([\w-]+)/);
     if (simpleConnMatch) {
       // Check if already added as labeled connection
       const from = simpleConnMatch[1];
@@ -570,9 +587,10 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
 
   // Create workflow steps
   for (const mermaidId of orderedNodes) {
-    const node = nodes.get(mermaidId);
+    const node = nodes.get(mermaidId) as ParsedNode & { itemsPath?: string; minSuccessPercent?: number } | undefined;
     if (node) {
-      const stepId = new ObjectId().toString();
+      // Use original mermaid ID if it was a step ID (for round-trip preservation)
+      const stepId = mermaidId.startsWith('step-') ? mermaidId : new ObjectId().toString();
       mermaidIdToStepId.set(mermaidId, stepId);
 
       const step: WorkflowStep = {
@@ -581,7 +599,11 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
         stepType: node.stepType,
       };
 
-      // Apply metadata from @step comments if present
+      // Apply config extracted from node label
+      if (node.itemsPath) step.itemsPath = node.itemsPath;
+      if (node.minSuccessPercent !== undefined) step.minSuccessPercent = node.minSuccessPercent;
+
+      // Apply metadata from @step comments if present (overrides label-extracted config)
       const metadata = stepMetadata.get(mermaidId);
       if (metadata) {
         // Merge metadata into step, but don't overwrite id/name/stepType (those come from node shape)
