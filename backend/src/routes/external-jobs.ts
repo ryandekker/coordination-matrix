@@ -16,6 +16,9 @@ externalJobsRouter.get('/', async (req: Request, res: Response, next: NextFuncti
       status,
       type,
       taskId,
+      taskStatus,
+      taskType,
+      assigneeId,
       sortBy = 'createdAt',
       sortOrder = 'desc',
     } = req.query;
@@ -24,44 +27,123 @@ externalJobsRouter.get('/', async (req: Request, res: Response, next: NextFuncti
     const limitNum = Math.min(200, Math.max(1, parseInt(limit as string, 10) || 50));
     const skip = (pageNum - 1) * limitNum;
 
-    const filter: Filter<ExternalJob> = {};
+    // Check if we need task-based filtering
+    const needsTaskLookup = taskStatus || taskType || assigneeId;
 
-    if (status) {
-      if (Array.isArray(status)) {
-        filter.status = { $in: status as ExternalJobStatus[] };
-      } else {
-        filter.status = status as ExternalJobStatus;
+    if (needsTaskLookup) {
+      // Use aggregation with $lookup for task-based filters
+      const pipeline: object[] = [];
+
+      // Initial match for external job filters
+      const jobMatch: Record<string, unknown> = {};
+      if (status) {
+        if (Array.isArray(status)) {
+          jobMatch.status = { $in: status };
+        } else {
+          jobMatch.status = status;
+        }
       }
+      if (type) {
+        jobMatch.type = type;
+      }
+      if (taskId) {
+        jobMatch.taskId = new ObjectId(taskId as string);
+      }
+      if (Object.keys(jobMatch).length > 0) {
+        pipeline.push({ $match: jobMatch });
+      }
+
+      // Lookup tasks
+      pipeline.push({
+        $lookup: {
+          from: 'tasks',
+          localField: 'taskId',
+          foreignField: '_id',
+          as: 'task',
+        },
+      });
+      pipeline.push({ $unwind: { path: '$task', preserveNullAndEmptyArrays: true } });
+
+      // Match task filters
+      const taskMatch: Record<string, unknown> = {};
+      if (taskStatus) {
+        taskMatch['task.status'] = taskStatus;
+      }
+      if (taskType) {
+        taskMatch['task.taskType'] = taskType;
+      }
+      if (assigneeId) {
+        taskMatch['task.assigneeId'] = new ObjectId(assigneeId as string);
+      }
+      if (Object.keys(taskMatch).length > 0) {
+        pipeline.push({ $match: taskMatch });
+      }
+
+      // Count total before pagination
+      const countPipeline = [...pipeline, { $count: 'total' }];
+      const countResult = await db.collection('external_jobs').aggregate(countPipeline).toArray();
+      const total = countResult[0]?.total || 0;
+
+      // Sort, skip, limit
+      pipeline.push({ $sort: { [sortBy as string]: sortOrder === 'asc' ? 1 : -1 } });
+      pipeline.push({ $skip: skip });
+      pipeline.push({ $limit: limitNum });
+
+      // Remove task field from output (optional - keep for debugging)
+      pipeline.push({ $project: { task: 0 } });
+
+      const jobs = await db.collection('external_jobs').aggregate(pipeline).toArray();
+
+      res.json({
+        data: jobs,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages: Math.ceil(total / limitNum),
+        },
+      });
+    } else {
+      // Original simple query (no task lookup needed)
+      const filter: Filter<ExternalJob> = {};
+
+      if (status) {
+        if (Array.isArray(status)) {
+          filter.status = { $in: status as ExternalJobStatus[] };
+        } else {
+          filter.status = status as ExternalJobStatus;
+        }
+      }
+
+      if (type) {
+        filter.type = type as string;
+      }
+
+      if (taskId) {
+        filter.taskId = new ObjectId(taskId as string);
+      }
+
+      const [jobs, total] = await Promise.all([
+        db
+          .collection<ExternalJob>('external_jobs')
+          .find(filter)
+          .sort({ [sortBy as string]: sortOrder === 'asc' ? 1 : -1 })
+          .skip(skip)
+          .limit(limitNum)
+          .toArray(),
+        db.collection<ExternalJob>('external_jobs').countDocuments(filter),
+      ]);
+
+      res.json({
+        data: jobs,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages: Math.ceil(total / limitNum),
+        },
+      });
     }
-
-    if (type) {
-      filter.type = type as string;
-    }
-
-    if (taskId) {
-      filter.taskId = new ObjectId(taskId as string);
-    }
-
-    const [jobs, total] = await Promise.all([
-      db
-        .collection<ExternalJob>('external_jobs')
-        .find(filter)
-        .sort({ [sortBy as string]: sortOrder === 'asc' ? 1 : -1 })
-        .skip(skip)
-        .limit(limitNum)
-        .toArray(),
-      db.collection<ExternalJob>('external_jobs').countDocuments(filter),
-    ]);
-
-    res.json({
-      data: jobs,
-      pagination: {
-        page: pageNum,
-        limit: limitNum,
-        total,
-        totalPages: Math.ceil(total / limitNum),
-      },
-    });
   } catch (error) {
     next(error);
   }

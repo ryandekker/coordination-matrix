@@ -656,16 +656,31 @@ tasksRouter.delete('/:id/webhook/retry', async (req: Request, res: Response, nex
 tasksRouter.get('/webhook-attempts', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { status, limit = '50', offset = '0' } = req.query;
+    const { status, taskStatus, taskType, assigneeId, limit = '50', offset = '0' } = req.query;
 
     // Find all tasks with webhookConfig that have attempts
     const filter: Record<string, unknown> = {
       'webhookConfig.attempts': { $exists: true, $ne: [] },
     };
 
-    // Filter by status if provided
+    // Filter by webhook attempt status if provided
     if (status) {
       filter['webhookConfig.attempts.status'] = status;
+    }
+
+    // Filter by task status if provided
+    if (taskStatus) {
+      filter.status = taskStatus;
+    }
+
+    // Filter by task type if provided
+    if (taskType) {
+      filter.taskType = taskType;
+    }
+
+    // Filter by assignee if provided
+    if (assigneeId) {
+      filter.assigneeId = new ObjectId(assigneeId as string);
     }
 
     const [tasks, total] = await Promise.all([

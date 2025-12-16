@@ -172,11 +172,17 @@ export const tasksApi = {
   // Get all webhook task attempts across all tasks
   getWebhookAttempts: async (params?: {
     status?: 'pending' | 'success' | 'failed'
+    taskStatus?: string
+    taskType?: string
+    assigneeId?: string
     limit?: number
     offset?: number
   }): Promise<{ data: WebhookTaskAttempt[]; pagination: { limit: number; offset: number; total: number } }> => {
     const searchParams = new URLSearchParams()
     if (params?.status) searchParams.append('status', params.status)
+    if (params?.taskStatus) searchParams.append('taskStatus', params.taskStatus)
+    if (params?.taskType) searchParams.append('taskType', params.taskType)
+    if (params?.assigneeId) searchParams.append('assigneeId', params.assigneeId)
     if (params?.limit) searchParams.append('limit', String(params.limit))
     if (params?.offset) searchParams.append('offset', String(params.offset))
     const response = await authFetch(`${API_BASE}/tasks/webhook-attempts?${searchParams}`)
@@ -364,8 +370,29 @@ export const workflowsApi = {
 
 // External Jobs API
 export const externalJobsApi = {
-  list: async (params?: Record<string, string>): Promise<PaginatedResponse<ExternalJob>> => {
-    const searchParams = new URLSearchParams(params)
+  list: async (params?: {
+    status?: string
+    type?: string
+    taskId?: string
+    taskStatus?: string
+    taskType?: string
+    assigneeId?: string
+    page?: string
+    limit?: string
+    sortBy?: string
+    sortOrder?: 'asc' | 'desc'
+  }): Promise<PaginatedResponse<ExternalJob>> => {
+    const searchParams = new URLSearchParams()
+    if (params?.status) searchParams.append('status', params.status)
+    if (params?.type) searchParams.append('type', params.type)
+    if (params?.taskId) searchParams.append('taskId', params.taskId)
+    if (params?.taskStatus) searchParams.append('taskStatus', params.taskStatus)
+    if (params?.taskType) searchParams.append('taskType', params.taskType)
+    if (params?.assigneeId) searchParams.append('assigneeId', params.assigneeId)
+    if (params?.page) searchParams.append('page', params.page)
+    if (params?.limit) searchParams.append('limit', params.limit)
+    if (params?.sortBy) searchParams.append('sortBy', params.sortBy)
+    if (params?.sortOrder) searchParams.append('sortOrder', params.sortOrder)
     const response = await authFetch(`${API_BASE}/external-jobs?${searchParams}`)
     return handleResponse(response)
   },
@@ -909,6 +936,9 @@ export const batchJobsApi = {
     workflowId?: string
     taskId?: string
     requiresManualReview?: boolean
+    taskStatus?: string
+    taskType?: string
+    assigneeId?: string
     page?: number
     limit?: number
   }): Promise<PaginatedResponse<BatchJob>> => {
@@ -923,6 +953,9 @@ export const batchJobsApi = {
     if (params?.requiresManualReview !== undefined) {
       searchParams.append('requiresManualReview', String(params.requiresManualReview))
     }
+    if (params?.taskStatus) searchParams.append('taskStatus', params.taskStatus)
+    if (params?.taskType) searchParams.append('taskType', params.taskType)
+    if (params?.assigneeId) searchParams.append('assigneeId', params.assigneeId)
     if (params?.page) searchParams.append('page', String(params.page))
     if (params?.limit) searchParams.append('limit', String(params.limit))
     const response = await authFetch(`${API_BASE}/batch-jobs?${searchParams}`)

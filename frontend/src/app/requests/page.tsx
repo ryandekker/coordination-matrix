@@ -72,6 +72,8 @@ import {
   workflowsApi,
   webhooksApi,
   tasksApi,
+  lookupsApi,
+  usersApi,
   BatchJob,
   BatchJobStatus,
   BatchItem,
@@ -81,6 +83,8 @@ import {
   ExternalJob,
   WebhookDelivery,
   WebhookTaskAttempt,
+  LookupValue,
+  User,
 } from '@/lib/api'
 
 // Unified request type for the list
@@ -1128,25 +1132,56 @@ function RequestsList() {
   const queryClient = useQueryClient()
   const [typeFilter, setTypeFilter] = useState<'all' | 'external' | 'batch' | 'webhook_delivery' | 'webhook_task'>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [taskStatusFilter, setTaskStatusFilter] = useState<string>('all')
+  const [taskTypeFilter, setTaskTypeFilter] = useState<string>('all')
+  const [assigneeFilter, setAssigneeFilter] = useState<string>('all')
   const [cancelConfirm, setCancelConfirm] = useState<BatchJob | null>(null)
+
+  // Fetch lookups for task types
+  const { data: lookupsData } = useQuery({
+    queryKey: ['lookups'],
+    queryFn: () => lookupsApi.getAll(),
+  })
+
+  // Fetch users for assignee filter
+  const { data: usersData } = useQuery({
+    queryKey: ['users'],
+    queryFn: () => usersApi.list(),
+  })
+
+  const taskTypes = lookupsData?.data?.taskType || []
+  const users = usersData?.data || []
+
+  // Build filter params for queries
+  const taskFilterParams = {
+    taskStatus: taskStatusFilter !== 'all' ? taskStatusFilter : undefined,
+    taskType: taskTypeFilter !== 'all' ? taskTypeFilter : undefined,
+    assigneeId: assigneeFilter !== 'all' ? assigneeFilter : undefined,
+  }
 
   // Fetch external jobs
   const { data: externalJobsData, isLoading: externalLoading, refetch: refetchExternal } = useQuery({
-    queryKey: ['external-jobs-list'],
-    queryFn: () => externalJobsApi.list({ limit: '100' }),
+    queryKey: ['external-jobs-list', taskFilterParams],
+    queryFn: () => externalJobsApi.list({
+      limit: '100',
+      ...taskFilterParams,
+    }),
     refetchInterval: 5000,
     enabled: typeFilter === 'all' || typeFilter === 'external',
   })
 
   // Fetch batch jobs
   const { data: batchJobsData, isLoading: batchLoading, refetch: refetchBatch } = useQuery({
-    queryKey: ['batch-jobs-list'],
-    queryFn: () => batchJobsApi.list({ limit: 100 }),
+    queryKey: ['batch-jobs-list', taskFilterParams],
+    queryFn: () => batchJobsApi.list({
+      limit: 100,
+      ...taskFilterParams,
+    }),
     refetchInterval: 5000,
     enabled: typeFilter === 'all' || typeFilter === 'batch',
   })
 
-  // Fetch webhook deliveries
+  // Fetch webhook deliveries (no task filters for system webhooks)
   const { data: webhookDeliveriesData, isLoading: deliveriesLoading, refetch: refetchDeliveries } = useQuery({
     queryKey: ['webhook-deliveries-list'],
     queryFn: () => webhooksApi.getAllDeliveries({ limit: 100 }),
@@ -1156,8 +1191,11 @@ function RequestsList() {
 
   // Fetch webhook task attempts
   const { data: webhookAttemptsData, isLoading: attemptsLoading, refetch: refetchAttempts } = useQuery({
-    queryKey: ['webhook-attempts-list'],
-    queryFn: () => tasksApi.getWebhookAttempts({ limit: 100 }),
+    queryKey: ['webhook-attempts-list', taskFilterParams],
+    queryFn: () => tasksApi.getWebhookAttempts({
+      limit: 100,
+      ...taskFilterParams,
+    }),
     refetchInterval: 5000,
     enabled: typeFilter === 'all' || typeFilter === 'webhook_task',
   })
@@ -1309,6 +1347,62 @@ function RequestsList() {
             </SelectContent>
           </Select>
         </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Task Status:</span>
+          <Select value={taskStatusFilter} onValueChange={setTaskStatusFilter}>
+            <SelectTrigger className="w-[150px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="in_progress">In Progress</SelectItem>
+              <SelectItem value="completed">Completed</SelectItem>
+              <SelectItem value="failed">Failed</SelectItem>
+              <SelectItem value="cancelled">Cancelled</SelectItem>
+              <SelectItem value="blocked">Blocked</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {taskTypes.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Task Type:</span>
+            <Select value={taskTypeFilter} onValueChange={setTaskTypeFilter}>
+              <SelectTrigger className="w-[150px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Types</SelectItem>
+                {taskTypes.map((type: LookupValue) => (
+                  <SelectItem key={type.code} value={type.code}>
+                    {type.displayName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        {users.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Assigned To:</span>
+            <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
+              <SelectTrigger className="w-[150px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Users</SelectItem>
+                {users.map((user: User) => (
+                  <SelectItem key={user._id} value={user._id}>
+                    {user.displayName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
 
       {/* Content */}
