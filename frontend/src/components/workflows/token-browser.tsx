@@ -8,7 +8,6 @@ import {
 } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import {
   Plus,
@@ -101,8 +100,10 @@ export function TokenBrowser({
     setLoadingSamples(true)
     setFetchError(null)
     try {
-      // Get recent completed runs
-      const runsRes = await fetch(`${API_BASE}/workflow-runs?workflowId=${workflowId}&status=completed&limit=1`)
+      // Get recent completed runs - include credentials for auth
+      const runsRes = await fetch(`${API_BASE}/workflow-runs?workflowId=${workflowId}&status=completed&limit=1`, {
+        credentials: 'include',
+      })
       if (!runsRes.ok) {
         setFetchError(`Failed to fetch runs: ${runsRes.status}`)
         setLoadingSamples(false)
@@ -120,7 +121,9 @@ export function TokenBrowser({
 
       // Get tasks from the most recent run
       const runId = runs[0]._id
-      const runRes = await fetch(`${API_BASE}/workflow-runs/${runId}?includeTasks=true`)
+      const runRes = await fetch(`${API_BASE}/workflow-runs/${runId}?includeTasks=true`, {
+        credentials: 'include',
+      })
       if (!runRes.ok) {
         setFetchError(`Failed to fetch run details: ${runRes.status}`)
         setLoadingSamples(false)
@@ -380,7 +383,7 @@ export function TokenBrowser({
           </div>
         </div>
 
-        <ScrollArea className="h-[300px]">
+        <div className="max-h-[300px] overflow-y-auto overflow-x-hidden">
           <div className="p-2 space-y-3">
             {filteredCategories.map((category) => (
               <div key={category.name}>
@@ -427,7 +430,7 @@ export function TokenBrowser({
               </div>
             )}
           </div>
-        </ScrollArea>
+        </div>
 
         <div className="border-t p-2 bg-muted/30">
           <p className="text-xs text-muted-foreground">
