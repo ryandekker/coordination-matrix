@@ -431,7 +431,7 @@ const TaskRow = memo(function TaskRow({
         className={cn(depth > 0 && 'bg-muted/30')}
         data-state={isSelected ? 'selected' : undefined}
       >
-        <TableCell className="pl-3 pr-0">
+        <TableCell className="w-12 pl-3 pr-0">
           <div className="flex justify-center">
             <Checkbox checked={isSelected} onCheckedChange={onToggleSelect} className="h-5 w-5" />
           </div>
