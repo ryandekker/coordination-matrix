@@ -364,15 +364,14 @@ tasksRouter.get('/workflow-callbacks', async (req: Request, res: Response, next:
     const db = getDb();
     const { taskStatus, taskType, limit = '50', offset = '0' } = req.query;
 
-    // Find tasks that are part of workflow callbacks:
+    // Find tasks that are part of workflow execution:
     // - Tasks with externalConfig.callbackSecret (expecting callbacks)
-    // - External tasks that are part of a workflow run (can receive callbacks)
-    // - Foreach tasks that are part of a workflow run (receive items via callbacks)
+    // - ALL tasks that are part of a workflow run (includes children created via callbacks)
+    //   This is broader than just external/foreach to capture agent, manual, etc. children
     const filter: Record<string, unknown> = {
       $or: [
         { 'externalConfig.callbackSecret': { $exists: true } },
-        { workflowRunId: { $exists: true }, taskType: 'external' },
-        { workflowRunId: { $exists: true }, taskType: 'foreach' },
+        { workflowRunId: { $exists: true, $ne: null } },
       ],
     };
 
