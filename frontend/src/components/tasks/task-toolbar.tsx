@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useCallback } from 'react'
-import { Search, Plus, Filter, Columns, ChevronDown, X, Bookmark, Tag } from 'lucide-react'
+import { Search, Filter, Columns, ChevronDown, X, Bookmark, Tag } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -42,7 +42,6 @@ interface TaskToolbarProps {
   onViewChange: (viewId: string) => void
   onFilterChange: (filters: Record<string, unknown>) => void
   onSearchChange: (search: string) => void
-  onCreateTask: () => void
   onOpenColumnConfig: () => void
   onSaveSearch?: (name: string, filters: Record<string, unknown>, sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>) => Promise<void>
   onUpdateSearch?: (viewId: string, filters: Record<string, unknown>, sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>) => Promise<void>
@@ -60,7 +59,6 @@ export function TaskToolbar({
   onViewChange,
   onFilterChange,
   onSearchChange,
-  onCreateTask,
   onOpenColumnConfig,
   onSaveSearch,
   onUpdateSearch,
@@ -243,12 +241,12 @@ export function TaskToolbar({
   }, [onSearchChange, handleStatusFilter, handleUrgencyFilter, handleAssigneeFilter, handleTagFilter])
 
   return (
-    <div className="space-y-3">
-      {/* Top row: View selector, Search, and action buttons - doesn't wrap */}
-      <div className="flex items-center gap-4">
+    <div className="space-y-2">
+      {/* Single row toolbar */}
+      <div className="flex flex-wrap items-center gap-2">
         {/* View Selector */}
         <Select value={currentView?._id} onValueChange={onViewChange}>
-          <SelectTrigger className="w-48 flex-shrink-0">
+          <SelectTrigger className="w-40">
             <SelectValue placeholder="Select view" />
           </SelectTrigger>
           <SelectContent>
@@ -263,7 +261,7 @@ export function TaskToolbar({
         </Select>
 
         {/* Search */}
-        <div className={`relative transition-all duration-200 ${isSearchFocused || search ? 'flex-1 min-w-48 max-w-lg' : 'w-48 flex-shrink-0'}`}>
+        <div className={`relative transition-all duration-200 ${isSearchFocused || search ? 'w-64' : 'w-40'}`}>
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search tasks..."
@@ -271,27 +269,9 @@ export function TaskToolbar({
             onChange={(e) => onSearchChange(e.target.value)}
             onFocus={() => setIsSearchFocused(true)}
             onBlur={() => setIsSearchFocused(false)}
-            className="pl-9"
+            className="pl-9 h-9"
           />
         </div>
-
-        <div className="flex-1" />
-
-        {/* Column Config */}
-        <Button variant="outline" size="sm" onClick={onOpenColumnConfig} className="flex-shrink-0">
-          <Columns className="mr-2 h-4 w-4" />
-          Columns
-        </Button>
-
-        {/* Create Task */}
-        <Button onClick={onCreateTask} className="flex-shrink-0">
-          <Plus className="mr-2 h-4 w-4" />
-          New Task
-        </Button>
-      </div>
-
-      {/* Filter row - can wrap */}
-      <div className="flex flex-wrap items-center gap-2">
 
       {/* Status Filter */}
       <DropdownMenu>
@@ -403,9 +383,14 @@ export function TaskToolbar({
       {(onSaveSearch || onUpdateSearch) && hasActiveFilters && (
         <Button variant="outline" size="sm" onClick={openSaveModal}>
           <Bookmark className="mr-2 h-4 w-4" />
-          Save Search
+          Save
         </Button>
       )}
+
+      {/* Column Config */}
+      <Button variant="outline" size="sm" onClick={onOpenColumnConfig}>
+        <Columns className="h-4 w-4" />
+      </Button>
       </div>
 
       {/* Active Filters */}
