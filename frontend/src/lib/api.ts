@@ -856,6 +856,8 @@ export interface WorkflowCallback {
   body?: unknown
   receivedAt: string
   status: string
+  // Created tasks from this callback
+  createdTaskIds?: string[]
 }
 
 // Activity Logs API
