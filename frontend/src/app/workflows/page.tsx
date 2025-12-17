@@ -1047,7 +1047,7 @@ export default function WorkflowsPage() {
                     {row.getVisibleCells().map(cell => (
                       <TableCell
                         key={cell.id}
-                        className={cell.column.id === 'select' ? 'pl-3 pr-0' : undefined}
+                        className={cell.column.id === 'select' ? 'w-12 pl-3 pr-0' : undefined}
                       >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </TableCell>
