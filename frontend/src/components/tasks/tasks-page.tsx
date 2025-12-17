@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
+import { Plus } from 'lucide-react'
 import { TaskDataTable } from './task-data-table'
 import { TaskToolbar } from './task-toolbar'
 import { TaskModal } from './task-modal'
 import { ColumnConfigModal } from './column-config-modal'
+import { Button } from '@/components/ui/button'
 import { useTasks, useTask, useLookups, useFieldConfigs, useViews, useUsers, useCreateView, useUpdateView } from '@/hooks/use-tasks'
 import { Task, View, FieldConfig } from '@/lib/api'
 
@@ -325,6 +327,10 @@ export function TasksPage() {
             Manage AI workflow tasks and human-in-the-loop reviews
           </p>
         </div>
+        <Button onClick={handleCreateTask}>
+          <Plus className="mr-2 h-4 w-4" />
+          New Task
+        </Button>
       </div>
 
       <TaskToolbar
@@ -339,7 +345,6 @@ export function TasksPage() {
         onViewChange={handleViewChange}
         onFilterChange={handleFilterChange}
         onSearchChange={handleSearchChange}
-        onCreateTask={handleCreateTask}
         onOpenColumnConfig={handleOpenColumnConfig}
         onSaveSearch={handleSaveSearch}
         onUpdateSearch={handleUpdateSearch}
