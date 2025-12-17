@@ -103,6 +103,7 @@ export function TasksPage() {
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false)
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState<string[]>([])
+  const [expandAllEnabled, setExpandAllEnabled] = useState(false)
 
   // Fetch task from URL if taskId is provided
   const { data: taskFromUrl } = useTask(taskIdFromUrl)
@@ -135,6 +136,29 @@ export function TasksPage() {
     : FALLBACK_FIELD_CONFIGS
   const views = viewsData?.data || []
   const users = usersData?.data || []
+
+  // Check if any tasks have children (for expand all button)
+  const hasAnyChildren = useMemo(() => {
+    return tasks.some(t => t.children && t.children.length > 0)
+  }, [tasks])
+
+  // Threshold for large lists where expand all defaults to off
+  const LARGE_LIST_THRESHOLD = 50
+  const isLargeList = (pagination?.total ?? tasks.length) > LARGE_LIST_THRESHOLD
+
+  // Load expand all preference from localStorage on mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const savedPref = localStorage.getItem('taskList.expandAllPreference')
+    if (savedPref !== null && !isLargeList) {
+      setExpandAllEnabled(savedPref === 'true')
+    }
+  }, [isLargeList])
+
+  const handleExpandAllChange = useCallback((enabled: boolean) => {
+    setExpandAllEnabled(enabled)
+    localStorage.setItem('taskList.expandAllPreference', String(enabled))
+  }, [])
 
   // Sync view from URL
   useEffect(() => {
@@ -348,6 +372,9 @@ export function TasksPage() {
         onOpenColumnConfig={handleOpenColumnConfig}
         onSaveSearch={handleSaveSearch}
         onUpdateSearch={handleUpdateSearch}
+        hasAnyChildren={hasAnyChildren}
+        expandAllEnabled={expandAllEnabled}
+        onExpandAllChange={handleExpandAllChange}
       />
 
       <TaskDataTable
@@ -364,6 +391,8 @@ export function TasksPage() {
         onEditTask={handleEditTask}
         onCreateSubtask={handleCreateSubtask}
         onPageChange={setPage}
+        expandAllEnabled={expandAllEnabled}
+        onExpandAllChange={handleExpandAllChange}
       />
 
       <TaskModal
