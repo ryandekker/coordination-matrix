@@ -59,10 +59,14 @@ export function useCreateTask() {
 
   return useMutation({
     mutationFn: tasksApi.create,
-    onSuccess: () => {
+    onSuccess: (result) => {
       // Invalidate all task queries
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
       queryClient.invalidateQueries({ queryKey: ['task-tree'] })
+      // If this is a subtask, invalidate the parent's children query
+      if (result?.data?.parentId) {
+        queryClient.invalidateQueries({ queryKey: ['task-children', result.data.parentId] })
+      }
     },
   })
 }
