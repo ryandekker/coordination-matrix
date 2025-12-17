@@ -98,7 +98,7 @@ All responses follow this structure:
         // Task schemas
         TaskStatus: {
           type: 'string',
-          enum: ['pending', 'in_progress', 'waiting', 'on_hold', 'completed', 'failed', 'cancelled'],
+          enum: ['pending', 'in_progress', 'waiting', 'on_hold', 'completed', 'failed', 'cancelled', 'archived'],
         },
         Urgency: {
           type: 'string',
