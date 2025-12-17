@@ -127,14 +127,16 @@ interface TaskNodeProps {
   depth: number
   allTasks: Task[]
   onTaskClick: (task: Task) => void
+  stepType?: TaskType  // Override type from workflow step
 }
 
-function TaskNode({ task, depth, allTasks, onTaskClick }: TaskNodeProps) {
+function TaskNode({ task, depth, allTasks, onTaskClick, stepType }: TaskNodeProps) {
   const [isExpanded, setIsExpanded] = useState(true)
   const children = allTasks.filter(t => t.parentId === task._id)
   const hasChildren = children.length > 0
 
-  const taskType = ((task as any).taskType || 'standard') as TaskType
+  // Use stepType override if provided, otherwise fall back to task.taskType
+  const taskType = stepType || ((task as any).taskType || 'standard') as TaskType
   const typeConfig = TASK_TYPE_CONFIG[taskType] || TASK_TYPE_CONFIG.standard
   const TypeIcon = typeConfig.icon
   const statusConfig = TASK_STATUS_CONFIG[task.status] || TASK_STATUS_CONFIG.pending
@@ -225,6 +227,7 @@ function TaskNode({ task, depth, allTasks, onTaskClick }: TaskNodeProps) {
                   depth={depth + 1}
                   allTasks={allTasks}
                   onTaskClick={onTaskClick}
+                  stepType={stepType}
                 />
               ))}
             </div>
@@ -584,6 +587,7 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
                               !((t as any).workflowStepId && (t as any).workflowStepId !== step.id)
                             )}
                             onTaskClick={setSelectedTask}
+                            stepType={stepType}
                           />
                         ))}
                       </div>
