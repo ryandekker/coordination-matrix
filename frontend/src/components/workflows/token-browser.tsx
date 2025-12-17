@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Popover,
   PopoverContent,
@@ -85,6 +85,7 @@ export function TokenBrowser({
   const [sampleData, setSampleData] = useState<SampleData[]>([])
   const [loadingSamples, setLoadingSamples] = useState(false)
   const [fetchError, setFetchError] = useState<string | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   // Fetch sample data from past workflow runs when popover opens
   useEffect(() => {
@@ -356,13 +357,17 @@ export function TokenBrowser({
       </PopoverTrigger>
       <PopoverContent className="w-[420px] p-0" align="start">
         <div className="p-2 border-b">
-          <div className="flex items-center gap-2">
-            <Search className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+          <div className="flex items-center gap-2 bg-muted/50 rounded-md px-2">
+            <Search
+              className="h-4 w-4 text-muted-foreground flex-shrink-0 cursor-pointer"
+              onClick={() => searchInputRef.current?.focus()}
+            />
             <Input
+              ref={searchInputRef}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search tokens..."
-              className="h-8 border-0 p-0 focus-visible:ring-0"
+              className="h-8 border-0 p-0 focus-visible:ring-0 bg-transparent"
             />
             {loadingSamples && (
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground flex-shrink-0" />
@@ -370,7 +375,7 @@ export function TokenBrowser({
           </div>
         </div>
 
-        <div className="max-h-[400px] overflow-y-auto overflow-x-hidden">
+        <div className="max-h-[400px] overflow-y-auto overscroll-contain pointer-events-auto">
           <div className="p-2 space-y-3">
             {filteredCategories.map((category) => (
               <div key={category.name}>
@@ -390,7 +395,7 @@ export function TokenBrowser({
                           {wrapInBraces ? `{{${token.path}}}` : token.path}
                         </code>
                         {token.fromRun && (
-                          <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1 rounded">
+                          <span className="text-[10px] text-emerald-400 dark:text-emerald-400 bg-emerald-950/50 dark:bg-emerald-950/50 px-1 rounded">
                             from run
                           </span>
                         )}
