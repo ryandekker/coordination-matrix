@@ -65,6 +65,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { JsonViewer } from '@/components/ui/json-viewer'
 import { cn } from '@/lib/utils'
 import {
   batchJobsApi,
@@ -447,17 +448,17 @@ function ExternalJobDetail({ jobId }: { jobId: string }) {
         {job.payload && Object.keys(job.payload).length > 0 && (
           <div className="rounded-lg border bg-card p-4">
             <h2 className="font-semibold mb-2">Request Payload</h2>
-            <pre className="text-sm bg-muted rounded p-3 overflow-auto max-h-64">
-              {JSON.stringify(job.payload, null, 2)}
-            </pre>
+            <div className="bg-muted rounded p-3 overflow-auto max-h-64">
+              <JsonViewer data={job.payload} defaultExpanded={true} maxInitialDepth={2} />
+            </div>
           </div>
         )}
         {job.result && Object.keys(job.result).length > 0 && (
           <div className="rounded-lg border bg-card p-4">
             <h2 className="font-semibold mb-2">Response Result</h2>
-            <pre className="text-sm bg-muted rounded p-3 overflow-auto max-h-64">
-              {JSON.stringify(job.result, null, 2)}
-            </pre>
+            <div className="bg-muted rounded p-3 overflow-auto max-h-64">
+              <JsonViewer data={job.result} defaultExpanded={true} maxInitialDepth={2} />
+            </div>
           </div>
         )}
       </div>
@@ -975,9 +976,9 @@ function WebhookDeliveryDetail({ deliveryId }: { deliveryId: string }) {
       {delivery.payload && Object.keys(delivery.payload).length > 0 && (
         <div className="rounded-lg border bg-card p-4">
           <h2 className="font-semibold mb-2">Payload</h2>
-          <pre className="text-sm bg-muted rounded p-3 overflow-auto max-h-64">
-            {JSON.stringify(delivery.payload, null, 2)}
-          </pre>
+          <div className="bg-muted rounded p-3 overflow-auto max-h-64">
+            <JsonViewer data={delivery.payload} defaultExpanded={true} maxInitialDepth={2} />
+          </div>
         </div>
       )}
 

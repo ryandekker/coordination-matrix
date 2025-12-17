@@ -31,6 +31,7 @@ import { useCreateTask, useUpdateTask, useUsers, useWorkflows, useTasks } from '
 import { cn } from '@/lib/utils'
 import { TaskActivity } from './task-activity'
 import { WebhookTaskConfig } from './webhook-task-config'
+import { JsonViewer } from '@/components/ui/json-viewer'
 import {
   TASK_TYPE_CONFIG,
   getTaskTypeConfig,
@@ -1259,20 +1260,13 @@ export function TaskModal({
           </div>
         </div>
       ) : (
-        // View mode - key-value display
-        <div className="px-3 py-2 text-sm bg-muted/50 rounded-md border space-y-1.5 max-h-[calc(100vh-300px)] overflow-y-auto">
-          {task?.metadata && Object.keys(task.metadata).length > 0 ? (
-            Object.entries(task.metadata).map(([key, value]) => (
-              <div key={key} className="flex gap-2">
-                <span className="text-xs font-medium text-muted-foreground min-w-[80px]">{key}:</span>
-                <span className="text-xs break-all">
-                  {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                </span>
-              </div>
-            ))
-          ) : (
-            <span className="text-xs text-muted-foreground italic">No metadata</span>
-          )}
+        // View mode - collapsible tree view
+        <div className="px-3 py-2 text-sm bg-muted/50 rounded-md border max-h-[calc(100vh-300px)] overflow-y-auto">
+          <JsonViewer
+            data={task?.metadata}
+            defaultExpanded={true}
+            maxInitialDepth={2}
+          />
         </div>
       )}
     </div>

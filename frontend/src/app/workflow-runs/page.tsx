@@ -56,6 +56,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { Textarea } from '@/components/ui/textarea'
+import { JsonViewer } from '@/components/ui/json-viewer'
 import { cn } from '@/lib/utils'
 import { workflowRunsApi, workflowsApi, WorkflowRun, WorkflowRunStatus, Task, Workflow as WorkflowType } from '@/lib/api'
 
@@ -418,17 +419,17 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
           {run.inputPayload && Object.keys(run.inputPayload).length > 0 && (
             <div className="rounded-lg border bg-card p-4">
               <h2 className="font-semibold mb-2">Input Payload</h2>
-              <pre className="text-sm bg-muted rounded p-3 overflow-auto max-h-48">
-                {JSON.stringify(run.inputPayload, null, 2)}
-              </pre>
+              <div className="bg-muted rounded p-3 overflow-auto max-h-64">
+                <JsonViewer data={run.inputPayload} defaultExpanded={true} maxInitialDepth={2} />
+              </div>
             </div>
           )}
           {run.outputPayload && Object.keys(run.outputPayload).length > 0 && (
             <div className="rounded-lg border bg-card p-4">
               <h2 className="font-semibold mb-2">Output Payload</h2>
-              <pre className="text-sm bg-muted rounded p-3 overflow-auto max-h-48">
-                {JSON.stringify(run.outputPayload, null, 2)}
-              </pre>
+              <div className="bg-muted rounded p-3 overflow-auto max-h-64">
+                <JsonViewer data={run.outputPayload} defaultExpanded={true} maxInitialDepth={2} />
+              </div>
             </div>
           )}
         </div>
