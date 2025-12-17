@@ -69,6 +69,7 @@ export function TaskToolbar({
   const [saveName, setSaveName] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [saveMode, setSaveMode] = useState<'new' | 'update'>('new')
+  const [isSearchFocused, setIsSearchFocused] = useState(false)
 
   const statusOptions = lookups.task_status || []
   const urgencyOptions = lookups.urgency || []
@@ -261,12 +262,14 @@ export function TaskToolbar({
       </Select>
 
       {/* Search */}
-      <div className="relative flex-1 max-w-md">
+      <div className={`relative transition-all duration-200 ${isSearchFocused || search ? 'flex-1 max-w-lg' : 'w-48'}`}>
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           placeholder="Search tasks..."
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
+          onFocus={() => setIsSearchFocused(true)}
+          onBlur={() => setIsSearchFocused(false)}
           className="pl-9"
         />
       </div>
