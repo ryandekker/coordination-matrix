@@ -1040,7 +1040,7 @@ export default function WorkflowsPage() {
                         ? null
                         : flexRender(header.column.columnDef.header, header.getContext())}
                     </TableHead>
-                  ))}
+                  )})}
                 </TableRow>
               ))}
             </TableHeader>
