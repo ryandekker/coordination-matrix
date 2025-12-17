@@ -601,14 +601,6 @@ class WorkflowExecutionService {
 
     // Strip undefined values before insertion to prevent MongoDB validation errors
     const cleanTask = stripUndefined(task as unknown as Record<string, unknown>) as unknown as Task;
-
-    // Debug logging for MongoDB validation errors
-    console.log(`[createTaskForStep] Inserting task for step ${step.id}:`, JSON.stringify(cleanTask, (key, value) => {
-      if (value instanceof ObjectId) return `ObjectId(${value.toString()})`;
-      if (value instanceof Date) return value.toISOString();
-      return value;
-    }, 2));
-
     const result = await this.tasks.insertOne(cleanTask);
     const createdTask = { ...cleanTask, _id: result.insertedId } as Task;
 
@@ -2050,8 +2042,7 @@ class WorkflowExecutionService {
           await this.executeStepForTask(run, workflow, nextStep, childTask, itemPayload);
         } catch (err) {
           const mongoErr = err as { code?: number; errInfo?: { details?: unknown } };
-          console.error(`[WorkflowExecutionService] Failed to create child task:`, err);
-          console.error(`[WorkflowExecutionService] Step details:`, JSON.stringify(nextStep, null, 2));
+          console.error(`[WorkflowExecutionService] Failed to create child task for step ${nextStep.id}:`, err);
           if (mongoErr.errInfo?.details) {
             console.error(`[WorkflowExecutionService] Validation details:`, JSON.stringify(mongoErr.errInfo.details, null, 2));
           }
