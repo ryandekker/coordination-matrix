@@ -1024,10 +1024,17 @@ export default function WorkflowsPage() {
             <TableHeader>
               {table.getHeaderGroups().map(headerGroup => (
                 <TableRow key={headerGroup.id}>
-                  {headerGroup.headers.map(header => (
+                  {headerGroup.headers.map(header => {
+                    let className: string | undefined
+                    if (header.column.id === 'select') {
+                      className = 'w-12 pl-3 pr-0'
+                    } else if (header.column.id === 'expander') {
+                      className = 'w-10'
+                    }
+                    return (
                     <TableHead
                       key={header.id}
-                      className={header.id === 'select' ? 'w-12 pl-3 pr-0' : undefined}
+                      className={className}
                     >
                       {header.isPlaceholder
                         ? null
