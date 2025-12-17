@@ -505,7 +505,7 @@ export function TaskModal({
                 </SelectTrigger>
                 <SelectContent>
                   {Object.entries(TASK_TYPE_CONFIG)
-                    .filter(([key]) => !['webhook', 'trigger', 'manual'].includes(key)) // Filter out legacy/special types
+                    .filter(([key]) => !['webhook', 'trigger'].includes(key)) // Filter out legacy/internal types
                     .map(([key, config]) => {
                       const Icon = config.icon
                       return (
@@ -966,6 +966,7 @@ export function TaskModal({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="agent">Agent</SelectItem>
+                    <SelectItem value="manual">Manual</SelectItem>
                     <SelectItem value="external">External</SelectItem>
                     <SelectItem value="decision">Decision</SelectItem>
                   </SelectContent>
@@ -1144,6 +1145,13 @@ export function TaskModal({
         {currentTaskType === 'flow' && (
           <p className="text-xs text-muted-foreground italic">
             Flow tasks are workflow parent tasks that contain workflow steps.
+          </p>
+        )}
+
+        {/* Manual task - human review */}
+        {currentTaskType === 'manual' && (
+          <p className="text-xs text-muted-foreground italic">
+            Manual tasks require human review and action to complete.
           </p>
         )}
 
