@@ -4,6 +4,8 @@ import { useState, useCallback, useMemo, memo, useRef, useEffect } from 'react'
 import {
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
@@ -473,6 +475,10 @@ const TaskRow = memo(function TaskRow({
   )
 })
 
+// Threshold for "large lists" - expand all is off by default above this
+const LARGE_LIST_THRESHOLD = 50
+const EXPAND_ALL_STORAGE_KEY = 'taskList.expandAllPreference'
+
 export function TaskDataTable({
   tasks,
   fieldConfigs,
@@ -490,6 +496,53 @@ export function TaskDataTable({
 }: TaskDataTableProps) {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
+  const [expandAllEnabled, setExpandAllEnabled] = useState(false)
+
+  // Get task IDs that have children (for expand all functionality)
+  const tasksWithChildren = useMemo(() => {
+    return tasks.filter(t => t.children && t.children.length > 0).map(t => t._id)
+  }, [tasks])
+
+  // Determine if this is a large list (where expand all defaults to off)
+  const isLargeList = (pagination?.total ?? tasks.length) > LARGE_LIST_THRESHOLD
+
+  // Load expand all preference from localStorage on mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const savedPref = localStorage.getItem(EXPAND_ALL_STORAGE_KEY)
+    if (savedPref !== null) {
+      const shouldExpand = savedPref === 'true'
+      // Don't auto-expand for large lists even if preference is saved
+      if (!isLargeList && shouldExpand) {
+        setExpandAllEnabled(true)
+        setExpandedRows(new Set(tasksWithChildren))
+      }
+    }
+  }, []) // Only run on mount
+
+  // When tasks change, update expanded rows if expand all is enabled
+  useEffect(() => {
+    if (expandAllEnabled && !isLargeList) {
+      setExpandedRows(new Set(tasksWithChildren))
+    }
+  }, [tasksWithChildren, expandAllEnabled, isLargeList])
+
+  // Toggle expand all function
+  const toggleExpandAll = useCallback(() => {
+    setExpandAllEnabled(prev => {
+      const newValue = !prev
+      // Save preference to localStorage
+      localStorage.setItem(EXPAND_ALL_STORAGE_KEY, String(newValue))
+
+      if (newValue) {
+        setExpandedRows(new Set(tasksWithChildren))
+      } else {
+        setExpandedRows(new Set())
+      }
+      return newValue
+    })
+  }, [tasksWithChildren])
 
   const updateTask = useUpdateTask()
   const deleteTask = useDeleteTask()
@@ -551,12 +604,19 @@ export function TaskDataTable({
       const newExpanded = new Set(prev)
       if (newExpanded.has(taskId)) {
         newExpanded.delete(taskId)
+        // If we're collapsing a row, we're no longer in "expand all" mode
+        setExpandAllEnabled(false)
       } else {
         newExpanded.add(taskId)
+        // Check if all tasks with children are now expanded
+        const allExpanded = tasksWithChildren.every(id => newExpanded.has(id) || id === taskId)
+        if (allExpanded) {
+          setExpandAllEnabled(true)
+        }
       }
       return newExpanded
     })
-  }, [])
+  }, [tasksWithChildren])
 
   const toggleRowSelection = useCallback((taskId: string) => {
     setSelectedRows((prev) => {
@@ -686,6 +746,9 @@ export function TaskDataTable({
 
   const isUpdating = bulkUpdateTasks.isPending || bulkDeleteTasks.isPending
 
+  // Check if any tasks have children (for showing expand all button)
+  const hasAnyChildren = tasksWithChildren.length > 0
+
   return (
     <div className="space-y-4">
       {selectedRows.size > 0 && (
@@ -701,6 +764,41 @@ export function TaskDataTable({
           onClearSelection={clearSelection}
           isUpdating={isUpdating}
         />
+      )}
+      {/* Table controls bar */}
+      {hasAnyChildren && (
+        <div className="flex items-center justify-end gap-2">
+          <TooltipProvider>
+            <Tooltip delayDuration={300}>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={toggleExpandAll}
+                  className="h-8"
+                >
+                  {expandAllEnabled ? (
+                    <>
+                      <ChevronsDownUp className="h-4 w-4 mr-1" />
+                      Collapse All
+                    </>
+                  ) : (
+                    <>
+                      <ChevronsUpDown className="h-4 w-4 mr-1" />
+                      Expand All
+                    </>
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{expandAllEnabled ? 'Collapse all task children' : 'Expand all task children'}</p>
+                {isLargeList && !expandAllEnabled && (
+                  <p className="text-xs text-muted-foreground">Note: Large list - preference won&apos;t be auto-applied</p>
+                )}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
       )}
       <div className="rounded-md border">
         <Table>
