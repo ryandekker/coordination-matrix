@@ -349,16 +349,18 @@ export function TaskModal({
   }, [])
 
 
-  // Cleanup on close
+  // Cleanup on close - perform pending save instead of cancelling it
   useEffect(() => {
     if (!isOpen) {
       if (autoSaveTimeoutRef.current) {
         clearTimeout(autoSaveTimeoutRef.current)
+        // Perform the pending save immediately instead of cancelling
+        performAutoSave()
       }
       setMetadataError(null)
       setIsMetadataEditMode(false)
     }
-  }, [isOpen])
+  }, [isOpen, performAutoSave])
 
   const onSubmit = async (data: Record<string, unknown>) => {
     // Validate title is required for create
@@ -519,12 +521,18 @@ export function TaskModal({
           }}
         />
 
-        {/* Status - inline select */}
+        {/* Status - inline select with immediate save */}
         <Controller
           name="status"
           control={control}
           render={({ field }) => (
-            <Select value={field.value as string || ''} onValueChange={field.onChange}>
+            <Select value={field.value as string || ''} onValueChange={(value) => {
+              field.onChange(value)
+              // Immediately save status changes - don't wait for debounce
+              if (task) {
+                updateTask.mutate({ id: task._id, data: { status: value } })
+              }
+            }}>
               <SelectTrigger
                 className="h-7 w-auto gap-1.5 px-2 text-xs border-0 bg-transparent hover:bg-muted"
                 style={currentStatusOption?.color ? {
