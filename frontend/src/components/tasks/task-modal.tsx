@@ -39,7 +39,8 @@ import {
   DEFAULT_TASK_MODAL_TAB,
   type TaskModalTab,
 } from '@/lib/task-type-config'
-import { Settings2, Database, Activity } from 'lucide-react'
+import { Settings2, Database, Activity, Workflow, ExternalLink } from 'lucide-react'
+import Link from 'next/link'
 
 interface TaskModalProps {
   task: Task | null
@@ -638,6 +639,18 @@ export function TaskModal({
             </Select>
           )}
         />
+
+        {/* Workflow Run Link - show when task is part of a workflow run */}
+        {task.workflowRunId && (
+          <Link
+            href={`/workflow-runs?id=${task.workflowRunId}`}
+            className="flex items-center gap-1.5 px-2 h-7 text-xs rounded-md bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors"
+          >
+            <Workflow className="h-3.5 w-3.5" />
+            <span>Workflow Run</span>
+            <ExternalLink className="h-3 w-3 opacity-60" />
+          </Link>
+        )}
 
         {/* Spacer */}
         <div className="flex-1" />
