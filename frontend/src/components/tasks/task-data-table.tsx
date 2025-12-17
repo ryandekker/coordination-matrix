@@ -735,7 +735,7 @@ export function TaskDataTable({
         | { displayName?: string; name?: string }
         | undefined
       if (ref?.displayName || ref?.name) {
-        return ref.displayName || ref.name
+        return <div className="text-center">{ref.displayName || ref.name}</div>
       }
       // If no resolved value, show dash
       return <span className="block text-center text-muted-foreground">-</span>
@@ -755,13 +755,14 @@ export function TaskDataTable({
 
     // Handle date fields
     if (fieldConfig.fieldType === 'datetime' || fieldConfig.fieldType === 'date') {
-      return formatDateTime(value as string)
+      const formatted = formatDateTime(value as string)
+      return <div className="text-center">{formatted}</div>
     }
 
     // Handle tags
     if (fieldConfig.fieldType === 'tags' && Array.isArray(value)) {
       return (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex justify-center flex-wrap gap-1">
           {(value as string[]).slice(0, 3).map((tag) => (
             <Badge key={tag} variant="secondary" className="text-xs">
               {tag}
@@ -778,13 +779,13 @@ export function TaskDataTable({
 
     // Handle number fields
     if (fieldConfig.fieldType === 'number') {
-      return value?.toString() || '0'
+      return <div className="text-center">{value?.toString() || '0'}</div>
     }
 
     if (value === null || value === undefined || value === '') {
       return <span className="block text-center text-muted-foreground">-</span>
     }
-    return value?.toString()
+    return <div className="text-center">{value?.toString()}</div>
   }, [])
 
   if (isLoading) {
