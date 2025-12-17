@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useCallback } from 'react'
-import { Search, Filter, Columns, ChevronDown, X, Bookmark, Tag } from 'lucide-react'
+import { Search, Filter, Columns, ChevronDown, X, Bookmark, Tag, ChevronsDownUp, ChevronsUpDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -45,6 +45,9 @@ interface TaskToolbarProps {
   onOpenColumnConfig: () => void
   onSaveSearch?: (name: string, filters: Record<string, unknown>, sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>) => Promise<void>
   onUpdateSearch?: (viewId: string, filters: Record<string, unknown>, sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>) => Promise<void>
+  hasAnyChildren?: boolean
+  expandAllEnabled?: boolean
+  onExpandAllChange?: (enabled: boolean) => void
 }
 
 export function TaskToolbar({
@@ -62,6 +65,9 @@ export function TaskToolbar({
   onOpenColumnConfig,
   onSaveSearch,
   onUpdateSearch,
+  hasAnyChildren,
+  expandAllEnabled,
+  onExpandAllChange,
 }: TaskToolbarProps) {
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false)
   const [saveName, setSaveName] = useState('')
@@ -384,6 +390,22 @@ export function TaskToolbar({
         <Button variant="outline" size="sm" onClick={openSaveModal}>
           <Bookmark className="mr-2 h-4 w-4" />
           Save
+        </Button>
+      )}
+
+      {/* Expand/Collapse All */}
+      {hasAnyChildren && onExpandAllChange && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onExpandAllChange(!expandAllEnabled)}
+          title={expandAllEnabled ? 'Collapse all' : 'Expand all'}
+        >
+          {expandAllEnabled ? (
+            <ChevronsDownUp className="h-4 w-4" />
+          ) : (
+            <ChevronsUpDown className="h-4 w-4" />
+          )}
         </Button>
       )}
 
