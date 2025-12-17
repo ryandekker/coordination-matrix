@@ -13,6 +13,9 @@ import {
   Copy,
   ExternalLink,
   Plus,
+  X,
+  CheckCircle,
+  AlertCircle,
 } from 'lucide-react'
 import {
   Table,
@@ -34,6 +37,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -41,7 +51,7 @@ import {
 } from '@/components/ui/tooltip'
 import { EditableCell } from './editable-cell'
 import { Task, FieldConfig, LookupValue, User } from '@/lib/api'
-import { useTaskChildren, useUpdateTask, useDeleteTask } from '@/hooks/use-tasks'
+import { useTaskChildren, useUpdateTask, useDeleteTask, useBulkUpdateTasks, useBulkDeleteTasks, useLookups } from '@/hooks/use-tasks'
 import { formatDateTime, cn } from '@/lib/utils'
 import { TASK_TYPE_CONFIG, getTaskTypeConfig } from '@/lib/task-type-config'
 
@@ -60,7 +70,7 @@ const TaskTypeIcon = memo(function TaskTypeIcon({ taskType, batchCounters }: { t
     <TooltipProvider>
       <Tooltip delayDuration={300}>
         <TooltipTrigger asChild>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center justify-center gap-1">
             <Icon className={cn('h-4 w-4', config.color)} />
             {progressText && (
               <span className="text-xs text-muted-foreground">{progressText}</span>
@@ -72,6 +82,85 @@ const TaskTypeIcon = memo(function TaskTypeIcon({ taskType, batchCounters }: { t
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
+  )
+})
+
+// Bulk actions bar component
+const BulkActionsBar = memo(function BulkActionsBar({
+  selectedCount,
+  lookups,
+  onStatusChange,
+  onPriorityChange,
+  onDelete,
+  onClearSelection,
+  isUpdating,
+}: {
+  selectedCount: number
+  lookups: Record<string, LookupValue[]>
+  onStatusChange: (status: string) => void
+  onPriorityChange: (priority: string) => void
+  onDelete: () => void
+  onClearSelection: () => void
+  isUpdating: boolean
+}) {
+  const statusOptions = lookups['taskStatus'] || []
+  const urgencyOptions = lookups['urgency'] || []
+
+  return (
+    <div className="flex items-center gap-3 p-3 bg-muted/50 border rounded-md mb-4">
+      <div className="flex items-center gap-2">
+        <CheckCircle className="h-4 w-4 text-primary" />
+        <span className="text-sm font-medium">{selectedCount} selected</span>
+      </div>
+      <div className="h-4 w-px bg-border" />
+      <div className="flex items-center gap-2">
+        <Select onValueChange={onStatusChange} disabled={isUpdating}>
+          <SelectTrigger className="h-8 w-[140px]">
+            <SelectValue placeholder="Set status" />
+          </SelectTrigger>
+          <SelectContent>
+            {statusOptions.map((status) => (
+              <SelectItem key={status._id} value={status.code}>
+                {status.displayName}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select onValueChange={onPriorityChange} disabled={isUpdating}>
+          <SelectTrigger className="h-8 w-[140px]">
+            <SelectValue placeholder="Set urgency" />
+          </SelectTrigger>
+          <SelectContent>
+            {urgencyOptions.map((urgency) => (
+              <SelectItem key={urgency._id} value={urgency.code}>
+                {urgency.displayName}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="h-4 w-px bg-border" />
+      <Button
+        variant="destructive"
+        size="sm"
+        onClick={onDelete}
+        disabled={isUpdating}
+        className="h-8"
+      >
+        <Trash2 className="h-4 w-4 mr-1" />
+        Delete
+      </Button>
+      <div className="flex-1" />
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onClearSelection}
+        className="h-8"
+      >
+        <X className="h-4 w-4 mr-1" />
+        Clear
+      </Button>
+    </div>
   )
 })
 
@@ -374,6 +463,32 @@ export function TaskDataTable({
 
   const updateTask = useUpdateTask()
   const deleteTask = useDeleteTask()
+  const bulkUpdateTasks = useBulkUpdateTasks()
+  const bulkDeleteTasks = useBulkDeleteTasks()
+
+  const clearSelection = useCallback(() => {
+    setSelectedRows(new Set())
+  }, [])
+
+  const handleBulkStatusChange = useCallback(async (status: string) => {
+    const taskIds = Array.from(selectedRows)
+    await bulkUpdateTasks.mutateAsync({ taskIds, updates: { status } })
+    clearSelection()
+  }, [selectedRows, bulkUpdateTasks, clearSelection])
+
+  const handleBulkPriorityChange = useCallback(async (urgency: string) => {
+    const taskIds = Array.from(selectedRows)
+    await bulkUpdateTasks.mutateAsync({ taskIds, updates: { urgency } })
+    clearSelection()
+  }, [selectedRows, bulkUpdateTasks, clearSelection])
+
+  const handleBulkDelete = useCallback(async () => {
+    if (confirm(`Are you sure you want to delete ${selectedRows.size} task(s)?`)) {
+      const taskIds = Array.from(selectedRows)
+      await bulkDeleteTasks.mutateAsync(taskIds)
+      clearSelection()
+    }
+  }, [selectedRows, bulkDeleteTasks, clearSelection])
 
   // Memoized field config map for quick lookup
   const fieldConfigMap = useMemo(
@@ -527,8 +642,21 @@ export function TaskDataTable({
     )
   }
 
+  const isUpdating = bulkUpdateTasks.isPending || bulkDeleteTasks.isPending
+
   return (
     <div className="space-y-4">
+      {selectedRows.size > 0 && (
+        <BulkActionsBar
+          selectedCount={selectedRows.size}
+          lookups={lookups}
+          onStatusChange={handleBulkStatusChange}
+          onPriorityChange={handleBulkPriorityChange}
+          onDelete={handleBulkDelete}
+          onClearSelection={clearSelection}
+          isUpdating={isUpdating}
+        />
+      )}
       <div className="rounded-md border">
         <Table>
           <TableHeader>
