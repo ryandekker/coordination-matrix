@@ -46,17 +46,23 @@ router.get('/stream', (req: Request, res: Response) => {
         timestamp: event.timestamp,
         changes: event.changes,
         actorType: event.actorType,
-        // Include minimal task info to enable targeted updates
+        // Include full task data for optimistic cache updates
         task: event.task ? {
           _id: event.task._id.toString(),
           title: event.task.title,
+          summary: event.task.summary,
           status: event.task.status,
           urgency: event.task.urgency,
           parentId: event.task.parentId?.toString() || null,
           assigneeId: event.task.assigneeId?.toString() || null,
+          createdById: event.task.createdById?.toString() || null,
           workflowId: event.task.workflowId?.toString() || null,
+          workflowRunId: event.task.workflowRunId?.toString() || null,
           taskType: event.task.taskType,
           batchCounters: event.task.batchCounters,
+          metadata: event.task.metadata,
+          children: event.task.children || [],
+          createdAt: event.task.createdAt,
           updatedAt: event.task.updatedAt,
         } : undefined,
       };

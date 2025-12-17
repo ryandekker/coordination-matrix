@@ -37,9 +37,11 @@ class EventStreamManager {
   private listeners: Map<string, Set<(event: TaskEventData) => void>> = new Map()
   private connectionListeners: Set<(connected: boolean) => void> = new Set()
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null
+  private disconnectTimeout: ReturnType<typeof setTimeout> | null = null
   private reconnectAttempts = 0
   private maxReconnectAttempts = 10
   private baseReconnectDelay = 1000
+  private disconnectDelay = 500 // Debounce delay for disconnect (handles React 18 StrictMode)
   private isConnecting = false
   private _isConnected = false
 
@@ -157,6 +159,12 @@ class EventStreamManager {
     }
     this.listeners.get(eventType)!.add(callback)
 
+    // Cancel any pending disconnect (handles React 18 StrictMode remounting)
+    if (this.disconnectTimeout) {
+      clearTimeout(this.disconnectTimeout)
+      this.disconnectTimeout = null
+    }
+
     // Auto-connect when first subscriber joins
     if (!this.eventSource && !this.isConnecting) {
       this.connect()
@@ -171,9 +179,15 @@ class EventStreamManager {
         this.listeners.delete(eventType)
       }
 
-      // Auto-disconnect when no more listeners
-      if (this.getTotalListenerCount() === 0) {
-        this.close()
+      // Schedule disconnect when no more listeners (debounced for React 18 StrictMode)
+      if (this.getTotalListenerCount() === 0 && !this.disconnectTimeout) {
+        this.disconnectTimeout = setTimeout(() => {
+          this.disconnectTimeout = null
+          // Double-check no listeners were added during the delay
+          if (this.getTotalListenerCount() === 0) {
+            this.close()
+          }
+        }, this.disconnectDelay)
       }
     }
   }
@@ -241,12 +255,98 @@ export function useEventStream(options?: {
     // Update React Query cache based on event type
     switch (event.type) {
       case 'task.created':
-        // Invalidate task lists to show new task
-        queryClient.invalidateQueries({ queryKey: ['tasks'] })
-        queryClient.invalidateQueries({ queryKey: ['task-tree'] })
-        // If it has a parent, invalidate that parent's children
-        if (event.task?.parentId) {
-          queryClient.invalidateQueries({ queryKey: ['task-children', event.task.parentId] })
+        // Optimistically add the new task to cache if we have task data
+        if (event.task && event.task._id) {
+          const newTask = event.task as Task
+
+          // Add to individual task cache
+          queryClient.setQueryData(['task', event.taskId], { data: newTask })
+
+          // Add to task list caches - only add root tasks to main list
+          if (!newTask.parentId) {
+            queryClient.setQueriesData({ queryKey: ['tasks'] }, (old: unknown) => {
+              if (!old) return old
+              const oldData = old as { data: Task[]; pagination: { total: number; page: number; limit: number; pages: number } }
+              // Check if task already exists (avoid duplicates)
+              if (oldData.data.some((t: Task) => t._id === newTask._id)) {
+                return oldData
+              }
+              // Add new task at the beginning (most recent first)
+              return {
+                ...oldData,
+                data: [newTask, ...oldData.data],
+                pagination: {
+                  ...oldData.pagination,
+                  total: oldData.pagination.total + 1
+                }
+              }
+            })
+          } else {
+            // For subtasks, add to parent's children in the cache
+            // First update the parent task's children array
+            queryClient.setQueriesData({ queryKey: ['tasks'] }, (old: unknown) => {
+              if (!old) return old
+              const oldData = old as { data: Task[]; pagination: unknown }
+              return {
+                ...oldData,
+                data: oldData.data.map((task: Task) => {
+                  if (task._id === newTask.parentId) {
+                    const existingChildren = task.children || []
+                    // Avoid duplicates
+                    if (existingChildren.some((c: Task) => c._id === newTask._id)) {
+                      return task
+                    }
+                    return {
+                      ...task,
+                      children: [...existingChildren, newTask]
+                    }
+                  }
+                  return task
+                })
+              }
+            })
+            // Also update task-children cache if it exists
+            queryClient.setQueriesData({ queryKey: ['task-children', newTask.parentId] }, (old: unknown) => {
+              if (!old) return old
+              const oldData = old as { data: Task[] }
+              if (oldData.data.some((t: Task) => t._id === newTask._id)) {
+                return oldData
+              }
+              return {
+                ...oldData,
+                data: [...oldData.data, newTask]
+              }
+            })
+          }
+
+          // Update task tree caches
+          queryClient.setQueriesData({ queryKey: ['task-tree'] }, (old: unknown) => {
+            if (!old) return old
+            const oldData = old as { data: Task[] }
+            if (!newTask.parentId) {
+              // Add as root task
+              if (oldData.data.some((t: Task) => t._id === newTask._id)) {
+                return oldData
+              }
+              return {
+                ...oldData,
+                data: [newTask, ...oldData.data]
+              }
+            } else {
+              // Add as child to parent in tree
+              return {
+                ...oldData,
+                data: addTaskToTree(oldData.data, newTask.parentId, newTask)
+              }
+            }
+          })
+        } else {
+          // Fall back to invalidation if we don't have full task data
+          queryClient.invalidateQueries({ queryKey: ['tasks'] })
+          queryClient.invalidateQueries({ queryKey: ['task-tree'] })
+          if (event.task?.parentId) {
+            queryClient.invalidateQueries({ queryKey: ['task-children', event.task.parentId] })
+          }
         }
         break
 
@@ -367,6 +467,30 @@ function updateTaskInTree(tasks: Task[], taskId: string, updates: Partial<Task>)
       return {
         ...task,
         children: updateTaskInTree(task.children, taskId, updates)
+      }
+    }
+    return task
+  })
+}
+
+// Helper to recursively add a task to a parent in a tree structure
+function addTaskToTree(tasks: Task[], parentId: string, newTask: Task): Task[] {
+  return tasks.map(task => {
+    if (task._id === parentId) {
+      const existingChildren = task.children || []
+      // Avoid duplicates
+      if (existingChildren.some((c: Task) => c._id === newTask._id)) {
+        return task
+      }
+      return {
+        ...task,
+        children: [...existingChildren, newTask]
+      }
+    }
+    if (task.children && task.children.length > 0) {
+      return {
+        ...task,
+        children: addTaskToTree(task.children, parentId, newTask)
       }
     }
     return task
