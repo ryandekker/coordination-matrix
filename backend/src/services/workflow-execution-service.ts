@@ -351,8 +351,15 @@ class WorkflowExecutionService {
   ): Promise<Task> {
     const now = new Date();
 
+    // Resolve root task title from template if provided
+    const defaultTitle = `Workflow: ${workflow.name}`;
+    let taskTitle = defaultTitle;
+    if (workflow.rootTaskTitleTemplate) {
+      taskTitle = this.resolveTitleTemplate(workflow.rootTaskTitleTemplate, run.inputPayload, defaultTitle);
+    }
+
     const task: Omit<Task, '_id'> = {
-      title: `Workflow: ${workflow.name}`,
+      title: taskTitle,
       status: 'in_progress',
       parentId: null,
       workflowId: workflow._id,
@@ -521,10 +528,16 @@ class WorkflowExecutionService {
     // Apply run-level task defaults, then step-specific overrides
     const runDefaults = this.applyTaskDefaults(run, now);
 
+    // Resolve title from template if provided, otherwise use step name
+    let taskTitle = step.name || `Step ${step.id || 'Unknown'}`;
+    if (step.titleTemplate) {
+      taskTitle = this.resolveTitleTemplate(step.titleTemplate, inputPayload, step.name);
+    }
+
     // Build task object, only including optional string fields if they have values
     // This prevents MongoDB validation errors for undefined string fields
     const task: Omit<Task, '_id'> = {
-      title: step.name || `Step ${step.id || 'Unknown'}`,
+      title: taskTitle,
       status: initialStatus,
       parentId: parentTask._id,
       workflowId: workflow._id,
@@ -1322,6 +1335,64 @@ class WorkflowExecutionService {
     }
 
     return current;
+  }
+
+  /**
+   * Resolves a title template string by replacing {{variable}} placeholders.
+   * Supports:
+   *   {{input.path.to.value}} - Value from input payload
+   *   {{item}} or {{_item}} - Current item in foreach loop
+   *   {{_index}} - Current index in foreach loop
+   *   {{_total}} - Total count in foreach loop
+   *   {{anyVariable}} - Direct lookup from input payload
+   */
+  private resolveTitleTemplate(
+    template: string,
+    inputPayload?: Record<string, unknown>,
+    fallbackTitle?: string
+  ): string {
+    if (!template) return fallbackTitle || '';
+
+    let result = template;
+
+    // Replace all {{...}} patterns
+    result = result.replace(/\{\{([^}]+)\}\}/g, (match, path) => {
+      const trimmedPath = path.trim();
+
+      // Handle input.* prefix explicitly
+      if (trimmedPath.startsWith('input.')) {
+        const inputPath = trimmedPath.substring(6); // Remove 'input.' prefix
+        const value = this.getValueByPath(inputPayload, inputPath);
+        return value !== undefined && value !== null ? String(value) : '';
+      }
+
+      // Handle direct property lookup (for item, _index, _total, etc.)
+      const value = this.getValueByPath(inputPayload, trimmedPath);
+      if (value !== undefined && value !== null) {
+        // For objects, provide a brief representation
+        if (typeof value === 'object') {
+          // Try to get a meaningful identifier from the object
+          const obj = value as Record<string, unknown>;
+          if (obj.name) return String(obj.name);
+          if (obj.title) return String(obj.title);
+          if (obj.id) return String(obj.id);
+          if (obj._id) return String(obj._id);
+          // Fallback to JSON for simple objects
+          return JSON.stringify(value);
+        }
+        return String(value);
+      }
+
+      // If not found, return empty string (variable not available)
+      return '';
+    });
+
+    // If the result is empty after substitution, use fallback
+    if (!result.trim()) {
+      return fallbackTitle || template;
+    }
+
+    return result;
   }
 
   // ============================================================================
