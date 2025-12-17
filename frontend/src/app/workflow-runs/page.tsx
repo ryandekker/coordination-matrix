@@ -28,8 +28,6 @@ import {
   User,
   X,
   CircleDashed,
-  ExternalLink,
-  FileText,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -121,15 +119,14 @@ function formatDuration(start: string | null | undefined, end: string | null | u
   return `${Math.round(durationMs / 3600000)}h`
 }
 
-// Task tree node component
+// Task tree node component - navigates directly to task page
 interface TaskNodeProps {
   task: Task
   depth: number
   allTasks: Task[]
-  onTaskClick?: (task: Task) => void
 }
 
-function TaskNode({ task, depth, allTasks, onTaskClick }: TaskNodeProps) {
+function TaskNode({ task, depth, allTasks }: TaskNodeProps) {
   const [isExpanded, setIsExpanded] = useState(true)
   const children = allTasks.filter(t => t.parentId === task._id)
   const hasChildren = children.length > 0
@@ -144,18 +141,14 @@ function TaskNode({ task, depth, allTasks, onTaskClick }: TaskNodeProps) {
       <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
         <div
           className={cn(
-            'flex items-center gap-2 p-2 rounded-lg border transition-colors cursor-pointer',
+            'flex items-center gap-2 p-2 rounded-lg border transition-colors',
             statusConfig.bgColor,
             'hover:bg-muted/50'
           )}
           style={{ marginLeft: `${depth * 24}px` }}
-          onClick={(e) => {
-            e.stopPropagation()
-            onTaskClick?.(task)
-          }}
         >
           {hasChildren ? (
-            <CollapsibleTrigger asChild onClick={(e) => e.stopPropagation()}>
+            <CollapsibleTrigger asChild>
               <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
                 {isExpanded ? (
                   <ChevronDown className="h-4 w-4" />
@@ -172,9 +165,13 @@ function TaskNode({ task, depth, allTasks, onTaskClick }: TaskNodeProps) {
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <span className="font-medium truncate hover:underline">
+              <Link
+                href={`/tasks?taskId=${task._id}`}
+                className="font-medium truncate hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
                 {task.title}
-              </span>
+              </Link>
               <Badge variant="outline" className={cn('text-xs flex-shrink-0', statusConfig.color)}>
                 {task.status.replace('_', ' ')}
               </Badge>
@@ -227,7 +224,6 @@ function TaskNode({ task, depth, allTasks, onTaskClick }: TaskNodeProps) {
                   task={child}
                   depth={depth + 1}
                   allTasks={allTasks}
-                  onTaskClick={onTaskClick}
                 />
               ))}
             </div>
@@ -238,12 +234,25 @@ function TaskNode({ task, depth, allTasks, onTaskClick }: TaskNodeProps) {
   )
 }
 
+// Helper to get the effective step type from a workflow step
+function getStepType(step: any): TaskType {
+  // Check stepType first (new format)
+  if (step.stepType) {
+    return step.stepType as TaskType
+  }
+  // Check execution mode (older format)
+  if (step.execution === 'manual' || step.type === 'manual') {
+    return 'manual'
+  }
+  // Default to agent
+  return 'agent'
+}
+
 // Detail view component
 function WorkflowRunDetail({ runId }: { runId: string }) {
   const router = useRouter()
   const queryClient = useQueryClient()
   const [cancelConfirm, setCancelConfirm] = useState(false)
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['workflow-run', runId],
@@ -388,57 +397,96 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
 
       <div className="rounded-lg border bg-card p-4">
         <h2 className="font-semibold mb-3">Step Progress</h2>
-        <div className="flex items-center gap-4 flex-wrap">
-          <div className="flex items-center gap-2">
-            <CheckCircle className="h-4 w-4 text-green-500" />
-            <span className="text-sm">{run.completedStepIds.length} steps completed</span>
-          </div>
-          {run.currentStepIds.length > 0 && (
-            <div className="flex items-center gap-2">
-              <Play className="h-4 w-4 text-blue-500" />
-              <span className="text-sm">{run.currentStepIds.length} steps in progress</span>
-            </div>
-          )}
-          {workflow?.steps && (workflow.steps.length - run.completedStepIds.length - run.currentStepIds.length - (run.failedStepId ? 1 : 0)) > 0 && (
-            <div className="flex items-center gap-2">
-              <Clock className="h-4 w-4 text-gray-400" />
-              <span className="text-sm text-muted-foreground">
-                {workflow.steps.length - run.completedStepIds.length - run.currentStepIds.length - (run.failedStepId ? 1 : 0)} steps pending
-              </span>
-            </div>
-          )}
-        </div>
+        {(() => {
+          // Build step-to-tasks map for deriving status from actual tasks
+          const stepToTasks = new Map<string, Task[]>()
+          tasks.forEach(task => {
+            const stepId = (task as any).workflowStepId
+            if (stepId) {
+              const existing = stepToTasks.get(stepId) || []
+              existing.push(task)
+              stepToTasks.set(stepId, existing)
+            }
+          })
 
-        {workflow?.steps && workflow.steps.length > 0 && (
-          <div className="mt-4">
-            <div className="flex flex-wrap gap-2">
-              {workflow.steps.map((step) => {
-                const isCompleted = run.completedStepIds.includes(step.id)
-                const isCurrent = run.currentStepIds.includes(step.id)
-                const isFailed = run.failedStepId === step.id
-                const isPending = !isCompleted && !isCurrent && !isFailed
+          const steps = workflow?.steps || []
 
-                return (
-                  <Badge
-                    key={step.id}
-                    variant="outline"
-                    className={cn(
-                      'text-xs',
-                      isCompleted && 'bg-green-50 text-green-700 border-green-300 dark:bg-green-950/50 dark:text-green-400 dark:border-green-700',
-                      isCurrent && 'bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-700',
-                      isFailed && 'bg-red-50 text-red-700 border-red-300 dark:bg-red-950/50 dark:text-red-400 dark:border-red-700',
-                      isPending && 'bg-gray-100 text-gray-400 border-gray-200 dark:bg-gray-800/50 dark:text-gray-500 dark:border-gray-700'
-                    )}
-                    title={isPending ? 'Not started yet' : undefined}
-                  >
-                    {isPending && <Clock className="h-3 w-3 mr-1 inline" />}
-                    {step.name}
-                  </Badge>
-                )
-              })}
-            </div>
-          </div>
-        )}
+          // Calculate derived statuses for each step
+          const stepStatuses = steps.map(step => {
+            const stepTasks = stepToTasks.get(step.id) || []
+            const hasTasks = stepTasks.length > 0
+
+            // Derive status from tasks if available, otherwise use run's tracking
+            const tasksDerivedCompleted = hasTasks && stepTasks.every(t => t.status === 'completed')
+            const tasksDerivedInProgress = hasTasks && stepTasks.some(t => t.status === 'in_progress' || t.status === 'waiting')
+            const tasksDerivedFailed = hasTasks && stepTasks.some(t => t.status === 'failed')
+
+            const isCompleted = tasksDerivedCompleted || (!hasTasks && run.completedStepIds.includes(step.id))
+            const isCurrent = !isCompleted && (tasksDerivedInProgress || (!hasTasks && run.currentStepIds.includes(step.id)))
+            const isFailed = tasksDerivedFailed || run.failedStepId === step.id
+            const isPending = !isCompleted && !isCurrent && !isFailed
+
+            return { step, isCompleted, isCurrent, isFailed, isPending }
+          })
+
+          const completedCount = stepStatuses.filter(s => s.isCompleted).length
+          const inProgressCount = stepStatuses.filter(s => s.isCurrent).length
+          const failedCount = stepStatuses.filter(s => s.isFailed).length
+          const pendingCount = stepStatuses.filter(s => s.isPending).length
+
+          return (
+            <>
+              <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  <span className="text-sm">{completedCount} steps completed</span>
+                </div>
+                {inProgressCount > 0 && (
+                  <div className="flex items-center gap-2">
+                    <Play className="h-4 w-4 text-blue-500" />
+                    <span className="text-sm">{inProgressCount} steps in progress</span>
+                  </div>
+                )}
+                {failedCount > 0 && (
+                  <div className="flex items-center gap-2">
+                    <XCircle className="h-4 w-4 text-red-500" />
+                    <span className="text-sm">{failedCount} steps failed</span>
+                  </div>
+                )}
+                {pendingCount > 0 && (
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-gray-400" />
+                    <span className="text-sm text-muted-foreground">{pendingCount} steps pending</span>
+                  </div>
+                )}
+              </div>
+
+              {steps.length > 0 && (
+                <div className="mt-4">
+                  <div className="flex flex-wrap gap-2">
+                    {stepStatuses.map(({ step, isCompleted, isCurrent, isFailed, isPending }) => (
+                      <Badge
+                        key={step.id}
+                        variant="outline"
+                        className={cn(
+                          'text-xs',
+                          isCompleted && 'bg-green-50 text-green-700 border-green-300 dark:bg-green-950/50 dark:text-green-400 dark:border-green-700',
+                          isCurrent && 'bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-700',
+                          isFailed && 'bg-red-50 text-red-700 border-red-300 dark:bg-red-950/50 dark:text-red-400 dark:border-red-700',
+                          isPending && 'bg-gray-100 text-gray-400 border-gray-200 dark:bg-gray-800/50 dark:text-gray-500 dark:border-gray-700'
+                        )}
+                        title={isPending ? 'Not started yet' : undefined}
+                      >
+                        {isPending && <Clock className="h-3 w-3 mr-1 inline" />}
+                        {step.name}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )
+        })()}
       </div>
 
       <div className="rounded-lg border bg-card p-4">
@@ -480,12 +528,18 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
               {steps.map((step, index) => {
                 const stepTasks = stepToTasks.get(step.id) || []
                 const hasTasks = stepTasks.length > 0
-                const isCompleted = run.completedStepIds.includes(step.id)
-                const isCurrent = run.currentStepIds.includes(step.id)
-                const isFailed = run.failedStepId === step.id
-                const isPending = !isCompleted && !isCurrent && !isFailed && !hasTasks
 
-                const stepType = ((step as any).stepType || 'agent') as TaskType
+                // Derive step status from tasks if available, otherwise use run's tracking
+                const tasksDerivedCompleted = hasTasks && stepTasks.every(t => t.status === 'completed')
+                const tasksDerivedInProgress = hasTasks && stepTasks.some(t => t.status === 'in_progress' || t.status === 'waiting')
+                const tasksDerivedFailed = hasTasks && stepTasks.some(t => t.status === 'failed')
+
+                const isCompleted = tasksDerivedCompleted || run.completedStepIds.includes(step.id)
+                const isCurrent = !isCompleted && (tasksDerivedInProgress || run.currentStepIds.includes(step.id))
+                const isFailed = tasksDerivedFailed || run.failedStepId === step.id
+                const isPending = !isCompleted && !isCurrent && !isFailed
+
+                const stepType = getStepType(step)
                 const typeConfig = TASK_TYPE_CONFIG[stepType] || TASK_TYPE_CONFIG.standard
                 const TypeIcon = typeConfig.icon
 
@@ -523,7 +577,6 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
                               // Include children without their own stepId
                               !((t as any).workflowStepId && (t as any).workflowStepId !== step.id)
                             )}
-                            onTaskClick={setSelectedTask}
                           />
                         ))}
                       </div>
@@ -559,7 +612,6 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
                       task={task}
                       depth={0}
                       allTasks={getChildrenWithoutStep(task._id)}
-                      onTaskClick={setSelectedTask}
                     />
                   ))}
                 </div>
@@ -589,115 +641,6 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
           )}
         </div>
       )}
-
-      {/* Task Detail Dialog */}
-      <Dialog open={!!selectedTask} onOpenChange={(open) => !open && setSelectedTask(null)}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          {selectedTask && (() => {
-            const taskType = ((selectedTask as any).taskType || 'standard') as TaskType
-            const typeConfig = TASK_TYPE_CONFIG[taskType] || TASK_TYPE_CONFIG.standard
-            const TypeIcon = typeConfig.icon
-            const statusConfig = TASK_STATUS_CONFIG[selectedTask.status] || TASK_STATUS_CONFIG.pending
-
-            return (
-              <>
-                <DialogHeader>
-                  <div className="flex items-center gap-2">
-                    <TypeIcon className={cn('h-5 w-5', typeConfig.color)} />
-                    <DialogTitle>{selectedTask.title}</DialogTitle>
-                  </div>
-                  <div className="flex items-center gap-2 pt-2">
-                    <Badge variant="outline" className={cn(statusConfig.color)}>
-                      {selectedTask.status.replace('_', ' ')}
-                    </Badge>
-                    <Badge variant="outline">{typeConfig.label}</Badge>
-                  </div>
-                </DialogHeader>
-
-                <div className="space-y-4">
-                  {/* Summary */}
-                  {selectedTask.summary && (
-                    <div>
-                      <h4 className="text-sm font-medium text-muted-foreground mb-1">Summary</h4>
-                      <p className="text-sm">{selectedTask.summary}</p>
-                    </div>
-                  )}
-
-                  {/* Description */}
-                  {selectedTask.description && (
-                    <div>
-                      <h4 className="text-sm font-medium text-muted-foreground mb-1">Description</h4>
-                      <p className="text-sm whitespace-pre-wrap">{selectedTask.description}</p>
-                    </div>
-                  )}
-
-                  {/* Timestamps */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <h4 className="text-sm font-medium text-muted-foreground mb-1">Created</h4>
-                      <p className="text-sm">{formatDate(selectedTask.createdAt)}</p>
-                    </div>
-                    {selectedTask.completedAt && (
-                      <div>
-                        <h4 className="text-sm font-medium text-muted-foreground mb-1">Completed</h4>
-                        <p className="text-sm">{formatDate(selectedTask.completedAt)}</p>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Input/Output Data */}
-                  {((selectedTask as any).inputData || (selectedTask as any).outputData) && (
-                    <div className="space-y-3">
-                      {(selectedTask as any).inputData && Object.keys((selectedTask as any).inputData).length > 0 && (
-                        <div>
-                          <h4 className="text-sm font-medium text-muted-foreground mb-1 flex items-center gap-1">
-                            <FileText className="h-3 w-3" />
-                            Input Data
-                          </h4>
-                          <pre className="text-xs bg-muted rounded p-3 overflow-auto max-h-32">
-                            {JSON.stringify((selectedTask as any).inputData, null, 2)}
-                          </pre>
-                        </div>
-                      )}
-                      {(selectedTask as any).outputData && Object.keys((selectedTask as any).outputData).length > 0 && (
-                        <div>
-                          <h4 className="text-sm font-medium text-muted-foreground mb-1 flex items-center gap-1">
-                            <FileText className="h-3 w-3" />
-                            Output Data
-                          </h4>
-                          <pre className="text-xs bg-muted rounded p-3 overflow-auto max-h-32">
-                            {JSON.stringify((selectedTask as any).outputData, null, 2)}
-                          </pre>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Error */}
-                  {(selectedTask as any).error && (
-                    <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3">
-                      <h4 className="text-sm font-medium text-destructive mb-1">Error</h4>
-                      <p className="text-sm text-destructive/80">{(selectedTask as any).error}</p>
-                    </div>
-                  )}
-                </div>
-
-                <DialogFooter>
-                  <Link href={`/tasks?taskId=${selectedTask._id}`}>
-                    <Button variant="outline" size="sm">
-                      <ExternalLink className="h-4 w-4 mr-2" />
-                      Open in Tasks
-                    </Button>
-                  </Link>
-                  <Button variant="default" size="sm" onClick={() => setSelectedTask(null)}>
-                    Close
-                  </Button>
-                </DialogFooter>
-              </>
-            )
-          })()}
-        </DialogContent>
-      </Dialog>
 
       <AlertDialog open={cancelConfirm} onOpenChange={setCancelConfirm}>
         <AlertDialogContent>
