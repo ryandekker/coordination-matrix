@@ -69,6 +69,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { workflowRunsApi, workflowsApi, WorkflowRun, WorkflowRunStatus, Task, Workflow as WorkflowType } from '@/lib/api'
+import { useFieldConfigs, useLookups } from '@/hooks/use-tasks'
+import { TaskModal } from '@/components/tasks/task-modal'
 
 const STATUS_CONFIG: Record<WorkflowRunStatus, { icon: React.ElementType; color: string; bgColor: string; label: string; filterable: boolean }> = {
   pending: { icon: Clock, color: 'text-gray-500', bgColor: 'bg-gray-50 dark:bg-gray-800/50', label: 'Pending', filterable: true },
@@ -104,7 +106,7 @@ const TASK_TYPE_CONFIG: Record<TaskType, { icon: React.ElementType; color: strin
   subflow: { icon: WorkflowIcon, color: 'text-pink-500', label: 'Subflow' },
   external: { icon: Globe, color: 'text-orange-500', label: 'External' },
   trigger: { icon: Bot, color: 'text-yellow-500', label: 'Trigger' },
-  manual: { icon: Bot, color: 'text-purple-500', label: 'Manual' },
+  manual: { icon: User, color: 'text-purple-500', label: 'Manual' },
   webhook: { icon: Globe, color: 'text-purple-500', label: 'Webhook' },
 }
 
@@ -157,20 +159,6 @@ function TaskNode({ task, depth, allTasks, onTaskClick, stepType }: TaskNodeProp
           style={{ marginLeft: `${depth * 24}px` }}
           onClick={() => onTaskClick(task)}
         >
-          {hasChildren ? (
-            <CollapsibleTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={(e) => e.stopPropagation()}>
-                {isExpanded ? (
-                  <ChevronDown className="h-4 w-4" />
-                ) : (
-                  <ChevronRight className="h-4 w-4" />
-                )}
-              </Button>
-            </CollapsibleTrigger>
-          ) : (
-            <div className="w-6" />
-          )}
-
           <TypeIcon className={cn('h-4 w-4 flex-shrink-0', typeConfig.color)} />
 
           <div className="flex-1 min-w-0">
@@ -287,6 +275,10 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
       return false
     },
   })
+
+  // Fetch field configs and lookups for TaskModal
+  const { data: fieldConfigsData } = useFieldConfigs('tasks')
+  const { data: lookupsData } = useLookups()
 
   const cancelMutation = useMutation({
     mutationFn: () => workflowRunsApi.cancel(runId),
@@ -688,114 +680,14 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Task Detail Dialog */}
-      <Dialog open={!!selectedTask} onOpenChange={(open) => !open && setSelectedTask(null)}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          {selectedTask && (() => {
-            const taskType = ((selectedTask as any).taskType || 'agent') as TaskType
-            const typeConfig = TASK_TYPE_CONFIG[taskType] || TASK_TYPE_CONFIG.agent
-            const TypeIcon = typeConfig.icon
-            const statusConfig = TASK_STATUS_CONFIG[selectedTask.status] || TASK_STATUS_CONFIG.pending
-
-            return (
-              <>
-                <DialogHeader>
-                  <div className="flex items-center gap-2">
-                    <TypeIcon className={cn('h-5 w-5', typeConfig.color)} />
-                    <DialogTitle>{selectedTask.title}</DialogTitle>
-                  </div>
-                  <div className="flex items-center gap-2 pt-2">
-                    <Badge variant="outline" className={cn(statusConfig.color)}>
-                      {selectedTask.status.replace('_', ' ')}
-                    </Badge>
-                    <Badge variant="outline">{typeConfig.label}</Badge>
-                  </div>
-                </DialogHeader>
-
-                <div className="space-y-4">
-                  {/* Summary */}
-                  {selectedTask.summary && (
-                    <div>
-                      <h4 className="text-sm font-medium text-muted-foreground mb-1">Summary</h4>
-                      <p className="text-sm">{selectedTask.summary}</p>
-                    </div>
-                  )}
-
-                  {/* Description */}
-                  {(selectedTask as any).description && (
-                    <div>
-                      <h4 className="text-sm font-medium text-muted-foreground mb-1">Description</h4>
-                      <p className="text-sm whitespace-pre-wrap">{(selectedTask as any).description}</p>
-                    </div>
-                  )}
-
-                  {/* Timestamps */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <h4 className="text-sm font-medium text-muted-foreground mb-1">Created</h4>
-                      <p className="text-sm">{formatDate(selectedTask.createdAt)}</p>
-                    </div>
-                    {(selectedTask as any).completedAt && (
-                      <div>
-                        <h4 className="text-sm font-medium text-muted-foreground mb-1">Completed</h4>
-                        <p className="text-sm">{formatDate((selectedTask as any).completedAt)}</p>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Input/Output Data */}
-                  {((selectedTask as any).inputData || (selectedTask as any).outputData) && (
-                    <div className="space-y-3">
-                      {(selectedTask as any).inputData && Object.keys((selectedTask as any).inputData).length > 0 && (
-                        <div>
-                          <h4 className="text-sm font-medium text-muted-foreground mb-1 flex items-center gap-1">
-                            <FileText className="h-3 w-3" />
-                            Input Data
-                          </h4>
-                          <pre className="text-xs bg-muted rounded p-3 overflow-auto max-h-32">
-                            {JSON.stringify((selectedTask as any).inputData, null, 2)}
-                          </pre>
-                        </div>
-                      )}
-                      {(selectedTask as any).outputData && Object.keys((selectedTask as any).outputData).length > 0 && (
-                        <div>
-                          <h4 className="text-sm font-medium text-muted-foreground mb-1 flex items-center gap-1">
-                            <FileText className="h-3 w-3" />
-                            Output Data
-                          </h4>
-                          <pre className="text-xs bg-muted rounded p-3 overflow-auto max-h-32">
-                            {JSON.stringify((selectedTask as any).outputData, null, 2)}
-                          </pre>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Error */}
-                  {(selectedTask as any).error && (
-                    <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3">
-                      <h4 className="text-sm font-medium text-destructive mb-1">Error</h4>
-                      <p className="text-sm text-destructive/80">{(selectedTask as any).error}</p>
-                    </div>
-                  )}
-                </div>
-
-                <DialogFooter>
-                  <Link href={`/tasks?taskId=${selectedTask._id}`}>
-                    <Button variant="outline" size="sm">
-                      <ExternalLink className="h-4 w-4 mr-2" />
-                      Open in Tasks
-                    </Button>
-                  </Link>
-                  <Button variant="default" size="sm" onClick={() => setSelectedTask(null)}>
-                    Close
-                  </Button>
-                </DialogFooter>
-              </>
-            )
-          })()}
-        </DialogContent>
-      </Dialog>
+      {/* Task Detail Modal */}
+      <TaskModal
+        task={selectedTask}
+        isOpen={!!selectedTask}
+        fieldConfigs={fieldConfigsData?.data || []}
+        lookups={lookupsData?.data || {}}
+        onClose={() => setSelectedTask(null)}
+      />
     </div>
   )
 }
