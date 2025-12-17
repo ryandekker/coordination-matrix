@@ -1674,8 +1674,12 @@ class WorkflowExecutionService {
         if (joinTask && joinTask.joinConfig?.awaitTaskId) {
           const joined = await this.checkJoinCondition(joinTask._id, joinTask.joinConfig.awaitTaskId);
           if (joined) {
-            // Join completed - advance to next step
-            await this.advanceToNextStep(run, workflow, joinTask);
+            // Re-fetch join task to get updated metadata (aggregatedResults, etc.)
+            const updatedJoinTask = await this.tasks.findOne({ _id: joinTask._id });
+            if (updatedJoinTask) {
+              // Join completed - advance to next step
+              await this.advanceToNextStep(run, workflow, updatedJoinTask);
+            }
           }
         }
         return;
@@ -1725,6 +1729,23 @@ class WorkflowExecutionService {
       console.log(`[WorkflowExecutionService] No connections, checking sequential. Current index: ${currentIndex}, next step: ${nextStep?.id || 'none'}`);
       if (nextStep) {
         nextStepIds.push(nextStep.id);
+      }
+    }
+
+    // If still no connections and this is a join task, check the associated foreach step's connections
+    if (nextStepIds.length === 0 && completedTask.taskType === 'join' && completedTask.joinConfig?.awaitTaskId) {
+      console.log(`[WorkflowExecutionService] Join task has no connections, checking foreach step connections`);
+      const foreachTask = await this.tasks.findOne({ _id: completedTask.joinConfig.awaitTaskId });
+      if (foreachTask?.workflowStepId) {
+        const foreachStep = workflow.steps.find(s => s.id === foreachTask.workflowStepId);
+        if (foreachStep?.connections) {
+          // Use foreach step's connections that aren't the join step itself
+          const foreachNextIds = foreachStep.connections
+            .map(c => c.targetStepId)
+            .filter(id => id !== currentStep.id);
+          nextStepIds.push(...foreachNextIds);
+          console.log(`[WorkflowExecutionService] Using foreach step connections: ${foreachNextIds.join(', ')}`);
+        }
       }
     }
 
