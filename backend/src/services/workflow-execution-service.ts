@@ -1665,11 +1665,50 @@ class WorkflowExecutionService {
         }
 
         // Check if there's a join task waiting
-        const joinTask = await this.tasks.findOne({
+        let joinTask = await this.tasks.findOne({
           workflowRunId: run._id,
           taskType: 'join',
           status: 'waiting',
         });
+
+        // If no join task exists, check if the child task's next step is a join step and create it
+        if (!joinTask) {
+          const childStep = workflow.steps.find(s => s.id === task.workflowStepId);
+          if (childStep) {
+            // Find next step via connections or sequential order
+            let nextStepIds = childStep.connections?.map(c => c.targetStepId) || [];
+            if (nextStepIds.length === 0) {
+              const childIndex = workflow.steps.findIndex(s => s.id === childStep.id);
+              const nextStep = workflow.steps[childIndex + 1];
+              if (nextStep) {
+                nextStepIds.push(nextStep.id);
+              }
+            }
+
+            // Check if any next step is a join step
+            for (const nextStepId of nextStepIds) {
+              const nextStep = workflow.steps.find(s => s.id === nextStepId);
+              if (nextStep?.stepType === 'join') {
+                console.log(`[WorkflowExecutionService] Creating join task for step ${nextStep.id} as it doesn't exist yet`);
+                // Get the root task (workflow root) as parent for the join task
+                const rootTask = await this.tasks.findOne({
+                  workflowRunId: run._id,
+                  parentId: null,
+                });
+                if (rootTask) {
+                  await this.executeStep(run, workflow, nextStep, rootTask);
+                  // Re-fetch the join task we just created
+                  joinTask = await this.tasks.findOne({
+                    workflowRunId: run._id,
+                    taskType: 'join',
+                    status: 'waiting',
+                  });
+                }
+                break;
+              }
+            }
+          }
+        }
 
         if (joinTask && joinTask.joinConfig?.awaitTaskId) {
           const joined = await this.checkJoinCondition(joinTask._id, joinTask.joinConfig.awaitTaskId);
