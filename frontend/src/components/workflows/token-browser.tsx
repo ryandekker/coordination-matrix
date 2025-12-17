@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Popover,
   PopoverContent,
@@ -86,6 +86,19 @@ export function TokenBrowser({
   const [loadingSamples, setLoadingSamples] = useState(false)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+
+  // Handle wheel events manually to ensure scrolling works in portal
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    // Prevent the event from bubbling to parent elements
+    e.stopPropagation()
+
+    // Manually scroll the container
+    container.scrollTop += e.deltaY
+  }, [])
 
   // Fetch sample data from past workflow runs when popover opens
   useEffect(() => {
@@ -375,7 +388,12 @@ export function TokenBrowser({
           </div>
         </div>
 
-        <div className="max-h-[400px] overflow-y-auto overscroll-contain pointer-events-auto">
+        <div
+          ref={scrollContainerRef}
+          onWheel={handleWheel}
+          className="max-h-[400px] overflow-y-auto overscroll-contain"
+          style={{ WebkitOverflowScrolling: 'touch' }}
+        >
           <div className="p-2 space-y-3">
             {filteredCategories.map((category) => (
               <div key={category.name}>
