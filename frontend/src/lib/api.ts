@@ -849,14 +849,13 @@ export interface WorkflowCallback {
   taskType: string
   workflowRunId?: string
   workflowStepId?: string
-  hasReceivedCallback: boolean
-  callbackPayload?: unknown
-  childTaskCount: number
-  expectedCount?: number
-  receivedCount?: number
-  createdAt: string
-  updatedAt: string
-  completedAt?: string
+  // Request details
+  url: string
+  method: string
+  headers: Record<string, string>
+  body?: unknown
+  receivedAt: string
+  status: string
 }
 
 // Activity Logs API

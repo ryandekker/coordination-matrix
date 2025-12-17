@@ -128,12 +128,9 @@ interface UnifiedRequest {
   method?: string
   requestHeaders?: Record<string, string>
   requestBody?: unknown
-  // Workflow callback fields
+  // Workflow callback fields (inbound requests)
   workflowRunId?: string
   workflowStepId?: string
-  hasReceivedCallback?: boolean
-  callbackPayload?: unknown
-  childTaskCount?: number
   original: ExternalJob | BatchJob | WebhookDelivery | WebhookTaskAttempt | WorkflowCallback
 }
 
@@ -282,19 +279,17 @@ function toWorkflowCallbackUnifiedRequest(callback: WorkflowCallback): UnifiedRe
   return {
     _id: callback._id,
     type: 'workflow_callback',
-    name: callback.taskTitle || `Workflow Callback`,
-    status: callback.taskStatus as RequestStatus,
-    createdAt: callback.createdAt,
-    completedAt: callback.completedAt,
+    name: `${callback.method} ${callback.url}`,
+    status: callback.status as RequestStatus,
+    createdAt: callback.receivedAt,
     taskId: callback.taskId,
     taskTitle: callback.taskTitle,
     workflowRunId: callback.workflowRunId,
     workflowStepId: callback.workflowStepId,
-    hasReceivedCallback: callback.hasReceivedCallback,
-    callbackPayload: callback.callbackPayload,
-    childTaskCount: callback.childTaskCount,
-    expectedCount: callback.expectedCount,
-    receivedCount: callback.receivedCount,
+    url: callback.url,
+    method: callback.method,
+    requestHeaders: callback.headers,
+    requestBody: callback.body,
     original: callback,
   }
 }
@@ -1197,17 +1192,9 @@ function WorkflowCallbackDetail({ callbackId }: { callbackId: string }) {
   const { data: callbacksData, isLoading, error, refetch } = useQuery({
     queryKey: ['workflow-callback', callbackId],
     queryFn: () => tasksApi.getWorkflowCallbacks({ limit: 100 }),
-    refetchInterval: (query) => {
-      const callbacks = query.state.data?.data || []
-      const callback = callbacks.find((c: WorkflowCallback) => c._id === callbackId)
-      if (callback && (callback.taskStatus === 'waiting' || callback.taskStatus === 'in_progress')) {
-        return 3000
-      }
-      return false
-    },
   })
 
-  const callback: WorkflowCallback | undefined = callbacksData?.data?.find((c: WorkflowCallback) => c._id === callbackId)
+  const foundCallback: WorkflowCallback | undefined = callbacksData?.data?.find((c) => c._id === callbackId)
 
   if (isLoading) {
     return (
@@ -1217,7 +1204,7 @@ function WorkflowCallbackDetail({ callbackId }: { callbackId: string }) {
     )
   }
 
-  if (error || !callback) {
+  if (error || !foundCallback) {
     return (
       <div className="space-y-4">
         <Button variant="ghost" onClick={() => router.push('/requests')}>
@@ -1225,7 +1212,7 @@ function WorkflowCallbackDetail({ callbackId }: { callbackId: string }) {
           Back to List
         </Button>
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-8 text-center">
-          <p className="text-destructive">Failed to load workflow callback</p>
+          <p className="text-destructive">Failed to load callback request</p>
           <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>
             Retry
           </Button>
@@ -1234,9 +1221,8 @@ function WorkflowCallbackDetail({ callbackId }: { callbackId: string }) {
     )
   }
 
-  const statusConfig = STATUS_CONFIG[callback.taskStatus] || STATUS_CONFIG.pending
-  const StatusIcon = statusConfig.icon
-  const isActive = callback.taskStatus === 'waiting' || callback.taskStatus === 'in_progress'
+  // After the guard, foundCallback is guaranteed to be WorkflowCallback
+  const callback = foundCallback
 
   return (
     <div className="space-y-6">
@@ -1250,21 +1236,11 @@ function WorkflowCallbackDetail({ callbackId }: { callbackId: string }) {
             <div className="flex items-center gap-3">
               <Badge variant="outline" className="text-xs">
                 <Phone className="h-3 w-3 mr-1" />
-                Workflow Callback
+                Inbound Callback
               </Badge>
-              <h1 className="text-2xl font-bold">{callback.taskTitle}</h1>
-              <Badge variant="outline" className={cn('text-sm', statusConfig.color)}>
-                <StatusIcon className={cn('h-4 w-4 mr-1', isActive && 'animate-spin')} />
-                {statusConfig.label}
-              </Badge>
-              {isActive && (
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-blue-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
-                </span>
-              )}
+              <h1 className="text-2xl font-bold">{String(callback.method)} Request</h1>
             </div>
-            <p className="text-muted-foreground text-sm">Task Type: {callback.taskType}</p>
+            <p className="text-muted-foreground text-sm">Task: {String(callback.taskTitle)}</p>
           </div>
         </div>
 
@@ -1277,66 +1253,75 @@ function WorkflowCallbackDetail({ callbackId }: { callbackId: string }) {
       {/* Stats grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="rounded-lg border bg-card p-4">
-          <p className="text-sm text-muted-foreground">Created</p>
-          <p className="font-medium">{formatDate(callback.createdAt)}</p>
+          <p className="text-sm text-muted-foreground">Received At</p>
+          <p className="font-medium">{formatDate(callback.receivedAt)}</p>
         </div>
         <div className="rounded-lg border bg-card p-4">
-          <p className="text-sm text-muted-foreground">Updated</p>
-          <p className="font-medium">{formatDate(callback.updatedAt)}</p>
+          <p className="text-sm text-muted-foreground">Method</p>
+          <p className="font-medium">{String(callback.method)}</p>
         </div>
         <div className="rounded-lg border bg-card p-4">
-          <p className="text-sm text-muted-foreground">Completed</p>
-          <p className="font-medium">{formatDate(callback.completedAt)}</p>
+          <p className="text-sm text-muted-foreground">Task Type</p>
+          <p className="font-medium">{String(callback.taskType)}</p>
         </div>
         <div className="rounded-lg border bg-card p-4">
-          <p className="text-sm text-muted-foreground">Callback Received</p>
-          <p className="font-medium">{callback.hasReceivedCallback ? 'Yes' : 'No'}</p>
+          <p className="text-sm text-muted-foreground">Task Status</p>
+          <p className="font-medium">{String(callback.taskStatus)}</p>
         </div>
       </div>
 
-      {/* Progress for foreach callbacks */}
-      {callback.childTaskCount > 0 ? (
+      {/* Request URL */}
+      <div className="rounded-lg border bg-card p-4">
+        <h2 className="font-semibold mb-2">Request URL</h2>
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary">{String(callback.method)}</Badge>
+          <code className="font-mono text-sm break-all">{String(callback.url)}</code>
+        </div>
+      </div>
+
+      {/* Request Headers */}
+      {callback.headers && Object.keys(callback.headers).length > 0 && (
         <div className="rounded-lg border bg-card p-4">
-          <h2 className="font-semibold mb-3">Progress</h2>
-          <div className="grid grid-cols-3 gap-4 text-sm">
-            <div>
-              <p className="text-muted-foreground">Expected</p>
-              <p className="font-medium text-lg">{String(callback.expectedCount ?? '-')}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Received</p>
-              <p className="font-medium text-lg">{String(callback.receivedCount ?? 0)}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Child Tasks</p>
-              <p className="font-medium text-lg">{callback.childTaskCount}</p>
-            </div>
+          <h2 className="font-semibold mb-2">Request Headers</h2>
+          <div className="space-y-1">
+            {Object.entries(callback.headers).map(([key, value]) => (
+              <div key={key} className="flex text-sm font-mono">
+                <span className="text-muted-foreground min-w-[200px]">{key}:</span>
+                <span className="break-all">{String(value)}</span>
+              </div>
+            ))}
           </div>
         </div>
-      ) : null}
+      )}
+
+      {/* Request Body */}
+      {callback.body !== undefined && callback.body !== null && (
+        <div className="rounded-lg border bg-card p-4">
+          <h2 className="font-semibold mb-2">Request Body</h2>
+          <pre className="text-sm bg-muted rounded p-3 overflow-auto max-h-64">
+            {typeof callback.body === 'string'
+              ? callback.body
+              : JSON.stringify(callback.body, null, 2)}
+          </pre>
+        </div>
+      )}
 
       {/* Related task */}
       {callback.taskId && (
         <div className="rounded-lg border bg-card p-4">
           <h2 className="font-semibold mb-2">Related Task</h2>
-          <Link
-            href={`/tasks?taskId=${callback.taskId}`}
-            className="text-primary hover:underline flex items-center gap-1"
-          >
-            View Task <ExternalLink className="h-3 w-3" />
-          </Link>
-        </div>
-      )}
-
-      {/* Callback Payload */}
-      {callback.callbackPayload && (
-        <div className="rounded-lg border bg-card p-4">
-          <h2 className="font-semibold mb-2">Callback Payload</h2>
-          <pre className="text-sm bg-muted rounded p-3 overflow-auto max-h-64">
-            {typeof callback.callbackPayload === 'string'
-              ? callback.callbackPayload
-              : JSON.stringify(callback.callbackPayload, null, 2)}
-          </pre>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium">{String(callback.taskTitle)}</p>
+              <p className="text-sm text-muted-foreground">Status: {String(callback.taskStatus)}</p>
+            </div>
+            <Link
+              href={`/tasks?taskId=${callback.taskId}`}
+              className="text-primary hover:underline flex items-center gap-1"
+            >
+              View Task <ExternalLink className="h-3 w-3" />
+            </Link>
+          </div>
         </div>
       )}
     </div>
@@ -1755,15 +1740,8 @@ function RequestsList() {
                         )}
                         {isWorkflowCallback && workflowCallback && (
                           <>
+                            <span className="font-mono text-xs truncate max-w-[300px]">{workflowCallback.url}</span>
                             <span className="text-xs">{workflowCallback.taskType}</span>
-                            {workflowCallback.childTaskCount > 0 && (
-                              <span>{workflowCallback.childTaskCount} items</span>
-                            )}
-                            {workflowCallback.hasReceivedCallback && (
-                              <Badge variant="outline" className="text-xs text-green-600">
-                                Received
-                              </Badge>
-                            )}
                           </>
                         )}
                         {request.error && (

@@ -1781,7 +1781,13 @@ class WorkflowExecutionService {
     runId: string,
     stepId: string,
     payload: Record<string, unknown>,
-    secret: string
+    secret: string,
+    requestInfo?: {
+      url: string;
+      method: string;
+      headers: Record<string, string>;
+      receivedAt: Date;
+    }
   ): Promise<Task> {
     const run = await this.workflowRuns.findOne({ _id: new ObjectId(runId) });
     if (!run) {
@@ -1804,13 +1810,31 @@ class WorkflowExecutionService {
       throw new Error('Invalid callback secret');
     }
 
-    // Update task with result and complete it
+    // Build the callback request log entry
+    const callbackRequest = {
+      _id: new ObjectId().toString(),
+      url: requestInfo?.url || `/api/workflow-runs/${runId}/callback/${stepId}`,
+      method: requestInfo?.method || 'POST',
+      headers: requestInfo?.headers || {},
+      body: payload,
+      receivedAt: requestInfo?.receivedAt || new Date(),
+      status: 'success' as const,
+    };
+
+    // Get existing callback requests or initialize empty array
+    const existingCallbacks = (task.metadata?.callbackRequests as unknown[]) || [];
+
+    // Update task with result, callback request log, and complete it
     await this.tasks.updateOne(
       { _id: task._id },
       {
         $set: {
           status: 'completed' as TaskStatus,
-          metadata: { ...task.metadata, callbackPayload: payload },
+          metadata: {
+            ...task.metadata,
+            callbackPayload: payload,
+            callbackRequests: [...existingCallbacks, callbackRequest],
+          },
           updatedAt: new Date(),
         },
       }

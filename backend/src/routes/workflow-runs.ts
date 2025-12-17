@@ -170,7 +170,20 @@ router.post('/:id/callback/:stepId', async (req: Request, res: Response): Promis
     }
 
     const payload = req.body;
-    const task = await workflowExecutionService.handleExternalCallback(id, stepId, payload, secret);
+
+    // Build request info for logging
+    const requestInfo = {
+      url: req.originalUrl,
+      method: req.method,
+      headers: Object.fromEntries(
+        Object.entries(req.headers)
+          .filter(([key]) => !['x-workflow-secret', 'authorization'].includes(key.toLowerCase()))
+          .map(([key, value]) => [key, String(value)])
+      ),
+      receivedAt: new Date(),
+    };
+
+    const task = await workflowExecutionService.handleExternalCallback(id, stepId, payload, secret, requestInfo);
 
     res.json({
       acknowledged: true,
