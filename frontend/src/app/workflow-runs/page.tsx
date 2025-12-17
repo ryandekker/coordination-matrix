@@ -457,19 +457,23 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
       <div className="rounded-lg border bg-card p-4">
         <h2 className="font-semibold mb-4">Tasks by Stage</h2>
         {(() => {
-          // Build a map from step ID to root tasks
+          // Build a map from step ID to tasks (check ALL tasks, not just root tasks)
           const stepToTasks = new Map<string, Task[]>()
-          const tasksWithoutStep: Task[] = []
+          const workflowRootTasks: Task[] = [] // Tasks that represent the whole workflow
+          const orphanTasks: Task[] = [] // Tasks without step mapping
 
-          rootTasks.forEach(task => {
+          // First pass: categorize all tasks
+          tasks.forEach(task => {
             const stepId = (task as any).workflowStepId
             if (stepId) {
               const existing = stepToTasks.get(stepId) || []
               existing.push(task)
               stepToTasks.set(stepId, existing)
-            } else {
-              tasksWithoutStep.push(task)
+            } else if (!task.parentId) {
+              // Root task without a step ID - likely the workflow container task
+              workflowRootTasks.push(task)
             }
+            // Non-root tasks without stepId are children and will be shown via their parent
           })
 
           const steps = workflow?.steps || []
@@ -478,8 +482,13 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
             return <p className="text-sm text-muted-foreground">No tasks created yet.</p>
           }
 
+          // Helper to get children that don't have their own stepId (those with stepId are shown in their step section)
+          const getChildrenWithoutStep = (parentId: string) => {
+            return tasks.filter(t => t.parentId === parentId && !(t as any).workflowStepId)
+          }
+
           return (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {/* Show all workflow steps */}
               {steps.map((step, index) => {
                 const stepTasks = stepToTasks.get(step.id) || []
@@ -497,20 +506,38 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
                   <div key={step.id} className="space-y-1">
                     {/* Step header - always shown */}
                     <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground mb-1">
-                      <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-xs">
+                      <span className={cn(
+                        'w-5 h-5 rounded-full flex items-center justify-center text-xs',
+                        isCompleted && 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-400',
+                        isCurrent && 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-400',
+                        isFailed && 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-400',
+                        isPending && 'bg-muted'
+                      )}>
                         {index + 1}
                       </span>
                       {step.name}
                       <Badge variant="outline" className="text-xs">
                         {typeConfig.label}
                       </Badge>
+                      {isCompleted && <CheckCircle className="h-3 w-3 text-green-500" />}
+                      {isCurrent && <Play className="h-3 w-3 text-blue-500" />}
+                      {isFailed && <XCircle className="h-3 w-3 text-red-500" />}
                     </div>
 
                     {/* Show actual tasks if they exist */}
                     {hasTasks ? (
                       <div className="space-y-1 ml-7">
                         {stepTasks.map(task => (
-                          <TaskNode key={task._id} task={task} depth={0} allTasks={tasks} onTaskClick={setSelectedTask} />
+                          <TaskNode
+                            key={task._id}
+                            task={task}
+                            depth={0}
+                            allTasks={tasks.filter(t =>
+                              // Include children without their own stepId
+                              !((t as any).workflowStepId && (t as any).workflowStepId !== step.id)
+                            )}
+                            onTaskClick={setSelectedTask}
+                          />
                         ))}
                       </div>
                     ) : (
@@ -535,12 +562,18 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
                 )
               })}
 
-              {/* Show any orphan tasks (tasks without a matching step) */}
-              {tasksWithoutStep.length > 0 && (
-                <div className="space-y-1 pt-2 border-t">
-                  <div className="text-sm font-medium text-muted-foreground mb-1">Other Tasks</div>
-                  {tasksWithoutStep.map(task => (
-                    <TaskNode key={task._id} task={task} depth={0} allTasks={tasks} onTaskClick={setSelectedTask} />
+              {/* Show workflow root tasks (container tasks) if they exist and have details worth showing */}
+              {workflowRootTasks.length > 0 && (
+                <div className="space-y-1 pt-3 border-t">
+                  <div className="text-sm font-medium text-muted-foreground mb-1">Workflow Task</div>
+                  {workflowRootTasks.map(task => (
+                    <TaskNode
+                      key={task._id}
+                      task={task}
+                      depth={0}
+                      allTasks={getChildrenWithoutStep(task._id)}
+                      onTaskClick={setSelectedTask}
+                    />
                   ))}
                 </div>
               )}
