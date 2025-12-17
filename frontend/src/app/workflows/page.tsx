@@ -1023,7 +1023,10 @@ export default function WorkflowsPage() {
               {table.getHeaderGroups().map(headerGroup => (
                 <TableRow key={headerGroup.id}>
                   {headerGroup.headers.map(header => (
-                    <TableHead key={header.id}>
+                    <TableHead
+                      key={header.id}
+                      className={header.id === 'select' ? 'w-12 pl-3 pr-0' : undefined}
+                    >
                       {header.isPlaceholder
                         ? null
                         : flexRender(header.column.columnDef.header, header.getContext())}
@@ -1040,7 +1043,10 @@ export default function WorkflowsPage() {
                     onClick={() => row.toggleExpanded()}
                   >
                     {row.getVisibleCells().map(cell => (
-                      <TableCell key={cell.id}>
+                      <TableCell
+                        key={cell.id}
+                        className={cell.column.id === 'select' ? 'pl-3 pr-0' : undefined}
+                      >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </TableCell>
                     ))}

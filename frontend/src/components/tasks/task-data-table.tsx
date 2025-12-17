@@ -429,7 +429,7 @@ const TaskRow = memo(function TaskRow({
         )}
         data-state={isSelected ? 'selected' : undefined}
       >
-        <TableCell className="px-0">
+        <TableCell className="pl-3 pr-0">
           <div className="flex justify-center">
             <Checkbox checked={isSelected} onCheckedChange={onToggleSelect} className="h-5 w-5" />
           </div>
@@ -732,9 +732,11 @@ export function TaskDataTable({
     if (fieldConfig.lookupType && resolved) {
       const lookup = resolved as { displayName: string; color?: string }
       return (
-        <Badge color={lookup.color} variant="outline">
-          {lookup.displayName}
-        </Badge>
+        <div className="flex justify-center">
+          <Badge color={lookup.color} variant="outline">
+            {lookup.displayName}
+          </Badge>
+        </div>
       )
     }
 
@@ -757,10 +759,12 @@ export function TaskDataTable({
     // Handle boolean fields
     if (fieldConfig.fieldType === 'boolean') {
       return (
-        <Checkbox
-          checked={Boolean(value)}
-          className="pointer-events-none"
-        />
+        <div className="flex justify-center">
+          <Checkbox
+            checked={Boolean(value)}
+            className="pointer-events-none"
+          />
+        </div>
       )
     }
 
@@ -828,7 +832,7 @@ export function TaskDataTable({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-12 px-0">
+              <TableHead className="w-12 pl-3 pr-0">
                 <div className="flex justify-center">
                   <Checkbox
                     checked={selectedRows.size === tasks.length && tasks.length > 0}
