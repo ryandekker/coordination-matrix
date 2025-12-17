@@ -357,22 +357,17 @@ tasksRouter.get('/webhook-attempts', async (req: Request, res: Response, next: N
   }
 });
 
-// GET /api/tasks/workflow-callbacks - List workflow callback tasks (inbound requests)
+// GET /api/tasks/workflow-callbacks - List inbound callback requests
 // NOTE: This route MUST be defined before /:id to avoid being matched as an ID
 tasksRouter.get('/workflow-callbacks', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
     const { taskStatus, taskType, limit = '50', offset = '0' } = req.query;
 
-    // Find tasks that are part of workflow execution:
-    // - Tasks with externalConfig.callbackSecret (expecting callbacks)
-    // - ALL tasks that are part of a workflow run (includes children created via callbacks)
-    //   This is broader than just external/foreach to capture agent, manual, etc. children
+    // Find tasks that have received callback requests
+    // These are tasks where metadata.callbackRequests exists and has entries
     const filter: Record<string, unknown> = {
-      $or: [
-        { 'externalConfig.callbackSecret': { $exists: true } },
-        { workflowRunId: { $exists: true, $ne: null } },
-      ],
+      'metadata.callbackRequests.0': { $exists: true },
     };
 
     // Filter by task status if provided
@@ -385,59 +380,71 @@ tasksRouter.get('/workflow-callbacks', async (req: Request, res: Response, next:
       filter.taskType = taskType;
     }
 
-    const [tasks, total] = await Promise.all([
-      db
-        .collection<Task>('tasks')
-        .find(filter)
-        .project({
-          _id: 1,
-          title: 1,
-          status: 1,
-          taskType: 1,
-          workflowRunId: 1,
-          workflowStepId: 1,
-          externalConfig: 1,
-          metadata: 1,
-          childTaskIds: 1,
-          createdAt: 1,
-          updatedAt: 1,
-          completedAt: 1,
-        })
-        .sort({ updatedAt: -1 })
-        .skip(parseInt(offset as string, 10))
-        .limit(parseInt(limit as string, 10))
-        .toArray(),
-      db.collection('tasks').countDocuments(filter),
-    ]);
+    const tasks = await db
+      .collection<Task>('tasks')
+      .find(filter)
+      .project({
+        _id: 1,
+        title: 1,
+        status: 1,
+        taskType: 1,
+        workflowRunId: 1,
+        workflowStepId: 1,
+        metadata: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      .sort({ updatedAt: -1 })
+      .toArray();
 
-    // Transform to a useful format
-    const callbacks = tasks.map((task) => ({
-      _id: task._id.toString(),
-      taskId: task._id.toString(),
-      taskTitle: task.title,
-      taskStatus: task.status,
-      taskType: task.taskType,
-      workflowRunId: task.workflowRunId?.toString(),
-      workflowStepId: task.workflowStepId,
-      // Callback info
-      hasReceivedCallback: !!task.metadata?.callbackPayload,
-      callbackPayload: task.metadata?.callbackPayload,
-      // For foreach tasks
-      childTaskCount: task.childTaskIds?.length || 0,
-      expectedCount: task.metadata?.expectedCount as number | undefined,
-      receivedCount: task.metadata?.receivedCount as number | undefined,
-      // Timestamps
-      createdAt: task.createdAt,
-      updatedAt: task.updatedAt,
-      completedAt: task.completedAt,
-    }));
+    // Flatten callback requests from all tasks into individual entries
+    interface CallbackRequestEntry {
+      _id: string;
+      url: string;
+      method: string;
+      headers: Record<string, string>;
+      body: unknown;
+      receivedAt: string;
+      status: string;
+    }
+
+    const callbackRequests = tasks.flatMap((task) => {
+      const requests = (task.metadata?.callbackRequests || []) as CallbackRequestEntry[];
+      return requests.map((req) => ({
+        _id: req._id,
+        taskId: task._id.toString(),
+        taskTitle: task.title,
+        taskStatus: task.status,
+        taskType: task.taskType,
+        workflowRunId: task.workflowRunId?.toString(),
+        workflowStepId: task.workflowStepId,
+        // Request details
+        url: req.url,
+        method: req.method,
+        headers: req.headers,
+        body: req.body,
+        receivedAt: req.receivedAt,
+        status: req.status,
+      }));
+    });
+
+    // Sort by receivedAt descending
+    callbackRequests.sort((a, b) =>
+      new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime()
+    );
+
+    // Apply pagination to flattened results
+    const paginatedRequests = callbackRequests.slice(
+      parseInt(offset as string, 10),
+      parseInt(offset as string, 10) + parseInt(limit as string, 10)
+    );
 
     res.json({
-      data: callbacks,
+      data: paginatedRequests,
       pagination: {
         limit: parseInt(limit as string, 10),
         offset: parseInt(offset as string, 10),
-        total,
+        total: callbackRequests.length,
       },
     });
   } catch (error) {

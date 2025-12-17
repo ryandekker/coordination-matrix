@@ -2173,7 +2173,7 @@ class WorkflowExecutionService {
     return {
       acknowledged: true,
       taskId: task._id.toString(),
-      taskType: task.taskType,
+      taskType: task.taskType || 'standard',
       childTaskIds,
       receivedCount: currentReceivedCount,
       expectedCount: currentExpectedCount,
@@ -2186,7 +2186,13 @@ class WorkflowExecutionService {
     runId: string,
     stepId: string,
     payload: Record<string, unknown>,
-    secret: string
+    secret: string,
+    _requestInfo?: {
+      url: string;
+      method: string;
+      headers: Record<string, string>;
+      receivedAt: Date;
+    }
   ): Promise<Task> {
     const result = await this.handleCallback(runId, stepId, payload, secret);
     const task = await this.tasks.findOne({ _id: new ObjectId(result.taskId) });
