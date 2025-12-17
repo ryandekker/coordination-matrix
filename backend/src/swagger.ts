@@ -1046,6 +1046,65 @@ All responses follow this structure:
           },
         },
       },
+      '/api/workflow-runs/{id}/callback/{stepId}': {
+        post: {
+          tags: ['Workflow Runs'],
+          summary: 'Unified callback endpoint for workflow step',
+          description: 'Handles all callback types: single result, streaming items, batch items. For foreach steps, use X-Expected-Count header to set expected item count.',
+          parameters: [
+            { name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Workflow run ID' },
+            { name: 'stepId', in: 'path', required: true, schema: { type: 'string' }, description: 'Step ID to receive callback' },
+            { name: 'X-Workflow-Secret', in: 'header', required: true, schema: { type: 'string' }, description: 'Callback secret for authentication' },
+            { name: 'X-Expected-Count', in: 'header', required: false, schema: { type: 'integer' }, description: 'Expected number of items (for foreach steps)' },
+            { name: 'X-Workflow-Complete', in: 'header', required: false, schema: { type: 'string', enum: ['true'] }, description: 'Signal that no more items will be sent' },
+          ],
+          requestBody: {
+            required: false,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  description: 'Payload can be: 1) object with "item" key, 2) object with "items" array, 3) any object (treated as single item)',
+                  properties: {
+                    item: { type: 'object', description: 'Single item to process' },
+                    items: { type: 'array', items: { type: 'object' }, description: 'Multiple items to process' },
+                    workflowUpdate: {
+                      type: 'object',
+                      properties: {
+                        total: { type: 'integer', description: 'Expected number of items' },
+                        complete: { type: 'boolean', description: 'Signal that no more items will be sent' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: 'Callback processed successfully',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      acknowledged: { type: 'boolean' },
+                      taskId: { type: 'string' },
+                      taskType: { type: 'string' },
+                      childTaskIds: { type: 'array', items: { type: 'string' } },
+                      receivedCount: { type: 'integer' },
+                      expectedCount: { type: 'integer' },
+                      isComplete: { type: 'boolean' },
+                    },
+                  },
+                },
+              },
+            },
+            401: { description: 'Invalid or missing callback secret' },
+            404: { description: 'Workflow run or step not found' },
+          },
+        },
+      },
 
       // Batch Jobs endpoints
       '/api/batch-jobs': {

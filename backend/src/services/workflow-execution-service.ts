@@ -1135,8 +1135,66 @@ class WorkflowExecutionService {
     foreachTask: Task,
     inputPayload?: Record<string, unknown>
   ): Promise<void> {
+    // Debug: Log the input payload structure
+    console.log(`[WorkflowExecutionService] executeForeach called for step ${step.id}`);
+    console.log(`[WorkflowExecutionService] inputPayload keys: ${Object.keys(inputPayload || {}).join(', ')}`);
+    console.log(`[WorkflowExecutionService] inputPayload: ${JSON.stringify(inputPayload, null, 2).substring(0, 1000)}`);
+    if (step.expectedCountPath) {
+      console.log(`[WorkflowExecutionService] step.expectedCountPath: ${step.expectedCountPath}`);
+      const testValue = this.getValueByPath(inputPayload, step.expectedCountPath);
+      console.log(`[WorkflowExecutionService] getValueByPath(inputPayload, "${step.expectedCountPath}") = ${testValue} (type: ${typeof testValue})`);
+    }
+
+    // Helper to get expected count from step config (for waiting/callback scenarios)
+    // Defined early so it can be used in all code paths
+    const getExpectedCountFromStepConfig = (): number => {
+      // Check expectedCountPath in input payload
+      if (step.expectedCountPath) {
+        const pathValue = this.getValueByPath(inputPayload, step.expectedCountPath);
+        if (typeof pathValue === 'number' && pathValue >= 0) {
+          console.log(`[WorkflowExecutionService] Using expectedCountPath "${step.expectedCountPath}" = ${pathValue}`);
+          return pathValue;
+        }
+
+        // Path didn't resolve - log helpful debug info
+        // Try common alternate paths that might have the count
+        const alternates = ['output.count', 'response.count', 'count', 'output.total', 'response.total', 'total'];
+        const foundAlternates: string[] = [];
+        for (const alt of alternates) {
+          const altValue = this.getValueByPath(inputPayload, alt);
+          if (typeof altValue === 'number') {
+            foundAlternates.push(`${alt}=${altValue}`);
+          }
+        }
+
+        console.warn(`[WorkflowExecutionService] expectedCountPath "${step.expectedCountPath}" did not resolve to a number.`);
+        console.warn(`[WorkflowExecutionService] Input payload keys: ${Object.keys(inputPayload || {}).join(', ')}`);
+        if (foundAlternates.length > 0) {
+          console.warn(`[WorkflowExecutionService] Found numeric values at: ${foundAlternates.join(', ')}. Consider updating expectedCountPath.`);
+        }
+        // Also log the actual payload structure for debugging
+        console.warn(`[WorkflowExecutionService] Input payload structure: ${JSON.stringify(inputPayload, null, 2).substring(0, 500)}`);
+      }
+      // Default to 0 (unknown, will be set via callback)
+      return 0;
+    };
+
+    // No itemsPath means this foreach step expects items via callback
     if (!step.itemsPath) {
-      console.warn(`[WorkflowExecutionService] Foreach step ${step.id} has no itemsPath`);
+      console.log(`[WorkflowExecutionService] Foreach step ${step.id} has no itemsPath - waiting for callback items`);
+      const expectedCount = getExpectedCountFromStepConfig();
+      await this.tasks.updateOne(
+        { _id: foreachTask._id },
+        {
+          $set: {
+            status: 'waiting' as TaskStatus,
+            expectedQuantity: expectedCount,
+            'batchCounters.expectedCount': expectedCount,
+            'metadata.waitingReason': 'No itemsPath configured. Waiting for items via callback.',
+          }
+        }
+      );
+      console.log(`[WorkflowExecutionService] Foreach task ${foreachTask._id} set to waiting for callbacks (expectedCount: ${expectedCount})`);
       return;
     }
 
@@ -1147,34 +1205,38 @@ class WorkflowExecutionService {
       console.warn(`[WorkflowExecutionService] Items at ${step.itemsPath} is not an array. Input payload keys: ${Object.keys(inputPayload || {}).join(', ')}`);
       // Set to waiting status - items may arrive via external callback
       // Do NOT set to completed, as that would trigger workflow advancement
+      const expectedCount = getExpectedCountFromStepConfig();
       await this.tasks.updateOne(
         { _id: foreachTask._id },
         {
           $set: {
             status: 'waiting' as TaskStatus,
-            'batchCounters.expectedCount': 0,
+            expectedQuantity: expectedCount,
+            'batchCounters.expectedCount': expectedCount,
             'metadata.waitingReason': `Items not found at path: ${step.itemsPath}. Waiting for external data.`,
           }
         }
       );
-      console.log(`[WorkflowExecutionService] Foreach task ${foreachTask._id} set to waiting - items not found at path`);
+      console.log(`[WorkflowExecutionService] Foreach task ${foreachTask._id} set to waiting - items not found at path (expectedCount: ${expectedCount})`);
       return;
     }
 
     // If we have an empty array, also set to waiting - items may arrive later
     if (items.length === 0) {
       console.warn(`[WorkflowExecutionService] Items array at ${step.itemsPath} is empty`);
+      const expectedCount = getExpectedCountFromStepConfig();
       await this.tasks.updateOne(
         { _id: foreachTask._id },
         {
           $set: {
             status: 'waiting' as TaskStatus,
-            'batchCounters.expectedCount': 0,
+            expectedQuantity: expectedCount,
+            'batchCounters.expectedCount': expectedCount,
             'metadata.waitingReason': `Items array at path ${step.itemsPath} is empty. Waiting for external data.`,
           }
         }
       );
-      console.log(`[WorkflowExecutionService] Foreach task ${foreachTask._id} set to waiting - empty items array`);
+      console.log(`[WorkflowExecutionService] Foreach task ${foreachTask._id} set to waiting - empty items array (expectedCount: ${expectedCount})`);
       return;
     }
 
@@ -1191,7 +1253,20 @@ class WorkflowExecutionService {
         expectedCount = pathValue;
         console.log(`[WorkflowExecutionService] Using expectedCountPath "${step.expectedCountPath}" = ${expectedCount}`);
       } else {
-        console.warn(`[WorkflowExecutionService] expectedCountPath "${step.expectedCountPath}" did not yield a valid number, falling back to items.length`);
+        // Path didn't resolve - provide helpful debug info
+        const alternates = ['output.count', 'response.count', 'count', 'output.total', 'response.total', 'total'];
+        const foundAlternates: string[] = [];
+        for (const alt of alternates) {
+          const altValue = this.getValueByPath(inputPayload, alt);
+          if (typeof altValue === 'number') {
+            foundAlternates.push(`${alt}=${altValue}`);
+          }
+        }
+        console.warn(`[WorkflowExecutionService] expectedCountPath "${step.expectedCountPath}" did not yield a valid number (got: ${pathValue}), falling back to items.length=${itemsToProcess.length}`);
+        console.warn(`[WorkflowExecutionService] Input payload keys: ${Object.keys(inputPayload || {}).join(', ')}`);
+        if (foundAlternates.length > 0) {
+          console.warn(`[WorkflowExecutionService] Found numeric values at: ${foundAlternates.join(', ')}. Consider updating expectedCountPath.`);
+        }
       }
     }
 

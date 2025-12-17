@@ -239,8 +239,24 @@ export function TokenBrowser({
     let stepTokens: Token[] = []
 
     if (stepSample) {
-      // Use actual sample data to build tokens - prefix with "output" to match actual path
-      stepTokens = extractPaths(stepSample.output, 'output')
+      // Build tokens that mirror the actual runtime payload structure
+      // Backend constructs: { ...metadata, output: metadata.response || metadata }
+      // So paths like "response.count" access the spread metadata,
+      // and paths like "output.count" access metadata.response (or metadata if no response)
+      const metadata = stepSample.output as Record<string, unknown> | null
+      const responseData = metadata?.response as Record<string, unknown> | undefined
+
+      // Add paths for the "output" key (which equals metadata.response at runtime)
+      const outputSource = responseData || metadata
+      if (outputSource) {
+        stepTokens = extractPaths(outputSource, 'output')
+      }
+
+      // Also add direct paths to response (spread at root level)
+      if (responseData) {
+        stepTokens.push(...extractPaths(responseData, 'response'))
+      }
+
       if (stepTokens.length === 0) {
         stepTokens.push({ path: 'output', description: 'Step output', fromRun: true })
       }

@@ -161,9 +161,13 @@ router.post('/:id/cancel', async (req: Request, res: Response): Promise<void> =>
 // 2. If payload has `items` array → process each as an item
 // 3. Otherwise → the entire payload (minus workflowUpdate) IS the item
 //
-// Workflow controls (namespaced to avoid conflicts with external payloads):
-// - workflowUpdate.complete: boolean - Signal that no more items will be sent
-// - workflowUpdate.total: number - Set/update expected item count
+// Workflow controls (multiple options, in order of precedence):
+// Option 1: Headers (cleanest for external services)
+//   - X-Expected-Count: number - Set expected item count
+//   - X-Workflow-Complete: "true" - Signal that no more items will be sent
+// Option 2: In payload (namespaced to avoid conflicts with external payloads)
+//   - workflowUpdate.complete: boolean - Signal that no more items will be sent
+//   - workflowUpdate.total: number - Set/update expected item count
 // ============================================================================
 router.post('/:id/callback/:stepId', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -180,7 +184,24 @@ router.post('/:id/callback/:stepId', async (req: Request, res: Response): Promis
       return;
     }
 
-    const payload = req.body;
+    // Check for header-based workflow controls
+    const expectedCountHeader = req.headers['x-expected-count'] as string | undefined;
+    const completeHeader = req.headers['x-workflow-complete'] as string | undefined;
+
+    // Start with the payload
+    const payload = { ...req.body };
+
+    // Merge header-based controls into payload.workflowUpdate (headers take precedence)
+    if (expectedCountHeader || completeHeader) {
+      const existingUpdate = (payload.workflowUpdate as Record<string, unknown>) || {};
+      payload.workflowUpdate = {
+        ...existingUpdate,
+        // Headers override payload values
+        ...(expectedCountHeader ? { total: parseInt(expectedCountHeader, 10) } : {}),
+        ...(completeHeader === 'true' ? { complete: true } : {}),
+      };
+    }
+
     const result = await workflowExecutionService.handleCallback(id, stepId, payload, secret);
 
     res.json(result);
