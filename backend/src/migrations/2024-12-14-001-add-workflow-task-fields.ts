@@ -232,6 +232,7 @@ export const migration: Migration = {
   id: '2024-12-14-001',
   name: 'add-workflow-task-fields',
   description: 'Add workflow execution fields to tasks and workflow_runs collections',
+  schemaVersion: 1,
 
   async up(db: Db): Promise<void> {
     // Update tasks collection validator

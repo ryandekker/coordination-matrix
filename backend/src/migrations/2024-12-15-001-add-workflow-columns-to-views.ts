@@ -12,6 +12,7 @@ export const migration: Migration = {
   id: '2024-12-15-001',
   name: 'add-workflow-columns-to-views',
   description: 'Add workflowId and workflowStage columns to default views',
+  schemaVersion: 2,
 
   async up(db: Db): Promise<void> {
     // Update the "All Tasks" view to include workflow columns

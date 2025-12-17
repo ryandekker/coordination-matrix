@@ -16,6 +16,7 @@ import {
   X,
   CheckCircle,
   AlertCircle,
+  Archive,
 } from 'lucide-react'
 import {
   Table,
@@ -91,6 +92,7 @@ const BulkActionsBar = memo(function BulkActionsBar({
   lookups,
   onStatusChange,
   onPriorityChange,
+  onArchive,
   onDelete,
   onClearSelection,
   isUpdating,
@@ -99,6 +101,7 @@ const BulkActionsBar = memo(function BulkActionsBar({
   lookups: Record<string, LookupValue[]>
   onStatusChange: (status: string) => void
   onPriorityChange: (priority: string) => void
+  onArchive: () => void
   onDelete: () => void
   onClearSelection: () => void
   isUpdating: boolean
@@ -140,6 +143,16 @@ const BulkActionsBar = memo(function BulkActionsBar({
         </Select>
       </div>
       <div className="h-4 w-px bg-border" />
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={onArchive}
+        disabled={isUpdating}
+        className="h-8"
+      >
+        <Archive className="h-4 w-4 mr-1" />
+        Archive
+      </Button>
       <Button
         variant="destructive"
         size="sm"
@@ -490,6 +503,12 @@ export function TaskDataTable({
     }
   }, [selectedRows, bulkDeleteTasks, clearSelection])
 
+  const handleBulkArchive = useCallback(async () => {
+    const taskIds = Array.from(selectedRows)
+    await bulkUpdateTasks.mutateAsync({ taskIds, updates: { status: 'archived' } })
+    clearSelection()
+  }, [selectedRows, bulkUpdateTasks, clearSelection])
+
   // Memoized field config map for quick lookup
   const fieldConfigMap = useMemo(
     () => new Map(fieldConfigs.map((fc) => [fc.fieldPath, fc])),
@@ -652,6 +671,7 @@ export function TaskDataTable({
           lookups={lookups}
           onStatusChange={handleBulkStatusChange}
           onPriorityChange={handleBulkPriorityChange}
+          onArchive={handleBulkArchive}
           onDelete={handleBulkDelete}
           onClearSelection={clearSelection}
           isUpdating={isUpdating}
