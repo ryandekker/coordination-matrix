@@ -73,13 +73,91 @@ export function useUpdateTask() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<Task> }) =>
       tasksApi.update(id, data),
-    onSuccess: (_, variables) => {
-      // Invalidate specific task and task lists
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      queryClient.invalidateQueries({ queryKey: ['task', variables.id] })
-      queryClient.invalidateQueries({ queryKey: ['task-tree'] })
-      queryClient.invalidateQueries({ queryKey: ['task-children'] })
+    // Use optimistic updates to prevent table refresh/collapse
+    onMutate: async ({ id, data }) => {
+      // Cancel outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ['tasks'] })
+      await queryClient.cancelQueries({ queryKey: ['task', id] })
+
+      // Snapshot previous values
+      const previousTask = queryClient.getQueryData(['task', id])
+      const previousTasks = queryClient.getQueriesData({ queryKey: ['tasks'] })
+
+      // Optimistically update the specific task
+      queryClient.setQueryData(['task', id], (old: unknown) => {
+        if (!old) return old
+        const oldData = old as { data: Task }
+        return { ...oldData, data: { ...oldData.data, ...data } }
+      })
+
+      // Optimistically update task in lists
+      queryClient.setQueriesData({ queryKey: ['tasks'] }, (old: unknown) => {
+        if (!old) return old
+        const oldData = old as { data: Task[]; pagination: unknown }
+        return {
+          ...oldData,
+          data: oldData.data.map((task: Task) =>
+            task._id === id ? { ...task, ...data } : task
+          )
+        }
+      })
+
+      // Optimistically update task tree
+      queryClient.setQueriesData({ queryKey: ['task-tree'] }, (old: unknown) => {
+        if (!old) return old
+        const oldData = old as { data: Task[] }
+        return {
+          ...oldData,
+          data: updateTaskInTree(oldData.data, id, data)
+        }
+      })
+
+      // Optimistically update task children
+      queryClient.setQueriesData({ queryKey: ['task-children'] }, (old: unknown) => {
+        if (!old) return old
+        const oldData = old as { data: Task[] }
+        return {
+          ...oldData,
+          data: oldData.data.map((task: Task) =>
+            task._id === id ? { ...task, ...data } : task
+          )
+        }
+      })
+
+      return { previousTask, previousTasks }
     },
+    onError: (_err, { id }, context) => {
+      // Rollback on error
+      if (context?.previousTask) {
+        queryClient.setQueryData(['task', id], context.previousTask)
+      }
+      if (context?.previousTasks) {
+        context.previousTasks.forEach(([queryKey, data]) => {
+          queryClient.setQueryData(queryKey, data)
+        })
+      }
+    },
+    // SSE will handle real-time updates, so we don't need to invalidate
+    // Only invalidate the specific task to get the resolved references
+    onSettled: (_, __, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ['task', id] })
+    },
+  })
+}
+
+// Helper to recursively update a task in a tree structure
+function updateTaskInTree(tasks: Task[], taskId: string, updates: Partial<Task>): Task[] {
+  return tasks.map(task => {
+    if (task._id === taskId) {
+      return { ...task, ...updates }
+    }
+    if (task.children && task.children.length > 0) {
+      return {
+        ...task,
+        children: updateTaskInTree(task.children, taskId, updates)
+      }
+    }
+    return task
   })
 }
 

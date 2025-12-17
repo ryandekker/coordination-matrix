@@ -7,6 +7,7 @@ import { TaskToolbar } from './task-toolbar'
 import { TaskModal } from './task-modal'
 import { ColumnConfigModal } from './column-config-modal'
 import { useTasks, useTask, useLookups, useFieldConfigs, useViews, useUsers, useCreateView, useUpdateView } from '@/hooks/use-tasks'
+import { useEventStream } from '@/hooks/use-event-stream'
 import { Task, View, FieldConfig } from '@/lib/api'
 
 // Fallback field configs when API returns empty or fails - ensures basic functionality
@@ -123,6 +124,9 @@ export function TasksPage() {
   const { data: usersData } = useUsers()
   const createViewMutation = useCreateView()
   const updateViewMutation = useUpdateView()
+
+  // Enable real-time updates via SSE - the hook handles cache updates automatically
+  useEventStream()
 
   const tasks = tasksData?.data || []
   const pagination = tasksData?.pagination

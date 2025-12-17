@@ -11,8 +11,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            staleTime: 60 * 1000, // 1 minute
+            staleTime: 30 * 1000, // 30 seconds - reduced since SSE provides real-time updates
+            gcTime: 5 * 60 * 1000, // 5 minutes - garbage collect unused queries
             refetchOnWindowFocus: false,
+            // Reduce retries to prevent holding failed queries
+            retry: 1,
           },
         },
       })

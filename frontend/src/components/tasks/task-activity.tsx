@@ -11,7 +11,7 @@ interface TaskActivityProps {
   taskId: string
   className?: string
   compact?: boolean
-  /** Polling interval in milliseconds. Default: 5000 (5 seconds) */
+  /** Polling interval in milliseconds. Default: 30000 (30 seconds) - SSE handles real-time updates */
   pollInterval?: number
 }
 
@@ -127,7 +127,7 @@ function ActivityEntry({ entry, compact, isNew }: { entry: ActivityLogEntry; com
   )
 }
 
-export function TaskActivity({ taskId, className, compact = false, pollInterval = 5000 }: TaskActivityProps) {
+export function TaskActivity({ taskId, className, compact = false, pollInterval = 30000 }: TaskActivityProps) {
   const [newComment, setNewComment] = useState('')
   const [newEntryIds, setNewEntryIds] = useState<Set<string>>(new Set())
   const prevEntryIdsRef = useRef<Set<string>>(new Set())

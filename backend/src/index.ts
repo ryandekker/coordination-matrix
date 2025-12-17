@@ -16,6 +16,7 @@ import { activityLogsRouter } from './routes/activity-logs.js';
 import { webhooksRouter } from './routes/webhooks.js';
 import batchJobsRouter from './routes/batch-jobs.js';
 import workflowRunsRouter from './routes/workflow-runs.js';
+import { eventsRouter } from './routes/events.js';
 import { authRouter } from './routes/auth.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { requireAuth } from './middleware/auth.js';
@@ -193,6 +194,7 @@ app.use('/api/activity-logs', requireAuth, activityLogsRouter);
 app.use('/api/webhooks', requireAuth, webhooksRouter);
 app.use('/api/batch-jobs', requireAuth, batchJobsRouter);
 app.use('/api/workflow-runs', requireAuth, workflowRunsRouter);
+app.use('/api/events', requireAuth, eventsRouter);
 
 // Error handling
 app.use(errorHandler);

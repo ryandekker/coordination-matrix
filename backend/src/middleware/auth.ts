@@ -97,14 +97,17 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   }
 
   // Fall back to JWT Bearer token authentication
-  if (!authHeader) {
+  // Also support token via query param for SSE (EventSource doesn't support custom headers)
+  const queryToken = req.query.token as string | undefined;
+
+  if (!authHeader && !queryToken) {
     res.status(401).json({ error: 'No authorization header' });
     return;
   }
 
-  const token = authHeader.startsWith('Bearer ')
+  const token = queryToken || (authHeader?.startsWith('Bearer ')
     ? authHeader.slice(7)
-    : authHeader;
+    : authHeader) || '';
 
   const user = verifyToken(token);
 
