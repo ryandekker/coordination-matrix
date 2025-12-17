@@ -83,9 +83,14 @@ export const EditableCell = memo(function EditableCell({
     setEditValue(value)
   }, [value])
 
-  // Handle click outside to save - only register when editing
+  // Handle click outside to save - only for non-portaled field types
+  // Select fields use portaled dropdowns (via radix-ui), so clicks on dropdown items
+  // would incorrectly trigger this handler (portal renders outside containerRef)
+  const usesPortaledUI = fieldConfig.fieldType === 'select'
+
   useEffect(() => {
-    if (!isEditing) return
+    // Skip click-outside handler for fields with portaled UI - they handle their own close logic
+    if (!isEditing || usesPortaledUI) return
 
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
@@ -94,7 +99,7 @@ export const EditableCell = memo(function EditableCell({
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [isEditing]) // Removed editValue from deps to prevent re-registration on keystroke
+  }, [isEditing, usesPortaledUI, handleSave])
 
   const handleSave = useCallback(() => {
     onSave(editValue)
