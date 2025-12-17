@@ -1646,6 +1646,24 @@ class WorkflowExecutionService {
       const parentTask = task.parentId ? await this.tasks.findOne({ _id: task.parentId }) : null;
 
       if (parentTask?.taskType === 'foreach') {
+        // Always update the foreach parent's batchCounters when a child completes
+        if (parentTask.batchCounters) {
+          const children = await this.tasks.find({ parentId: parentTask._id }).toArray();
+          const completedCount = children.filter(c => c.status === 'completed').length;
+          const failedCount = children.filter(c => c.status === 'failed').length;
+
+          await this.tasks.updateOne(
+            { _id: parentTask._id },
+            {
+              $set: {
+                'batchCounters.processedCount': completedCount,
+                'batchCounters.failedCount': failedCount,
+              },
+            }
+          );
+          console.log(`[WorkflowExecutionService] Updated foreach ${parentTask._id} counters: ${completedCount} completed, ${failedCount} failed`);
+        }
+
         // Check if there's a join task waiting
         const joinTask = await this.tasks.findOne({
           workflowRunId: run._id,
