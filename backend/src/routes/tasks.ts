@@ -357,6 +357,93 @@ tasksRouter.get('/webhook-attempts', async (req: Request, res: Response, next: N
   }
 });
 
+// GET /api/tasks/workflow-callbacks - List workflow callback tasks (inbound requests)
+// NOTE: This route MUST be defined before /:id to avoid being matched as an ID
+tasksRouter.get('/workflow-callbacks', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { taskStatus, taskType, limit = '50', offset = '0' } = req.query;
+
+    // Find tasks that are part of workflow callbacks:
+    // - Tasks with externalConfig.callbackSecret (expecting callbacks)
+    // - Foreach tasks that receive items via callbacks
+    const filter: Record<string, unknown> = {
+      $or: [
+        { 'externalConfig.callbackSecret': { $exists: true } },
+        { taskType: 'foreach', childTaskIds: { $exists: true } },
+      ],
+    };
+
+    // Filter by task status if provided
+    if (taskStatus) {
+      filter.status = taskStatus;
+    }
+
+    // Filter by task type if provided
+    if (taskType) {
+      filter.taskType = taskType;
+    }
+
+    const [tasks, total] = await Promise.all([
+      db
+        .collection<Task>('tasks')
+        .find(filter)
+        .project({
+          _id: 1,
+          title: 1,
+          status: 1,
+          taskType: 1,
+          workflowRunId: 1,
+          workflowStepId: 1,
+          externalConfig: 1,
+          metadata: 1,
+          childTaskIds: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          completedAt: 1,
+        })
+        .sort({ updatedAt: -1 })
+        .skip(parseInt(offset as string, 10))
+        .limit(parseInt(limit as string, 10))
+        .toArray(),
+      db.collection('tasks').countDocuments(filter),
+    ]);
+
+    // Transform to a useful format
+    const callbacks = tasks.map((task) => ({
+      _id: task._id.toString(),
+      taskId: task._id.toString(),
+      taskTitle: task.title,
+      taskStatus: task.status,
+      taskType: task.taskType,
+      workflowRunId: task.workflowRunId?.toString(),
+      workflowStepId: task.workflowStepId,
+      // Callback info
+      hasReceivedCallback: !!task.metadata?.callbackPayload,
+      callbackPayload: task.metadata?.callbackPayload,
+      // For foreach tasks
+      childTaskCount: task.childTaskIds?.length || 0,
+      expectedCount: task.metadata?.expectedCount as number | undefined,
+      receivedCount: task.metadata?.receivedCount as number | undefined,
+      // Timestamps
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+      completedAt: task.completedAt,
+    }));
+
+    res.json({
+      data: callbacks,
+      pagination: {
+        limit: parseInt(limit as string, 10),
+        offset: parseInt(offset as string, 10),
+        total,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/tasks/:id - Get a single task
 tasksRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {

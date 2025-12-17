@@ -188,6 +188,22 @@ export const tasksApi = {
     const response = await authFetch(`${API_BASE}/tasks/webhook-attempts?${searchParams}`)
     return handleResponse(response)
   },
+
+  // Get workflow callback tasks (inbound requests from external systems)
+  getWorkflowCallbacks: async (params?: {
+    taskStatus?: string
+    taskType?: string
+    limit?: number
+    offset?: number
+  }): Promise<{ data: WorkflowCallback[]; pagination: { limit: number; offset: number; total: number } }> => {
+    const searchParams = new URLSearchParams()
+    if (params?.taskStatus) searchParams.append('taskStatus', params.taskStatus)
+    if (params?.taskType) searchParams.append('taskType', params.taskType)
+    if (params?.limit) searchParams.append('limit', String(params.limit))
+    if (params?.offset) searchParams.append('offset', String(params.offset))
+    const response = await authFetch(`${API_BASE}/tasks/workflow-callbacks?${searchParams}`)
+    return handleResponse(response)
+  },
 }
 
 // Lookups API
@@ -821,6 +837,25 @@ export interface WebhookTaskAttempt {
   headers?: Record<string, string>
   requestBody?: unknown
   startedAt: string
+  completedAt?: string
+}
+
+// Workflow callback (inbound requests from external systems)
+export interface WorkflowCallback {
+  _id: string
+  taskId: string
+  taskTitle: string
+  taskStatus: string
+  taskType: string
+  workflowRunId?: string
+  workflowStepId?: string
+  hasReceivedCallback: boolean
+  callbackPayload?: unknown
+  childTaskCount: number
+  expectedCount?: number
+  receivedCount?: number
+  createdAt: string
+  updatedAt: string
   completedAt?: string
 }
 

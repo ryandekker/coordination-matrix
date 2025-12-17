@@ -83,13 +83,15 @@ import {
   ExternalJob,
   WebhookDelivery,
   WebhookTaskAttempt,
+  WorkflowCallback,
   LookupValue,
   User,
 } from '@/lib/api'
+import { Phone } from 'lucide-react'
 
 // Unified request type for the list
-type RequestType = 'external' | 'batch' | 'webhook_delivery' | 'webhook_task'
-type RequestStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'awaiting_responses' | 'manual_review' | 'success' | 'retrying'
+type RequestType = 'external' | 'batch' | 'webhook_delivery' | 'webhook_task' | 'workflow_callback'
+type RequestStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'awaiting_responses' | 'manual_review' | 'success' | 'retrying' | 'in_progress' | 'waiting'
 
 interface UnifiedRequest {
   _id: string
@@ -126,13 +128,21 @@ interface UnifiedRequest {
   method?: string
   requestHeaders?: Record<string, string>
   requestBody?: unknown
-  original: ExternalJob | BatchJob | WebhookDelivery | WebhookTaskAttempt
+  // Workflow callback fields
+  workflowRunId?: string
+  workflowStepId?: string
+  hasReceivedCallback?: boolean
+  callbackPayload?: unknown
+  childTaskCount?: number
+  original: ExternalJob | BatchJob | WebhookDelivery | WebhookTaskAttempt | WorkflowCallback
 }
 
 // Status configurations
 const STATUS_CONFIG: Record<string, { icon: React.ElementType; color: string; bgColor: string; label: string }> = {
   pending: { icon: Clock, color: 'text-gray-500', bgColor: 'bg-gray-50 dark:bg-gray-800/50', label: 'Pending' },
   processing: { icon: Loader2, color: 'text-blue-500', bgColor: 'bg-blue-50 dark:bg-blue-950/50', label: 'Processing' },
+  in_progress: { icon: Loader2, color: 'text-blue-500', bgColor: 'bg-blue-50 dark:bg-blue-950/50', label: 'In Progress' },
+  waiting: { icon: Clock, color: 'text-amber-500', bgColor: 'bg-amber-50 dark:bg-amber-950/50', label: 'Waiting' },
   awaiting_responses: { icon: ArrowLeftRight, color: 'text-amber-500', bgColor: 'bg-amber-50 dark:bg-amber-950/50', label: 'Awaiting' },
   completed: { icon: CheckCircle, color: 'text-green-500', bgColor: 'bg-green-50 dark:bg-green-950/50', label: 'Completed' },
   success: { icon: CheckCircle, color: 'text-green-500', bgColor: 'bg-green-50 dark:bg-green-950/50', label: 'Success' },
@@ -264,6 +274,28 @@ function toWebhookTaskUnifiedRequest(attempt: WebhookTaskAttempt): UnifiedReques
     requestBody: attempt.requestBody,
     error: attempt.errorMessage,
     original: attempt,
+  }
+}
+
+// Convert workflow callback to unified format
+function toWorkflowCallbackUnifiedRequest(callback: WorkflowCallback): UnifiedRequest {
+  return {
+    _id: callback._id,
+    type: 'workflow_callback',
+    name: callback.taskTitle || `Workflow Callback`,
+    status: callback.taskStatus as RequestStatus,
+    createdAt: callback.createdAt,
+    completedAt: callback.completedAt,
+    taskId: callback.taskId,
+    taskTitle: callback.taskTitle,
+    workflowRunId: callback.workflowRunId,
+    workflowStepId: callback.workflowStepId,
+    hasReceivedCallback: callback.hasReceivedCallback,
+    callbackPayload: callback.callbackPayload,
+    childTaskCount: callback.childTaskCount,
+    expectedCount: callback.expectedCount,
+    receivedCount: callback.receivedCount,
+    original: callback,
   }
 }
 
@@ -1157,11 +1189,166 @@ function WebhookTaskDetail({ attemptId }: { attemptId: string }) {
 }
 
 // ============================================================================
+// Workflow Callback Detail View
+// ============================================================================
+function WorkflowCallbackDetail({ callbackId }: { callbackId: string }) {
+  const router = useRouter()
+
+  const { data: callbacksData, isLoading, error, refetch } = useQuery({
+    queryKey: ['workflow-callback', callbackId],
+    queryFn: () => tasksApi.getWorkflowCallbacks({ limit: 100 }),
+    refetchInterval: (query) => {
+      const callbacks = query.state.data?.data || []
+      const callback = callbacks.find((c: WorkflowCallback) => c._id === callbackId)
+      if (callback && (callback.taskStatus === 'waiting' || callback.taskStatus === 'in_progress')) {
+        return 3000
+      }
+      return false
+    },
+  })
+
+  const callback: WorkflowCallback | undefined = callbacksData?.data?.find((c: WorkflowCallback) => c._id === callbackId)
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    )
+  }
+
+  if (error || !callback) {
+    return (
+      <div className="space-y-4">
+        <Button variant="ghost" onClick={() => router.push('/requests')}>
+          <ChevronLeft className="h-4 w-4 mr-2" />
+          Back to List
+        </Button>
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-8 text-center">
+          <p className="text-destructive">Failed to load workflow callback</p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>
+            Retry
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  const statusConfig = STATUS_CONFIG[callback.taskStatus] || STATUS_CONFIG.pending
+  const StatusIcon = statusConfig.icon
+  const isActive = callback.taskStatus === 'waiting' || callback.taskStatus === 'in_progress'
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" onClick={() => router.push('/requests')}>
+            <ChevronLeft className="h-4 w-4 mr-2" />
+            Back
+          </Button>
+          <div>
+            <div className="flex items-center gap-3">
+              <Badge variant="outline" className="text-xs">
+                <Phone className="h-3 w-3 mr-1" />
+                Workflow Callback
+              </Badge>
+              <h1 className="text-2xl font-bold">{callback.taskTitle}</h1>
+              <Badge variant="outline" className={cn('text-sm', statusConfig.color)}>
+                <StatusIcon className={cn('h-4 w-4 mr-1', isActive && 'animate-spin')} />
+                {statusConfig.label}
+              </Badge>
+              {isActive && (
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-blue-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                </span>
+              )}
+            </div>
+            <p className="text-muted-foreground text-sm">Task Type: {callback.taskType}</p>
+          </div>
+        </div>
+
+        <Button variant="outline" size="sm" onClick={() => refetch()}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Refresh
+        </Button>
+      </div>
+
+      {/* Stats grid */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="rounded-lg border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Created</p>
+          <p className="font-medium">{formatDate(callback.createdAt)}</p>
+        </div>
+        <div className="rounded-lg border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Updated</p>
+          <p className="font-medium">{formatDate(callback.updatedAt)}</p>
+        </div>
+        <div className="rounded-lg border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Completed</p>
+          <p className="font-medium">{formatDate(callback.completedAt)}</p>
+        </div>
+        <div className="rounded-lg border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Callback Received</p>
+          <p className="font-medium">{callback.hasReceivedCallback ? 'Yes' : 'No'}</p>
+        </div>
+      </div>
+
+      {/* Progress for foreach callbacks */}
+      {callback.childTaskCount > 0 ? (
+        <div className="rounded-lg border bg-card p-4">
+          <h2 className="font-semibold mb-3">Progress</h2>
+          <div className="grid grid-cols-3 gap-4 text-sm">
+            <div>
+              <p className="text-muted-foreground">Expected</p>
+              <p className="font-medium text-lg">{String(callback.expectedCount ?? '-')}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">Received</p>
+              <p className="font-medium text-lg">{String(callback.receivedCount ?? 0)}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">Child Tasks</p>
+              <p className="font-medium text-lg">{callback.childTaskCount}</p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Related task */}
+      {callback.taskId && (
+        <div className="rounded-lg border bg-card p-4">
+          <h2 className="font-semibold mb-2">Related Task</h2>
+          <Link
+            href={`/tasks?taskId=${callback.taskId}`}
+            className="text-primary hover:underline flex items-center gap-1"
+          >
+            View Task <ExternalLink className="h-3 w-3" />
+          </Link>
+        </div>
+      )}
+
+      {/* Callback Payload */}
+      {callback.callbackPayload && (
+        <div className="rounded-lg border bg-card p-4">
+          <h2 className="font-semibold mb-2">Callback Payload</h2>
+          <pre className="text-sm bg-muted rounded p-3 overflow-auto max-h-64">
+            {typeof callback.callbackPayload === 'string'
+              ? callback.callbackPayload
+              : JSON.stringify(callback.callbackPayload, null, 2)}
+          </pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ============================================================================
 // Unified Request List
 // ============================================================================
 function RequestsList() {
   const queryClient = useQueryClient()
-  const [typeFilter, setTypeFilter] = useState<'all' | 'external' | 'batch' | 'webhook_delivery' | 'webhook_task'>('all')
+  const [typeFilter, setTypeFilter] = useState<'all' | 'external' | 'batch' | 'webhook_delivery' | 'webhook_task' | 'workflow_callback'>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [taskStatusFilter, setTaskStatusFilter] = useState<string>('all')
   const [taskTypeFilter, setTaskTypeFilter] = useState<string>('all')
@@ -1231,6 +1418,18 @@ function RequestsList() {
     enabled: typeFilter === 'all' || typeFilter === 'webhook_task',
   })
 
+  // Fetch workflow callbacks (inbound requests)
+  const { data: workflowCallbacksData, isLoading: callbacksLoading, refetch: refetchCallbacks } = useQuery({
+    queryKey: ['workflow-callbacks-list', taskFilterParams],
+    queryFn: () => tasksApi.getWorkflowCallbacks({
+      limit: 100,
+      taskStatus: taskFilterParams.taskStatus,
+      taskType: taskFilterParams.taskType,
+    }),
+    refetchInterval: 5000,
+    enabled: typeFilter === 'all' || typeFilter === 'workflow_callback',
+  })
+
   // Fetch workflows for batch job names
   const { data: workflowsData } = useQuery({
     queryKey: ['workflows'],
@@ -1277,6 +1476,11 @@ function RequestsList() {
       requests.push(...webhookAttemptsData.data.map(toWebhookTaskUnifiedRequest))
     }
 
+    // Add workflow callbacks
+    if ((typeFilter === 'all' || typeFilter === 'workflow_callback') && workflowCallbacksData?.data) {
+      requests.push(...workflowCallbacksData.data.map(toWorkflowCallbackUnifiedRequest))
+    }
+
     // Filter by status
     let filtered = requests
     if (statusFilter !== 'all') {
@@ -1285,20 +1489,21 @@ function RequestsList() {
 
     // Sort by createdAt descending
     return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-  }, [externalJobsData, batchJobsData, webhookDeliveriesData, webhookAttemptsData, typeFilter, statusFilter])
+  }, [externalJobsData, batchJobsData, webhookDeliveriesData, webhookAttemptsData, workflowCallbacksData, typeFilter, statusFilter])
 
-  const isLoading = externalLoading || batchLoading || deliveriesLoading || attemptsLoading
+  const isLoading = externalLoading || batchLoading || deliveriesLoading || attemptsLoading || callbacksLoading
 
   const handleRefresh = () => {
     refetchExternal()
     refetchBatch()
     refetchDeliveries()
     refetchAttempts()
+    refetchCallbacks()
   }
 
   // Count active requests
   const activeCount = unifiedRequests.filter(r =>
-    r.status === 'pending' || r.status === 'processing' || r.status === 'awaiting_responses' || r.status === 'retrying'
+    r.status === 'pending' || r.status === 'processing' || r.status === 'awaiting_responses' || r.status === 'retrying' || r.status === 'in_progress' || r.status === 'waiting'
   ).length
 
   return (
@@ -1325,7 +1530,7 @@ function RequestsList() {
       <div className="flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Type:</span>
-          <Select value={typeFilter} onValueChange={(v: 'all' | 'external' | 'batch' | 'webhook_delivery' | 'webhook_task') => setTypeFilter(v)}>
+          <Select value={typeFilter} onValueChange={(v: 'all' | 'external' | 'batch' | 'webhook_delivery' | 'webhook_task' | 'workflow_callback') => setTypeFilter(v)}>
             <SelectTrigger className="w-[180px]">
               <SelectValue />
             </SelectTrigger>
@@ -1353,6 +1558,12 @@ function RequestsList() {
                 <div className="flex items-center gap-2">
                   <ArrowLeftRight className="h-4 w-4" />
                   Webhook Tasks
+                </div>
+              </SelectItem>
+              <SelectItem value="workflow_callback">
+                <div className="flex items-center gap-2">
+                  <Phone className="h-4 w-4" />
+                  Workflow Callbacks
                 </div>
               </SelectItem>
             </SelectContent>
@@ -1454,13 +1665,15 @@ function RequestsList() {
           {unifiedRequests.map((request) => {
             const statusConfig = STATUS_CONFIG[request.status] || STATUS_CONFIG.pending
             const StatusIcon = statusConfig.icon
-            const isActive = request.status === 'pending' || request.status === 'processing' || request.status === 'awaiting_responses' || request.status === 'retrying'
+            const isActive = request.status === 'pending' || request.status === 'processing' || request.status === 'awaiting_responses' || request.status === 'retrying' || request.status === 'in_progress' || request.status === 'waiting'
             const needsReview = request.status === 'manual_review'
             const isBatch = request.type === 'batch'
             const isExternal = request.type === 'external'
             const isWebhookDelivery = request.type === 'webhook_delivery'
             const isWebhookTask = request.type === 'webhook_task'
+            const isWorkflowCallback = request.type === 'workflow_callback'
             const batchJob = isBatch ? request.original as BatchJob : null
+            const workflowCallback = isWorkflowCallback ? request.original as WorkflowCallback : null
             const progressPercent = batchJob && batchJob.expectedCount > 0
               ? Math.round((batchJob.processedCount / batchJob.expectedCount) * 100)
               : 0
@@ -1471,6 +1684,7 @@ function RequestsList() {
               if (isExternal) return <><Globe className="h-3 w-3 mr-1" />External</>
               if (isWebhookDelivery) return <><Send className="h-3 w-3 mr-1" />Webhook</>
               if (isWebhookTask) return <><ArrowLeftRight className="h-3 w-3 mr-1" />Task Webhook</>
+              if (isWorkflowCallback) return <><Phone className="h-3 w-3 mr-1" />Callback</>
               return null
             }
 
@@ -1538,6 +1752,19 @@ function RequestsList() {
                         )}
                         {isWebhookTask && request.durationMs !== undefined && (
                           <span>{request.durationMs}ms</span>
+                        )}
+                        {isWorkflowCallback && workflowCallback && (
+                          <>
+                            <span className="text-xs">{workflowCallback.taskType}</span>
+                            {workflowCallback.childTaskCount > 0 && (
+                              <span>{workflowCallback.childTaskCount} items</span>
+                            )}
+                            {workflowCallback.hasReceivedCallback && (
+                              <Badge variant="outline" className="text-xs text-green-600">
+                                Received
+                              </Badge>
+                            )}
+                          </>
                         )}
                         {request.error && (
                           <span className="text-destructive truncate max-w-[200px]" title={request.error}>
@@ -1630,6 +1857,9 @@ function RequestsContent() {
     }
     if (requestType === 'webhook_task') {
       return <WebhookTaskDetail attemptId={requestId} />
+    }
+    if (requestType === 'workflow_callback') {
+      return <WorkflowCallbackDetail callbackId={requestId} />
     }
     // Default to batch
     return <BatchJobDetail requestId={requestId} />
