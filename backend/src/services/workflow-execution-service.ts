@@ -25,9 +25,10 @@ type WorkflowRunEventHandler = (event: WorkflowRunEvent) => void | Promise<void>
 /**
  * Resolves template variables in a string.
  * Supported variables:
- *   {{callbackUrl}} - Unified callback URL for all callback types (single result, streaming items)
- *   {{systemWebhookUrl}} - Alias for callbackUrl (backward compatibility)
- *   {{foreachWebhookUrl}} - Alias for callbackUrl (backward compatibility, deprecated)
+ *   {{callbackUrl}} - Callback URL for current step (single result, completion signals)
+ *   {{systemWebhookUrl}} - Smart callback URL that routes to next foreach step when available
+ *                          (use for streaming items from external->foreach pattern)
+ *   {{foreachWebhookUrl}} - Alias for systemWebhookUrl (backward compatibility)
  *   {{callbackSecret}} - Task-specific callback secret
  *   {{workflowRunId}} - Current workflow run ID
  *   {{stepId}} - Current step ID
@@ -53,8 +54,14 @@ function resolveTemplateVariables(
   // {{callbackUrl}} - the primary/preferred variable
   result = result.replace(/\{\{callbackUrl\}\}/g, callbackUrl);
 
-  // {{systemWebhookUrl}} - backward compatibility alias
-  result = result.replace(/\{\{systemWebhookUrl\}\}/g, callbackUrl);
+  // {{systemWebhookUrl}} - smart callback URL that routes to foreach step when available
+  // This enables the common pattern: external trigger -> streaming items to foreach
+  if (context.nextForeachStepId) {
+    const smartCallbackUrl = `${BASE_URL}/api/workflow-runs/${context.workflowRunId}/callback/${context.nextForeachStepId}`;
+    result = result.replace(/\{\{systemWebhookUrl\}\}/g, smartCallbackUrl);
+  } else {
+    result = result.replace(/\{\{systemWebhookUrl\}\}/g, callbackUrl);
+  }
 
   // {{foreachWebhookUrl}} - backward compatibility (points to same unified endpoint)
   // If there's a next foreach step, use that step's callback URL
@@ -1912,10 +1919,24 @@ class WorkflowExecutionService {
       throw new Error(`Task for step ${stepId} not found or already completed`);
     }
 
-    // Verify secret - check both task-specific and workflow run secrets
-    const validSecret =
+    // Verify secret - check task-specific, workflow run, and previous step secrets
+    let validSecret =
       task.externalConfig?.callbackSecret === secret ||
       run.callbackSecret === secret;
+
+    // For foreach tasks, also check the previous external step's callback secret
+    // This supports the pattern where external step routes callbacks to the foreach step
+    if (!validSecret && task.taskType === 'foreach') {
+      const prevExternalTask = await this.tasks.findOne({
+        workflowRunId: run._id,
+        taskType: 'external',
+        status: 'completed',
+      }, { sort: { createdAt: -1 } });
+
+      if (prevExternalTask?.externalConfig?.callbackSecret === secret) {
+        validSecret = true;
+      }
+    }
 
     if (!validSecret) {
       throw new Error('Invalid callback secret');
