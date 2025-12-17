@@ -717,9 +717,11 @@ export function TaskDataTable({
     if (fieldConfig.lookupType && resolved) {
       const lookup = resolved as { displayName: string; color?: string }
       return (
-        <Badge color={lookup.color} variant="outline">
-          {lookup.displayName}
-        </Badge>
+        <div className="flex justify-center">
+          <Badge color={lookup.color} variant="outline">
+            {lookup.displayName}
+          </Badge>
+        </div>
       )
     }
 
@@ -742,10 +744,12 @@ export function TaskDataTable({
     // Handle boolean fields
     if (fieldConfig.fieldType === 'boolean') {
       return (
-        <Checkbox
-          checked={Boolean(value)}
-          className="pointer-events-none"
-        />
+        <div className="flex justify-center">
+          <Checkbox
+            checked={Boolean(value)}
+            className="pointer-events-none"
+          />
+        </div>
       )
     }
 

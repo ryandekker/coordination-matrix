@@ -138,7 +138,7 @@ export const EditableCell = memo(function EditableCell({
   if (fieldConfig.fieldType === 'boolean') {
     return (
       <div
-        className="editable-cell cursor-pointer hover:bg-muted/50 py-0.5 rounded transition-colors truncate"
+        className="editable-cell cursor-pointer hover:bg-muted/50 py-0.5 rounded transition-colors flex justify-center"
         onClick={handleBooleanToggle}
         onKeyDown={handleBooleanKeyDown}
         tabIndex={0}
@@ -282,7 +282,7 @@ export const EditableCell = memo(function EditableCell({
       }
       return (
         <div
-          className="cursor-pointer hover:bg-muted/50 py-0.5 rounded transition-colors truncate"
+          className="cursor-pointer hover:bg-muted/50 py-0.5 rounded transition-colors flex justify-center"
           onClick={() => setIsEditing(true)}
         >
           {children}
