@@ -588,21 +588,40 @@ export function TaskDataTable({
     return tasks.filter(t => t.children && t.children.length > 0).map(t => t._id)
   }, [tasks])
 
-  // When tasks change, update expanded rows if expand all is enabled
-  useEffect(() => {
-    if (expandAllEnabled) {
-      setExpandedRows(new Set(tasksWithChildren))
-    }
-  }, [tasksWithChildren, expandAllEnabled])
+  // Track previous expandAllEnabled to detect changes
+  const prevExpandAllEnabled = useRef(expandAllEnabled)
 
   // When expandAllEnabled changes from parent, update expanded rows
+  // Only collapse all when explicitly toggling expand all OFF (not on data changes)
   useEffect(() => {
-    if (expandAllEnabled) {
+    const wasEnabled = prevExpandAllEnabled.current
+    prevExpandAllEnabled.current = expandAllEnabled
+
+    if (expandAllEnabled && !wasEnabled) {
+      // Expand all was just enabled - expand all rows with children
       setExpandedRows(new Set(tasksWithChildren))
-    } else {
+    } else if (!expandAllEnabled && wasEnabled) {
+      // Expand all was just disabled - collapse all rows
       setExpandedRows(new Set())
     }
   }, [expandAllEnabled, tasksWithChildren])
+
+  // When new tasks with children are added while expand all is enabled, expand them
+  useEffect(() => {
+    if (expandAllEnabled) {
+      setExpandedRows(prev => {
+        const next = new Set(prev)
+        let changed = false
+        for (const taskId of tasksWithChildren) {
+          if (!next.has(taskId)) {
+            next.add(taskId)
+            changed = true
+          }
+        }
+        return changed ? next : prev
+      })
+    }
+  }, [tasksWithChildren, expandAllEnabled])
 
   const updateTask = useUpdateTask()
   const deleteTask = useDeleteTask()
