@@ -837,7 +837,11 @@ export function TaskDataTable({
     }
 
     if (value === null || value === undefined || value === '') {
-      return <span className="block text-center text-muted-foreground">-</span>
+      return <span className={cn("block text-muted-foreground", fieldConfig.fieldPath !== 'title' && "text-center")}>-</span>
+    }
+    // Title should be left-aligned, other text fields centered
+    if (fieldConfig.fieldPath === 'title') {
+      return <span>{value?.toString()}</span>
     }
     return <div className="text-center">{value?.toString()}</div>
   }, [])
