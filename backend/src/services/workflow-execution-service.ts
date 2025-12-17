@@ -2066,6 +2066,47 @@ class WorkflowExecutionService {
       throw new Error(`Workflow run ${runId} not found`);
     }
 
+    // Find any task for this step (for logging purposes - even completed ones)
+    const anyTaskForStep = await this.tasks.findOne({
+      workflowRunId: run._id,
+      workflowStepId: stepId,
+    }, { sort: { createdAt: -1 } });
+
+    // Helper to log callback request (used for both success and failure)
+    const logCallbackRequest = async (
+      taskId: ObjectId | null,
+      status: 'success' | 'failed',
+      error?: string,
+      createdTaskIds: string[] = []
+    ) => {
+      if (!requestInfo || !taskId) return;
+
+      const callbackRequest = {
+        _id: new ObjectId().toString(),
+        url: requestInfo.url,
+        method: requestInfo.method,
+        headers: requestInfo.headers,
+        body: payload,
+        receivedAt: requestInfo.receivedAt,
+        status,
+        error,
+        createdTaskIds,
+      };
+
+      const currentTask = await this.tasks.findOne({ _id: taskId });
+      const existingCallbacks = (currentTask?.metadata?.callbackRequests as unknown[]) || [];
+
+      await this.tasks.updateOne(
+        { _id: taskId },
+        {
+          $set: {
+            'metadata.callbackRequests': [...existingCallbacks, callbackRequest],
+          },
+        }
+      );
+      console.log(`[WorkflowExecutionService] Logged ${status} callback request to task ${taskId}${error ? `: ${error}` : ''}`);
+    };
+
     // Find the task for this step (could be any type: external, foreach, etc.)
     // Look for tasks that are waiting for callbacks
     const task = await this.tasks.findOne({
@@ -2075,6 +2116,12 @@ class WorkflowExecutionService {
     });
 
     if (!task) {
+      // Log the failed request against any task we found for this step
+      await logCallbackRequest(
+        anyTaskForStep?._id || null,
+        'failed',
+        `Task for step ${stepId} not found or already completed`
+      );
       throw new Error(`Task for step ${stepId} not found or already completed`);
     }
 
@@ -2098,12 +2145,9 @@ class WorkflowExecutionService {
     }
 
     if (!validSecret) {
+      await logCallbackRequest(task._id, 'failed', 'Invalid callback secret');
       throw new Error('Invalid callback secret');
     }
-
-    // Store requestInfo for later - we'll log the callback after processing items
-    // so we can include the created task IDs
-    const callbackRequestId = requestInfo ? new ObjectId().toString() : null;
 
     const workflow = await this.workflows.findOne({ _id: run.workflowId });
     if (!workflow) {
@@ -2258,35 +2302,8 @@ class WorkflowExecutionService {
       console.log(`[WorkflowExecutionService] Foreach ${task._id} all items received, waiting for children to complete`);
     }
 
-    // Log the callback request now that we have the created task IDs
-    if (requestInfo && callbackRequestId) {
-      const callbackRequest = {
-        _id: callbackRequestId,
-        url: requestInfo.url,
-        method: requestInfo.method,
-        headers: requestInfo.headers,
-        body: payload,
-        receivedAt: requestInfo.receivedAt,
-        status: 'success' as const,
-        createdTaskIds: childTaskIds,
-      };
-
-      // Get existing callback requests or initialize empty array
-      // Re-fetch task to get current metadata (may have been updated during processing)
-      const currentTask = await this.tasks.findOne({ _id: task._id });
-      const existingCallbacks = (currentTask?.metadata?.callbackRequests as unknown[]) || [];
-
-      // Update task with callback request log
-      await this.tasks.updateOne(
-        { _id: task._id },
-        {
-          $set: {
-            'metadata.callbackRequests': [...existingCallbacks, callbackRequest],
-          },
-        }
-      );
-      console.log(`[WorkflowExecutionService] Logged callback request to task ${task._id} with ${childTaskIds.length} created tasks`);
-    }
+    // Log the successful callback request with created task IDs
+    await logCallbackRequest(task._id, 'success', undefined, childTaskIds);
 
     return {
       acknowledged: true,
