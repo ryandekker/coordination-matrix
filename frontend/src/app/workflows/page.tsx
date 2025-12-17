@@ -646,21 +646,23 @@ export default function WorkflowsPage() {
     {
       id: 'select',
       header: ({ table }) => (
-        <Checkbox
-          checked={table.getIsAllPageRowsSelected()}
-          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-          aria-label="Select all"
-          className="translate-y-[2px]"
-        />
+        <div className="flex justify-center">
+          <Checkbox
+            checked={table.getIsAllPageRowsSelected()}
+            onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+            aria-label="Select all"
+          />
+        </div>
       ),
       cell: ({ row }) => (
-        <Checkbox
-          checked={row.getIsSelected()}
-          onCheckedChange={(value) => row.toggleSelected(!!value)}
-          onClick={(e) => e.stopPropagation()}
-          aria-label="Select row"
-          className="translate-y-[2px]"
-        />
+        <div className="flex justify-center">
+          <Checkbox
+            checked={row.getIsSelected()}
+            onCheckedChange={(value) => row.toggleSelected(!!value)}
+            onClick={(e) => e.stopPropagation()}
+            aria-label="Select row"
+          />
+        </div>
       ),
       enableSorting: false,
       enableHiding: false,
@@ -765,7 +767,7 @@ export default function WorkflowsPage() {
       cell: ({ row }) => {
         const stats = row.original.stats
         if (!stats || stats.runCount === 0) {
-          return <span className="text-muted-foreground">-</span>
+          return <span className="block text-center text-muted-foreground">-</span>
         }
         return (
           <div className="flex items-center gap-2 text-sm">
@@ -795,7 +797,7 @@ export default function WorkflowsPage() {
       cell: ({ row }) => {
         const stats = row.original.stats
         if (!stats || !stats.lastRunAt) {
-          return <span className="text-muted-foreground">Never</span>
+          return <span className="block text-center text-muted-foreground">-</span>
         }
         return (
           <span className="text-sm text-muted-foreground flex items-center gap-1">

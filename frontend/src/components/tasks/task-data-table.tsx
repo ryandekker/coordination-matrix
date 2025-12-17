@@ -429,8 +429,10 @@ const TaskRow = memo(function TaskRow({
         )}
         data-state={isSelected ? 'selected' : undefined}
       >
-        <TableCell className="text-center">
-          <Checkbox checked={isSelected} onCheckedChange={onToggleSelect} className="h-5 w-5" />
+        <TableCell className="px-0">
+          <div className="flex justify-center">
+            <Checkbox checked={isSelected} onCheckedChange={onToggleSelect} className="h-5 w-5" />
+          </div>
         </TableCell>
         <TableCell className="w-10 text-center">
           <TaskTypeIcon taskType={task.taskType} batchCounters={task.batchCounters} />
@@ -749,8 +751,7 @@ export function TaskDataTable({
         return ref.displayName || ref.name
       }
       // If no resolved value, show dash
-      const rawValue = task[fieldConfig.fieldPath as keyof Task]
-      return rawValue ? '-' : '-'
+      return <span className="block text-center text-muted-foreground">-</span>
     }
 
     // Handle boolean fields
@@ -791,7 +792,10 @@ export function TaskDataTable({
       return value?.toString() || '0'
     }
 
-    return value?.toString() || '-'
+    if (value === null || value === undefined || value === '') {
+      return <span className="block text-center text-muted-foreground">-</span>
+    }
+    return value?.toString()
   }, [])
 
   if (isLoading) {
@@ -824,12 +828,14 @@ export function TaskDataTable({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-12 text-center">
-                <Checkbox
-                  checked={selectedRows.size === tasks.length && tasks.length > 0}
-                  onCheckedChange={toggleAllSelection}
-                  className="h-5 w-5"
-                />
+              <TableHead className="w-12 px-0">
+                <div className="flex justify-center">
+                  <Checkbox
+                    checked={selectedRows.size === tasks.length && tasks.length > 0}
+                    onCheckedChange={toggleAllSelection}
+                    className="h-5 w-5"
+                  />
+                </div>
               </TableHead>
               <TableHead className="w-10 text-center">
                 <TooltipProvider>
