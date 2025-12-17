@@ -406,6 +406,7 @@ tasksRouter.get('/workflow-callbacks', async (req: Request, res: Response, next:
       body: unknown;
       receivedAt: string;
       status: string;
+      createdTaskIds?: string[];
     }
 
     const callbackRequests = tasks.flatMap((task) => {
@@ -425,6 +426,8 @@ tasksRouter.get('/workflow-callbacks', async (req: Request, res: Response, next:
         body: req.body,
         receivedAt: req.receivedAt,
         status: req.status,
+        // Created tasks from this callback
+        createdTaskIds: req.createdTaskIds,
       }));
     });
 

@@ -1324,6 +1324,26 @@ function WorkflowCallbackDetail({ callbackId }: { callbackId: string }) {
           </div>
         </div>
       )}
+
+      {/* Created Tasks */}
+      {callback.createdTaskIds && callback.createdTaskIds.length > 0 && (
+        <div className="rounded-lg border bg-card p-4">
+          <h2 className="font-semibold mb-2">Created Tasks ({callback.createdTaskIds.length})</h2>
+          <div className="space-y-2">
+            {callback.createdTaskIds.map((taskId) => (
+              <div key={taskId} className="flex items-center justify-between py-1 border-b last:border-0">
+                <code className="text-sm font-mono text-muted-foreground">{taskId}</code>
+                <Link
+                  href={`/tasks?taskId=${taskId}`}
+                  className="text-primary hover:underline flex items-center gap-1 text-sm"
+                >
+                  View <ExternalLink className="h-3 w-3" />
+                </Link>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

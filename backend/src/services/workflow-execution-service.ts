@@ -2023,33 +2023,9 @@ class WorkflowExecutionService {
       throw new Error('Invalid callback secret');
     }
 
-    // Log the callback request if requestInfo was provided
-    if (requestInfo) {
-      const callbackRequest = {
-        _id: new ObjectId().toString(),
-        url: requestInfo.url,
-        method: requestInfo.method,
-        headers: requestInfo.headers,
-        body: payload,
-        receivedAt: requestInfo.receivedAt,
-        status: 'success' as const,
-      };
-
-      // Get existing callback requests or initialize empty array
-      const existingCallbacks = (task.metadata?.callbackRequests as unknown[]) || [];
-
-      // Update task with callback request log
-      await this.tasks.updateOne(
-        { _id: task._id },
-        {
-          $set: {
-            'metadata.callbackRequests': [...existingCallbacks, callbackRequest],
-            updatedAt: new Date(),
-          },
-        }
-      );
-      console.log(`[WorkflowExecutionService] Logged callback request to task ${task._id}`);
-    }
+    // Store requestInfo for later - we'll log the callback after processing items
+    // so we can include the created task IDs
+    const callbackRequestId = requestInfo ? new ObjectId().toString() : null;
 
     const workflow = await this.workflows.findOne({ _id: run.workflowId });
     if (!workflow) {
@@ -2202,6 +2178,36 @@ class WorkflowExecutionService {
         }
       );
       console.log(`[WorkflowExecutionService] Foreach ${task._id} all items received, waiting for children to complete`);
+    }
+
+    // Log the callback request now that we have the created task IDs
+    if (requestInfo && callbackRequestId) {
+      const callbackRequest = {
+        _id: callbackRequestId,
+        url: requestInfo.url,
+        method: requestInfo.method,
+        headers: requestInfo.headers,
+        body: payload,
+        receivedAt: requestInfo.receivedAt,
+        status: 'success' as const,
+        createdTaskIds: childTaskIds,
+      };
+
+      // Get existing callback requests or initialize empty array
+      // Re-fetch task to get current metadata (may have been updated during processing)
+      const currentTask = await this.tasks.findOne({ _id: task._id });
+      const existingCallbacks = (currentTask?.metadata?.callbackRequests as unknown[]) || [];
+
+      // Update task with callback request log
+      await this.tasks.updateOne(
+        { _id: task._id },
+        {
+          $set: {
+            'metadata.callbackRequests': [...existingCallbacks, callbackRequest],
+          },
+        }
+      );
+      console.log(`[WorkflowExecutionService] Logged callback request to task ${task._id} with ${childTaskIds.length} created tasks`);
     }
 
     return {
