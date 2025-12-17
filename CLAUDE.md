@@ -105,7 +105,15 @@ npm run cli task:create --title "New task" --status pending
 
 # Generic API request
 npm run cli request /api/tasks --method GET
+
+# Test SSE (Server-Sent Events) connection
+npm run cli events --duration 30
+
+# Test SSE while creating a task in another terminal
+npm run cli events --duration 30 --quiet  # Suppress heartbeats
 ```
+
+**Note:** Always prefer using the CLI for API testing rather than the browser, as it provides clearer output and avoids authentication complexities.
 
 See `./scripts/matrix-cli.mjs --help` for all commands.
 

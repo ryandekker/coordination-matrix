@@ -922,6 +922,121 @@ async function cmdWebhooks(args) {
 }
 
 // ============================================================================
+// Event Stream Commands (SSE)
+// ============================================================================
+
+async function cmdEvents(args) {
+  const config = loadConfig();
+  const apiUrl = getApiUrl();
+
+  // Build the SSE URL with token
+  let token = null;
+  if (config.token) {
+    token = config.token;
+  } else if (config.apiKey) {
+    error('SSE requires JWT token authentication. Use "matrix-cli login" first.');
+    process.exit(1);
+  } else {
+    error('Not authenticated. Use "matrix-cli login" first.');
+    process.exit(1);
+  }
+
+  const duration = parseInt(args.duration || '10', 10);
+  const url = `${apiUrl}/api/events/stream?token=${encodeURIComponent(token)}`;
+
+  info(`Connecting to SSE: ${apiUrl}/api/events/stream`);
+  info(`Duration: ${duration} seconds (use --duration to change)`);
+  info('Waiting for events... (Ctrl+C to stop)\n');
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      info('\nDuration reached, closing connection...');
+      controller.abort();
+    }, duration * 1000);
+
+    const response = await fetch(url, {
+      headers: { 'Accept': 'text/event-stream' },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      clearTimeout(timeout);
+      const text = await response.text();
+      error(`SSE connection failed (${response.status}): ${text}`);
+      process.exit(1);
+    }
+
+    success('Connected to event stream');
+    console.log('---');
+
+    // Read the stream
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let eventCount = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // Process complete events (separated by double newlines)
+      const events = buffer.split('\n\n');
+      buffer = events.pop() || ''; // Keep incomplete event in buffer
+
+      for (const event of events) {
+        if (!event.trim()) continue;
+
+        // Parse SSE format
+        const lines = event.split('\n');
+        let eventType = 'message';
+        let eventData = '';
+
+        for (const line of lines) {
+          if (line.startsWith('event:')) {
+            eventType = line.slice(6).trim();
+          } else if (line.startsWith('data:')) {
+            eventData = line.slice(5).trim();
+          }
+        }
+
+        if (eventType === 'connected') {
+          console.log(`[${new Date().toISOString()}] SSE Connected`);
+        } else if (eventType === 'heartbeat') {
+          if (!args.quiet) {
+            console.log(`[${new Date().toISOString()}] Heartbeat`);
+          }
+        } else if (eventData) {
+          eventCount++;
+          try {
+            const data = JSON.parse(eventData);
+            console.log(`\n[${new Date().toISOString()}] Event: ${eventType}`);
+            console.log(JSON.stringify(data, null, 2));
+          } catch {
+            console.log(`\n[${new Date().toISOString()}] Event: ${eventType}`);
+            console.log(eventData);
+          }
+        }
+      }
+    }
+
+    clearTimeout(timeout);
+    console.log('---');
+    info(`Connection closed. Received ${eventCount} event(s).`);
+
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      // Normal timeout
+      return;
+    }
+    error(`SSE error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+// ============================================================================
 // Activity Log Commands
 // ============================================================================
 
@@ -1069,6 +1184,7 @@ Other Commands:
   external-jobs             List external jobs (--status, --type, --task)
   external-jobs:pending     Get pending jobs for workers
   webhooks                  List webhooks
+  events                    Connect to SSE event stream (--duration, --quiet)
   activity <taskId>         Get activity log for task
   comment <taskId>          Add comment to task (--text)
   request <path>            Generic API request (--method, --body)
@@ -1187,6 +1303,9 @@ async function main() {
       type: { type: 'string' },
       task: { type: 'string' },
 
+      // Events options
+      duration: { type: 'string' },
+
       // Auth options
       email: { type: 'string', short: 'e' },
       password: { type: 'string' },
@@ -1242,6 +1361,9 @@ async function main() {
 
     // Webhooks
     'webhooks': cmdWebhooks,
+
+    // Events (SSE)
+    'events': cmdEvents,
 
     // Activity
     'activity': cmdActivityLogs,
