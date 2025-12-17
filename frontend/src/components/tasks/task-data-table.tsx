@@ -420,12 +420,18 @@ const TaskRow = memo(function TaskRow({
     }
   }, [expandAllEnabled, isExpanded, children, expandedRows, toggleRowExpansion])
 
+  // Flow tasks that are children (depth > 0) appear as placeholders
+  // They also appear at root level, so this is just a reference/link
+  const isFlowPlaceholder = isFlowTask && depth > 0
+
   return (
     <>
       <TableRow
         className={cn(
           depth > 0 && 'bg-muted/30',
-          isPulsing && 'animate-pulse bg-pink-50 dark:bg-pink-950/30'
+          isPulsing && 'animate-pulse bg-pink-50 dark:bg-pink-950/30',
+          // Flow placeholders have special styling - pink tinted, italic text
+          isFlowPlaceholder && 'bg-pink-50/50 dark:bg-pink-950/20 border-l-2 border-pink-300 dark:border-pink-700'
         )}
         data-state={isSelected ? 'selected' : undefined}
       >
@@ -436,6 +442,9 @@ const TaskRow = memo(function TaskRow({
         </TableCell>
         <TableCell className="w-10 text-center">
           <TaskTypeIcon taskType={task.taskType} batchCounters={task.batchCounters} />
+          {isFlowPlaceholder && (
+            <span className="text-[10px] text-pink-500 block -mt-1">ref</span>
+          )}
         </TableCell>
         {fieldConfigs.map((fc) => (
           <TableCell

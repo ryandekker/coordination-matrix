@@ -35,9 +35,13 @@ function buildFilter(query: Record<string, unknown>, currentUserId?: string): Fi
     filter.$text = { $search: search };
   }
 
-  // Parent filter
+  // Parent filter - flow tasks should appear at root level even if they have a parent
   if (rootOnly === 'true' || rootOnly === true) {
-    filter.parentId = null;
+    // Show root tasks OR flow tasks (flow tasks appear at both root and under parent)
+    filter.$or = [
+      { parentId: null },
+      { taskType: 'flow', parentId: { $ne: null } }
+    ];
   } else if (parentId) {
     filter.parentId = toObjectId(parentId as string);
   }
@@ -658,6 +662,13 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       updatedAt: now,
       dueAt: taskData.dueAt ? new Date(taskData.dueAt) : null,
       metadata: taskData.metadata || {},
+      // Task type and execution fields
+      ...(taskData.taskType && { taskType: taskData.taskType }),
+      ...(taskData.executionMode && { executionMode: taskData.executionMode }),
+      ...(taskData.webhookConfig && { webhookConfig: taskData.webhookConfig }),
+      ...(taskData.foreachConfig && { foreachConfig: taskData.foreachConfig }),
+      ...(taskData.joinConfig && { joinConfig: taskData.joinConfig }),
+      ...(taskData.externalConfig && { externalConfig: taskData.externalConfig }),
     };
 
     const result = await db.collection('tasks').insertOne(newTask);
