@@ -1143,11 +1143,26 @@ export function TaskModal({
           </div>
         )}
 
-        {/* Agent task - no special config */}
+        {/* Agent task - extra prompt field */}
         {currentTaskType === 'agent' && (
-          <p className="text-xs text-muted-foreground italic">
-            Agent tasks are executed by AI agents using the extra prompt.
-          </p>
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground italic">
+              Agent tasks are executed by AI agents using the extra prompt.
+            </p>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Extra Prompt</label>
+              <textarea
+                {...register('extraPrompt')}
+                placeholder="Additional prompt context for AI agent..."
+                rows={4}
+                className={cn(
+                  'flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm',
+                  'placeholder:text-muted-foreground resize-none transition-colors',
+                  'focus-visible:outline-none focus-visible:border-primary'
+                )}
+              />
+            </div>
+          </div>
         )}
 
         {/* Flow task - workflow parent */}
