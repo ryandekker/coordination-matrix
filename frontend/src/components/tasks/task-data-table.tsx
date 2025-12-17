@@ -502,34 +502,54 @@ export function TaskDataTable({
 
   const handleBulkStatusChange = useCallback(async (status: string) => {
     const taskIds = Array.from(selectedRows)
-    await bulkUpdateTasks.mutateAsync({ taskIds, updates: { status } })
-    clearSelection()
+    try {
+      await bulkUpdateTasks.mutateAsync({ taskIds, updates: { status } })
+      clearSelection()
+    } catch (error) {
+      console.error('Bulk status update failed:', error)
+    }
   }, [selectedRows, bulkUpdateTasks, clearSelection])
 
   const handleBulkPriorityChange = useCallback(async (urgency: string) => {
     const taskIds = Array.from(selectedRows)
-    await bulkUpdateTasks.mutateAsync({ taskIds, updates: { urgency } })
-    clearSelection()
+    try {
+      await bulkUpdateTasks.mutateAsync({ taskIds, updates: { urgency } })
+      clearSelection()
+    } catch (error) {
+      console.error('Bulk urgency update failed:', error)
+    }
   }, [selectedRows, bulkUpdateTasks, clearSelection])
 
   const handleBulkDelete = useCallback(async () => {
     if (confirm(`Are you sure you want to delete ${selectedRows.size} task(s)?`)) {
       const taskIds = Array.from(selectedRows)
-      await bulkDeleteTasks.mutateAsync(taskIds)
-      clearSelection()
+      try {
+        await bulkDeleteTasks.mutateAsync(taskIds)
+        clearSelection()
+      } catch (error) {
+        console.error('Bulk delete failed:', error)
+      }
     }
   }, [selectedRows, bulkDeleteTasks, clearSelection])
 
   const handleBulkArchive = useCallback(async () => {
     const taskIds = Array.from(selectedRows)
-    await bulkUpdateTasks.mutateAsync({ taskIds, updates: { status: 'archived' } })
-    clearSelection()
+    try {
+      await bulkUpdateTasks.mutateAsync({ taskIds, updates: { status: 'archived' } })
+      clearSelection()
+    } catch (error) {
+      console.error('Bulk archive failed:', error)
+    }
   }, [selectedRows, bulkUpdateTasks, clearSelection])
 
   const handleBulkAssigneeChange = useCallback(async (assigneeId: string | null) => {
     const taskIds = Array.from(selectedRows)
-    await bulkUpdateTasks.mutateAsync({ taskIds, updates: { assigneeId } })
-    clearSelection()
+    try {
+      await bulkUpdateTasks.mutateAsync({ taskIds, updates: { assigneeId } })
+      clearSelection()
+    } catch (error) {
+      console.error('Bulk assignee update failed:', error)
+    }
   }, [selectedRows, bulkUpdateTasks, clearSelection])
 
   // Memoized field config map for quick lookup
