@@ -58,14 +58,14 @@ import { formatDateTime, cn } from '@/lib/utils'
 import { TASK_TYPE_CONFIG, getTaskTypeConfig } from '@/lib/task-type-config'
 
 // Task type icon component with tooltip - uses shared config
-const TaskTypeIcon = memo(function TaskTypeIcon({ taskType, batchCounters }: { taskType?: string; batchCounters?: { completedCount?: number; expectedCount?: number } }) {
+const TaskTypeIcon = memo(function TaskTypeIcon({ taskType, batchCounters }: { taskType?: string; batchCounters?: { processedCount?: number; expectedCount?: number } }) {
   const config = getTaskTypeConfig(taskType)
   const Icon = config.icon
 
   // For foreach tasks, show progress if available
   const showProgress = taskType === 'foreach' && batchCounters?.expectedCount
   const progressText = showProgress
-    ? `${batchCounters?.completedCount || 0}/${batchCounters?.expectedCount}`
+    ? `${batchCounters?.processedCount || 0}/${batchCounters?.expectedCount}`
     : null
 
   return (
