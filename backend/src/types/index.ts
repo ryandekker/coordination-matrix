@@ -17,9 +17,9 @@ export type Urgency = 'low' | 'normal' | 'high' | 'urgent';
 
 // Task types that map 1:1 to workflow step types
 export type TaskType =
-  | 'standard'     // Regular task (default, for backward compatibility)
+  | 'flow'         // Workflow parent task (root task of a workflow run)
   | 'trigger'      // Entry point / trigger step
-  | 'agent'        // Automated/AI execution
+  | 'agent'        // Automated/AI execution (default)
   | 'manual'       // Human execution
   | 'decision'     // Conditional branching
   | 'foreach'      // Fan-out iteration (spawns subtasks)

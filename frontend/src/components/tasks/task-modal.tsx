@@ -140,7 +140,7 @@ export function TaskModal({
     assigneeId: null,
     dueAt: null,
     tags: '',
-    taskType: 'standard',
+    taskType: 'agent',
   }
 
   const defaultValues = useMemo(() => {
@@ -476,7 +476,7 @@ export function TaskModal({
             const TypeIcon = typeConfig.icon
             return (
               <Select
-                value={field.value as string || 'standard'}
+                value={field.value as string || 'agent'}
                 onValueChange={(val) => {
                   field.onChange(val)
                   // Initialize webhook config when switching to external type
@@ -708,20 +708,22 @@ export function TaskModal({
           />
         </div>
 
-        {/* Extra Prompt */}
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Extra Prompt</label>
-          <textarea
-            {...register('extraPrompt')}
-            placeholder="Additional prompt context..."
-            rows={2}
-            className={cn(
-              'flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm',
-              'placeholder:text-muted-foreground resize-none transition-colors',
-              'focus-visible:outline-none focus-visible:border-primary'
-            )}
-          />
-        </div>
+        {/* Extra Prompt - only for agent tasks */}
+        {currentTaskType === 'agent' && (
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Extra Prompt</label>
+            <textarea
+              {...register('extraPrompt')}
+              placeholder="Additional prompt context..."
+              rows={2}
+              className={cn(
+                'flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm',
+                'placeholder:text-muted-foreground resize-none transition-colors',
+                'focus-visible:outline-none focus-visible:border-primary'
+              )}
+            />
+          </div>
+        )}
 
         {/* Additional Info */}
         <div className="space-y-1">
@@ -928,7 +930,7 @@ export function TaskModal({
               control={control}
               render={({ field }) => (
                 <Select
-                  value={field.value as string || 'standard'}
+                  value={field.value as string || 'agent'}
                   onValueChange={(val) => {
                     field.onChange(val)
                     // Initialize webhook config when switching to external type
@@ -947,7 +949,7 @@ export function TaskModal({
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="standard">Standard</SelectItem>
+                    <SelectItem value="agent">Agent</SelectItem>
                     <SelectItem value="external">External</SelectItem>
                     <SelectItem value="decision">Decision</SelectItem>
                   </SelectContent>
@@ -1115,10 +1117,17 @@ export function TaskModal({
           </div>
         )}
 
-        {/* Standard task - no special config */}
-        {currentTaskType === 'standard' && (
+        {/* Agent task - no special config */}
+        {currentTaskType === 'agent' && (
           <p className="text-xs text-muted-foreground italic">
-            Standard tasks have no additional configuration.
+            Agent tasks are executed by AI agents using the extra prompt.
+          </p>
+        )}
+
+        {/* Flow task - workflow parent */}
+        {currentTaskType === 'flow' && (
+          <p className="text-xs text-muted-foreground italic">
+            Flow tasks are workflow parent tasks that contain workflow steps.
           </p>
         )}
 

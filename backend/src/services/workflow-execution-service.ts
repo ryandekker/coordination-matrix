@@ -357,7 +357,7 @@ class WorkflowExecutionService {
       parentId: null,
       workflowId: workflow._id,
       workflowRunId: run._id,
-      taskType: 'standard',
+      taskType: 'flow',
       executionMode: 'automated',
       createdById: actorId,
       createdAt: now,
@@ -623,7 +623,7 @@ class WorkflowExecutionService {
       'join': 'join',
       'subflow': 'subflow',
     };
-    return mapping[stepType] || 'standard';
+    return mapping[stepType] || 'agent';
   }
 
   private mapStepTypeToExecutionMode(stepType: string): ExecutionMode {
@@ -2308,7 +2308,7 @@ class WorkflowExecutionService {
     return {
       acknowledged: true,
       taskId: task._id.toString(),
-      taskType: task.taskType || 'standard',
+      taskType: task.taskType || 'agent',
       childTaskIds,
       receivedCount: currentReceivedCount,
       expectedCount: currentExpectedCount,

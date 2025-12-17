@@ -77,15 +77,19 @@ const TASK_STATUS_CONFIG: Record<string, { color: string; bgColor: string }> = {
   cancelled: { color: 'text-gray-400', bgColor: 'bg-gray-50 dark:bg-gray-800/50' },
 }
 
-type TaskType = 'standard' | 'decision' | 'foreach' | 'join' | 'subflow' | 'external'
+type TaskType = 'flow' | 'agent' | 'decision' | 'foreach' | 'join' | 'subflow' | 'external' | 'trigger' | 'manual' | 'webhook'
 
 const TASK_TYPE_CONFIG: Record<TaskType, { icon: React.ElementType; color: string; label: string }> = {
-  standard: { icon: Bot, color: 'text-blue-500', label: 'Agent' },
+  flow: { icon: WorkflowIcon, color: 'text-slate-500', label: 'Flow' },
+  agent: { icon: Bot, color: 'text-blue-500', label: 'Agent' },
   decision: { icon: GitBranch, color: 'text-amber-500', label: 'Decision' },
   foreach: { icon: Repeat, color: 'text-green-500', label: 'ForEach' },
   join: { icon: Merge, color: 'text-indigo-500', label: 'Join' },
   subflow: { icon: WorkflowIcon, color: 'text-pink-500', label: 'Subflow' },
   external: { icon: Globe, color: 'text-orange-500', label: 'External' },
+  trigger: { icon: Bot, color: 'text-yellow-500', label: 'Trigger' },
+  manual: { icon: Bot, color: 'text-purple-500', label: 'Manual' },
+  webhook: { icon: Globe, color: 'text-purple-500', label: 'Webhook' },
 }
 
 function formatDate(dateString: string | null | undefined): string {
@@ -117,8 +121,8 @@ function TaskNode({ task, depth, allTasks }: TaskNodeProps) {
   const children = allTasks.filter(t => t.parentId === task._id)
   const hasChildren = children.length > 0
 
-  const taskType = ((task as any).taskType || 'standard') as TaskType
-  const typeConfig = TASK_TYPE_CONFIG[taskType] || TASK_TYPE_CONFIG.standard
+  const taskType = ((task as any).taskType || 'agent') as TaskType
+  const typeConfig = TASK_TYPE_CONFIG[taskType] || TASK_TYPE_CONFIG.agent
   const TypeIcon = typeConfig.icon
   const statusConfig = TASK_STATUS_CONFIG[task.status] || TASK_STATUS_CONFIG.pending
 

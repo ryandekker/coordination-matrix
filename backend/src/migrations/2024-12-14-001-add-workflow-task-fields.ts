@@ -4,7 +4,7 @@
  * This adds the necessary fields for workflow task execution:
  * - workflowRunId: Links task to a workflow run instance
  * - workflowStepId: The step within the workflow
- * - taskType: Type of task (standard, decision, foreach, join, external, subflow)
+ * - taskType: Type of task (flow, agent, trigger, manual, decision, foreach, join, external, webhook, subflow)
  * - executionMode: How the task executes (manual, automated, immediate, external_callback)
  * - foreachConfig: Configuration for foreach tasks
  * - externalConfig: Configuration for external callback tasks
@@ -107,7 +107,7 @@ const TASKS_VALIDATOR = {
       },
       taskType: {
         bsonType: ['string', 'null'],
-        enum: ['standard', 'decision', 'foreach', 'join', 'external', 'subflow', null],
+        enum: ['flow', 'trigger', 'agent', 'manual', 'decision', 'foreach', 'join', 'external', 'webhook', 'subflow', null],
         description: 'Type of task for workflow execution',
       },
       executionMode: {
