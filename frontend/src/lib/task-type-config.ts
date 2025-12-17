@@ -9,6 +9,7 @@ import {
   Zap,
   Bot,
   User,
+  Network,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -16,7 +17,8 @@ import {
  * Task Type Configuration
  *
  * Colors are designed to match workflow step types since they map 1:1:
- * - standard/agent: Blue (AI/automated tasks)
+ * - flow: Slate (workflow parent tasks)
+ * - agent: Blue (AI/automated tasks - default)
  * - external: Orange (API/webhook calls)
  * - webhook: Purple (legacy webhook type)
  * - trigger: Yellow (entry points)
@@ -39,7 +41,8 @@ export interface TaskTypeConfig {
 // Mapping from task types to workflow step types
 // This ensures consistent colors between tasks and workflow stages
 export const TASK_TYPE_TO_STEP_TYPE: Record<string, string> = {
-  standard: 'agent',
+  flow: 'flow',
+  agent: 'agent',
   external: 'external',
   webhook: 'external',  // Legacy - maps to external
   trigger: 'trigger',
@@ -47,14 +50,23 @@ export const TASK_TYPE_TO_STEP_TYPE: Record<string, string> = {
   foreach: 'foreach',
   join: 'join',
   subflow: 'subflow',
+  manual: 'manual',
 }
 
 // Central configuration for all task types
 // Colors are aligned with workflow step types for consistency
 export const TASK_TYPE_CONFIG: Record<string, TaskTypeConfig> = {
-  standard: {
+  flow: {
+    icon: Network,
+    label: 'Flow',
+    color: 'text-slate-500',
+    bgColor: 'bg-slate-50 dark:bg-slate-950/30',
+    hexColor: '#64748B',
+    description: 'Workflow parent task',
+  },
+  agent: {
     icon: Bot,
-    label: 'Standard',
+    label: 'Agent',
     color: 'text-blue-500',
     bgColor: 'bg-blue-50 dark:bg-blue-950/30',
     hexColor: '#3B82F6',
@@ -189,7 +201,7 @@ export const WORKFLOW_STEP_TYPE_CONFIG: Record<string, TaskTypeConfig> = {
 
 // Helper function to get config for a task type with fallback
 export function getTaskTypeConfig(taskType?: string): TaskTypeConfig {
-  return TASK_TYPE_CONFIG[taskType || 'standard'] || TASK_TYPE_CONFIG.standard
+  return TASK_TYPE_CONFIG[taskType || 'agent'] || TASK_TYPE_CONFIG.agent
 }
 
 // Helper function to get config for a workflow step type with fallback

@@ -118,7 +118,7 @@ All responses follow this structure:
             workflowId: { $ref: '#/components/schemas/ObjectId', nullable: true },
             workflowRunId: { $ref: '#/components/schemas/ObjectId', nullable: true },
             workflowStepId: { type: 'string', nullable: true },
-            taskType: { type: 'string', enum: ['standard', 'trigger', 'agent', 'manual', 'decision', 'foreach', 'join', 'external', 'webhook', 'subflow'], description: 'Type of task for workflow execution' },
+            taskType: { type: 'string', enum: ['flow', 'trigger', 'agent', 'manual', 'decision', 'foreach', 'join', 'external', 'webhook', 'subflow'], description: 'Type of task for workflow execution' },
             executionMode: { type: 'string', enum: ['manual', 'automated', 'immediate', 'external_callback'] },
             expectedQuantity: { type: 'integer', description: 'Expected number of subtasks/results' },
             assigneeId: { $ref: '#/components/schemas/ObjectId', nullable: true },
@@ -182,7 +182,7 @@ All responses follow this structure:
         },
         TaskType: {
           type: 'string',
-          enum: ['standard', 'trigger', 'agent', 'manual', 'decision', 'foreach', 'join', 'external', 'webhook', 'subflow'],
+          enum: ['flow', 'trigger', 'agent', 'manual', 'decision', 'foreach', 'join', 'external', 'webhook', 'subflow'],
           description: 'Type of task - maps 1:1 to WorkflowStepType',
         },
         WorkflowStep: {
