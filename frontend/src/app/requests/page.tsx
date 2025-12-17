@@ -1261,14 +1261,24 @@ function WorkflowCallbackDetail({ callbackId }: { callbackId: string }) {
           <p className="font-medium">{String(callback.method)}</p>
         </div>
         <div className="rounded-lg border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Request Status</p>
+          <Badge variant={callback.status === 'success' ? 'default' : 'destructive'}>
+            {String(callback.status)}
+          </Badge>
+        </div>
+        <div className="rounded-lg border bg-card p-4">
           <p className="text-sm text-muted-foreground">Task Type</p>
           <p className="font-medium">{String(callback.taskType)}</p>
         </div>
-        <div className="rounded-lg border bg-card p-4">
-          <p className="text-sm text-muted-foreground">Task Status</p>
-          <p className="font-medium">{String(callback.taskStatus)}</p>
-        </div>
       </div>
+
+      {/* Error message for failed callbacks */}
+      {callback.error && (
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
+          <h2 className="font-semibold text-destructive mb-2">Error</h2>
+          <p className="text-sm">{callback.error}</p>
+        </div>
+      )}
 
       {/* Request URL */}
       <div className="rounded-lg border bg-card p-4">

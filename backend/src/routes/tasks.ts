@@ -406,6 +406,7 @@ tasksRouter.get('/workflow-callbacks', async (req: Request, res: Response, next:
       body: unknown;
       receivedAt: string;
       status: string;
+      error?: string;
       createdTaskIds?: string[];
     }
 
@@ -426,6 +427,8 @@ tasksRouter.get('/workflow-callbacks', async (req: Request, res: Response, next:
         body: req.body,
         receivedAt: req.receivedAt,
         status: req.status,
+        // Error message if failed
+        error: req.error,
         // Created tasks from this callback
         createdTaskIds: req.createdTaskIds,
       }));

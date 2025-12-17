@@ -856,6 +856,8 @@ export interface WorkflowCallback {
   body?: unknown
   receivedAt: string
   status: string
+  // Error message if request failed
+  error?: string
   // Created tasks from this callback
   createdTaskIds?: string[]
 }
