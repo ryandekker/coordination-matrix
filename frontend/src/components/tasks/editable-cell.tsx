@@ -83,6 +83,18 @@ export const EditableCell = memo(function EditableCell({
     setEditValue(value)
   }, [value])
 
+  const handleSave = useCallback(() => {
+    onSave(editValue)
+    setIsEditing(false)
+    setSearchQuery('')
+  }, [editValue, onSave])
+
+  const handleCancel = useCallback(() => {
+    setEditValue(value)
+    setIsEditing(false)
+    setSearchQuery('')
+  }, [value])
+
   // Handle click outside to save - only for non-portaled field types
   // Select fields use portaled dropdowns (via radix-ui), so clicks on dropdown items
   // would incorrectly trigger this handler (portal renders outside containerRef)
@@ -100,18 +112,6 @@ export const EditableCell = memo(function EditableCell({
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [isEditing, usesPortaledUI, handleSave])
-
-  const handleSave = useCallback(() => {
-    onSave(editValue)
-    setIsEditing(false)
-    setSearchQuery('')
-  }, [editValue, onSave])
-
-  const handleCancel = useCallback(() => {
-    setEditValue(value)
-    setIsEditing(false)
-    setSearchQuery('')
-  }, [value])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
