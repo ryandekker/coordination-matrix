@@ -16,45 +16,27 @@ export function Logo({ className, size = 32 }: LogoProps) {
     >
       <defs>
         <linearGradient id="logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" style={{ stopColor: '#37A7E7', stopOpacity: 1 }} />
-          <stop offset="100%" style={{ stopColor: '#0E1F2F', stopOpacity: 1 }} />
+          <stop offset="0%" style={{ stopColor: '#3B82F6', stopOpacity: 1 }} />
+          <stop offset="100%" style={{ stopColor: '#1E3A5F', stopOpacity: 1 }} />
         </linearGradient>
       </defs>
 
       {/* Background rounded square */}
       <rect x="1" y="1" width="30" height="30" rx="6" fill="url(#logo-grad)" />
 
-      {/* Grid lines (matrix pattern) */}
+      {/* Connection lines between nodes */}
       <path
-        d="M8 3 L8 29 M24 3 L24 29 M3 8 L29 8 M3 24 L29 24"
-        stroke="rgba(255,255,255,0.15)"
-        strokeWidth="1"
-        fill="none"
-      />
-
-      {/* Node circles at intersections (coordination points) */}
-      <circle cx="8" cy="8" r="3.5" fill="#fff" />
-      <circle cx="24" cy="8" r="3.5" fill="#fff" />
-      <circle cx="8" cy="24" r="3.5" fill="#fff" />
-      <circle cx="24" cy="24" r="3.5" fill="#fff" />
-      <circle cx="16" cy="16" r="4.5" fill="#6ABFF0" />
-
-      {/* Connection lines between nodes (workflow connections) */}
-      <path
-        d="M8 8 L16 16 M24 8 L16 16 M8 24 L16 16 M24 24 L16 16"
-        stroke="rgba(255,255,255,0.6)"
+        d="M10 10 L22 10 M22 10 L16 22 M16 22 L10 10"
+        stroke="rgba(255,255,255,0.5)"
         strokeWidth="1.5"
         fill="none"
+        strokeLinecap="round"
       />
 
-      {/* Diagonal connections (cross-coordination) */}
-      <path
-        d="M8 8 L24 24 M24 8 L8 24"
-        stroke="rgba(106,191,240,0.4)"
-        strokeWidth="1"
-        fill="none"
-        strokeDasharray="2,2"
-      />
+      {/* Network nodes - triangular arrangement */}
+      <circle cx="10" cy="10" r="3.5" fill="#fff" />
+      <circle cx="22" cy="10" r="3.5" fill="#fff" />
+      <circle cx="16" cy="22" r="3.5" fill="#93C5FD" />
     </svg>
   )
 }
