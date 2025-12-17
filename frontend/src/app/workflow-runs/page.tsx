@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, Suspense } from 'react'
+import { useState, Suspense, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
@@ -23,6 +23,10 @@ import {
   GitBranch,
   Repeat,
   Merge,
+  Search,
+  Calendar,
+  User,
+  X,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -56,17 +60,24 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { Textarea } from '@/components/ui/textarea'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { workflowRunsApi, workflowsApi, WorkflowRun, WorkflowRunStatus, Task, Workflow as WorkflowType } from '@/lib/api'
 
-const STATUS_CONFIG: Record<WorkflowRunStatus, { icon: React.ElementType; color: string; bgColor: string; label: string }> = {
-  pending: { icon: Clock, color: 'text-gray-500', bgColor: 'bg-gray-50 dark:bg-gray-800/50', label: 'Pending' },
-  running: { icon: Play, color: 'text-blue-500', bgColor: 'bg-blue-50 dark:bg-blue-950/50', label: 'Running' },
-  paused: { icon: Pause, color: 'text-amber-500', bgColor: 'bg-amber-50 dark:bg-amber-950/50', label: 'Paused' },
-  completed: { icon: CheckCircle, color: 'text-green-500', bgColor: 'bg-green-50 dark:bg-green-950/50', label: 'Completed' },
-  failed: { icon: XCircle, color: 'text-red-500', bgColor: 'bg-red-50 dark:bg-red-950/50', label: 'Failed' },
-  cancelled: { icon: Ban, color: 'text-gray-500', bgColor: 'bg-gray-50 dark:bg-gray-800/50', label: 'Cancelled' },
+const STATUS_CONFIG: Record<WorkflowRunStatus, { icon: React.ElementType; color: string; bgColor: string; label: string; filterable: boolean }> = {
+  pending: { icon: Clock, color: 'text-gray-500', bgColor: 'bg-gray-50 dark:bg-gray-800/50', label: 'Pending', filterable: true },
+  running: { icon: Play, color: 'text-blue-500', bgColor: 'bg-blue-50 dark:bg-blue-950/50', label: 'Running', filterable: true },
+  paused: { icon: Pause, color: 'text-amber-500', bgColor: 'bg-amber-50 dark:bg-amber-950/50', label: 'Paused', filterable: false },
+  completed: { icon: CheckCircle, color: 'text-green-500', bgColor: 'bg-green-50 dark:bg-green-950/50', label: 'Completed', filterable: true },
+  failed: { icon: XCircle, color: 'text-red-500', bgColor: 'bg-red-50 dark:bg-red-950/50', label: 'Failed', filterable: true },
+  cancelled: { icon: Ban, color: 'text-gray-500', bgColor: 'bg-gray-50 dark:bg-gray-800/50', label: 'Cancelled', filterable: true },
 }
+
+// Get only filterable statuses for the filter dropdown
+const FILTERABLE_STATUSES = Object.entries(STATUS_CONFIG)
+  .filter(([, config]) => config.filterable)
+  .map(([status]) => status as WorkflowRunStatus)
 
 const TASK_STATUS_CONFIG: Record<string, { color: string; bgColor: string }> = {
   pending: { color: 'text-gray-500', bgColor: 'bg-gray-50 dark:bg-gray-800/50' },
@@ -322,7 +333,7 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div className="rounded-lg border bg-card p-4">
           <p className="text-sm text-muted-foreground">Started</p>
           <p className="font-medium">{formatDate(run.startedAt || run.createdAt)}</p>
@@ -336,8 +347,18 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
           <p className="font-medium">{formatDuration(run.startedAt || run.createdAt, run.completedAt)}</p>
         </div>
         <div className="rounded-lg border bg-card p-4">
-          <p className="text-sm text-muted-foreground">Total Tasks</p>
-          <p className="font-medium">{tasks.length}</p>
+          <p className="text-sm text-muted-foreground">Tasks</p>
+          <p className="font-medium">
+            <span className="text-green-600">{tasks.filter(t => t.status === 'completed').length}</span>
+            <span className="text-muted-foreground"> / {tasks.length}</span>
+          </p>
+        </div>
+        <div className="rounded-lg border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Steps</p>
+          <p className="font-medium">
+            <span className="text-green-600">{run.completedStepIds.length}</span>
+            <span className="text-muted-foreground"> / {workflow?.steps?.length || 0}</span>
+          </p>
         </div>
       </div>
 
@@ -357,8 +378,8 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
       )}
 
       <div className="rounded-lg border bg-card p-4">
-        <h2 className="font-semibold mb-3">Progress</h2>
-        <div className="flex items-center gap-4">
+        <h2 className="font-semibold mb-3">Step Progress</h2>
+        <div className="flex items-center gap-4 flex-wrap">
           <div className="flex items-center gap-2">
             <CheckCircle className="h-4 w-4 text-green-500" />
             <span className="text-sm">{run.completedStepIds.length} steps completed</span>
@@ -367,6 +388,14 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
             <div className="flex items-center gap-2">
               <Play className="h-4 w-4 text-blue-500" />
               <span className="text-sm">{run.currentStepIds.length} steps in progress</span>
+            </div>
+          )}
+          {workflow?.steps && (workflow.steps.length - run.completedStepIds.length - run.currentStepIds.length - (run.failedStepId ? 1 : 0)) > 0 && (
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-gray-400" />
+              <span className="text-sm text-muted-foreground">
+                {workflow.steps.length - run.completedStepIds.length - run.currentStepIds.length - (run.failedStepId ? 1 : 0)} steps pending
+              </span>
             </div>
           )}
         </div>
@@ -378,6 +407,7 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
                 const isCompleted = run.completedStepIds.includes(step.id)
                 const isCurrent = run.currentStepIds.includes(step.id)
                 const isFailed = run.failedStepId === step.id
+                const isPending = !isCompleted && !isCurrent && !isFailed
 
                 return (
                   <Badge
@@ -385,12 +415,14 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
                     variant="outline"
                     className={cn(
                       'text-xs',
-                      isCompleted && 'bg-green-50 text-green-700 border-green-300',
-                      isCurrent && 'bg-blue-50 text-blue-700 border-blue-300',
-                      isFailed && 'bg-red-50 text-red-700 border-red-300',
-                      !isCompleted && !isCurrent && !isFailed && 'bg-gray-50 text-gray-500'
+                      isCompleted && 'bg-green-50 text-green-700 border-green-300 dark:bg-green-950/50 dark:text-green-400 dark:border-green-700',
+                      isCurrent && 'bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-700',
+                      isFailed && 'bg-red-50 text-red-700 border-red-300 dark:bg-red-950/50 dark:text-red-400 dark:border-red-700',
+                      isPending && 'bg-gray-100 text-gray-400 border-gray-200 dark:bg-gray-800/50 dark:text-gray-500 dark:border-gray-700'
                     )}
+                    title={isPending ? 'Not started yet' : undefined}
                   >
+                    {isPending && <Clock className="h-3 w-3 mr-1 inline" />}
                     {step.name}
                   </Badge>
                 )
@@ -463,6 +495,10 @@ function WorkflowRunsList() {
   const queryClient = useQueryClient()
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [workflowFilter, setWorkflowFilter] = useState<string>('all')
+  const [searchQuery, setSearchQuery] = useState<string>('')
+  const [dateFrom, setDateFrom] = useState<string>('')
+  const [dateTo, setDateTo] = useState<string>('')
+  const [showFilters, setShowFilters] = useState(false)
   const [cancelConfirm, setCancelConfirm] = useState<WorkflowRun | null>(null)
   const [startDialog, setStartDialog] = useState<{ open: boolean; workflow: WorkflowType | null }>({
     open: false,
@@ -477,10 +513,12 @@ function WorkflowRunsList() {
   })
 
   const { data: runsData, isLoading, error, refetch } = useQuery({
-    queryKey: ['workflow-runs', statusFilter, workflowFilter, page],
+    queryKey: ['workflow-runs', statusFilter, workflowFilter, dateFrom, dateTo, page],
     queryFn: () => workflowRunsApi.list({
       status: statusFilter !== 'all' ? statusFilter as WorkflowRunStatus : undefined,
       workflowId: workflowFilter !== 'all' ? workflowFilter : undefined,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
       page,
       limit: 20,
     }),
@@ -506,8 +544,47 @@ function WorkflowRunsList() {
   })
 
   const workflows = workflowsData?.data || []
-  const runs = runsData?.data || []
+  const allRuns = runsData?.data || []
   const pagination = runsData?.pagination
+
+  // Build workflow name lookup for efficient searching
+  const workflowNameLookup = useMemo(() => {
+    const lookup: Record<string, string> = {}
+    workflows.forEach(w => {
+      lookup[w._id] = w.name.toLowerCase()
+    })
+    return lookup
+  }, [workflows])
+
+  // Apply client-side search filter
+  const runs = useMemo(() => {
+    if (!searchQuery.trim()) return allRuns
+    const query = searchQuery.toLowerCase()
+    return allRuns.filter(run => {
+      const workflowName = workflowNameLookup[run.workflowId] || ''
+      return workflowName.includes(query) || run._id.toLowerCase().includes(query)
+    })
+  }, [allRuns, searchQuery, workflowNameLookup])
+
+  // Count active filters for badge
+  const activeFilterCount = useMemo(() => {
+    let count = 0
+    if (statusFilter !== 'all') count++
+    if (workflowFilter !== 'all') count++
+    if (dateFrom) count++
+    if (dateTo) count++
+    if (searchQuery.trim()) count++
+    return count
+  }, [statusFilter, workflowFilter, dateFrom, dateTo, searchQuery])
+
+  const clearAllFilters = () => {
+    setStatusFilter('all')
+    setWorkflowFilter('all')
+    setSearchQuery('')
+    setDateFrom('')
+    setDateTo('')
+    setPage(1)
+  }
 
   const handleStartWorkflow = () => {
     if (!startDialog.workflow) return
@@ -569,32 +646,45 @@ function WorkflowRunsList() {
         </div>
       </div>
 
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">Status:</span>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
+      {/* Search and filter bar */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-3">
+          {/* Search */}
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search by workflow name or run ID..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+
+          {/* Status filter */}
+          <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
             <SelectTrigger className="w-[150px]">
-              <SelectValue />
+              <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Statuses</SelectItem>
-              {Object.entries(STATUS_CONFIG).map(([status, config]) => (
-                <SelectItem key={status} value={status}>
-                  <div className="flex items-center gap-2">
-                    <config.icon className={cn('h-4 w-4', config.color)} />
-                    {config.label}
-                  </div>
-                </SelectItem>
-              ))}
+              {FILTERABLE_STATUSES.map((status) => {
+                const config = STATUS_CONFIG[status]
+                return (
+                  <SelectItem key={status} value={status}>
+                    <div className="flex items-center gap-2">
+                      <config.icon className={cn('h-4 w-4', config.color)} />
+                      {config.label}
+                    </div>
+                  </SelectItem>
+                )
+              })}
             </SelectContent>
           </Select>
-        </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">Workflow:</span>
-          <Select value={workflowFilter} onValueChange={setWorkflowFilter}>
+          {/* Workflow filter */}
+          <Select value={workflowFilter} onValueChange={(v) => { setWorkflowFilter(v); setPage(1); }}>
             <SelectTrigger className="w-[200px]">
-              <SelectValue />
+              <SelectValue placeholder="Workflow" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Workflows</SelectItem>
@@ -605,7 +695,69 @@ function WorkflowRunsList() {
               ))}
             </SelectContent>
           </Select>
+
+          {/* More filters toggle */}
+          <Button
+            variant={showFilters ? 'secondary' : 'outline'}
+            size="sm"
+            onClick={() => setShowFilters(!showFilters)}
+          >
+            <Calendar className="h-4 w-4 mr-2" />
+            Date Range
+            {(dateFrom || dateTo) && (
+              <Badge variant="secondary" className="ml-2 h-5 w-5 p-0 flex items-center justify-center">
+                1
+              </Badge>
+            )}
+          </Button>
+
+          {/* Clear filters */}
+          {activeFilterCount > 0 && (
+            <Button variant="ghost" size="sm" onClick={clearAllFilters}>
+              <X className="h-4 w-4 mr-1" />
+              Clear ({activeFilterCount})
+            </Button>
+          )}
         </div>
+
+        {/* Expanded date filters */}
+        {showFilters && (
+          <div className="flex items-center gap-4 p-3 rounded-lg border bg-muted/30">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="dateFrom" className="text-sm text-muted-foreground whitespace-nowrap">
+                From:
+              </Label>
+              <Input
+                id="dateFrom"
+                type="date"
+                value={dateFrom}
+                onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
+                className="w-[160px]"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Label htmlFor="dateTo" className="text-sm text-muted-foreground whitespace-nowrap">
+                To:
+              </Label>
+              <Input
+                id="dateTo"
+                type="date"
+                value={dateTo}
+                onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
+                className="w-[160px]"
+              />
+            </div>
+            {(dateFrom || dateTo) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => { setDateFrom(''); setDateTo(''); setPage(1); }}
+              >
+                Clear dates
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       {isLoading ? (
@@ -703,8 +855,8 @@ function WorkflowRunsList() {
 
                 {(run.completedStepIds.length > 0 || run.currentStepIds.length > 0) && (
                   <div className="mt-3 pt-3 border-t">
-                    <div className="flex items-center gap-2 text-sm">
-                      <span className="text-muted-foreground">Progress:</span>
+                    <div className="flex items-center gap-3 text-sm">
+                      <span className="text-muted-foreground">Steps:</span>
                       <span className="text-green-600">{run.completedStepIds.length} completed</span>
                       {run.currentStepIds.length > 0 && (
                         <span className="text-blue-600">{run.currentStepIds.length} in progress</span>

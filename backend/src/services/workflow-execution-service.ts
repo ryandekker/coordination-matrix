@@ -2439,6 +2439,8 @@ class WorkflowExecutionService {
   async listWorkflowRuns(options: {
     workflowId?: string;
     status?: WorkflowRunStatus | WorkflowRunStatus[];
+    dateFrom?: Date;
+    dateTo?: Date;
     page?: number;
     limit?: number;
   } = {}): Promise<{ runs: WorkflowRun[]; total: number }> {
@@ -2452,6 +2454,16 @@ class WorkflowExecutionService {
       filter.status = Array.isArray(options.status)
         ? { $in: options.status }
         : options.status;
+    }
+    // Add date range filter
+    if (options.dateFrom || options.dateTo) {
+      filter.createdAt = {};
+      if (options.dateFrom) {
+        (filter.createdAt as Record<string, Date>).$gte = options.dateFrom;
+      }
+      if (options.dateTo) {
+        (filter.createdAt as Record<string, Date>).$lte = options.dateTo;
+      }
     }
 
     const [runs, total] = await Promise.all([
