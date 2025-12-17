@@ -30,7 +30,7 @@ db.createCollection('tasks', {
         },
         status: {
           bsonType: 'string',
-          enum: ['pending', 'in_progress', 'on_hold', 'waiting', 'completed', 'failed', 'cancelled'],
+          enum: ['pending', 'in_progress', 'on_hold', 'waiting', 'completed', 'failed', 'cancelled', 'archived'],
           description: 'Current task status'
         },
         urgency: {

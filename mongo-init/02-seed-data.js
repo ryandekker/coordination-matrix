@@ -16,6 +16,7 @@ const lookups = [
   { type: 'task_status', code: 'completed', displayName: 'Completed', color: '#10B981', icon: 'check', sortOrder: 5, isActive: true },
   { type: 'task_status', code: 'failed', displayName: 'Failed', color: '#EF4444', icon: 'x-circle', sortOrder: 6, isActive: true },
   { type: 'task_status', code: 'cancelled', displayName: 'Cancelled', color: '#9CA3AF', icon: 'ban', sortOrder: 7, isActive: true },
+  { type: 'task_status', code: 'archived', displayName: 'Archived', color: '#64748B', icon: 'archive', sortOrder: 8, isActive: true },
 
   // Urgency levels
   { type: 'urgency', code: 'low', displayName: 'Low', color: '#6B7280', icon: 'arrow-down', sortOrder: 1, isActive: true },

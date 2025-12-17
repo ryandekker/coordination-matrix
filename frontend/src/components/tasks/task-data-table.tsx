@@ -103,7 +103,7 @@ const BulkActionsBar = memo(function BulkActionsBar({
   onClearSelection: () => void
   isUpdating: boolean
 }) {
-  const statusOptions = lookups['taskStatus'] || []
+  const statusOptions = lookups['task_status'] || []
   const urgencyOptions = lookups['urgency'] || []
 
   return (
