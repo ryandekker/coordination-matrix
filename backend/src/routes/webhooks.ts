@@ -73,6 +73,31 @@ webhooksRouter.get('/', async (req: Request, res: Response, next: NextFunction) 
   }
 });
 
+// GET /api/webhooks/deliveries - Get all deliveries across all webhooks
+// NOTE: This route must come BEFORE /:id to prevent 'deliveries' from being parsed as an ID
+webhooksRouter.get('/deliveries', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { limit = '100', offset = '0', status } = req.query;
+
+    const result = await webhookService.getAllDeliveries({
+      limit: parseInt(limit as string, 10),
+      offset: parseInt(offset as string, 10),
+      status: status as string | undefined,
+    });
+
+    res.json({
+      data: result.data,
+      pagination: {
+        limit: parseInt(limit as string, 10),
+        offset: parseInt(offset as string, 10),
+        total: result.total,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/webhooks/:id - Get a single webhook
 webhooksRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
