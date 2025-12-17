@@ -570,6 +570,9 @@ export interface WorkflowStep {
   name: string;
   description?: string;
   stepType: WorkflowStepType;
+
+  // Dynamic title template - supports {{input.field}}, {{output.field}}, {{_item}}, etc.
+  titleTemplate?: string;
   connections?: Array<{
     targetStepId: string;
     condition?: string | null;
@@ -630,6 +633,10 @@ export interface Workflow {
   isActive: boolean;
   steps: WorkflowStep[];
   mermaidDiagram?: string;
+
+  // Dynamic title template for the root task - supports {{input.field}} variables
+  rootTaskTitleTemplate?: string;
+
   createdAt: Date;
   updatedAt: Date;
   createdById?: ObjectId | null;

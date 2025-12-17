@@ -101,6 +101,9 @@ interface WorkflowStep {
   description?: string
   stepType?: WorkflowStepType  // Optional for backward compatibility
 
+  // Dynamic title template - supports {{input.field}}, {{item}}, {{_index}}, etc.
+  titleTemplate?: string
+
   // Non-linear flow: explicit connections to next steps
   connections?: StepConnection[]
 
@@ -150,6 +153,9 @@ interface Workflow {
   steps?: WorkflowStep[]
   stages?: string[]  // Legacy format
   mermaidDiagram?: string
+
+  // Dynamic title template for the root task - supports {{input.field}} variables
+  rootTaskTitleTemplate?: string
 }
 
 const workflowSchema = z.object({
@@ -510,6 +516,7 @@ export function WorkflowEditor({
   onSave,
 }: WorkflowEditorProps) {
   const [steps, setSteps] = useState<WorkflowStep[]>([])
+  const [rootTaskTitleTemplate, setRootTaskTitleTemplate] = useState('')
   const [mermaidCode, setMermaidCode] = useState('')
   const [mermaidError, setMermaidError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState('visual')
@@ -568,6 +575,7 @@ export function WorkflowEditor({
           })) || [])
       setSteps(normalizedSteps)
       setMermaidCode(workflow.mermaidDiagram || '')
+      setRootTaskTitleTemplate(workflow.rootTaskTitleTemplate || '')
     } else {
       reset({
         name: '',
@@ -576,6 +584,7 @@ export function WorkflowEditor({
       })
       setSteps([])
       setMermaidCode('')
+      setRootTaskTitleTemplate('')
     }
   }, [workflow, reset])
 
@@ -686,6 +695,7 @@ export function WorkflowEditor({
       steps,
       mermaidDiagram: mermaidCode,
       description: data.description || '',
+      rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
     }
     onSave(workflowData)
   }
@@ -744,6 +754,38 @@ export function WorkflowEditor({
                 {...register('description')}
                 placeholder="Brief description"
               />
+            </div>
+          </div>
+
+          {/* Root Task Title Template */}
+          <div className="mb-4">
+            <div className="space-y-1">
+              <label className="text-sm font-medium flex items-center gap-2">
+                <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                Root Task Title Template
+                <span className="text-xs text-muted-foreground">(optional)</span>
+              </label>
+              <div className="flex gap-1">
+                <Input
+                  value={rootTaskTitleTemplate}
+                  onChange={(e) => setRootTaskTitleTemplate(e.target.value)}
+                  placeholder={`e.g., "Process Order: {{input.orderId}}" - defaults to "Workflow: {name}"`}
+                  className="font-mono text-sm"
+                />
+                <TokenBrowser
+                  workflowId={workflow?._id}
+                  previousSteps={[]}
+                  currentStepIndex={0}
+                  onSelectToken={(token) => {
+                    setRootTaskTitleTemplate(prev => prev + token)
+                  }}
+                  variant="text"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Dynamic title for the workflow&apos;s parent task. Use {`{{input.field}}`} to include data from the workflow input payload.
+                If empty, defaults to &quot;Workflow: {watch('name') || '{name}'}&quot;.
+              </p>
             </div>
           </div>
 
@@ -947,6 +989,43 @@ export function WorkflowEditor({
                           {/* Step Details (Expanded) */}
                           <CollapsibleContent>
                             <div className="border-t px-4 py-3 space-y-3 bg-muted/20">
+                              {/* Task Title Template - available for all step types */}
+                              <div className="space-y-1">
+                                <label className="text-sm font-medium flex items-center gap-2">
+                                  <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                                  Task Title Template
+                                  <span className="text-xs text-muted-foreground">(optional)</span>
+                                </label>
+                                <div className="flex gap-1">
+                                  <Input
+                                    value={step.titleTemplate || ''}
+                                    onChange={(e) => updateStep(index, { titleTemplate: e.target.value })}
+                                    placeholder={`e.g., "Review: {{item.name}}" or "Process {{input.customerName}}"`}
+                                    className="font-mono text-sm"
+                                  />
+                                  <TokenBrowser
+                                    workflowId={workflow?._id}
+                                    previousSteps={steps.slice(0, index).map(s => ({
+                                      id: s.id,
+                                      name: s.name,
+                                      stepType: s.stepType,
+                                      itemVariable: s.itemVariable,
+                                    }))}
+                                    currentStepIndex={index}
+                                    loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
+                                    onSelectToken={(token) => {
+                                      const current = step.titleTemplate || ''
+                                      updateStep(index, { titleTemplate: current + token })
+                                    }}
+                                    variant="text"
+                                  />
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                  Dynamic title for tasks created from this step. Use {`{{input.field}}`} for input data{isInLoop ? `, {{${loopScope?.foreachStep.itemVariable || 'item'}}} for loop items, {{_index}} for position` : ''}.
+                                  If empty, uses the step name.
+                                </p>
+                              </div>
+
                               {/* Agent step configuration */}
                               {(step.stepType === 'agent' || (!step.stepType && step.execution !== 'manual')) && (
                                 <div className="space-y-3">
