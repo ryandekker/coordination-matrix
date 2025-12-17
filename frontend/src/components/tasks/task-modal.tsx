@@ -947,9 +947,19 @@ export function TaskModal({
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="standard">Standard</SelectItem>
-                    <SelectItem value="external">External</SelectItem>
-                    <SelectItem value="decision">Decision</SelectItem>
+                    {Object.entries(TASK_TYPE_CONFIG)
+                      .filter(([key]) => !['webhook', 'trigger', 'manual'].includes(key)) // Filter out legacy/special types
+                      .map(([key, config]) => {
+                        const Icon = config.icon
+                        return (
+                          <SelectItem key={key} value={key}>
+                            <div className="flex items-center gap-2">
+                              <Icon className={cn('h-4 w-4', config.color)} />
+                              <span>{config.label}</span>
+                            </div>
+                          </SelectItem>
+                        )
+                      })}
                   </SelectContent>
                 </Select>
               )}

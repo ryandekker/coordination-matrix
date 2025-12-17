@@ -104,7 +104,7 @@ Decision nodes are not tasks. They are pure routing constructs evaluated synchro
 export type TaskStatus =
   | 'pending'
   | 'in_progress'
-  | 'waiting'        // NEW: Waiting for child tasks (foreach, subflow)
+  | 'waiting'        // NEW: Waiting for child tasks (foreach, flow)
   | 'on_hold'
   | 'completed'
   | 'failed'         // NEW: Execution failed (distinct from on_hold)
@@ -175,7 +175,7 @@ Workflows can reference agent IDs that don't exist yet. On first use, the system
 // backend/src/routes/workflows.ts
 
 // Step types for workflow routing
-type WorkflowStepType = 'task' | 'decision' | 'foreach' | 'join' | 'subflow';
+type WorkflowStepType = 'task' | 'decision' | 'foreach' | 'join' | 'flow';
 
 // Execution mode (only applicable to 'task' type)
 type ExecutionMode = 'automated' | 'manual';
@@ -217,8 +217,8 @@ interface WorkflowStep {
   // NEW: Join configuration (only for stepType='join')
   awaitTag?: string;              // Tag pattern: "foreach:{{parentId}}"
 
-  // NEW: Subflow configuration (only for stepType='subflow')
-  subflowId?: string;
+  // NEW: Flow configuration (only for stepType='flow')
+  flowId?: string;
   inputMapping?: Record<string, string>;
 }
 ```
@@ -231,7 +231,7 @@ interface WorkflowStep {
 | `decision` | No | Routes based on previous output |
 | `foreach` | Yes (multiple) | Spawns a task per item in array |
 | `join` | Yes | Waits for parallel tasks, aggregates results |
-| `subflow` | Yes | Delegates to another workflow |
+| `flow` | Yes | Delegates to another workflow |
 
 ---
 
@@ -375,7 +375,7 @@ function assemblePrompt(task, agent, workflowStep) {
 | Decision | `{Curly braces}` | `C{Quality Gate}` |
 | ForEach | `[[Double brackets]]` | `D[[Each: Process File]]` |
 | Join | `[Square]` with join label | `E[Join Results]` |
-| Subflow | `[[Run: Name]]` | `F[[Run: Security Scan]]` |
+| Flow | `[[Run: Name]]` | `F[[Run: Security Scan]]` |
 
 ### Edge Labels as Conditions
 
@@ -529,8 +529,8 @@ async function routeToStep(
       await checkJoinCondition(workflow, step, previousTask);
       break;
 
-    case 'subflow':
-      await startSubflow(workflow, step, previousTask, output);
+    case 'flow':
+      await startFlow(workflow, step, previousTask, output);
       break;
   }
 }
@@ -785,7 +785,7 @@ function getValueByPath(obj: unknown, path: string): unknown {
 
 2. **Human-in-the-Loop Notifications:** When a task is `ESCALATE`d, what notification mechanism should trigger?
 
-3. **Subflow Depth:** Limit nesting depth to prevent infinite recursion? (Suggest: max 5 levels)
+3. **Flow Depth:** Limit nesting depth to prevent infinite recursion? (Suggest: max 5 levels)
 
 ---
 
@@ -799,7 +799,7 @@ function getValueByPath(obj: unknown, path: string): unknown {
 - [ ] Add decision fields: `branches`, `defaultBranch`
 - [ ] Add foreach fields: `itemsPath`, `itemVariable`, `maxItems`
 - [ ] Add join fields: `awaitTag`
-- [ ] Add subflow fields: `subflowId`, `inputMapping`
+- [ ] Add flow fields: `flowId`, `inputMapping`
 
 ### Phase 2: Mermaid Parser Updates
 - [ ] Update `parseMermaidToSteps()` to extract config block
@@ -813,7 +813,7 @@ function getValueByPath(obj: unknown, path: string): unknown {
 - [ ] Implement decision routing logic
 - [ ] Implement foreach task spawning
 - [ ] Implement join condition checking
-- [ ] Implement subflow delegation
+- [ ] Implement flow delegation
 
 ### Phase 4: API Updates
 - [ ] Add endpoint to fetch agent user by ID

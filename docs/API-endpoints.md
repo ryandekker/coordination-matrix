@@ -262,7 +262,7 @@ See `./scripts/matrix-cli.mjs --help` for all commands.
 - `decision` - Conditional routing
 - `foreach` - Fan-out loop
 - `join` - Fan-in aggregation
-- `subflow` - Nested workflow
+- `flow` - Nested workflow
 
 **Create Workflow:**
 ```json

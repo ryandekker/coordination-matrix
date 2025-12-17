@@ -10,7 +10,7 @@ Each workflow step can have an AI prompt that instructs the daemon on how to pro
 
 You will receive:
 - **Step name**: The workflow stage name (e.g., "Review", "Analysis", "Implementation")
-- **Step type**: `task` | `decision` | `foreach` | `join` | `subflow`
+- **Step type**: `task` | `decision` | `foreach` | `join` | `flow`
 - **Execution mode**: `automated` | `manual`
 - **Workflow context**: The overall workflow purpose and surrounding steps
 - **Available data**: Fields and variables from previous steps
