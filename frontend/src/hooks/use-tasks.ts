@@ -186,8 +186,10 @@ export function useBulkUpdateTasks() {
     mutationFn: ({ taskIds, updates }: { taskIds: string[]; updates: Partial<Task> }) =>
       tasksApi.bulkUpdate(taskIds, updates),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      queryClient.invalidateQueries({ queryKey: ['task-tree'] })
+      // Force refetch all task-related queries
+      queryClient.invalidateQueries({ queryKey: ['tasks'], refetchType: 'all' })
+      queryClient.invalidateQueries({ queryKey: ['task-tree'], refetchType: 'all' })
+      queryClient.invalidateQueries({ queryKey: ['task-children'], refetchType: 'all' })
     },
   })
 }
@@ -198,8 +200,10 @@ export function useBulkDeleteTasks() {
   return useMutation({
     mutationFn: (taskIds: string[]) => tasksApi.bulkDelete(taskIds),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      queryClient.invalidateQueries({ queryKey: ['task-tree'] })
+      // Force refetch all task-related queries
+      queryClient.invalidateQueries({ queryKey: ['tasks'], refetchType: 'all' })
+      queryClient.invalidateQueries({ queryKey: ['task-tree'], refetchType: 'all' })
+      queryClient.invalidateQueries({ queryKey: ['task-children'], refetchType: 'all' })
     },
   })
 }
