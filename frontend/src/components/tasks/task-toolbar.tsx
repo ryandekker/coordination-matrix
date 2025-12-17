@@ -244,35 +244,54 @@ export function TaskToolbar({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-4">
-      {/* View Selector */}
-      <Select value={currentView?._id} onValueChange={onViewChange}>
-        <SelectTrigger className="w-48">
-          <SelectValue placeholder="Select view" />
-        </SelectTrigger>
-        <SelectContent>
-          {views
-            .filter((view) => view._id)
-            .map((view) => (
-              <SelectItem key={view._id} value={view._id}>
-                {view.name}
-              </SelectItem>
-            ))}
-        </SelectContent>
-      </Select>
+      {/* Top row: View selector, Search, and action buttons - doesn't wrap */}
+      <div className="flex items-center gap-4">
+        {/* View Selector */}
+        <Select value={currentView?._id} onValueChange={onViewChange}>
+          <SelectTrigger className="w-48 flex-shrink-0">
+            <SelectValue placeholder="Select view" />
+          </SelectTrigger>
+          <SelectContent>
+            {views
+              .filter((view) => view._id)
+              .map((view) => (
+                <SelectItem key={view._id} value={view._id}>
+                  {view.name}
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>
 
-      {/* Search */}
-      <div className={`relative transition-all duration-200 ${isSearchFocused || search ? 'flex-1 max-w-lg' : 'w-48'}`}>
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder="Search tasks..."
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          onFocus={() => setIsSearchFocused(true)}
-          onBlur={() => setIsSearchFocused(false)}
-          className="pl-9"
-        />
+        {/* Search */}
+        <div className={`relative transition-all duration-200 ${isSearchFocused || search ? 'flex-1 min-w-48 max-w-lg' : 'w-48 flex-shrink-0'}`}>
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Search tasks..."
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            onFocus={() => setIsSearchFocused(true)}
+            onBlur={() => setIsSearchFocused(false)}
+            className="pl-9"
+          />
+        </div>
+
+        <div className="flex-1" />
+
+        {/* Column Config */}
+        <Button variant="outline" size="sm" onClick={onOpenColumnConfig} className="flex-shrink-0">
+          <Columns className="mr-2 h-4 w-4" />
+          Columns
+        </Button>
+
+        {/* Create Task */}
+        <Button onClick={onCreateTask} className="flex-shrink-0">
+          <Plus className="mr-2 h-4 w-4" />
+          New Task
+        </Button>
       </div>
+
+      {/* Filter row - can wrap */}
+      <div className="flex flex-wrap items-center gap-2">
 
       {/* Status Filter */}
       <DropdownMenu>
@@ -380,8 +399,6 @@ export function TaskToolbar({
         </DropdownMenu>
       )}
 
-      <div className="flex-1" />
-
       {/* Save Search */}
       {(onSaveSearch || onUpdateSearch) && hasActiveFilters && (
         <Button variant="outline" size="sm" onClick={openSaveModal}>
@@ -389,18 +406,6 @@ export function TaskToolbar({
           Save Search
         </Button>
       )}
-
-      {/* Column Config */}
-      <Button variant="outline" size="sm" onClick={onOpenColumnConfig}>
-        <Columns className="mr-2 h-4 w-4" />
-        Columns
-      </Button>
-
-      {/* Create Task */}
-      <Button onClick={onCreateTask}>
-        <Plus className="mr-2 h-4 w-4" />
-        New Task
-      </Button>
       </div>
 
       {/* Active Filters */}

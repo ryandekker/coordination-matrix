@@ -336,6 +336,7 @@ const TaskRow = memo(function TaskRow({
   handleDeleteTask,
   handleEditTask,
   handleCreateSubtask,
+  expandAllEnabled,
 }: {
   task: Task
   fieldConfigs: FieldConfig[]
@@ -358,11 +359,23 @@ const TaskRow = memo(function TaskRow({
   handleDeleteTask: (taskId: string) => void
   handleEditTask: (task: Task) => void
   handleCreateSubtask: (task: Task) => void
+  expandAllEnabled: boolean
 }) {
   // Fetch children when expanded
   const { data: childrenData } = useTaskChildren(isExpanded ? task._id : null)
   const children = childrenData?.data || []
   const hasChildren = isExpanded ? children.length > 0 : task.children && task.children.length > 0
+
+  // Auto-expand children that have grandchildren when expandAllEnabled is true
+  useEffect(() => {
+    if (expandAllEnabled && isExpanded && children.length > 0) {
+      children.forEach(child => {
+        if (child.children && child.children.length > 0 && !expandedRows.has(child._id)) {
+          toggleRowExpansion(child._id)
+        }
+      })
+    }
+  }, [expandAllEnabled, isExpanded, children, expandedRows, toggleRowExpansion])
 
   return (
     <>
@@ -469,6 +482,7 @@ const TaskRow = memo(function TaskRow({
             handleDeleteTask={handleDeleteTask}
             handleEditTask={handleEditTask}
             handleCreateSubtask={handleCreateSubtask}
+            expandAllEnabled={expandAllEnabled}
           />
         ))}
     </>
@@ -874,6 +888,7 @@ export function TaskDataTable({
                   handleDeleteTask={handleDeleteTask}
                   handleEditTask={onEditTask}
                   handleCreateSubtask={onCreateSubtask}
+                  expandAllEnabled={expandAllEnabled}
                 />
               ))
             )}
