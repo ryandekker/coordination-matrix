@@ -90,8 +90,10 @@ const TaskTypeIcon = memo(function TaskTypeIcon({ taskType, batchCounters }: { t
 const BulkActionsBar = memo(function BulkActionsBar({
   selectedCount,
   lookups,
+  users,
   onStatusChange,
   onPriorityChange,
+  onAssigneeChange,
   onArchive,
   onDelete,
   onClearSelection,
@@ -99,8 +101,10 @@ const BulkActionsBar = memo(function BulkActionsBar({
 }: {
   selectedCount: number
   lookups: Record<string, LookupValue[]>
+  users: User[]
   onStatusChange: (status: string) => void
   onPriorityChange: (priority: string) => void
+  onAssigneeChange: (assigneeId: string | null) => void
   onArchive: () => void
   onDelete: () => void
   onClearSelection: () => void
@@ -137,6 +141,19 @@ const BulkActionsBar = memo(function BulkActionsBar({
             {urgencyOptions.map((urgency) => (
               <SelectItem key={urgency._id} value={urgency.code}>
                 {urgency.displayName}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select onValueChange={(val) => onAssigneeChange(val === '__unassign__' ? null : val)} disabled={isUpdating}>
+          <SelectTrigger className="h-8 w-[140px]">
+            <SelectValue placeholder="Set assignee" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__unassign__">Unassigned</SelectItem>
+            {users.map((user) => (
+              <SelectItem key={user._id} value={user._id}>
+                {user.displayName}
               </SelectItem>
             ))}
           </SelectContent>
@@ -509,6 +526,12 @@ export function TaskDataTable({
     clearSelection()
   }, [selectedRows, bulkUpdateTasks, clearSelection])
 
+  const handleBulkAssigneeChange = useCallback(async (assigneeId: string | null) => {
+    const taskIds = Array.from(selectedRows)
+    await bulkUpdateTasks.mutateAsync({ taskIds, updates: { assigneeId } })
+    clearSelection()
+  }, [selectedRows, bulkUpdateTasks, clearSelection])
+
   // Memoized field config map for quick lookup
   const fieldConfigMap = useMemo(
     () => new Map(fieldConfigs.map((fc) => [fc.fieldPath, fc])),
@@ -669,8 +692,10 @@ export function TaskDataTable({
         <BulkActionsBar
           selectedCount={selectedRows.size}
           lookups={lookups}
+          users={users}
           onStatusChange={handleBulkStatusChange}
           onPriorityChange={handleBulkPriorityChange}
+          onAssigneeChange={handleBulkAssigneeChange}
           onArchive={handleBulkArchive}
           onDelete={handleBulkDelete}
           onClearSelection={clearSelection}
