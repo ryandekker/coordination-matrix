@@ -56,6 +56,8 @@ app.post('/api/workflow-runs/:id/foreach/:stepId/item', async (req, res) => {
     const { id, stepId } = req.params;
     const { ObjectId } = await import('mongodb');
 
+    console.log(`[ForeachCallback] Received request for run=${id}, step=${stepId}`);
+
     if (!ObjectId.isValid(id)) {
       res.status(400).json({ error: 'Invalid workflow run ID' });
       return;
@@ -84,10 +86,22 @@ app.post('/api/workflow-runs/:id/foreach/:stepId/item', async (req, res) => {
       secret
     );
 
+    console.log(`[ForeachCallback] Success: received=${result.receivedCount}/${result.expectedCount}`);
     res.json(result);
   } catch (error: unknown) {
-    console.error('[WorkflowRuns] Foreach item callback error:', error);
-    const message = error instanceof Error ? error.message : 'Failed to process foreach item';
+    console.error('[ForeachCallback] Error:', error);
+
+    // Extract error details
+    const err = error as Error & { code?: number; codeName?: string; errInfo?: unknown };
+    const message = err.message || 'Failed to process foreach item';
+
+    // Log additional MongoDB error details if present
+    if (err.code) {
+      console.error(`[ForeachCallback] MongoDB error code: ${err.code}, codeName: ${err.codeName}`);
+      if (err.errInfo) {
+        console.error('[ForeachCallback] Error info:', JSON.stringify(err.errInfo, null, 2));
+      }
+    }
 
     if (message.includes('Invalid callback secret') || message.includes('secret')) {
       res.status(401).json({ error: message });
@@ -95,6 +109,15 @@ app.post('/api/workflow-runs/:id/foreach/:stepId/item', async (req, res) => {
     }
     if (message.includes('not found')) {
       res.status(404).json({ error: message });
+      return;
+    }
+    // Handle MongoDB validation errors
+    if (message.includes('Document failed validation') || err.code === 121) {
+      res.status(400).json({
+        error: 'Invalid task data',
+        details: message,
+        validationError: err.errInfo || null
+      });
       return;
     }
 

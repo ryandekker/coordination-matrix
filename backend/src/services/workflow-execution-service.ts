@@ -1994,8 +1994,13 @@ class WorkflowExecutionService {
       const nextStep = nextStepId ? workflow.steps.find(s => s.id === nextStepId) : null;
 
       if (!nextStep) {
+        console.error(`[WorkflowExecutionService] No child step found for foreach ${stepId}`);
+        console.error(`[WorkflowExecutionService] Step connections:`, step.connections);
+        console.error(`[WorkflowExecutionService] Available steps:`, workflow.steps.map(s => s.id));
         throw new Error(`Foreach step ${stepId} has no connected child step`);
       }
+
+      console.log(`[WorkflowExecutionService] Creating child task for step ${nextStep.id} (${nextStep.name || 'unnamed'}) of type ${nextStep.stepType}`);
 
       // Build item payload
       const itemPayload = {
@@ -2005,8 +2010,14 @@ class WorkflowExecutionService {
       };
 
       // Create child task for this item
-      const childTask = await this.createTaskForStep(run, workflow, nextStep, foreachTask, itemPayload);
-      childTaskId = childTask._id.toString();
+      try {
+        const childTask = await this.createTaskForStep(run, workflow, nextStep, foreachTask, itemPayload);
+        childTaskId = childTask._id.toString();
+      } catch (err) {
+        console.error(`[WorkflowExecutionService] Failed to create child task:`, err);
+        console.error(`[WorkflowExecutionService] Step details:`, JSON.stringify(nextStep, null, 2));
+        throw err;
+      }
 
       // Increment received count
       currentReceivedCount++;
