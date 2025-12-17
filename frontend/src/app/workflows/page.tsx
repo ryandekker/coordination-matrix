@@ -651,6 +651,7 @@ export default function WorkflowsPage() {
             checked={table.getIsAllPageRowsSelected()}
             onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
             aria-label="Select all"
+            className="h-5 w-5"
           />
         </div>
       ),
@@ -661,6 +662,7 @@ export default function WorkflowsPage() {
             onCheckedChange={(value) => row.toggleSelected(!!value)}
             onClick={(e) => e.stopPropagation()}
             aria-label="Select row"
+            className="h-5 w-5"
           />
         </div>
       ),
