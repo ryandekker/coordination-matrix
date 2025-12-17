@@ -295,6 +295,8 @@ tasksRouter.get('/webhook-attempts', async (req: Request, res: Response, next: N
         completedAt: attempt.completedAt,
         url: task.webhookConfig?.url,
         method: task.webhookConfig?.method,
+        headers: task.webhookConfig?.headers,
+        requestBody: task.webhookConfig?.body,
         maxRetries: task.webhookConfig?.maxRetries,
         nextRetryAt: task.webhookConfig?.nextRetryAt,
       }));

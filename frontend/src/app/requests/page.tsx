@@ -124,6 +124,8 @@ interface UnifiedRequest {
   durationMs?: number
   url?: string
   method?: string
+  requestHeaders?: Record<string, string>
+  requestBody?: string
   original: ExternalJob | BatchJob | WebhookDelivery | WebhookTaskAttempt
 }
 
@@ -258,6 +260,8 @@ function toWebhookTaskUnifiedRequest(attempt: WebhookTaskAttempt): UnifiedReques
     durationMs: attempt.durationMs,
     url: attempt.url,
     method: attempt.method,
+    requestHeaders: attempt.headers,
+    requestBody: attempt.requestBody,
     error: attempt.errorMessage,
     original: attempt,
   }
@@ -1072,10 +1076,41 @@ function WebhookTaskDetail({ attemptId }: { attemptId: string }) {
       {/* Request details */}
       <div className="rounded-lg border bg-card p-4">
         <h2 className="font-semibold mb-2">Request</h2>
-        <div className="flex items-center gap-2 text-sm">
+        <div className="flex items-center gap-2 text-sm mb-3">
           <Badge variant="secondary">{attempt.method}</Badge>
           <span className="font-mono break-all">{attempt.url}</span>
         </div>
+
+        {/* Request Headers */}
+        {attempt.headers && Object.keys(attempt.headers).length > 0 && (
+          <div className="mt-3 pt-3 border-t">
+            <h3 className="text-sm font-medium mb-2 text-muted-foreground">Headers</h3>
+            <div className="space-y-1">
+              {Object.entries(attempt.headers).map(([key, value]) => (
+                <div key={key} className="flex text-xs font-mono">
+                  <span className="text-muted-foreground min-w-[150px]">{key}:</span>
+                  <span className="break-all">{value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Request Body */}
+        {attempt.requestBody && (
+          <div className="mt-3 pt-3 border-t">
+            <h3 className="text-sm font-medium mb-2 text-muted-foreground">Body</h3>
+            <pre className="text-xs bg-muted rounded p-3 overflow-auto max-h-48">
+              {(() => {
+                try {
+                  return JSON.stringify(JSON.parse(attempt.requestBody), null, 2)
+                } catch {
+                  return attempt.requestBody
+                }
+              })()}
+            </pre>
+          </div>
+        )}
       </div>
 
       {/* Related task */}
@@ -1549,6 +1584,43 @@ function RequestsList() {
                         {batchJob.failedCount} failed
                       </p>
                     )}
+                  </div>
+                )}
+
+                {/* Payload preview for webhook tasks */}
+                {isWebhookTask && request.requestBody && (
+                  <div className="mt-3 pt-3 border-t">
+                    <p className="text-xs text-muted-foreground mb-1">Request Body:</p>
+                    <pre className="text-xs bg-muted rounded p-2 overflow-hidden max-h-16 line-clamp-3">
+                      {(() => {
+                        try {
+                          const parsed = JSON.parse(request.requestBody)
+                          return JSON.stringify(parsed, null, 2)
+                        } catch {
+                          return request.requestBody
+                        }
+                      })()}
+                    </pre>
+                  </div>
+                )}
+
+                {/* Payload preview for external jobs */}
+                {isExternal && request.payload && Object.keys(request.payload).length > 0 && (
+                  <div className="mt-3 pt-3 border-t">
+                    <p className="text-xs text-muted-foreground mb-1">Payload:</p>
+                    <pre className="text-xs bg-muted rounded p-2 overflow-hidden max-h-16 line-clamp-3">
+                      {JSON.stringify(request.payload, null, 2)}
+                    </pre>
+                  </div>
+                )}
+
+                {/* Payload preview for webhook deliveries */}
+                {isWebhookDelivery && request.payload && Object.keys(request.payload).length > 0 && (
+                  <div className="mt-3 pt-3 border-t">
+                    <p className="text-xs text-muted-foreground mb-1">Payload:</p>
+                    <pre className="text-xs bg-muted rounded p-2 overflow-hidden max-h-16 line-clamp-3">
+                      {JSON.stringify(request.payload, null, 2)}
+                    </pre>
                   </div>
                 )}
               </div>

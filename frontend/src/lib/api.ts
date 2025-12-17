@@ -818,6 +818,8 @@ export interface WebhookTaskAttempt {
   durationMs?: number
   url: string
   method: string
+  headers?: Record<string, string>
+  requestBody?: string
   startedAt: string
   completedAt?: string
 }
