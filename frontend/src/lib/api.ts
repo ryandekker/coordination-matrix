@@ -505,6 +505,8 @@ export interface Task {
   urgency?: string
   parentId: string | null
   workflowId?: string | null
+  workflowRunId?: string | null
+  workflowStepId?: string | null
   workflowStage?: string
   externalId?: string
   externalHoldDate?: string | null
