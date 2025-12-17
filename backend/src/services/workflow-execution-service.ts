@@ -2422,18 +2422,24 @@ class WorkflowExecutionService {
   }
 
   async getWorkflowRunWithTasks(runId: string): Promise<{
-    run: WorkflowRun;
+    run: WorkflowRun & { workflow?: Workflow };
     tasks: Task[];
   } | null> {
     const run = await this.getWorkflowRun(runId);
     if (!run) return null;
+
+    // Fetch workflow definition to include steps for progress display
+    const workflow = await this.workflows.findOne({ _id: run.workflowId });
 
     const tasks = await this.tasks
       .find({ workflowRunId: run._id })
       .sort({ createdAt: 1 })
       .toArray();
 
-    return { run, tasks };
+    return {
+      run: { ...run, workflow: workflow || undefined },
+      tasks,
+    };
   }
 
   async listWorkflowRuns(options: {

@@ -8,8 +8,10 @@ import {
   useReactTable,
   getCoreRowModel,
   getExpandedRowModel,
+  getFilteredRowModel,
   flexRender,
   ColumnDef,
+  RowSelectionState,
 } from '@tanstack/react-table'
 import {
   Workflow,
@@ -34,6 +36,9 @@ import {
   Calendar,
   CheckCircle2,
   XCircle,
+  Search,
+  X,
+  Check,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -79,6 +84,7 @@ import {
 } from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
 import { authFetch } from '@/lib/api'
+import { Checkbox } from '@/components/ui/checkbox'
 
 // Lazy-load WorkflowEditor to reduce initial bundle size (includes heavy mermaid dependency)
 const WorkflowEditor = dynamic(
@@ -395,6 +401,7 @@ export default function WorkflowsPage() {
   const [isEditorOpen, setIsEditorOpen] = useState(false)
   const [editingWorkflow, setEditingWorkflow] = useState<WorkflowData | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<WorkflowData | null>(null)
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false)
   const [runDialog, setRunDialog] = useState<{ open: boolean; workflow: WorkflowData | null }>({
     open: false,
     workflow: null,
@@ -405,6 +412,11 @@ export default function WorkflowsPage() {
   const [runTags, setRunTags] = useState('')
   const [runExternalId, setRunExternalId] = useState('')
   const [runSource, setRunSource] = useState('')
+
+  // Filter and selection state
+  const [searchQuery, setSearchQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
 
   const { data: workflowsData, isLoading, error } = useQuery({
     queryKey: ['workflows'],
@@ -480,6 +492,38 @@ export default function WorkflowsPage() {
     },
   })
 
+  // Bulk action mutations
+  const bulkEnableMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      await Promise.all(ids.map(id => updateWorkflow(id, { isActive: true })))
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflows'] })
+      setRowSelection({})
+    },
+  })
+
+  const bulkDisableMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      await Promise.all(ids.map(id => updateWorkflow(id, { isActive: false })))
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflows'] })
+      setRowSelection({})
+    },
+  })
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      await Promise.all(ids.map(id => deleteWorkflow(id)))
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflows'] })
+      setRowSelection({})
+      setBulkDeleteConfirm(false)
+    },
+  })
+
   const resetRunForm = () => {
     setRunPayload('')
     setRunAssignee('')
@@ -518,9 +562,9 @@ export default function WorkflowsPage() {
   }
 
   // Normalize workflows to ensure steps array exists and add stats
-  // Memoized to prevent TanStack Table from reinitializing on every render
+  // Then apply filters
   const workflows = useMemo<WorkflowWithStats[]>(() => {
-    return (workflowsData?.data || []).map(w => ({
+    let result = (workflowsData?.data || []).map(w => ({
       ...w,
       steps: (w.steps || (w.stages?.map((name, i) => ({
         id: `stage-${i}`,
@@ -530,7 +574,35 @@ export default function WorkflowsPage() {
       })) || [])) as WorkflowStep[],
       stats: statsMap?.[w._id],
     }))
-  }, [workflowsData?.data, statsMap])
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase()
+      result = result.filter(w =>
+        w.name.toLowerCase().includes(query) ||
+        w.description?.toLowerCase().includes(query)
+      )
+    }
+
+    // Apply status filter
+    if (statusFilter !== 'all') {
+      result = result.filter(w =>
+        statusFilter === 'active' ? w.isActive : !w.isActive
+      )
+    }
+
+    return result
+  }, [workflowsData?.data, statsMap, searchQuery, statusFilter])
+
+  // Get selected workflow IDs
+  const selectedWorkflowIds = useMemo(() => {
+    return Object.keys(rowSelection)
+      .filter(key => rowSelection[key])
+      .map(index => workflows[parseInt(index)]?._id)
+      .filter(Boolean) as string[]
+  }, [rowSelection, workflows])
+
+  const selectedCount = selectedWorkflowIds.length
 
   const openCreateEditor = useCallback(() => {
     setEditingWorkflow(null)
@@ -571,6 +643,28 @@ export default function WorkflowsPage() {
 
   // Table columns - memoized to prevent TanStack Table from reinitializing on every render
   const columns = useMemo<ColumnDef<WorkflowWithStats>[]>(() => [
+    {
+      id: 'select',
+      header: ({ table }) => (
+        <Checkbox
+          checked={table.getIsAllPageRowsSelected()}
+          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+          aria-label="Select all"
+          className="translate-y-[2px]"
+        />
+      ),
+      cell: ({ row }) => (
+        <Checkbox
+          checked={row.getIsSelected()}
+          onCheckedChange={(value) => row.toggleSelected(!!value)}
+          onClick={(e) => e.stopPropagation()}
+          aria-label="Select row"
+          className="translate-y-[2px]"
+        />
+      ),
+      enableSorting: false,
+      enableHiding: false,
+    },
     {
       id: 'expander',
       header: () => null,
@@ -785,7 +879,12 @@ export default function WorkflowsPage() {
     columns,
     getCoreRowModel: getCoreRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
     getRowCanExpand: () => true,
+    onRowSelectionChange: setRowSelection,
+    state: {
+      rowSelection,
+    },
   })
 
   return (
@@ -801,6 +900,90 @@ export default function WorkflowsPage() {
           <Plus className="mr-2 h-4 w-4" />
           Create Workflow
         </Button>
+      </div>
+
+      {/* Filters and bulk actions */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {/* Search */}
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search workflows..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+
+        {/* Status filter */}
+        <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
+          <SelectTrigger className="w-[130px]">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="active">
+              <div className="flex items-center gap-2">
+                <Play className="h-3 w-3 text-green-500" />
+                Active
+              </div>
+            </SelectItem>
+            <SelectItem value="inactive">
+              <div className="flex items-center gap-2">
+                <Pause className="h-3 w-3 text-gray-500" />
+                Inactive
+              </div>
+            </SelectItem>
+          </SelectContent>
+        </Select>
+
+        {/* Clear filters */}
+        {(searchQuery || statusFilter !== 'all') && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => { setSearchQuery(''); setStatusFilter('all'); }}
+          >
+            <X className="h-4 w-4 mr-1" />
+            Clear
+          </Button>
+        )}
+
+        {/* Bulk actions (only shown when rows are selected) */}
+        {selectedCount > 0 && (
+          <div className="flex items-center gap-2 ml-auto border-l pl-3">
+            <span className="text-sm text-muted-foreground">
+              {selectedCount} selected
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => bulkEnableMutation.mutate(selectedWorkflowIds)}
+              disabled={bulkEnableMutation.isPending}
+            >
+              <Play className="h-4 w-4 mr-1" />
+              Enable
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => bulkDisableMutation.mutate(selectedWorkflowIds)}
+              disabled={bulkDisableMutation.isPending}
+            >
+              <Pause className="h-4 w-4 mr-1" />
+              Disable
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={() => setBulkDeleteConfirm(true)}
+            >
+              <Trash2 className="h-4 w-4 mr-1" />
+              Delete
+            </Button>
+          </div>
+        )}
       </div>
 
       {isLoading ? (
@@ -899,6 +1082,29 @@ export default function WorkflowsPage() {
               onClick={() => deleteConfirm && deleteMutation.mutate(deleteConfirm._id)}
             >
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <AlertDialog open={bulkDeleteConfirm} onOpenChange={setBulkDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedCount} Workflow{selectedCount !== 1 ? 's' : ''}</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete {selectedCount} selected workflow{selectedCount !== 1 ? 's' : ''}?
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => bulkDeleteMutation.mutate(selectedWorkflowIds)}
+              disabled={bulkDeleteMutation.isPending}
+            >
+              {bulkDeleteMutation.isPending ? 'Deleting...' : 'Delete All'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
