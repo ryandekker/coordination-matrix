@@ -202,7 +202,19 @@ router.post('/:id/callback/:stepId', async (req: Request, res: Response): Promis
       };
     }
 
-    const result = await workflowExecutionService.handleCallback(id, stepId, payload, secret);
+    // Build request info for logging
+    const requestInfo = {
+      url: req.originalUrl,
+      method: req.method,
+      headers: Object.fromEntries(
+        Object.entries(req.headers)
+          .filter(([key]) => !['x-workflow-secret', 'authorization'].includes(key.toLowerCase()))
+          .map(([key, value]) => [key, String(value)])
+      ),
+      receivedAt: new Date(),
+    };
+
+    const result = await workflowExecutionService.handleCallback(id, stepId, payload, secret, requestInfo);
 
     res.json(result);
   } catch (error: unknown) {
@@ -256,7 +268,19 @@ router.post('/:id/foreach/:stepId/item', async (req: Request, res: Response): Pr
       };
     }
 
-    const result = await workflowExecutionService.handleCallback(id, stepId, unifiedPayload, secret);
+    // Build request info for logging
+    const requestInfo = {
+      url: req.originalUrl,
+      method: req.method,
+      headers: Object.fromEntries(
+        Object.entries(req.headers)
+          .filter(([key]) => !['x-workflow-secret', 'authorization'].includes(key.toLowerCase()))
+          .map(([key, value]) => [key, String(value)])
+      ),
+      receivedAt: new Date(),
+    };
+
+    const result = await workflowExecutionService.handleCallback(id, stepId, unifiedPayload, secret, requestInfo);
 
     // Return legacy response format for backward compatibility
     res.json({

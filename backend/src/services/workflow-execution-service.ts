@@ -2006,7 +2006,13 @@ class WorkflowExecutionService {
     runId: string,
     stepId: string,
     payload: Record<string, unknown>,
-    secret: string
+    secret: string,
+    requestInfo?: {
+      url: string;
+      method: string;
+      headers: Record<string, string>;
+      receivedAt: Date;
+    }
   ): Promise<{
     acknowledged: boolean;
     taskId: string;
@@ -2054,6 +2060,34 @@ class WorkflowExecutionService {
 
     if (!validSecret) {
       throw new Error('Invalid callback secret');
+    }
+
+    // Log the callback request if requestInfo was provided
+    if (requestInfo) {
+      const callbackRequest = {
+        _id: new ObjectId().toString(),
+        url: requestInfo.url,
+        method: requestInfo.method,
+        headers: requestInfo.headers,
+        body: payload,
+        receivedAt: requestInfo.receivedAt,
+        status: 'success' as const,
+      };
+
+      // Get existing callback requests or initialize empty array
+      const existingCallbacks = (task.metadata?.callbackRequests as unknown[]) || [];
+
+      // Update task with callback request log
+      await this.tasks.updateOne(
+        { _id: task._id },
+        {
+          $set: {
+            'metadata.callbackRequests': [...existingCallbacks, callbackRequest],
+            updatedAt: new Date(),
+          },
+        }
+      );
+      console.log(`[WorkflowExecutionService] Logged callback request to task ${task._id}`);
     }
 
     const workflow = await this.workflows.findOne({ _id: run.workflowId });
@@ -2226,14 +2260,14 @@ class WorkflowExecutionService {
     stepId: string,
     payload: Record<string, unknown>,
     secret: string,
-    _requestInfo?: {
+    requestInfo?: {
       url: string;
       method: string;
       headers: Record<string, string>;
       receivedAt: Date;
     }
   ): Promise<Task> {
-    const result = await this.handleCallback(runId, stepId, payload, secret);
+    const result = await this.handleCallback(runId, stepId, payload, secret, requestInfo);
     const task = await this.tasks.findOne({ _id: new ObjectId(result.taskId) });
     return task!;
   }
