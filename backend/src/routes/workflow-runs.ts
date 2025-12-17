@@ -55,6 +55,8 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
     const {
       workflowId,
       status,
+      dateFrom,
+      dateTo,
       page = '1',
       limit = '20',
     } = req.query;
@@ -66,9 +68,23 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
       statusFilter = statuses.length === 1 ? statuses[0] : statuses;
     }
 
+    // Parse date filters
+    let dateFromParsed: Date | undefined;
+    let dateToParsed: Date | undefined;
+    if (dateFrom) {
+      dateFromParsed = new Date(dateFrom as string);
+      dateFromParsed.setHours(0, 0, 0, 0);
+    }
+    if (dateTo) {
+      dateToParsed = new Date(dateTo as string);
+      dateToParsed.setHours(23, 59, 59, 999);
+    }
+
     const result = await workflowExecutionService.listWorkflowRuns({
       workflowId: workflowId as string,
       status: statusFilter,
+      dateFrom: dateFromParsed,
+      dateTo: dateToParsed,
       page: parseInt(page as string, 10),
       limit: parseInt(limit as string, 10),
     });

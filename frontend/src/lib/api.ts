@@ -730,6 +730,8 @@ export const workflowRunsApi = {
   list: async (params?: {
     workflowId?: string
     status?: WorkflowRunStatus | WorkflowRunStatus[]
+    dateFrom?: string
+    dateTo?: string
     page?: number
     limit?: number
   }): Promise<PaginatedResponse<WorkflowRun>> => {
@@ -739,6 +741,8 @@ export const workflowRunsApi = {
       const statuses = Array.isArray(params.status) ? params.status : [params.status]
       searchParams.append('status', statuses.join(','))
     }
+    if (params?.dateFrom) searchParams.append('dateFrom', params.dateFrom)
+    if (params?.dateTo) searchParams.append('dateTo', params.dateTo)
     if (params?.page) searchParams.append('page', String(params.page))
     if (params?.limit) searchParams.append('limit', String(params.limit))
     const response = await authFetch(`${API_BASE}/workflow-runs?${searchParams}`)
