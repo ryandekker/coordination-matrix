@@ -125,7 +125,7 @@ interface UnifiedRequest {
   url?: string
   method?: string
   requestHeaders?: Record<string, string>
-  requestBody?: string
+  requestBody?: unknown
   original: ExternalJob | BatchJob | WebhookDelivery | WebhookTaskAttempt
 }
 
@@ -1097,17 +1097,13 @@ function WebhookTaskDetail({ attemptId }: { attemptId: string }) {
         )}
 
         {/* Request Body */}
-        {attempt.requestBody && (
+        {attempt.requestBody !== undefined && attempt.requestBody !== null && (
           <div className="mt-3 pt-3 border-t">
             <h3 className="text-sm font-medium mb-2 text-muted-foreground">Body</h3>
             <pre className="text-xs bg-muted rounded p-3 overflow-auto max-h-48">
-              {(() => {
-                try {
-                  return JSON.stringify(JSON.parse(attempt.requestBody), null, 2)
-                } catch {
-                  return attempt.requestBody
-                }
-              })()}
+              {typeof attempt.requestBody === 'string'
+                ? attempt.requestBody
+                : JSON.stringify(attempt.requestBody, null, 2)}
             </pre>
           </div>
         )}
@@ -1587,42 +1583,6 @@ function RequestsList() {
                   </div>
                 )}
 
-                {/* Payload preview for webhook tasks */}
-                {isWebhookTask && request.requestBody && (
-                  <div className="mt-3 pt-3 border-t">
-                    <p className="text-xs text-muted-foreground mb-1">Request Body:</p>
-                    <pre className="text-xs bg-muted rounded p-2 overflow-hidden max-h-16 line-clamp-3">
-                      {(() => {
-                        try {
-                          const parsed = JSON.parse(request.requestBody)
-                          return JSON.stringify(parsed, null, 2)
-                        } catch {
-                          return request.requestBody
-                        }
-                      })()}
-                    </pre>
-                  </div>
-                )}
-
-                {/* Payload preview for external jobs */}
-                {isExternal && request.payload && Object.keys(request.payload).length > 0 && (
-                  <div className="mt-3 pt-3 border-t">
-                    <p className="text-xs text-muted-foreground mb-1">Payload:</p>
-                    <pre className="text-xs bg-muted rounded p-2 overflow-hidden max-h-16 line-clamp-3">
-                      {JSON.stringify(request.payload, null, 2)}
-                    </pre>
-                  </div>
-                )}
-
-                {/* Payload preview for webhook deliveries */}
-                {isWebhookDelivery && request.payload && Object.keys(request.payload).length > 0 && (
-                  <div className="mt-3 pt-3 border-t">
-                    <p className="text-xs text-muted-foreground mb-1">Payload:</p>
-                    <pre className="text-xs bg-muted rounded p-2 overflow-hidden max-h-16 line-clamp-3">
-                      {JSON.stringify(request.payload, null, 2)}
-                    </pre>
-                  </div>
-                )}
               </div>
             )
           })}

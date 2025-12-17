@@ -819,7 +819,7 @@ export interface WebhookTaskAttempt {
   url: string
   method: string
   headers?: Record<string, string>
-  requestBody?: string
+  requestBody?: unknown
   startedAt: string
   completedAt?: string
 }
