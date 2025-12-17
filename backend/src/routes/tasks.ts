@@ -409,11 +409,26 @@ tasksRouter.get('/:id/children', async (req: Request, res: Response, next: NextF
       .sort({ createdAt: 1 })
       .toArray();
 
-    let resolvedChildren = children;
+    // Add child count to each task to enable expand/collapse UI
+    const taskIds = children.map(t => t._id);
+    const childCounts = await db.collection<Task>('tasks').aggregate([
+      { $match: { parentId: { $in: taskIds } } },
+      { $group: { _id: '$parentId', count: { $sum: 1 } } }
+    ]).toArray();
+
+    const childCountMap = new Map(childCounts.map(c => [c._id.toString(), c.count]));
+    const childrenWithChildInfo = children.map(task => ({
+      ...task,
+      children: childCountMap.get(task._id.toString())
+        ? Array(childCountMap.get(task._id.toString())).fill({})
+        : []
+    }));
+
+    let resolvedChildren = childrenWithChildInfo;
     if (resolveReferences === 'true') {
       const resolver = new ReferenceResolver();
       await resolver.loadFieldConfigs('tasks');
-      resolvedChildren = await resolver.resolveDocuments(children);
+      resolvedChildren = await resolver.resolveDocuments(childrenWithChildInfo);
     }
 
     res.json({ data: resolvedChildren });
