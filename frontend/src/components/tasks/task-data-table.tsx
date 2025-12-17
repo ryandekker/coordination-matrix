@@ -355,6 +355,7 @@ const TaskRow = memo(function TaskRow({
   renderCellValue,
   expandedRows,
   selectedRows,
+  pulsingRows,
   toggleRowExpansion,
   toggleRowSelection,
   handleDeleteTask,
@@ -362,6 +363,8 @@ const TaskRow = memo(function TaskRow({
   handleCreateSubtask,
   expandAllEnabled,
   onNavigateToFlow,
+  isPulsing,
+  onTriggerPulse,
 }: {
   task: Task
   fieldConfigs: FieldConfig[]
