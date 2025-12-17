@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { Plus } from 'lucide-react'
+import { Plus, ChevronLeft, Workflow } from 'lucide-react'
 import { TaskDataTable } from './task-data-table'
 import { TaskToolbar } from './task-toolbar'
 import { TaskModal } from './task-modal'
 import { ColumnConfigModal } from './column-config-modal'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { useTasks, useTask, useLookups, useFieldConfigs, useViews, useUsers, useCreateView, useUpdateView } from '@/hooks/use-tasks'
 import { useEventStream } from '@/hooks/use-event-stream'
 import { Task, View, FieldConfig } from '@/lib/api'
@@ -91,6 +92,7 @@ export function TasksPage() {
   const router = useRouter()
   const viewIdFromUrl = searchParams.get('viewId')
   const taskIdFromUrl = searchParams.get('taskId')
+  const parentIdFromUrl = searchParams.get('parentId')  // For viewing a flow's children
 
   const [selectedView, setSelectedView] = useState<string | null>(viewIdFromUrl)
   const [filters, setFilters] = useState<Record<string, unknown>>({})
@@ -109,14 +111,17 @@ export function TasksPage() {
   // Fetch task from URL if taskId is provided
   const { data: taskFromUrl } = useTask(taskIdFromUrl)
 
-  // Fetch data
+  // Fetch the flow parent task when viewing its children
+  const { data: flowParentTask } = useTask(parentIdFromUrl)
+
+  // Fetch data - use parentId filter when viewing a flow, otherwise use rootOnly
   const { data: tasksData, isLoading: tasksLoading } = useTasks({
     page,
     limit: 50,
     sortBy,
     sortOrder,
     search,
-    rootOnly: true,
+    ...(parentIdFromUrl ? { parentId: parentIdFromUrl } : { rootOnly: true }),
     resolveReferences: true,
     ...filters,
   })
@@ -348,11 +353,39 @@ export function TasksPage() {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Flow breadcrumb - shown when viewing a flow's children */}
+      {parentIdFromUrl && flowParentTask?.data && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-pink-50 dark:bg-pink-950/30 border border-pink-200 dark:border-pink-800 rounded-lg animate-[pulse_0.5s_ease-in-out_2]">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-pink-600 dark:text-pink-400 hover:bg-pink-100 dark:hover:bg-pink-900/50"
+            onClick={() => router.push('/tasks')}
+          >
+            <ChevronLeft className="h-4 w-4 mr-1" />
+            Back to all tasks
+          </Button>
+          <span className="text-muted-foreground">|</span>
+          <div className="flex items-center gap-2">
+            <Workflow className="h-4 w-4 text-pink-500" />
+            <span className="text-sm font-medium text-pink-800 dark:text-pink-200">
+              Flow: {flowParentTask.data.title}
+            </span>
+            <Badge variant="outline" className="text-xs border-pink-300 text-pink-600">
+              {flowParentTask.data.status}
+            </Badge>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Tasks</h1>
           <p className="text-muted-foreground">
-            Manage AI workflow tasks and human-in-the-loop reviews
+            {parentIdFromUrl && flowParentTask?.data
+              ? `Viewing tasks within flow: ${flowParentTask.data.title}`
+              : 'Manage AI workflow tasks and human-in-the-loop reviews'
+            }
           </p>
         </div>
         <Button onClick={handleCreateTask}>

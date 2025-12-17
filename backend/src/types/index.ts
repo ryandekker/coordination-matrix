@@ -7,7 +7,7 @@ import { ObjectId } from 'mongodb';
 export type TaskStatus =
   | 'pending'
   | 'in_progress'
-  | 'waiting'      // Waiting for child tasks (foreach, subflow)
+  | 'waiting'      // Waiting for child tasks (foreach, flow)
   | 'on_hold'
   | 'completed'
   | 'failed'       // Execution failed (distinct from on_hold)
@@ -24,7 +24,7 @@ export type TaskType =
   | 'decision'     // Conditional branching
   | 'foreach'      // Fan-out iteration (spawns subtasks)
   | 'join'         // Fan-in synchronization (awaits boundary conditions)
-  | 'subflow'      // Nested workflow
+  | 'flow'         // Nested workflow
   | 'external'     // Outbound HTTP call with callback
   | 'webhook';     // Outbound HTTP call (fire-and-forget)
 
@@ -563,7 +563,7 @@ export type WorkflowStepType =
   | 'decision'     // Conditional branching
   | 'foreach'      // Fan-out iteration (spawns subtasks)
   | 'join'         // Fan-in synchronization (awaits boundary conditions)
-  | 'subflow';     // Nested workflow
+  | 'flow';        // Nested workflow
 
 export interface WorkflowStep {
   id: string;
@@ -615,8 +615,8 @@ export interface WorkflowStep {
   joinBoundary?: JoinBoundary;          // Boundary conditions for when the join fires
   minSuccessPercent?: number;           // Legacy: percentage of tasks that must succeed (default: 100)
 
-  // Subflow step config
-  subflowId?: string;
+  // Flow step config (nested workflow)
+  flowId?: string;
   inputMapping?: Record<string, string>;
 
   // Input aggregation

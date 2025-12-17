@@ -25,7 +25,7 @@ import {
  * - decision: Amber (conditional branching)
  * - foreach: Green (iteration/fan-out)
  * - join: Indigo (aggregation/fan-in)
- * - subflow: Pink (nested workflows)
+ * - flow: Pink (nested workflows)
  * - manual: Purple (human tasks)
  */
 
@@ -126,7 +126,7 @@ export const TASK_TYPE_CONFIG: Record<string, TaskTypeConfig> = {
     color: 'text-pink-500',
     bgColor: 'bg-pink-50 dark:bg-pink-950/30',
     hexColor: '#EC4899',
-    description: 'Run sub-workflow',
+    description: 'Nested workflow',
   },
   manual: {
     icon: User,
@@ -189,13 +189,13 @@ export const WORKFLOW_STEP_TYPE_CONFIG: Record<string, TaskTypeConfig> = {
     hexColor: '#6366F1',
     description: 'Aggregate results',
   },
-  subflow: {
+  flow: {
     icon: Workflow,
-    label: 'Subflow',
+    label: 'Flow',
     color: 'text-pink-500',
     bgColor: 'bg-pink-50 dark:bg-pink-950/30',
     hexColor: '#EC4899',
-    description: 'Run sub-workflow',
+    description: 'Nested workflow',
   },
 }
 

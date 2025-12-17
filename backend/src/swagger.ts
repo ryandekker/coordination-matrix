@@ -177,7 +177,7 @@ All responses follow this structure:
         // Workflow schemas
         WorkflowStepType: {
           type: 'string',
-          enum: ['trigger', 'agent', 'manual', 'external', 'webhook', 'decision', 'foreach', 'join', 'subflow'],
+          enum: ['trigger', 'agent', 'manual', 'external', 'webhook', 'decision', 'foreach', 'join', 'flow'],
           description: 'Type of workflow step - maps 1:1 to TaskType',
         },
         TaskType: {

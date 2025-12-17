@@ -77,8 +77,8 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 // - decision: Routing based on conditions from previous step output
 // - foreach: Fan-out loop over collection
 // - join: Fan-in aggregation point
-// - subflow: Delegate to another workflow
-type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'subflow'
+// - flow: Delegate to another workflow (nested)
+type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow'
 
 // Connection between steps (for non-linear flows)
 interface StepConnection {
@@ -130,8 +130,8 @@ interface WorkflowStep {
   // Shared by ForEach and Join
   expectedCountPath?: string       // JSONPath to expected count from input/external step response
 
-  // Subflow fields
-  subflowId?: string
+  // Flow fields (nested workflow)
+  flowId?: string
   inputMapping?: Record<string, string>
 
   // Legacy compatibility
@@ -174,7 +174,7 @@ const STEP_TYPES: { type: WorkflowStepType; label: string; description: string; 
   { type: 'decision', label: 'Decision', description: 'Route by condition', icon: GitBranch, color: 'text-amber-500', bgColor: 'bg-amber-50' },
   { type: 'foreach', label: 'ForEach', description: 'Loop over items', icon: Repeat, color: 'text-green-500', bgColor: 'bg-green-50' },
   { type: 'join', label: 'Join', description: 'Aggregate results', icon: Merge, color: 'text-indigo-500', bgColor: 'bg-indigo-50' },
-  { type: 'subflow', label: 'Subflow', description: 'Run sub-workflow', icon: WorkflowIcon, color: 'text-pink-500', bgColor: 'bg-pink-50' },
+  { type: 'flow', label: 'Flow', description: 'Nested workflow', icon: WorkflowIcon, color: 'text-pink-500', bgColor: 'bg-pink-50' },
 ]
 
 // Detect loop scopes (ForEach → Join boundaries)
@@ -334,8 +334,8 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     // Shared by ForEach and Join
     if (step.expectedCountPath) metadata.expectedCountPath = step.expectedCountPath
 
-    // Subflow step fields
-    if (step.subflowId) metadata.subflowId = step.subflowId
+    // Flow step fields
+    if (step.flowId) metadata.flowId = step.flowId
     if (step.inputMapping && Object.keys(step.inputMapping).length > 0) {
       metadata.inputMapping = step.inputMapping
     }
@@ -366,7 +366,7 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
         const pct = step.minSuccessPercent !== undefined ? ` @${step.minSuccessPercent}%` : ''
         lines.push(`    ${nodeId}[["Join: ${label}${pct}"]]`)
         break
-      case 'subflow':
+      case 'flow':
         lines.push(`    ${nodeId}[["Run: ${label}"]]`)
         break
       default:
@@ -438,7 +438,7 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
   lines.push('    classDef decision fill:#F59E0B,color:#fff,stroke:#D97706')
   lines.push('    classDef foreach fill:#10B981,color:#fff,stroke:#059669')
   lines.push('    classDef join fill:#6366F1,color:#fff,stroke:#4F46E5')
-  lines.push('    classDef subflow fill:#EC4899,color:#fff,stroke:#DB2777')
+  lines.push('    classDef flow fill:#EC4899,color:#fff,stroke:#DB2777')
 
   // Apply classes to nodes
   const classGroups: Record<string, string[]> = {
@@ -448,7 +448,7 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     decision: [],
     foreach: [],
     join: [],
-    subflow: [],
+    flow: [],
   }
 
   steps.forEach((step, i) => {
@@ -473,8 +473,8 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
       case 'join':
         classGroups.join.push(nodeId)
         break
-      case 'subflow':
-        classGroups.subflow.push(nodeId)
+      case 'flow':
+        classGroups.flow.push(nodeId)
         break
       default:
         const execution = step.execution || step.type || 'automated'
@@ -1637,27 +1637,27 @@ The agent will receive task context automatically.`}
                                 </>
                               )}
 
-                              {/* Subflow configuration */}
-                              {step.stepType === 'subflow' && (
+                              {/* Flow configuration (nested workflow) */}
+                              {step.stepType === 'flow' && (
                                 <>
                                   <div className="bg-pink-50 dark:bg-pink-950/30 border border-pink-200 dark:border-pink-800 rounded-lg p-3 text-sm">
                                     <div className="flex items-start gap-2">
                                       <WorkflowIcon className="h-4 w-4 text-pink-600 dark:text-pink-400 mt-0.5 flex-shrink-0" />
                                       <div className="text-pink-800 dark:text-pink-200">
-                                        <p className="font-medium">Subflow / Nested Workflow</p>
+                                        <p className="font-medium">Nested Workflow</p>
                                         <p className="text-xs mt-1">
                                           Delegates execution to another workflow. Input is passed programmatically
-                                          and results are returned when the subflow completes.
+                                          and results are returned when the flow completes.
                                         </p>
                                       </div>
                                     </div>
                                   </div>
 
                                   <div className="space-y-1">
-                                    <label className="text-sm font-medium">Subflow ID</label>
+                                    <label className="text-sm font-medium">Flow ID</label>
                                     <Input
-                                      value={step.subflowId || ''}
-                                      onChange={(e) => updateStep(index, { subflowId: e.target.value })}
+                                      value={step.flowId || ''}
+                                      onChange={(e) => updateStep(index, { flowId: e.target.value })}
                                       placeholder="workflow-id"
                                       className="font-mono text-sm"
                                     />

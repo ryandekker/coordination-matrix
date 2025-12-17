@@ -488,9 +488,9 @@ class WorkflowExecutionService {
         await this.executeDecision(run, workflow, step, task, inputPayload);
         break;
 
-      case 'subflow':
-        // TODO: Implement subflow execution
-        console.log('[WorkflowExecutionService] Subflow execution not yet implemented');
+      case 'flow':
+        // TODO: Implement flow execution (nested workflow)
+        console.log('[WorkflowExecutionService] Flow execution not yet implemented');
         break;
     }
 
@@ -621,7 +621,7 @@ class WorkflowExecutionService {
       'decision': 'decision',
       'foreach': 'foreach',
       'join': 'join',
-      'subflow': 'subflow',
+      'flow': 'flow',
     };
     return mapping[stepType] || 'agent';
   }
@@ -636,7 +636,7 @@ class WorkflowExecutionService {
       'decision': 'immediate',
       'foreach': 'immediate',
       'join': 'immediate',
-      'subflow': 'automated',
+      'flow': 'automated',
     };
     return mapping[stepType] || 'automated';
   }
