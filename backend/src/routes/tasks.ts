@@ -993,10 +993,12 @@ tasksRouter.post('/bulk', async (req: Request, res: Response, next: NextFunction
         delete updates.createdAt;
         updates.updatedAt = now;
 
+        console.log(`[Bulk Update] Updating ${taskIds.length} tasks with:`, updates);
         result = await db.collection('tasks').updateMany(
           { _id: { $in: objectIds } },
           { $set: updates }
         );
+        console.log(`[Bulk Update] Result: matched=${result.matchedCount}, modified=${result.modifiedCount}`);
         break;
 
       case 'delete':
