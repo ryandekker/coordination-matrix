@@ -29,7 +29,7 @@ All labels should be quoted with double quotes to handle special characters safe
 | Decision | - | Diamond | `{"text"}` | `step3{"Is Valid?"}` |
 | ForEach | - | Subroutine | `[["Each: text"]]` | `step4[["Each: Process Item"]]` |
 | Join | - | Subroutine | `[["Join: text"]]` | `step5[["Join: Merge Results"]]` |
-| Subflow | - | Subroutine | `[["Run: text"]]` | `step6[["Run: Subprocess"]]` |
+| Flow | - | Subroutine | `[["Run: text"]]` | `step6[["Run: Subprocess"]]` |
 
 ### Escaping Special Characters in Labels
 
@@ -45,7 +45,7 @@ classDef manual fill:#8B5CF6,color:#fff,stroke:#7C3AED
 classDef decision fill:#F59E0B,color:#fff,stroke:#D97706
 classDef foreach fill:#10B981,color:#fff,stroke:#059669
 classDef join fill:#8B5CF6,color:#fff,stroke:#7C3AED
-classDef subflow fill:#EC4899,color:#fff,stroke:#DB2777
+classDef flow fill:#EC4899,color:#fff,stroke:#DB2777
 ```
 
 ### Class Assignments (Required - Apply Classes to Nodes)
@@ -92,7 +92,7 @@ flowchart TD
     classDef decision fill:#F59E0B,color:#fff,stroke:#D97706
     classDef foreach fill:#10B981,color:#fff,stroke:#059669
     classDef join fill:#8B5CF6,color:#fff,stroke:#7C3AED
-    classDef subflow fill:#EC4899,color:#fff,stroke:#DB2777
+    classDef flow fill:#EC4899,color:#fff,stroke:#DB2777
 
     class step1 automated
     class step2 decision
@@ -146,7 +146,7 @@ flowchart TD
     classDef decision fill:#F59E0B,color:#fff,stroke:#D97706
     classDef foreach fill:#10B981,color:#fff,stroke:#059669
     classDef join fill:#8B5CF6,color:#fff,stroke:#7C3AED
-    classDef subflow fill:#EC4899,color:#fff,stroke:#DB2777
+    classDef flow fill:#EC4899,color:#fff,stroke:#DB2777
 
     %% Class assignments (can group nodes: class nodeA,nodeB className)
     class step1 automated

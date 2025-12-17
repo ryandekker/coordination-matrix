@@ -275,36 +275,18 @@ const TitleCell = memo(function TitleCell({
 
   // Render the leading button based on task type
   const renderLeadingButton = () => {
-    // Flow tasks show a navigation arrow - they're always shown as placeholders
-    if (isFlowTask && hasChildren) {
-      return (
-        <TooltipProvider>
-          <Tooltip delayDuration={300}>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 w-6 p-0 flex-shrink-0 text-pink-500 hover:text-pink-600 hover:bg-pink-50"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onNavigateToFlow?.(task._id)
-                }}
-              >
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Open flow</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      )
-    }
-
-    // Regular tasks with children show expand/collapse chevron
+    // All tasks with children (including flow tasks) show expand/collapse chevron
     if (hasChildren) {
       return (
-        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 flex-shrink-0" onClick={onToggleExpand}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn(
+            "h-6 w-6 p-0 flex-shrink-0",
+            isFlowTask && "text-pink-500 hover:text-pink-600 hover:bg-pink-50"
+          )}
+          onClick={onToggleExpand}
+        >
           {isExpanded ? (
             <ChevronDown className="h-4 w-4" />
           ) : (
@@ -397,6 +379,7 @@ const TaskRow = memo(function TaskRow({
   renderCellValue: (task: Task, fc: FieldConfig) => React.ReactNode
   expandedRows: Set<string>
   selectedRows: Set<string>
+  pulsingRows: Set<string>
   toggleRowExpansion: (taskId: string) => void
   toggleRowSelection: (taskId: string) => void
   handleDeleteTask: (taskId: string) => void
@@ -404,15 +387,24 @@ const TaskRow = memo(function TaskRow({
   handleCreateSubtask: (task: Task) => void
   expandAllEnabled: boolean
   onNavigateToFlow: (taskId: string) => void
+  isPulsing: boolean
+  onTriggerPulse: (taskId: string) => void
 }) {
-  // Flow tasks should not be expanded inline - they navigate to their own view
   const isFlowTask = task.taskType === 'flow'
 
-  // Fetch children when expanded (but not for flow tasks)
-  const shouldFetchChildren = isExpanded && !isFlowTask
-  const { data: childrenData } = useTaskChildren(shouldFetchChildren ? task._id : null)
+  // Fetch children when expanded (including flow tasks - they now expand inline)
+  const { data: childrenData } = useTaskChildren(isExpanded ? task._id : null)
   const children = childrenData?.data || []
   const hasChildren = isExpanded ? children.length > 0 : task.children && task.children.length > 0
+
+  // Handle expand toggle with pulse animation for flow tasks
+  const handleToggleExpand = useCallback(() => {
+    onToggleExpand()
+    // Trigger pulse when expanding a flow task
+    if (isFlowTask && !isExpanded) {
+      onTriggerPulse(task._id)
+    }
+  }, [onToggleExpand, isFlowTask, isExpanded, onTriggerPulse, task._id])
 
   // Auto-expand children that have grandchildren when expandAllEnabled is true
   useEffect(() => {
@@ -428,7 +420,10 @@ const TaskRow = memo(function TaskRow({
   return (
     <>
       <TableRow
-        className={cn(depth > 0 && 'bg-muted/30')}
+        className={cn(
+          depth > 0 && 'bg-muted/30',
+          isPulsing && 'animate-pulse bg-pink-50 dark:bg-pink-950/30'
+        )}
         data-state={isSelected ? 'selected' : undefined}
       >
         <TableCell className="text-center">
@@ -448,7 +443,7 @@ const TaskRow = memo(function TaskRow({
                 fieldConfig={fc}
                 depth={depth}
                 isExpanded={isExpanded}
-                onToggleExpand={onToggleExpand}
+                onToggleExpand={handleToggleExpand}
                 onCellUpdate={onCellUpdate}
                 onEdit={onEdit}
                 renderCellValue={renderCellValue}
@@ -506,8 +501,8 @@ const TaskRow = memo(function TaskRow({
           </DropdownMenu>
         </TableCell>
       </TableRow>
-      {/* Flow tasks don't render children inline - they navigate to their own view */}
-      {isExpanded && !isFlowTask &&
+      {/* Render children inline when expanded (including flow tasks) */}
+      {isExpanded &&
         children.map((child) => (
           <TaskRow
             key={child._id}
@@ -527,6 +522,7 @@ const TaskRow = memo(function TaskRow({
             renderCellValue={renderCellValue}
             expandedRows={expandedRows}
             selectedRows={selectedRows}
+            pulsingRows={pulsingRows}
             toggleRowExpansion={toggleRowExpansion}
             toggleRowSelection={toggleRowSelection}
             handleDeleteTask={handleDeleteTask}
@@ -534,6 +530,8 @@ const TaskRow = memo(function TaskRow({
             handleCreateSubtask={handleCreateSubtask}
             expandAllEnabled={expandAllEnabled}
             onNavigateToFlow={onNavigateToFlow}
+            isPulsing={pulsingRows.has(child._id)}
+            onTriggerPulse={onTriggerPulse}
           />
         ))}
     </>
@@ -560,6 +558,20 @@ export function TaskDataTable({
   const router = useRouter()
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
+  const [pulsingRows, setPulsingRows] = useState<Set<string>>(new Set())
+
+  // Trigger pulse animation for a row (used when expanding flow tasks)
+  const triggerPulse = useCallback((taskId: string) => {
+    setPulsingRows(prev => new Set(prev).add(taskId))
+    // Remove the pulse after animation completes (1 second)
+    setTimeout(() => {
+      setPulsingRows(prev => {
+        const next = new Set(prev)
+        next.delete(taskId)
+        return next
+      })
+    }, 1000)
+  }, [])
 
   // Navigate to a flow task's own view (shows its children as root-level tasks)
   const handleNavigateToFlow = useCallback((taskId: string) => {
@@ -874,6 +886,7 @@ export function TaskDataTable({
                   renderCellValue={renderCellValue}
                   expandedRows={expandedRows}
                   selectedRows={selectedRows}
+                  pulsingRows={pulsingRows}
                   toggleRowExpansion={toggleRowExpansion}
                   toggleRowSelection={toggleRowSelection}
                   handleDeleteTask={handleDeleteTask}
@@ -881,6 +894,8 @@ export function TaskDataTable({
                   handleCreateSubtask={onCreateSubtask}
                   expandAllEnabled={expandAllEnabled}
                   onNavigateToFlow={handleNavigateToFlow}
+                  isPulsing={pulsingRows.has(task._id)}
+                  onTriggerPulse={triggerPulse}
                 />
               ))
             )}

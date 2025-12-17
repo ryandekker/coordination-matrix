@@ -88,7 +88,7 @@ Each workflow step creates a task with a specific `taskType` and `executionMode`
 | `decision` | `decision` | `immediate` | Auto (condition eval) |
 | `foreach` | `foreach` | `automated` | Auto (creates children) |
 | `join` | `join` | `automated` | Auto (waits for children) |
-| `subflow` | `subflow` | `automated` | Nested workflow |
+| `flow` | `flow` | `automated` | Nested workflow |
 
 ---
 
