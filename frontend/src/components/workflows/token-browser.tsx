@@ -24,8 +24,7 @@ import {
   Clock,
   Loader2,
 } from 'lucide-react'
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
+import { workflowRunsApi } from '@/lib/api'
 
 interface TokenCategory {
   name: string
@@ -100,43 +99,30 @@ export function TokenBrowser({
     setLoadingSamples(true)
     setFetchError(null)
     try {
-      // Get recent completed runs - include credentials for auth
-      const runsRes = await fetch(`${API_BASE}/workflow-runs?workflowId=${workflowId}&status=completed&limit=1`, {
-        credentials: 'include',
+      // Get recent runs (completed or running) using authenticated API client
+      // Include running runs since they may have tasks with output data
+      const runsResponse = await workflowRunsApi.list({
+        workflowId,
+        status: ['completed', 'running'],
+        limit: 1,
       })
-      if (!runsRes.ok) {
-        setFetchError(`Failed to fetch runs: ${runsRes.status}`)
-        setLoadingSamples(false)
-        return
-      }
-
-      const runsData = await runsRes.json()
-      const runs = runsData.data || []
+      const runs = runsResponse.data || []
 
       if (runs.length === 0) {
-        setFetchError('No completed runs yet')
+        setFetchError('No runs yet')
         setLoadingSamples(false)
         return
       }
 
       // Get tasks from the most recent run
       const runId = runs[0]._id
-      const runRes = await fetch(`${API_BASE}/workflow-runs/${runId}?includeTasks=true`, {
-        credentials: 'include',
-      })
-      if (!runRes.ok) {
-        setFetchError(`Failed to fetch run details: ${runRes.status}`)
-        setLoadingSamples(false)
-        return
-      }
-
-      const runData = await runRes.json()
-      const tasks = runData.tasks || []
+      const runResponse = await workflowRunsApi.get(runId, true) as { tasks?: Array<{ workflowStepId?: string; title?: string; metadata?: unknown }> }
+      const tasks = runResponse.tasks || []
 
       // Extract output data from each task - data is in `metadata` field
       const samples: SampleData[] = tasks
-        .filter((task: { metadata?: unknown }) => task.metadata && Object.keys(task.metadata as object).length > 0)
-        .map((task: { workflowStepId?: string; title?: string; metadata?: unknown }) => ({
+        .filter((task) => task.metadata && Object.keys(task.metadata as object).length > 0)
+        .map((task) => ({
           stepId: task.workflowStepId || '',
           stepName: task.title || 'Unknown Step',
           output: task.metadata,
@@ -149,7 +135,8 @@ export function TokenBrowser({
       setSampleData(samples)
     } catch (error) {
       console.error('Failed to fetch sample data:', error)
-      setFetchError('Network error')
+      const errorMessage = error instanceof Error ? error.message : 'Network error'
+      setFetchError(errorMessage)
     } finally {
       setLoadingSamples(false)
     }
@@ -167,7 +154,7 @@ export function TokenBrowser({
         const path = prefix ? `${prefix}.${key}` : key
         const valueType = Array.isArray(value) ? 'array' : typeof value
         const example = valueType === 'string'
-          ? (value as string).substring(0, 50) + ((value as string).length > 50 ? '...' : '')
+          ? (value as string).substring(0, 100) + ((value as string).length > 100 ? '...' : '')
           : valueType === 'number' || valueType === 'boolean'
           ? String(value)
           : valueType === 'array'
@@ -342,7 +329,7 @@ export function TokenBrowser({
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={setOpen} modal={false}>
       <PopoverTrigger asChild>
         {children || (
           variant === 'icon' ? (
@@ -367,7 +354,7 @@ export function TokenBrowser({
           )
         )}
       </PopoverTrigger>
-      <PopoverContent className="w-80 p-0" align="start">
+      <PopoverContent className="w-[420px] p-0" align="start">
         <div className="p-2 border-b">
           <div className="flex items-center gap-2">
             <Search className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -383,7 +370,7 @@ export function TokenBrowser({
           </div>
         </div>
 
-        <div className="max-h-[300px] overflow-y-auto overflow-x-hidden">
+        <div className="max-h-[400px] overflow-y-auto overflow-x-hidden">
           <div className="p-2 space-y-3">
             {filteredCategories.map((category) => (
               <div key={category.name}>
@@ -413,7 +400,7 @@ export function TokenBrowser({
                           {token.description}
                         </span>
                         {token.example && (
-                          <span className="text-[10px] text-muted-foreground/70 font-mono truncate max-w-[150px]">
+                          <span className="text-[10px] text-muted-foreground/70 font-mono break-all max-w-[280px]">
                             = {token.example}
                           </span>
                         )}
