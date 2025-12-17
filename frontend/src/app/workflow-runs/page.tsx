@@ -28,6 +28,8 @@ import {
   User,
   X,
   CircleDashed,
+  ExternalLink,
+  FileText,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -119,14 +121,15 @@ function formatDuration(start: string | null | undefined, end: string | null | u
   return `${Math.round(durationMs / 3600000)}h`
 }
 
-// Task tree node component - navigates directly to task page
+// Task tree node component - shows task details in modal
 interface TaskNodeProps {
   task: Task
   depth: number
   allTasks: Task[]
+  onTaskClick: (task: Task) => void
 }
 
-function TaskNode({ task, depth, allTasks }: TaskNodeProps) {
+function TaskNode({ task, depth, allTasks, onTaskClick }: TaskNodeProps) {
   const [isExpanded, setIsExpanded] = useState(true)
   const children = allTasks.filter(t => t.parentId === task._id)
   const hasChildren = children.length > 0
@@ -141,15 +144,16 @@ function TaskNode({ task, depth, allTasks }: TaskNodeProps) {
       <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
         <div
           className={cn(
-            'flex items-center gap-2 p-2 rounded-lg border transition-colors',
+            'flex items-center gap-2 p-2 rounded-lg border transition-colors cursor-pointer',
             statusConfig.bgColor,
             'hover:bg-muted/50'
           )}
           style={{ marginLeft: `${depth * 24}px` }}
+          onClick={() => onTaskClick(task)}
         >
           {hasChildren ? (
             <CollapsibleTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={(e) => e.stopPropagation()}>
                 {isExpanded ? (
                   <ChevronDown className="h-4 w-4" />
                 ) : (
@@ -165,13 +169,9 @@ function TaskNode({ task, depth, allTasks }: TaskNodeProps) {
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <Link
-                href={`/tasks?taskId=${task._id}`}
-                className="font-medium truncate hover:underline"
-                onClick={(e) => e.stopPropagation()}
-              >
+              <span className="font-medium truncate hover:underline">
                 {task.title}
-              </Link>
+              </span>
               <Badge variant="outline" className={cn('text-xs flex-shrink-0', statusConfig.color)}>
                 {task.status.replace('_', ' ')}
               </Badge>
@@ -224,6 +224,7 @@ function TaskNode({ task, depth, allTasks }: TaskNodeProps) {
                   task={child}
                   depth={depth + 1}
                   allTasks={allTasks}
+                  onTaskClick={onTaskClick}
                 />
               ))}
             </div>
@@ -240,8 +241,12 @@ function getStepType(step: any): TaskType {
   if (step.stepType) {
     return step.stepType as TaskType
   }
-  // Check execution mode (older format)
-  if (step.execution === 'manual' || step.type === 'manual') {
+  // Check execution mode (older format) - multiple legacy field names
+  if (step.execution === 'manual' || step.type === 'manual' || step.executionMode === 'manual') {
+    return 'manual'
+  }
+  // Check for hitlPhase which indicates human-in-the-loop
+  if (step.hitlPhase) {
     return 'manual'
   }
   // Default to agent
@@ -253,6 +258,7 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
   const router = useRouter()
   const queryClient = useQueryClient()
   const [cancelConfirm, setCancelConfirm] = useState(false)
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['workflow-run', runId],
@@ -577,6 +583,7 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
                               // Include children without their own stepId
                               !((t as any).workflowStepId && (t as any).workflowStepId !== step.id)
                             )}
+                            onTaskClick={setSelectedTask}
                           />
                         ))}
                       </div>
@@ -612,6 +619,7 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
                       task={task}
                       depth={0}
                       allTasks={getChildrenWithoutStep(task._id)}
+                      onTaskClick={setSelectedTask}
                     />
                   ))}
                 </div>
@@ -662,6 +670,115 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Task Detail Dialog */}
+      <Dialog open={!!selectedTask} onOpenChange={(open) => !open && setSelectedTask(null)}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          {selectedTask && (() => {
+            const taskType = ((selectedTask as any).taskType || 'standard') as TaskType
+            const typeConfig = TASK_TYPE_CONFIG[taskType] || TASK_TYPE_CONFIG.standard
+            const TypeIcon = typeConfig.icon
+            const statusConfig = TASK_STATUS_CONFIG[selectedTask.status] || TASK_STATUS_CONFIG.pending
+
+            return (
+              <>
+                <DialogHeader>
+                  <div className="flex items-center gap-2">
+                    <TypeIcon className={cn('h-5 w-5', typeConfig.color)} />
+                    <DialogTitle>{selectedTask.title}</DialogTitle>
+                  </div>
+                  <div className="flex items-center gap-2 pt-2">
+                    <Badge variant="outline" className={cn(statusConfig.color)}>
+                      {selectedTask.status.replace('_', ' ')}
+                    </Badge>
+                    <Badge variant="outline">{typeConfig.label}</Badge>
+                  </div>
+                </DialogHeader>
+
+                <div className="space-y-4">
+                  {/* Summary */}
+                  {selectedTask.summary && (
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground mb-1">Summary</h4>
+                      <p className="text-sm">{selectedTask.summary}</p>
+                    </div>
+                  )}
+
+                  {/* Description */}
+                  {(selectedTask as any).description && (
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground mb-1">Description</h4>
+                      <p className="text-sm whitespace-pre-wrap">{(selectedTask as any).description}</p>
+                    </div>
+                  )}
+
+                  {/* Timestamps */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground mb-1">Created</h4>
+                      <p className="text-sm">{formatDate(selectedTask.createdAt)}</p>
+                    </div>
+                    {(selectedTask as any).completedAt && (
+                      <div>
+                        <h4 className="text-sm font-medium text-muted-foreground mb-1">Completed</h4>
+                        <p className="text-sm">{formatDate((selectedTask as any).completedAt)}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Input/Output Data */}
+                  {((selectedTask as any).inputData || (selectedTask as any).outputData) && (
+                    <div className="space-y-3">
+                      {(selectedTask as any).inputData && Object.keys((selectedTask as any).inputData).length > 0 && (
+                        <div>
+                          <h4 className="text-sm font-medium text-muted-foreground mb-1 flex items-center gap-1">
+                            <FileText className="h-3 w-3" />
+                            Input Data
+                          </h4>
+                          <pre className="text-xs bg-muted rounded p-3 overflow-auto max-h-32">
+                            {JSON.stringify((selectedTask as any).inputData, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                      {(selectedTask as any).outputData && Object.keys((selectedTask as any).outputData).length > 0 && (
+                        <div>
+                          <h4 className="text-sm font-medium text-muted-foreground mb-1 flex items-center gap-1">
+                            <FileText className="h-3 w-3" />
+                            Output Data
+                          </h4>
+                          <pre className="text-xs bg-muted rounded p-3 overflow-auto max-h-32">
+                            {JSON.stringify((selectedTask as any).outputData, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Error */}
+                  {(selectedTask as any).error && (
+                    <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3">
+                      <h4 className="text-sm font-medium text-destructive mb-1">Error</h4>
+                      <p className="text-sm text-destructive/80">{(selectedTask as any).error}</p>
+                    </div>
+                  )}
+                </div>
+
+                <DialogFooter>
+                  <Link href={`/tasks?taskId=${selectedTask._id}`}>
+                    <Button variant="outline" size="sm">
+                      <ExternalLink className="h-4 w-4 mr-2" />
+                      Open in Tasks
+                    </Button>
+                  </Link>
+                  <Button variant="default" size="sm" onClick={() => setSelectedTask(null)}>
+                    Close
+                  </Button>
+                </DialogFooter>
+              </>
+            )
+          })()}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
