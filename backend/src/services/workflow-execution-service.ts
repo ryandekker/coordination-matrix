@@ -1994,8 +1994,13 @@ class WorkflowExecutionService {
       const nextStep = nextStepId ? workflow.steps.find(s => s.id === nextStepId) : null;
 
       if (!nextStep) {
+        console.error(`[WorkflowExecutionService] No child step found for foreach ${stepId}`);
+        console.error(`[WorkflowExecutionService] Step connections:`, step.connections);
+        console.error(`[WorkflowExecutionService] Available steps:`, workflow.steps.map(s => s.id));
         throw new Error(`Foreach step ${stepId} has no connected child step`);
       }
+
+      console.log(`[WorkflowExecutionService] Creating child tasks for step ${nextStep.id} (${nextStep.name || 'unnamed'}) of type ${nextStep.stepType}`);
 
       // Create child task for each item
       for (const item of items) {
@@ -2005,14 +2010,20 @@ class WorkflowExecutionService {
           _total: currentExpectedCount,
         };
 
-        const childTask = await this.createTaskForStep(run, workflow, nextStep, task, itemPayload);
-        childTaskIds.push(childTask._id.toString());
-        currentReceivedCount++;
+        try {
+          const childTask = await this.createTaskForStep(run, workflow, nextStep, task, itemPayload);
+          childTaskIds.push(childTask._id.toString());
+          currentReceivedCount++;
 
-        console.log(`[WorkflowExecutionService] Foreach ${task._id} received item ${currentReceivedCount}/${currentExpectedCount}`);
+          console.log(`[WorkflowExecutionService] Foreach ${task._id} received item ${currentReceivedCount}/${currentExpectedCount}`);
 
-        // Execute the child task based on its step type
-        await this.executeStepForTask(run, workflow, nextStep, childTask, itemPayload);
+          // Execute the child task based on its step type
+          await this.executeStepForTask(run, workflow, nextStep, childTask, itemPayload);
+        } catch (err) {
+          console.error(`[WorkflowExecutionService] Failed to create child task:`, err);
+          console.error(`[WorkflowExecutionService] Step details:`, JSON.stringify(nextStep, null, 2));
+          throw err;
+        }
       }
 
       // Update received count

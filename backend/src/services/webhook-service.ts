@@ -399,6 +399,34 @@ class WebhookService {
   }
 
   /**
+   * Get all deliveries across all webhooks
+   */
+  async getAllDeliveries(
+    options: { limit?: number; offset?: number; status?: string } = {}
+  ): Promise<{ data: WebhookDelivery[]; total: number }> {
+    const { limit = 50, offset = 0, status } = options;
+    const db = getDb();
+
+    const filter: Record<string, unknown> = {};
+    if (status) {
+      filter.status = status;
+    }
+
+    const [deliveries, total] = await Promise.all([
+      db
+        .collection<WebhookDelivery>('webhook_deliveries')
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(offset)
+        .limit(limit)
+        .toArray(),
+      db.collection('webhook_deliveries').countDocuments(filter),
+    ]);
+
+    return { data: deliveries, total };
+  }
+
+  /**
    * Retry a specific delivery
    */
   async retryDelivery(deliveryId: ObjectId): Promise<boolean> {
