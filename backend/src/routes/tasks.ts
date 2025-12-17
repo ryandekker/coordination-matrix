@@ -222,14 +222,23 @@ tasksRouter.get('/webhook-attempts', async (req: Request, res: Response, next: N
     const db = getDb();
     const { status, taskStatus, taskType, assigneeId, limit = '50', offset = '0' } = req.query;
 
-    // Find all tasks with webhookConfig that have attempts
+    // Find all tasks with webhookConfig (either with attempts or pending)
     const filter: Record<string, unknown> = {
-      'webhookConfig.attempts': { $exists: true, $ne: [] },
+      'webhookConfig.url': { $exists: true },
     };
 
     // Filter by webhook attempt status if provided
     if (status) {
-      filter['webhookConfig.attempts.status'] = status;
+      if (status === 'pending') {
+        // Pending means no attempts yet OR last attempt is pending
+        filter.$or = [
+          { 'webhookConfig.attempts': { $exists: false } },
+          { 'webhookConfig.attempts': { $size: 0 } },
+          { 'webhookConfig.attempts.status': 'pending' },
+        ];
+      } else {
+        filter['webhookConfig.attempts.status'] = status;
+      }
     }
 
     // Filter by task status if provided
@@ -281,6 +290,31 @@ tasksRouter.get('/webhook-attempts', async (req: Request, res: Response, next: N
     }
     const webhookAttempts = tasks.flatMap((task) => {
       const attempts: WebhookAttemptData[] = task.webhookConfig?.attempts || [];
+
+      // If no attempts yet, create a pending entry for the task
+      if (attempts.length === 0) {
+        return [{
+          _id: `${task._id}-pending`,
+          taskId: task._id,
+          taskTitle: task.title,
+          taskStatus: task.status,
+          attemptNumber: 0,
+          status: 'pending',
+          httpStatus: undefined,
+          responseBody: undefined,
+          errorMessage: undefined,
+          durationMs: undefined,
+          startedAt: task.createdAt,
+          completedAt: undefined,
+          url: task.webhookConfig?.url,
+          method: task.webhookConfig?.method,
+          headers: task.webhookConfig?.headers,
+          requestBody: task.metadata?.requestBody,
+          maxRetries: task.webhookConfig?.maxRetries,
+          nextRetryAt: task.webhookConfig?.nextRetryAt,
+        }];
+      }
+
       return attempts.map((attempt: WebhookAttemptData, index: number) => ({
         _id: `${task._id}-${index}`,
         taskId: task._id,
@@ -303,7 +337,7 @@ tasksRouter.get('/webhook-attempts', async (req: Request, res: Response, next: N
       }));
     });
 
-    // Sort by startedAt descending
+    // Sort by startedAt descending (pending tasks use createdAt)
     webhookAttempts.sort((a, b) => {
       const dateA = a.startedAt ? new Date(a.startedAt).getTime() : 0;
       const dateB = b.startedAt ? new Date(b.startedAt).getTime() : 0;
