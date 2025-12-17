@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useMemo, Suspense } from 'react'
+import { useState, useMemo, Suspense, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useEventStream, TaskEventData } from '@/hooks/use-event-stream'
 import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import {
@@ -1371,6 +1372,17 @@ function RequestsList() {
   const [assigneeFilter, setAssigneeFilter] = useState<string>('all')
   const [cancelConfirm, setCancelConfirm] = useState<BatchJob | null>(null)
 
+  // Real-time updates - invalidate request queries when tasks change
+  const handleEvent = useCallback((event: TaskEventData) => {
+    // Task changes may affect external jobs, batch jobs, and workflow callbacks
+    queryClient.invalidateQueries({ queryKey: ['external-jobs-list'] })
+    queryClient.invalidateQueries({ queryKey: ['batch-jobs-list'] })
+    queryClient.invalidateQueries({ queryKey: ['workflow-callbacks-list'] })
+    queryClient.invalidateQueries({ queryKey: ['webhook-attempts-list'] })
+  }, [queryClient])
+
+  useEventStream({ onEvent: handleEvent })
+
   // Fetch lookups for task types
   const { data: lookupsData } = useQuery({
     queryKey: ['lookups'],
@@ -1393,25 +1405,25 @@ function RequestsList() {
     assigneeId: assigneeFilter !== 'all' ? assigneeFilter : undefined,
   }
 
-  // Fetch external jobs
+  // Fetch external jobs - reduced polling since SSE handles most updates
   const { data: externalJobsData, isLoading: externalLoading, refetch: refetchExternal } = useQuery({
     queryKey: ['external-jobs-list', taskFilterParams],
     queryFn: () => externalJobsApi.list({
       limit: '100',
       ...taskFilterParams,
     }),
-    refetchInterval: 5000,
+    refetchInterval: 30000, // Fallback polling - SSE handles real-time
     enabled: typeFilter === 'all' || typeFilter === 'external',
   })
 
-  // Fetch batch jobs
+  // Fetch batch jobs - reduced polling since SSE handles most updates
   const { data: batchJobsData, isLoading: batchLoading, refetch: refetchBatch } = useQuery({
     queryKey: ['batch-jobs-list', taskFilterParams],
     queryFn: () => batchJobsApi.list({
       limit: 100,
       ...taskFilterParams,
     }),
-    refetchInterval: 5000,
+    refetchInterval: 30000, // Fallback polling - SSE handles real-time
     enabled: typeFilter === 'all' || typeFilter === 'batch',
   })
 
@@ -1419,7 +1431,7 @@ function RequestsList() {
   const { data: webhookDeliveriesData, isLoading: deliveriesLoading, refetch: refetchDeliveries } = useQuery({
     queryKey: ['webhook-deliveries-list'],
     queryFn: () => webhooksApi.getAllDeliveries({ limit: 100 }),
-    refetchInterval: 5000,
+    refetchInterval: 30000, // Fallback polling - SSE handles real-time
     enabled: typeFilter === 'all' || typeFilter === 'webhook_delivery',
   })
 
@@ -1430,7 +1442,7 @@ function RequestsList() {
       limit: 100,
       ...taskFilterParams,
     }),
-    refetchInterval: 5000,
+    refetchInterval: 30000, // Fallback polling - SSE handles real-time
     enabled: typeFilter === 'all' || typeFilter === 'webhook_task',
   })
 
@@ -1442,7 +1454,7 @@ function RequestsList() {
       taskStatus: taskFilterParams.taskStatus,
       taskType: taskFilterParams.taskType,
     }),
-    refetchInterval: 5000,
+    refetchInterval: 30000, // Fallback polling - SSE handles real-time
     enabled: typeFilter === 'all' || typeFilter === 'workflow_callback',
   })
 

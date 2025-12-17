@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, Suspense } from 'react'
+import { useState, Suspense, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useEventStream, TaskEventData } from '@/hooks/use-event-stream'
 import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import {
@@ -225,6 +226,15 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
   const router = useRouter()
   const queryClient = useQueryClient()
   const [cancelConfirm, setCancelConfirm] = useState(false)
+
+  // Real-time updates - invalidate this run's data when related tasks change
+  const handleEvent = useCallback((event: TaskEventData) => {
+    if (event.task?.workflowId) {
+      queryClient.invalidateQueries({ queryKey: ['workflow-run', runId] })
+    }
+  }, [queryClient, runId])
+
+  useEventStream({ onEvent: handleEvent })
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['workflow-run', runId],
@@ -472,6 +482,15 @@ function WorkflowRunsList() {
   const [startPayload, setStartPayload] = useState('')
   const [page, setPage] = useState(1)
 
+  // Real-time updates - invalidate workflow runs when tasks change
+  const handleEvent = useCallback((event: TaskEventData) => {
+    if (event.task?.workflowId) {
+      queryClient.invalidateQueries({ queryKey: ['workflow-runs'] })
+    }
+  }, [queryClient])
+
+  useEventStream({ onEvent: handleEvent })
+
   const { data: workflowsData } = useQuery({
     queryKey: ['workflows'],
     queryFn: () => workflowsApi.list(),
@@ -485,7 +504,8 @@ function WorkflowRunsList() {
       page,
       limit: 20,
     }),
-    refetchInterval: 5000,
+    // Reduced polling - SSE handles most updates, polling is fallback for non-task events
+    refetchInterval: 15000,
   })
 
   const cancelMutation = useMutation({
