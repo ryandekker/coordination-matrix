@@ -3,6 +3,7 @@
  *
  * This system allows safe, incremental schema updates without data loss.
  * Migrations are tracked in a _migrations collection and only run once.
+ * Schema version is tracked in a _schema_info collection.
  *
  * Usage:
  *   npm run db:migrate        # Run pending migrations
@@ -15,6 +16,7 @@ export interface Migration {
   id: string;
   name: string;
   description?: string;
+  schemaVersion?: number; // Schema version this migration brings the DB to
   up: (db: Db) => Promise<void>;
   down?: (db: Db) => Promise<void>;
 }
@@ -24,6 +26,14 @@ interface MigrationRecord {
   name: string;
   appliedAt: Date;
   durationMs: number;
+  schemaVersion?: number;
+}
+
+interface SchemaInfo {
+  _id: 'schema_version';
+  version: number;
+  updatedAt: Date;
+  lastMigrationId: string;
 }
 
 export class MigrationRunner {
@@ -46,6 +56,29 @@ export class MigrationRunner {
     return this.db.collection<MigrationRecord>('_migrations');
   }
 
+  private get schemaInfoCollection() {
+    return this.db.collection<SchemaInfo>('_schema_info');
+  }
+
+  async getSchemaVersion(): Promise<number> {
+    const info = await this.schemaInfoCollection.findOne({ _id: 'schema_version' });
+    return info?.version ?? 0;
+  }
+
+  private async updateSchemaVersion(version: number, migrationId: string): Promise<void> {
+    await this.schemaInfoCollection.updateOne(
+      { _id: 'schema_version' },
+      {
+        $set: {
+          version,
+          updatedAt: new Date(),
+          lastMigrationId: migrationId,
+        },
+      },
+      { upsert: true }
+    );
+  }
+
   async getAppliedMigrations(): Promise<MigrationRecord[]> {
     return this.migrationsCollection.find().sort({ appliedAt: 1 }).toArray();
   }
@@ -58,10 +91,11 @@ export class MigrationRunner {
       .sort((a, b) => a.id.localeCompare(b.id));
   }
 
-  async runPending(): Promise<{ applied: string[]; errors: string[] }> {
+  async runPending(): Promise<{ applied: string[]; errors: string[]; schemaVersion: number }> {
     const pending = await this.getPendingMigrations();
     const applied: string[] = [];
     const errors: string[] = [];
+    let currentSchemaVersion = await this.getSchemaVersion();
 
     for (const migration of pending) {
       const startTime = Date.now();
@@ -69,15 +103,22 @@ export class MigrationRunner {
         console.log(`[Migration] Running: ${migration.id} - ${migration.name}`);
         await migration.up(this.db);
 
+        // Update schema version if migration specifies one
+        if (migration.schemaVersion !== undefined) {
+          currentSchemaVersion = migration.schemaVersion;
+          await this.updateSchemaVersion(currentSchemaVersion, migration.id);
+        }
+
         await this.migrationsCollection.insertOne({
           _id: migration.id,
           name: migration.name,
           appliedAt: new Date(),
           durationMs: Date.now() - startTime,
+          schemaVersion: migration.schemaVersion,
         });
 
         applied.push(migration.id);
-        console.log(`[Migration] ✓ Completed: ${migration.id} (${Date.now() - startTime}ms)`);
+        console.log(`[Migration] ✓ Completed: ${migration.id} (${Date.now() - startTime}ms)${migration.schemaVersion ? ` [Schema v${migration.schemaVersion}]` : ''}`);
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         errors.push(`${migration.id}: ${errorMsg}`);
@@ -86,16 +127,18 @@ export class MigrationRunner {
       }
     }
 
-    return { applied, errors };
+    return { applied, errors, schemaVersion: currentSchemaVersion };
   }
 
   async status(): Promise<{
     applied: MigrationRecord[];
     pending: Migration[];
+    schemaVersion: number;
   }> {
     const applied = await this.getAppliedMigrations();
     const pending = await this.getPendingMigrations();
-    return { applied, pending };
+    const schemaVersion = await this.getSchemaVersion();
+    return { applied, pending, schemaVersion };
   }
 
   async rollback(migrationId: string): Promise<void> {
@@ -115,6 +158,17 @@ export class MigrationRunner {
     console.log(`[Migration] Rolling back: ${migrationId}`);
     await migration.down(this.db);
     await this.migrationsCollection.deleteOne({ _id: migrationId });
+
+    // Recalculate schema version from remaining migrations
+    const remaining = await this.getAppliedMigrations();
+    const lastWithVersion = [...remaining].reverse().find((m) => m.schemaVersion !== undefined);
+    if (lastWithVersion) {
+      await this.updateSchemaVersion(lastWithVersion.schemaVersion!, lastWithVersion._id);
+    } else {
+      // No migrations with version remain, reset to 0
+      await this.schemaInfoCollection.deleteOne({ _id: 'schema_version' });
+    }
+
     console.log(`[Migration] ✓ Rolled back: ${migrationId}`);
   }
 }

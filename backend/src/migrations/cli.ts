@@ -41,19 +41,22 @@ async function main() {
         } else {
           console.log(`[Migration CLI] Applied ${result.applied.length} migration(s)`);
         }
+        console.log(`[Migration CLI] Schema version: ${result.schemaVersion}`);
         break;
       }
 
       case 'status': {
         const status = await runner.status();
         console.log('\n=== Migration Status ===\n');
+        console.log(`Schema Version: ${status.schemaVersion}\n`);
 
         console.log('Applied migrations:');
         if (status.applied.length === 0) {
           console.log('  (none)');
         } else {
           for (const m of status.applied) {
-            console.log(`  ✓ ${m._id} - ${m.name} (applied ${m.appliedAt.toISOString()})`);
+            const versionTag = m.schemaVersion ? ` [v${m.schemaVersion}]` : '';
+            console.log(`  ✓ ${m._id} - ${m.name}${versionTag} (applied ${m.appliedAt.toISOString()})`);
           }
         }
 
@@ -62,7 +65,8 @@ async function main() {
           console.log('  (none)');
         } else {
           for (const m of status.pending) {
-            console.log(`  ○ ${m.id} - ${m.name}`);
+            const versionTag = m.schemaVersion ? ` [v${m.schemaVersion}]` : '';
+            console.log(`  ○ ${m.id} - ${m.name}${versionTag}`);
           }
         }
         break;
