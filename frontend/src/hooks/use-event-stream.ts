@@ -104,6 +104,7 @@ class EventStreamManager {
         this.eventSource?.addEventListener(type, (event: MessageEvent) => {
           try {
             const data: TaskEventData = JSON.parse(event.data)
+            console.log(`[EventStream] Event: ${type}`, { taskId: data.taskId, parentId: data.task?.parentId })
             this.notifyListeners(type, data)
             this.notifyListeners('*', data) // Also notify wildcard listeners
           } catch (error) {
