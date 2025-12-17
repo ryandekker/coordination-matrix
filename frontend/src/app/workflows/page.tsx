@@ -96,7 +96,7 @@ const WorkflowEditor = dynamic(
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
 // Updated step types - aligned with workflow-editor
-type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'subflow'
+type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow'
 
 interface StepConnection {
   targetStepId: string
@@ -130,12 +130,12 @@ interface WorkflowStep {
   // Decision step configuration
   defaultConnection?: string
 
-  // ForEach/Join/Subflow fields
+  // ForEach/Join/Flow fields
   itemsPath?: string
   itemVariable?: string
   maxItems?: number
   awaitTag?: string
-  subflowId?: string
+  flowId?: string
   inputMapping?: Record<string, string>
 
   // Legacy compatibility
@@ -239,7 +239,7 @@ function getStepIcon(step: WorkflowStep) {
       return <Repeat className="h-4 w-4 text-green-500" />
     case 'join':
       return <Merge className="h-4 w-4 text-indigo-500" />
-    case 'subflow':
+    case 'flow':
       return <Workflow className="h-4 w-4 text-pink-500" />
     default:
       return <Bot className="h-4 w-4 text-blue-500" />
@@ -264,8 +264,8 @@ function getStepTypeLabel(step: WorkflowStep): string {
       return 'ForEach'
     case 'join':
       return 'Join'
-    case 'subflow':
-      return 'Subflow'
+    case 'flow':
+      return 'Flow'
     default:
       return 'Agent'
   }
@@ -346,7 +346,7 @@ const StepsDetail = memo(function StepsDetail({ workflow }: { workflow: Workflow
               case 'decision': return 'border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800'
               case 'foreach': return 'border-green-300 bg-green-50 dark:bg-green-950/30 dark:border-green-800'
               case 'join': return 'border-indigo-300 bg-indigo-50 dark:bg-indigo-950/30 dark:border-indigo-800'
-              case 'subflow': return 'border-pink-300 bg-pink-50 dark:bg-pink-950/30 dark:border-pink-800'
+              case 'flow': return 'border-pink-300 bg-pink-50 dark:bg-pink-950/30 dark:border-pink-800'
               default: return 'border-gray-200 bg-gray-50 dark:bg-gray-900/30 dark:border-gray-700'
             }
           }

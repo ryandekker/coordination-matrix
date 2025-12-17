@@ -14,8 +14,8 @@ export const workflowsRouter = Router();
 // - decision: Routing based on conditions from previous step output
 // - foreach: Fan-out loop over collection (spawns subtasks)
 // - join: Fan-in aggregation point (awaits boundary conditions)
-// - subflow: Delegate to another workflow
-type WorkflowStepType = 'trigger' | 'agent' | 'manual' | 'external' | 'webhook' | 'decision' | 'foreach' | 'join' | 'subflow';
+// - flow: Delegate to another workflow (nested)
+type WorkflowStepType = 'trigger' | 'agent' | 'manual' | 'external' | 'webhook' | 'decision' | 'foreach' | 'join' | 'flow';
 
 // Connection between steps (for non-linear flows)
 interface StepConnection {
@@ -91,8 +91,8 @@ interface WorkflowStep {
   minSuccessPercent?: number;       // Legacy: percentage of tasks that must succeed
   expectedCountPath?: string;       // JSONPath to get expected count from previous step
 
-  // Subflow configuration
-  subflowId?: string;
+  // Flow configuration (nested workflow)
+  flowId?: string;
   inputMapping?: Record<string, string>;
 
   // Input aggregation
@@ -211,7 +211,7 @@ workflowsRouter.get('/:id', async (req: Request, res: Response, next: NextFuncti
 
 // Helper to ensure all steps have IDs
 // Valid step types for normalization
-const VALID_STEP_TYPES: WorkflowStepType[] = ['trigger', 'agent', 'manual', 'external', 'webhook', 'decision', 'foreach', 'join', 'subflow'];
+const VALID_STEP_TYPES: WorkflowStepType[] = ['trigger', 'agent', 'manual', 'external', 'webhook', 'decision', 'foreach', 'join', 'flow'];
 
 function ensureStepIds(steps: WorkflowStep[]): WorkflowStep[] {
   if (!steps || !Array.isArray(steps)) return [];
@@ -435,7 +435,7 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
       continue;
     }
 
-    // Double square brackets [[ ]] - foreach/join/subflow
+    // Double square brackets [[ ]] - foreach/join/flow
     // Pattern: ID[["text"]] or ID[[text]]
     const doubleSquareMatch = line.match(/^([\w-]+)\[\[["']?([^"\]]+?)["']?\]\]/);
     if (doubleSquareMatch) {
@@ -465,9 +465,9 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
           cleanName = pctMatch[1].trim();
           minSuccessPercent = parseInt(pctMatch[2]);
         }
-      } else if (lowerText.startsWith('run:') || lowerText.startsWith('subflow:')) {
-        stepType = 'subflow';
-        cleanName = text.replace(/^(run|subflow):\s*/i, '').trim();
+      } else if (lowerText.startsWith('run:') || lowerText.startsWith('flow:')) {
+        stepType = 'flow';
+        cleanName = text.replace(/^(run|flow):\s*/i, '').trim();
       } else {
         // Default double brackets to foreach if no prefix
         stepType = 'foreach';
@@ -724,8 +724,8 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     if (step.minSuccessPercent) metadata.minSuccessPercent = step.minSuccessPercent;
     if (step.stepType === 'join' && step.expectedCountPath) metadata.expectedCountPath = step.expectedCountPath;
 
-    // Subflow step fields
-    if (step.subflowId) metadata.subflowId = step.subflowId;
+    // Flow step fields
+    if (step.flowId) metadata.flowId = step.flowId;
     if (step.inputMapping) metadata.inputMapping = step.inputMapping;
 
     // Queue metadata comment if there's any data to preserve (will add at the end)
@@ -756,7 +756,7 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
       case 'join':
         lines.push(`    ${nodeId}[["Join: ${nodeName}"]]`);
         break;
-      case 'subflow':
+      case 'flow':
         lines.push(`    ${nodeId}[["Run: ${nodeName}"]]`);
         break;
       default:
@@ -820,7 +820,7 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
   lines.push('    classDef decision fill:#F59E0B,color:#fff');   // Amber - Decision
   lines.push('    classDef foreach fill:#10B981,color:#fff');    // Green - Loop
   lines.push('    classDef join fill:#6366F1,color:#fff');       // Indigo - Join
-  lines.push('    classDef subflow fill:#EC4899,color:#fff');    // Pink - Subflow
+  lines.push('    classDef flow fill:#EC4899,color:#fff');       // Pink - Flow
 
   // Apply classes to nodes
   const classGroups: Record<string, string[]> = {
@@ -830,7 +830,7 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     decision: [],
     foreach: [],
     join: [],
-    subflow: [],
+    flow: [],
   };
 
   for (let i = 0; i < steps.length; i++) {
@@ -856,8 +856,8 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
       case 'join':
         classGroups.join.push(nodeId);
         break;
-      case 'subflow':
-        classGroups.subflow.push(nodeId);
+      case 'flow':
+        classGroups.flow.push(nodeId);
         break;
       default:
         // Legacy support

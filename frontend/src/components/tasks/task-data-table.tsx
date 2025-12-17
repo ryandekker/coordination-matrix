@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useMemo, memo, useRef, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   ChevronDown,
   ChevronRight,
@@ -16,6 +17,7 @@ import {
   X,
   CheckCircle,
   Archive,
+  ArrowRight,
 } from 'lucide-react'
 import {
   Table,
@@ -226,6 +228,7 @@ const TitleCell = memo(function TitleCell({
   onCellUpdate,
   onEdit,
   renderCellValue,
+  onNavigateToFlow,
 }: {
   task: Task
   fieldConfig: FieldConfig
@@ -235,10 +238,15 @@ const TitleCell = memo(function TitleCell({
   onCellUpdate: (taskId: string, field: string, value: unknown) => void
   onEdit: () => void
   renderCellValue: (task: Task, fc: FieldConfig) => React.ReactNode
+  onNavigateToFlow?: (taskId: string) => void
 }) {
   const [isInlineEditing, setIsInlineEditing] = useState(false)
   const [editValue, setEditValue] = useState(task.title || '')
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Check if this is a flow task (nested workflow) - should not be expandable inline
+  const isFlowTask = task.taskType === 'flow'
+  const hasChildren = task.children && task.children.length > 0
 
   useEffect(() => {
     if (isInlineEditing && inputRef.current) {
@@ -265,9 +273,37 @@ const TitleCell = memo(function TitleCell({
     }
   }, [handleSave, handleCancel])
 
-  return (
-    <div style={{ paddingLeft: depth * 16 }} className="flex items-center gap-1 group">
-      {(task.children && task.children.length > 0) ? (
+  // Render the leading button based on task type
+  const renderLeadingButton = () => {
+    // Flow tasks show a navigation arrow - they're always shown as placeholders
+    if (isFlowTask && hasChildren) {
+      return (
+        <TooltipProvider>
+          <Tooltip delayDuration={300}>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 flex-shrink-0 text-pink-500 hover:text-pink-600 hover:bg-pink-50"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onNavigateToFlow?.(task._id)
+                }}
+              >
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Open flow</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )
+    }
+
+    // Regular tasks with children show expand/collapse chevron
+    if (hasChildren) {
+      return (
         <Button variant="ghost" size="sm" className="h-6 w-6 p-0 flex-shrink-0" onClick={onToggleExpand}>
           {isExpanded ? (
             <ChevronDown className="h-4 w-4" />
@@ -275,9 +311,16 @@ const TitleCell = memo(function TitleCell({
             <ChevronRight className="h-4 w-4" />
           )}
         </Button>
-      ) : (
-        <div className="w-6 flex-shrink-0" />
-      )}
+      )
+    }
+
+    // No children - empty space for alignment
+    return <div className="w-6 flex-shrink-0" />
+  }
+
+  return (
+    <div style={{ paddingLeft: depth * 16 }} className="flex items-center gap-1 group">
+      {renderLeadingButton()}
       {isInlineEditing ? (
         <Input
           ref={inputRef}
@@ -336,6 +379,7 @@ const TaskRow = memo(function TaskRow({
   handleEditTask,
   handleCreateSubtask,
   expandAllEnabled,
+  onNavigateToFlow,
 }: {
   task: Task
   fieldConfigs: FieldConfig[]
@@ -359,9 +403,14 @@ const TaskRow = memo(function TaskRow({
   handleEditTask: (task: Task) => void
   handleCreateSubtask: (task: Task) => void
   expandAllEnabled: boolean
+  onNavigateToFlow: (taskId: string) => void
 }) {
-  // Fetch children when expanded
-  const { data: childrenData } = useTaskChildren(isExpanded ? task._id : null)
+  // Flow tasks should not be expanded inline - they navigate to their own view
+  const isFlowTask = task.taskType === 'flow'
+
+  // Fetch children when expanded (but not for flow tasks)
+  const shouldFetchChildren = isExpanded && !isFlowTask
+  const { data: childrenData } = useTaskChildren(shouldFetchChildren ? task._id : null)
   const children = childrenData?.data || []
   const hasChildren = isExpanded ? children.length > 0 : task.children && task.children.length > 0
 
@@ -403,6 +452,7 @@ const TaskRow = memo(function TaskRow({
                 onCellUpdate={onCellUpdate}
                 onEdit={onEdit}
                 renderCellValue={renderCellValue}
+                onNavigateToFlow={onNavigateToFlow}
               />
             ) : (
               <>
@@ -456,7 +506,8 @@ const TaskRow = memo(function TaskRow({
           </DropdownMenu>
         </TableCell>
       </TableRow>
-      {isExpanded &&
+      {/* Flow tasks don't render children inline - they navigate to their own view */}
+      {isExpanded && !isFlowTask &&
         children.map((child) => (
           <TaskRow
             key={child._id}
@@ -482,6 +533,7 @@ const TaskRow = memo(function TaskRow({
             handleEditTask={handleEditTask}
             handleCreateSubtask={handleCreateSubtask}
             expandAllEnabled={expandAllEnabled}
+            onNavigateToFlow={onNavigateToFlow}
           />
         ))}
     </>
@@ -505,8 +557,14 @@ export function TaskDataTable({
   expandAllEnabled,
   onExpandAllChange,
 }: TaskDataTableProps) {
+  const router = useRouter()
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
+
+  // Navigate to a flow task's own view (shows its children as root-level tasks)
+  const handleNavigateToFlow = useCallback((taskId: string) => {
+    router.push(`/tasks?parentId=${taskId}`)
+  }, [router])
 
   // Get task IDs that have children (for expand all functionality)
   const tasksWithChildren = useMemo(() => {
@@ -822,6 +880,7 @@ export function TaskDataTable({
                   handleEditTask={onEditTask}
                   handleCreateSubtask={onCreateSubtask}
                   expandAllEnabled={expandAllEnabled}
+                  onNavigateToFlow={handleNavigateToFlow}
                 />
               ))
             )}

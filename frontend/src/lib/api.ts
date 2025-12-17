@@ -461,7 +461,7 @@ export type TaskType =
   | 'decision'
   | 'foreach'
   | 'join'
-  | 'subflow'
+  | 'flow'
   | 'external'
 
 export type WebhookMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
@@ -611,7 +611,7 @@ export interface ExternalJob {
 }
 
 // Workflow step types
-export type WorkflowStepType = 'task' | 'decision' | 'foreach' | 'join' | 'subflow'
+export type WorkflowStepType = 'task' | 'decision' | 'foreach' | 'join' | 'flow'
 export type ExecutionMode = 'automated' | 'manual'
 
 export interface DecisionBranch {
@@ -636,8 +636,8 @@ export interface WorkflowStep {
   itemVariable?: string           // ForEach: Template variable name
   maxItems?: number               // ForEach: Limit (default: 100)
   awaitTag?: string               // Join: Tag pattern
-  subflowId?: string              // Subflow: Target workflow ID
-  inputMapping?: Record<string, string>  // Subflow: Input mapping
+  flowId?: string                 // Flow: Target workflow ID (nested workflow)
+  inputMapping?: Record<string, string>  // Flow: Input mapping
 }
 
 export interface Workflow {

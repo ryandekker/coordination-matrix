@@ -1136,10 +1136,10 @@ export function TaskModal({
           </p>
         )}
 
-        {/* Subflow task */}
-        {currentTaskType === 'subflow' && (
+        {/* Flow task (nested workflow) */}
+        {currentTaskType === 'flow' && (
           <p className="text-xs text-muted-foreground italic">
-            Subflow tasks delegate to another workflow.
+            Flow tasks delegate to another workflow.
           </p>
         )}
       </div>
