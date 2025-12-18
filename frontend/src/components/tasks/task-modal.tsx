@@ -40,7 +40,7 @@ import {
   DEFAULT_TASK_MODAL_TAB,
   type TaskModalTab,
 } from '@/lib/task-type-config'
-import { Settings2, Database, Activity, Workflow, ExternalLink } from 'lucide-react'
+import { Settings2, Database, Activity, Workflow, ExternalLink, ArrowUpRight } from 'lucide-react'
 import Link from 'next/link'
 
 interface TaskModalProps {
@@ -62,6 +62,7 @@ export function TaskModal({
 }: TaskModalProps) {
   const queryClient = useQueryClient()
   const prevIsOpenRef = useRef(false)
+  const titleInputRef = useRef<HTMLInputElement>(null)
   const [isMetadataEditMode, setIsMetadataEditMode] = useState(false)
   const [metadataError, setMetadataError] = useState<string | null>(null)
   const [webhookConfig, setWebhookConfig] = useState<WebhookConfig | undefined>(undefined)
@@ -122,6 +123,18 @@ export function TaskModal({
     }
     prevIsOpenRef.current = isOpen
   }, [isOpen, task?._id, queryClient])
+
+  // Auto-focus title input when creating a new task
+  useEffect(() => {
+    if (isOpen && !task) {
+      // Small delay to ensure the dialog is rendered
+      const timer = setTimeout(() => {
+        titleInputRef.current?.focus()
+        titleInputRef.current?.select()
+      }, 50)
+      return () => clearTimeout(timer)
+    }
+  }, [isOpen, task])
 
   const editableFields = useMemo(() => {
     return fieldConfigs
@@ -653,6 +666,17 @@ export function TaskModal({
           </Link>
         )}
 
+        {/* Parent Task Link - show when task has a parent */}
+        {task._resolved?.parent && (
+          <Link
+            href={`/tasks?id=${task._resolved.parent._id}`}
+            className="flex items-center gap-1.5 px-2 h-7 text-xs rounded-md bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors max-w-[200px]"
+          >
+            <ArrowUpRight className="h-3.5 w-3.5 flex-shrink-0" />
+            <span className="truncate">Parent: {task._resolved.parent.title}</span>
+          </Link>
+        )}
+
         {/* Spacer */}
         <div className="flex-1" />
 
@@ -703,7 +727,15 @@ export function TaskModal({
         {!isEditMode && (
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">Title *</label>
-            <Input {...register('title')} placeholder="Task title" className="h-8 text-sm" />
+            <Input
+              {...register('title')}
+              ref={(e) => {
+                register('title').ref(e)
+                titleInputRef.current = e
+              }}
+              placeholder="Task title"
+              className="h-8 text-sm"
+            />
           </div>
         )}
 
