@@ -68,18 +68,8 @@ export const migration: Migration = {
   schemaVersion: 4,
 
   async up(db: Db): Promise<void> {
-    // Check if collection exists
-    const collections = await db.listCollections({ name: 'activity_logs' }).toArray();
-
-    if (collections.length === 0) {
-      // Create collection with validator
-      await db.createCollection('activity_logs', { validator: ACTIVITY_LOGS_VALIDATOR });
-      console.log('[Migration] Created activity_logs collection');
-    } else {
-      // Update validator on existing collection
-      await migrationHelpers.updateValidator(db, 'activity_logs', ACTIVITY_LOGS_VALIDATOR);
-      console.log('[Migration] Updated activity_logs validator');
-    }
+    // Create collection with validator (handles permission errors gracefully)
+    await migrationHelpers.createCollection(db, 'activity_logs', ACTIVITY_LOGS_VALIDATOR);
 
     // Create indexes
     await migrationHelpers.ensureIndex(db, 'activity_logs', { taskId: 1, timestamp: -1 });

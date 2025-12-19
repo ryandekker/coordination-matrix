@@ -257,15 +257,8 @@ export const migration: Migration = {
   schemaVersion: 6,
 
   async up(db: Db): Promise<void> {
-    // Create daemon_executions collection
-    const daemonCollections = await db.listCollections({ name: 'daemon_executions' }).toArray();
-    if (daemonCollections.length === 0) {
-      await db.createCollection('daemon_executions', { validator: DAEMON_EXECUTIONS_VALIDATOR });
-      console.log('[Migration] Created daemon_executions collection');
-    } else {
-      await migrationHelpers.updateValidator(db, 'daemon_executions', DAEMON_EXECUTIONS_VALIDATOR);
-      console.log('[Migration] Updated daemon_executions validator');
-    }
+    // Create daemon_executions collection (handles permission errors gracefully)
+    await migrationHelpers.createCollection(db, 'daemon_executions', DAEMON_EXECUTIONS_VALIDATOR);
 
     // Create daemon_executions indexes
     await migrationHelpers.ensureIndex(db, 'daemon_executions', { ruleName: 1, createdAt: -1 });
@@ -274,15 +267,8 @@ export const migration: Migration = {
     await migrationHelpers.ensureIndex(db, 'daemon_executions', { createdAt: -1 });
     console.log('[Migration] Created daemon_executions indexes');
 
-    // Create batch_jobs collection
-    const batchJobsCollections = await db.listCollections({ name: 'batch_jobs' }).toArray();
-    if (batchJobsCollections.length === 0) {
-      await db.createCollection('batch_jobs', { validator: BATCH_JOBS_VALIDATOR });
-      console.log('[Migration] Created batch_jobs collection');
-    } else {
-      await migrationHelpers.updateValidator(db, 'batch_jobs', BATCH_JOBS_VALIDATOR);
-      console.log('[Migration] Updated batch_jobs validator');
-    }
+    // Create batch_jobs collection (handles permission errors gracefully)
+    await migrationHelpers.createCollection(db, 'batch_jobs', BATCH_JOBS_VALIDATOR);
 
     // Create batch_jobs indexes
     await migrationHelpers.ensureIndex(db, 'batch_jobs', { status: 1, deadlineAt: 1 });
@@ -293,15 +279,8 @@ export const migration: Migration = {
     await migrationHelpers.ensureIndex(db, 'batch_jobs', { status: 1, requiresManualReview: 1 });
     console.log('[Migration] Created batch_jobs indexes');
 
-    // Create batch_items collection
-    const batchItemsCollections = await db.listCollections({ name: 'batch_items' }).toArray();
-    if (batchItemsCollections.length === 0) {
-      await db.createCollection('batch_items', { validator: BATCH_ITEMS_VALIDATOR });
-      console.log('[Migration] Created batch_items collection');
-    } else {
-      await migrationHelpers.updateValidator(db, 'batch_items', BATCH_ITEMS_VALIDATOR);
-      console.log('[Migration] Updated batch_items validator');
-    }
+    // Create batch_items collection (handles permission errors gracefully)
+    await migrationHelpers.createCollection(db, 'batch_items', BATCH_ITEMS_VALIDATOR);
 
     // Create batch_items indexes
     await migrationHelpers.ensureIndex(db, 'batch_items', { batchJobId: 1, itemKey: 1 }, { unique: true });

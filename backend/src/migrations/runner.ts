@@ -176,6 +176,41 @@ export class MigrationRunner {
 // Helper functions for common migration operations
 export const migrationHelpers = {
   /**
+   * Create a collection with optional validator
+   * On MongoDB Atlas without dbAdmin role, creates without validator and logs warning
+   */
+  async createCollection(
+    db: Db,
+    collectionName: string,
+    validator?: object
+  ): Promise<void> {
+    // Check if collection exists
+    const collections = await db.listCollections({ name: collectionName }).toArray();
+    if (collections.length > 0) {
+      console.log(`[Migration] Collection ${collectionName} already exists`);
+      return;
+    }
+
+    if (validator) {
+      try {
+        await db.createCollection(collectionName, { validator });
+        console.log(`[Migration] Created ${collectionName} collection with validator`);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        if (errorMsg.includes('not allowed') || errorMsg.includes('AtlasError')) {
+          console.log(`[Migration] ⚠ Cannot create ${collectionName} with validator (permission denied), creating without`);
+          await db.createCollection(collectionName);
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      await db.createCollection(collectionName);
+      console.log(`[Migration] Created ${collectionName} collection`);
+    }
+  },
+
+  /**
    * Update a collection's JSON Schema validator
    * This preserves existing data while updating validation rules
    * Note: On MongoDB Atlas, this requires dbAdmin role. If permission is denied,

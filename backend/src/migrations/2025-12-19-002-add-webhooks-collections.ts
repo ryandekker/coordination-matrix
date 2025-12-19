@@ -140,15 +140,8 @@ export const migration: Migration = {
   schemaVersion: 5,
 
   async up(db: Db): Promise<void> {
-    // Create webhooks collection
-    const webhooksCollections = await db.listCollections({ name: 'webhooks' }).toArray();
-    if (webhooksCollections.length === 0) {
-      await db.createCollection('webhooks', { validator: WEBHOOKS_VALIDATOR });
-      console.log('[Migration] Created webhooks collection');
-    } else {
-      await migrationHelpers.updateValidator(db, 'webhooks', WEBHOOKS_VALIDATOR);
-      console.log('[Migration] Updated webhooks validator');
-    }
+    // Create webhooks collection (handles permission errors gracefully)
+    await migrationHelpers.createCollection(db, 'webhooks', WEBHOOKS_VALIDATOR);
 
     // Create webhooks indexes
     await migrationHelpers.ensureIndex(db, 'webhooks', { isActive: 1 });
@@ -156,15 +149,8 @@ export const migration: Migration = {
     await migrationHelpers.ensureIndex(db, 'webhooks', { savedSearchId: 1 });
     console.log('[Migration] Created webhooks indexes');
 
-    // Create webhook_deliveries collection
-    const deliveriesCollections = await db.listCollections({ name: 'webhook_deliveries' }).toArray();
-    if (deliveriesCollections.length === 0) {
-      await db.createCollection('webhook_deliveries', { validator: WEBHOOK_DELIVERIES_VALIDATOR });
-      console.log('[Migration] Created webhook_deliveries collection');
-    } else {
-      await migrationHelpers.updateValidator(db, 'webhook_deliveries', WEBHOOK_DELIVERIES_VALIDATOR);
-      console.log('[Migration] Updated webhook_deliveries validator');
-    }
+    // Create webhook_deliveries collection (handles permission errors gracefully)
+    await migrationHelpers.createCollection(db, 'webhook_deliveries', WEBHOOK_DELIVERIES_VALIDATOR);
 
     // Create webhook_deliveries indexes
     await migrationHelpers.ensureIndex(db, 'webhook_deliveries', { webhookId: 1, createdAt: -1 });
