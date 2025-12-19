@@ -12,6 +12,10 @@ import { migration as addWorkflowTaskFields } from './2024-12-14-001-add-workflo
 import { migration as addWorkflowColumnsToViews } from './2024-12-15-001-add-workflow-columns-to-views.js';
 import { migration as addArchivedStatusLookup } from './2024-12-17-001-add-archived-status-lookup.js';
 import { migration as renameSubflowToFlow } from './2024-12-17-002-rename-subflow-to-flow.js';
+import { migration as addActivityLogsCollection } from './2025-12-19-001-add-activity-logs-collection.js';
+import { migration as addWebhooksCollections } from './2025-12-19-002-add-webhooks-collections.js';
+import { migration as addDaemonBatchCollections } from './2025-12-19-003-add-daemon-batch-collections.js';
+import { migration as addMissingTaskIndexes } from './2025-12-19-004-add-missing-task-indexes.js';
 
 // Register all migrations in order
 export const migrations: Migration[] = [
@@ -19,4 +23,8 @@ export const migrations: Migration[] = [
   addWorkflowColumnsToViews,
   addArchivedStatusLookup,
   renameSubflowToFlow,
+  addActivityLogsCollection,
+  addWebhooksCollections,
+  addDaemonBatchCollections,
+  addMissingTaskIndexes,
 ];

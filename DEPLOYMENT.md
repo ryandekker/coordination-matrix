@@ -1,17 +1,167 @@
 # Deployment Guide
 
-Production deployment options for Coordination Matrix.
+Production deployment and migration instructions for Coordination Matrix.
 
-## Overview
+## Production Architecture
 
-The application consists of three services:
-- **Frontend** - Next.js React application (port 3000)
-- **Backend** - Express.js REST API (port 3001)
-- **MongoDB** - Database (port 27017)
+```
+                    ┌─────────────────────────────────────┐
+                    │         Cloudflare Pages            │
+                    │  https://coordination-matrix.pages  │
+                    │         (Static Frontend)           │
+                    └────────────────┬────────────────────┘
+                                     │ API calls
+                    ┌────────────────▼────────────────────┐
+                    │            Render                   │
+                    │    (Backend - Express.js API)       │
+                    │   Auto-deploys from prod branch     │
+                    └────────────────┬────────────────────┘
+                                     │
+                    ┌────────────────▼────────────────────┐
+                    │         MongoDB Atlas               │
+                    │       (Managed Database)            │
+                    └─────────────────────────────────────┘
+```
 
-## Docker Compose (Recommended)
+## Production Services
 
-The simplest deployment method using Docker Compose.
+| Service | Platform | Deployment |
+|---------|----------|------------|
+| Frontend | Cloudflare Pages | Auto-deploys from `prod` branch |
+| Backend | Render | Auto-deploys from `prod` branch |
+| Database | MongoDB Atlas | Managed cluster |
+
+## Deployment Workflow
+
+### Deploying to Production
+
+1. **Merge to prod branch** - Both Cloudflare Pages and Render watch the `prod` branch
+2. **Run migrations** - After backend deploys, run any pending migrations (see below)
+3. **Verify** - Check the health endpoint and frontend
+
+```bash
+# Merge main to prod
+git checkout prod
+git merge main
+git push origin prod
+
+# Wait for deployments to complete, then run migrations
+MONGODB_URI="mongodb+srv://..." npm --prefix backend run db:migrate
+```
+
+### Environment Variables
+
+**Render (Backend):**
+
+| Variable | Description |
+|----------|-------------|
+| `MONGODB_URI` | MongoDB Atlas connection string |
+| `NODE_ENV` | `production` |
+| `JWT_SECRET` | Secure random string (use `openssl rand -hex 32`) |
+| `CORS_ORIGIN` | `https://coordination-matrix.pages.dev` |
+| `PORT` | `3001` (Render default) |
+
+**Cloudflare Pages (Frontend):**
+
+| Variable | Description |
+|----------|-------------|
+| `NEXT_PUBLIC_API_URL` | Backend API URL (Render URL + `/api`) |
+| `NEXT_PUBLIC_APP_NAME` | Application display name |
+
+---
+
+## Database Migrations
+
+The migration system allows safe, incremental schema updates without data loss.
+
+### Migration Commands
+
+```bash
+# Check migration status (shows applied and pending)
+npm --prefix backend run db:migrate:status
+
+# Run pending migrations
+npm --prefix backend run db:migrate
+```
+
+### Running Migrations Against Production
+
+**Before running migrations:**
+1. Ensure the backend is not actively processing requests (consider maintenance mode)
+2. Take a backup of the database (MongoDB Atlas has automated backups)
+
+```bash
+# Set the production MongoDB URI
+export MONGODB_URI="mongodb+srv://username:password@cluster.mongodb.net/coordination_matrix?retryWrites=true&w=majority"
+
+# Check what migrations are pending
+npm --prefix backend run db:migrate:status
+
+# Run the migrations
+npm --prefix backend run db:migrate
+```
+
+### Creating New Migrations
+
+Migrations live in `backend/src/migrations/`. To create a new migration:
+
+1. Create a new file with the format `YYYY-MM-DD-NNN-description.ts`
+2. Implement the `Migration` interface:
+
+```typescript
+// backend/src/migrations/2024-12-19-001-example-migration.ts
+import { Migration, migrationHelpers } from './runner.js';
+import { Db } from 'mongodb';
+
+export const migration: Migration = {
+  id: '2024-12-19-001-example-migration',
+  name: 'Example migration description',
+  schemaVersion: 5, // Optional: increment if changing schema
+
+  async up(db: Db) {
+    // Add a field to all documents
+    await migrationHelpers.addFieldIfMissing(db, 'tasks', 'newField', 'defaultValue');
+
+    // Or create an index
+    await migrationHelpers.ensureIndex(db, 'tasks', { newField: 1 });
+  },
+
+  async down(db: Db) {
+    // Optional: rollback logic
+    await db.collection('tasks').updateMany({}, { $unset: { newField: '' } });
+  },
+};
+```
+
+3. Register it in `backend/src/migrations/index.ts`:
+
+```typescript
+import { migration as exampleMigration } from './2024-12-19-001-example-migration.js';
+
+export const migrations: Migration[] = [
+  // ... existing migrations
+  exampleMigration,
+];
+```
+
+### Schema Sync: Local vs Production
+
+The local development database is initialized from `mongo-init/01-init-db.js`. Production may have schema differences if:
+- New fields were added to init scripts but not yet migrated in production
+- Production has data created before certain schema changes
+
+**To identify discrepancies:**
+
+1. Compare `mongo-init/01-init-db.js` against production schema
+2. Write migrations for any fields/indexes missing in production
+3. Test migrations locally first
+4. Run against production
+
+---
+
+## Self-Hosted Deployment (Docker)
+
+For self-hosted deployments using Docker Compose.
 
 ### Prerequisites
 
@@ -63,7 +213,7 @@ docker compose ps
 docker compose logs -f
 ```
 
-### Architecture
+### Architecture (Self-Hosted)
 
 ```
                     ┌─────────────────┐
@@ -136,13 +286,15 @@ server {
 }
 ```
 
-### Health Checks
+---
 
-Built-in health checks for monitoring:
+## Operations
+
+### Health Checks
 
 ```bash
 # Backend health
-curl http://localhost:3001/health
+curl https://api.yourdomain.com/health
 
 # MongoDB health (via Docker)
 docker compose exec mongodb mongosh --eval "db.adminCommand('ping')"
@@ -150,7 +302,12 @@ docker compose exec mongodb mongosh --eval "db.adminCommand('ping')"
 
 ### Backup and Restore
 
-**Backup MongoDB:**
+**MongoDB Atlas:**
+- Automatic daily backups enabled
+- Point-in-time recovery available
+- Manual snapshot via Atlas UI
+
+**Self-hosted MongoDB:**
 
 ```bash
 # Create backup
@@ -174,91 +331,7 @@ docker compose exec mongodb mongorestore \
   --archive=/tmp/backup.archive --drop
 ```
 
-### Scaling
-
-For high availability, consider:
-
-1. **MongoDB Replica Set** - Replace single MongoDB with a replica set
-2. **Multiple Backend Instances** - Scale horizontally behind a load balancer
-3. **CDN for Frontend** - Use a CDN for static assets
-
-Example scaling with Docker Compose:
-
-```bash
-# Scale backend to 3 instances
-docker compose up -d --scale backend=3
-```
-
-## Kubernetes Deployment
-
-For Kubernetes deployments, create manifests based on the Docker Compose configuration.
-
-### Key Considerations
-
-1. **Secrets** - Store MongoDB credentials and JWT secret in Kubernetes Secrets
-2. **Persistent Volume** - Use PersistentVolumeClaim for MongoDB data
-3. **Services** - Create ClusterIP services for internal communication
-4. **Ingress** - Configure Ingress for external access
-
-### Example Deployment
-
-```yaml
-# mongodb-deployment.yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: mongodb
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: mongodb
-  template:
-    metadata:
-      labels:
-        app: mongodb
-    spec:
-      containers:
-      - name: mongodb
-        image: mongo:7.0
-        ports:
-        - containerPort: 27017
-        env:
-        - name: MONGO_INITDB_ROOT_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: mongodb-secret
-              key: username
-        - name: MONGO_INITDB_ROOT_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: mongodb-secret
-              key: password
-        volumeMounts:
-        - name: mongodb-data
-          mountPath: /data/db
-      volumes:
-      - name: mongodb-data
-        persistentVolumeClaim:
-          claimName: mongodb-pvc
-```
-
-## Cloud Platform Deployments
-
-### Railway / Render / Fly.io
-
-These platforms support Docker deployments:
-
-1. Connect your repository
-2. Set environment variables in the platform dashboard
-3. Deploy each service separately or use the Docker Compose file
-
-### AWS / GCP / Azure
-
-Options include:
-- **Container Services** (ECS, Cloud Run, Container Apps)
-- **Kubernetes** (EKS, GKE, AKS)
-- **VM-based** with Docker Compose
+---
 
 ## Environment Variables Reference
 
@@ -266,13 +339,15 @@ Options include:
 |----------|----------|---------|-------------|
 | `MONGO_ROOT_USER` | Yes | admin | MongoDB admin username |
 | `MONGO_ROOT_PASSWORD` | Yes | adminpassword | MongoDB admin password |
+| `MONGODB_URI` | No | auto | Full MongoDB connection string (overrides above) |
 | `NODE_ENV` | No | development | Environment (production/development) |
 | `JWT_SECRET` | Yes | - | Secret for JWT token signing |
 | `PORT` | No | 3001 | Backend API port |
-| `MONGODB_URI` | No | auto | Full MongoDB connection string |
 | `CORS_ORIGIN` | No | localhost:3000 | Allowed CORS origin |
 | `NEXT_PUBLIC_API_URL` | Yes | - | Backend API URL for frontend |
 | `NEXT_PUBLIC_APP_NAME` | No | Coordination Matrix | App display name |
+
+---
 
 ## Security Checklist
 
@@ -287,15 +362,9 @@ Before going to production:
 - [ ] Set up regular database backups
 - [ ] Configure monitoring and alerting
 - [ ] Review MongoDB access controls
+- [ ] Run pending migrations
 
-## Monitoring
-
-Recommended monitoring setup:
-
-1. **Container Metrics** - Use Prometheus + Grafana or cloud provider metrics
-2. **Application Logs** - Aggregate with ELK stack or cloud logging
-3. **Uptime Monitoring** - Use external uptime monitor for `/health` endpoint
-4. **Database Monitoring** - MongoDB Compass or cloud provider tools
+---
 
 ## Troubleshooting
 
@@ -318,6 +387,16 @@ docker compose exec mongodb mongosh -u admin -p <password>
 
 # Check network
 docker network inspect coordination-matrix_coordination-network
+```
+
+### Migration failures
+
+```bash
+# Check migration status
+npm --prefix backend run db:migrate:status
+
+# View detailed logs (migrations print to console)
+MONGODB_URI="..." npx --prefix backend tsx src/migrations/cli.ts run
 ```
 
 ### Out of memory
