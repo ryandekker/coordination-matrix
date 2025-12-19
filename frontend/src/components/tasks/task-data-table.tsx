@@ -281,10 +281,7 @@ const TitleCell = memo(function TitleCell({
         <Button
           variant="ghost"
           size="sm"
-          className={cn(
-            "h-6 w-6 p-0 flex-shrink-0",
-            isFlowTask && "text-pink-500 hover:text-pink-600 hover:bg-pink-50"
-          )}
+          className="h-6 w-6 p-0 flex-shrink-0"
           onClick={onToggleExpand}
         >
           {isExpanded ? (
@@ -429,9 +426,7 @@ const TaskRow = memo(function TaskRow({
       <TableRow
         className={cn(
           depth > 0 && 'bg-muted/30',
-          isPulsing && 'animate-pulse bg-pink-50 dark:bg-pink-950/30',
-          // Flow placeholders have special styling - pink tinted, italic text
-          isFlowPlaceholder && 'bg-pink-50/50 dark:bg-pink-950/20 border-l-2 border-pink-300 dark:border-pink-700'
+          isPulsing && depth === 0 && 'animate-pulse border-b-2 border-pink-400 bg-pink-50 dark:bg-pink-950/30'
         )}
         data-state={isSelected ? 'selected' : undefined}
       >
@@ -440,10 +435,25 @@ const TaskRow = memo(function TaskRow({
             <Checkbox checked={isSelected} onCheckedChange={onToggleSelect} className="h-5 w-5" />
           </div>
         </TableCell>
-        <TableCell className="w-10 text-center">
-          <TaskTypeIcon taskType={task.taskType} batchCounters={task.batchCounters} />
-          {isFlowPlaceholder && (
-            <span className="text-[10px] text-pink-500 block -mt-1">ref</span>
+        <TableCell className="w-10 p-0">
+          {isFlowPlaceholder ? (
+            <button
+              className="w-full h-full flex flex-col items-center justify-center py-1 cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation()
+                // Highlight this flow task at the root level
+                onTriggerPulse(task._id)
+              }}
+            >
+              <span className="mt-1">
+                <TaskTypeIcon taskType={task.taskType} batchCounters={task.batchCounters} />
+              </span>
+              <span className="text-[10px] text-pink-500">ref →</span>
+            </button>
+          ) : (
+            <div className="flex justify-center">
+              <TaskTypeIcon taskType={task.taskType} batchCounters={task.batchCounters} />
+            </div>
           )}
         </TableCell>
         {fieldConfigs.map((fc) => (
@@ -574,17 +584,9 @@ export function TaskDataTable({
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
   const [pulsingRows, setPulsingRows] = useState<Set<string>>(new Set())
 
-  // Trigger pulse animation for a row (used when expanding flow tasks)
+  // Highlight a row (persists until view change clears it)
   const triggerPulse = useCallback((taskId: string) => {
     setPulsingRows(prev => new Set(prev).add(taskId))
-    // Remove the pulse after animation completes (1 second)
-    setTimeout(() => {
-      setPulsingRows(prev => {
-        const next = new Set(prev)
-        next.delete(taskId)
-        return next
-      })
-    }, 1000)
   }, [])
 
   // Navigate to a flow task's own view (shows its children as root-level tasks)

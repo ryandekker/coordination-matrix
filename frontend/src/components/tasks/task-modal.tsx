@@ -722,8 +722,8 @@ export function TaskModal({
           />
         </div>
 
-        {/* Extra Prompt - only for agent tasks (hidden for standard tasks in edit mode - moved to sidebar) */}
-        {currentTaskType === 'agent' && !(isEditMode && currentTaskType === 'standard') && (
+        {/* Extra Prompt - only for agent tasks */}
+        {currentTaskType === 'agent' && (
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">Extra Prompt</label>
             <textarea
@@ -1052,19 +1052,18 @@ export function TaskModal({
 
     return (
       <div className="p-4 space-y-4">
-        {/* Task type display */}
-        <div
-          className="p-3 rounded-lg border"
-          style={{
-            backgroundColor: `${typeConfig.hexColor}10`,
-            borderColor: `${typeConfig.hexColor}30`,
-          }}
-        >
-          <div className="flex items-center gap-2 mb-2">
-            <TypeIcon className="h-5 w-5" style={{ color: typeConfig.hexColor }} />
-            <span className="font-medium" style={{ color: typeConfig.hexColor }}>
-              {typeConfig.label} Task
-            </span>
+        {/* Task type display (selector is in header) */}
+        <div className="space-y-2">
+          <label className="text-xs font-medium text-muted-foreground">Task Type</label>
+          <div
+            className="flex items-center gap-2 px-3 py-2 rounded-md border"
+            style={{
+              backgroundColor: `${typeConfig.hexColor}10`,
+              borderColor: `${typeConfig.hexColor}30`,
+            }}
+          >
+            <TypeIcon className="h-4 w-4" style={{ color: typeConfig.hexColor }} />
+            <span className="text-sm font-medium" style={{ color: typeConfig.hexColor }}>{typeConfig.label}</span>
           </div>
           <p className="text-xs text-muted-foreground">{typeConfig.description}</p>
         </div>

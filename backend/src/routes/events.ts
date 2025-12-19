@@ -61,7 +61,7 @@ router.get('/stream', (req: Request, res: Response) => {
           taskType: event.task.taskType,
           batchCounters: event.task.batchCounters,
           metadata: event.task.metadata,
-          children: event.task.children || [],
+          children: (event.task as unknown as Record<string, unknown>).children || [],
           createdAt: event.task.createdAt,
           updatedAt: event.task.updatedAt,
         } : undefined,

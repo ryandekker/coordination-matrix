@@ -49,7 +49,6 @@ export const TASK_TYPE_TO_STEP_TYPE: Record<string, string> = {
   decision: 'decision',
   foreach: 'foreach',
   join: 'join',
-  subflow: 'subflow',
   manual: 'manual',
 }
 
@@ -59,10 +58,10 @@ export const TASK_TYPE_CONFIG: Record<string, TaskTypeConfig> = {
   flow: {
     icon: Network,
     label: 'Flow',
-    color: 'text-slate-500',
-    bgColor: 'bg-slate-50 dark:bg-slate-950/30',
-    hexColor: '#64748B',
-    description: 'Workflow parent task',
+    color: 'text-pink-500',
+    bgColor: 'bg-pink-50 dark:bg-pink-950/30',
+    hexColor: '#EC4899',
+    description: 'Nested workflow/flow task',
   },
   agent: {
     icon: Bot,
@@ -119,14 +118,6 @@ export const TASK_TYPE_CONFIG: Record<string, TaskTypeConfig> = {
     bgColor: 'bg-indigo-50 dark:bg-indigo-950/30',
     hexColor: '#6366F1',
     description: 'Aggregate results',
-  },
-  subflow: {
-    icon: Workflow,
-    label: 'Subflow',
-    color: 'text-pink-500',
-    bgColor: 'bg-pink-50 dark:bg-pink-950/30',
-    hexColor: '#EC4899',
-    description: 'Nested workflow',
   },
   manual: {
     icon: User,

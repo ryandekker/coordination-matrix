@@ -100,7 +100,7 @@ const TASKS_VALIDATOR = {
       // Updated: 'subflow' renamed to 'flow'
       taskType: {
         bsonType: ['string', 'null'],
-        enum: ['standard', 'trigger', 'agent', 'manual', 'decision', 'foreach', 'join', 'flow', 'external', 'webhook', null],
+        enum: ['flow', 'trigger', 'agent', 'manual', 'decision', 'foreach', 'join', 'external', 'webhook', null],
         description: 'Type of task for workflow execution',
       },
       executionMode: {
@@ -141,7 +141,7 @@ const TASKS_VALIDATOR = {
 };
 
 export const migration: Migration = {
-  id: '2024-12-17-001',
+  id: '2024-12-17-002',
   name: 'rename-subflow-to-flow',
   description: 'Rename taskType "subflow" to "flow" for consistency',
   schemaVersion: 2,

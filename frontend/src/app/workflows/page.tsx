@@ -1027,7 +1027,7 @@ export default function WorkflowsPage() {
                   {headerGroup.headers.map(header => {
                     let className: string | undefined
                     if (header.column.id === 'select') {
-                      className = 'w-12 pl-3 pr-0'
+                      className = 'w-12 pr-0'
                     } else if (header.column.id === 'expander') {
                       className = 'w-10'
                     }
@@ -1054,7 +1054,7 @@ export default function WorkflowsPage() {
                     {row.getVisibleCells().map(cell => (
                       <TableCell
                         key={cell.id}
-                        className={cell.column.id === 'select' ? 'w-12 pl-3 pr-0' : undefined}
+                        className={cell.column.id === 'select' ? 'w-12 pr-0' : undefined}
                       >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </TableCell>

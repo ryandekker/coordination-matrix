@@ -136,7 +136,19 @@ export function TasksPage() {
   // Enable real-time updates via SSE - the hook handles cache updates automatically
   useEventStream()
 
-  const tasks = tasksData?.data || []
+  const rawTasks = tasksData?.data || []
+  // When viewing a flow's children, prepend the parent flow task to show it at the top
+  const tasks = useMemo(() => {
+    if (parentIdFromUrl && flowParentTask?.data) {
+      // Add children reference to parent so it can be expanded
+      const parentWithChildren: Task = {
+        ...flowParentTask.data,
+        children: rawTasks, // Use actual tasks as children for proper expansion
+      }
+      return [parentWithChildren, ...rawTasks]
+    }
+    return rawTasks
+  }, [parentIdFromUrl, flowParentTask?.data, rawTasks])
   const pagination = tasksData?.pagination
   const lookups = lookupsData?.data || {}
   // Use API field configs if available, otherwise fall back to defaults

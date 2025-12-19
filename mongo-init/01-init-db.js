@@ -105,7 +105,7 @@ db.createCollection('tasks', {
         },
         taskType: {
           bsonType: 'string',
-          enum: ['flow', 'trigger', 'agent', 'manual', 'decision', 'foreach', 'join', 'external', 'webhook', 'subflow'],
+          enum: ['flow', 'trigger', 'agent', 'manual', 'decision', 'foreach', 'join', 'external', 'webhook'],
           description: 'Type of task for workflow execution - maps 1:1 to workflow step types'
         },
         executionMode: {

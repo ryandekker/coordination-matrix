@@ -1356,7 +1356,7 @@ class WorkflowExecutionService {
     let result = template;
 
     // Replace all {{...}} patterns
-    result = result.replace(/\{\{([^}]+)\}\}/g, (match, path) => {
+    result = result.replace(/\{\{([^}]+)\}\}/g, (_match, path) => {
       const trimmedPath = path.trim();
 
       // Handle input.* prefix explicitly
