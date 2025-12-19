@@ -178,6 +178,8 @@ export const migrationHelpers = {
   /**
    * Update a collection's JSON Schema validator
    * This preserves existing data while updating validation rules
+   * Note: On MongoDB Atlas, this requires dbAdmin role. If permission is denied,
+   * the function will log a warning but not fail (validators are optional).
    */
   async updateValidator(
     db: Db,
@@ -188,16 +190,37 @@ export const migrationHelpers = {
     const collections = await db.listCollections({ name: collectionName }).toArray();
     if (collections.length === 0) {
       // Collection doesn't exist, create it with the validator
-      await db.createCollection(collectionName, { validator });
+      try {
+        await db.createCollection(collectionName, { validator });
+      } catch (error) {
+        // If we can't create with validator, create without
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        if (errorMsg.includes('not allowed') || errorMsg.includes('AtlasError')) {
+          console.log(`[Migration] ⚠ Cannot set validator on ${collectionName} (permission denied), creating without validator`);
+          await db.createCollection(collectionName);
+        } else {
+          throw error;
+        }
+      }
       return;
     }
 
     // Update existing collection's validator
-    await db.command({
-      collMod: collectionName,
-      validator,
-      validationLevel: 'moderate', // Allow existing invalid docs, validate new ones
-    });
+    try {
+      await db.command({
+        collMod: collectionName,
+        validator,
+        validationLevel: 'moderate', // Allow existing invalid docs, validate new ones
+      });
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      // Skip permission errors on Atlas - validators are optional
+      if (errorMsg.includes('not allowed') || errorMsg.includes('AtlasError')) {
+        console.log(`[Migration] ⚠ Cannot update validator on ${collectionName} (permission denied), skipping`);
+      } else {
+        throw error;
+      }
+    }
   },
 
   /**
