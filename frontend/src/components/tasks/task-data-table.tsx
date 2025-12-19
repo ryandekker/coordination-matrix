@@ -388,7 +388,7 @@ const TaskRow = memo(function TaskRow({
   expandAllEnabled: boolean
   onNavigateToFlow: (taskId: string) => void
   isPulsing: boolean
-  onTriggerPulse: (taskId: string) => void
+  onTriggerPulse: (taskId: string, shouldScroll?: boolean) => void
 }) {
   const isFlowTask = task.taskType === 'flow'
 
@@ -442,8 +442,8 @@ const TaskRow = memo(function TaskRow({
               className="w-full h-full flex flex-col items-center justify-center py-1 cursor-pointer"
               onClick={(e) => {
                 e.stopPropagation()
-                // Highlight this flow task at the root level
-                onTriggerPulse(task._id)
+                // Highlight this flow task at the root level and scroll to it
+                onTriggerPulse(task._id, true)
               }}
             >
               <span className="mt-1">
@@ -585,15 +585,26 @@ export function TaskDataTable({
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
   const [pulsingRows, setPulsingRows] = useState<Set<string>>(new Set())
 
-  // Highlight a row and scroll to it (persists until view change clears it)
-  const triggerPulse = useCallback((taskId: string) => {
-    setPulsingRows(prev => new Set(prev).add(taskId))
-    // Scroll to the row
-    setTimeout(() => {
-      const row = document.querySelector(`[data-task-id="${taskId}"]`)
-      row?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }, 0)
+  // Highlight a row (clears others, persists until another is clicked)
+  // Clear first to restart animation if same row is clicked again
+  const triggerPulse = useCallback((taskId: string, shouldScroll = false) => {
+    setPulsingRows(new Set())
+    requestAnimationFrame(() => {
+      setPulsingRows(new Set([taskId]))
+      if (shouldScroll) {
+        setTimeout(() => {
+          const row = document.querySelector(`[data-task-id="${taskId}"]`)
+          row?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }, 0)
+      }
+    })
   }, [])
+
+  // Wrapper for onEditTask that also triggers pulse
+  const handleEditTaskWithPulse = useCallback((task: Task) => {
+    triggerPulse(task._id)
+    onEditTask(task)
+  }, [triggerPulse, onEditTask])
 
   // Navigate to a flow task's own view (shows its children as root-level tasks)
   const handleNavigateToFlow = useCallback((taskId: string) => {
@@ -954,7 +965,7 @@ export function TaskDataTable({
                   onToggleExpand={() => toggleRowExpansion(task._id)}
                   onToggleSelect={() => toggleRowSelection(task._id)}
                   onCellUpdate={handleCellUpdate}
-                  onEdit={() => onEditTask(task)}
+                  onEdit={() => handleEditTaskWithPulse(task)}
                   onDelete={() => handleDeleteTask(task._id)}
                   onCreateSubtask={() => onCreateSubtask(task)}
                   renderCellValue={renderCellValue}
@@ -964,7 +975,7 @@ export function TaskDataTable({
                   toggleRowExpansion={toggleRowExpansion}
                   toggleRowSelection={toggleRowSelection}
                   handleDeleteTask={handleDeleteTask}
-                  handleEditTask={onEditTask}
+                  handleEditTask={handleEditTaskWithPulse}
                   handleCreateSubtask={onCreateSubtask}
                   expandAllEnabled={expandAllEnabled}
                   onNavigateToFlow={handleNavigateToFlow}
