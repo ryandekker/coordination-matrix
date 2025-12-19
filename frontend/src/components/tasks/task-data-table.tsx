@@ -426,9 +426,10 @@ const TaskRow = memo(function TaskRow({
       <TableRow
         className={cn(
           depth > 0 && 'bg-muted/30',
-          isPulsing && depth === 0 && 'animate-pulse border-b-2 border-pink-400 bg-pink-50 dark:bg-pink-950/30'
+          isPulsing && depth === 0 && 'animate-pulse-bg border-b-2 border-pink-400'
         )}
         data-state={isSelected ? 'selected' : undefined}
+        data-task-id={task._id}
       >
         <TableCell className="w-12 pl-3 pr-0">
           <div className="flex justify-center">
@@ -584,9 +585,14 @@ export function TaskDataTable({
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
   const [pulsingRows, setPulsingRows] = useState<Set<string>>(new Set())
 
-  // Highlight a row (persists until view change clears it)
+  // Highlight a row and scroll to it (persists until view change clears it)
   const triggerPulse = useCallback((taskId: string) => {
     setPulsingRows(prev => new Set(prev).add(taskId))
+    // Scroll to the row
+    setTimeout(() => {
+      const row = document.querySelector(`[data-task-id="${taskId}"]`)
+      row?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 0)
   }, [])
 
   // Navigate to a flow task's own view (shows its children as root-level tasks)
