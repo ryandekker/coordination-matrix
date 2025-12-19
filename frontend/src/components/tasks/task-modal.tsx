@@ -42,6 +42,7 @@ import {
 } from '@/lib/task-type-config'
 import { Settings2, Database, Activity, Workflow, ExternalLink, ArrowUpRight } from 'lucide-react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 
 interface TaskModalProps {
   task: Task | null
@@ -60,6 +61,7 @@ export function TaskModal({
   parentTask = null,
   onClose,
 }: TaskModalProps) {
+  const router = useRouter()
   const queryClient = useQueryClient()
   const prevIsOpenRef = useRef(false)
   const titleInputRef = useRef<HTMLInputElement>(null)
@@ -668,13 +670,17 @@ export function TaskModal({
 
         {/* Parent Task Link - show when task has a parent */}
         {task._resolved?.parent && (
-          <Link
-            href={`/tasks?id=${task._resolved.parent._id}`}
+          <button
+            type="button"
+            onClick={() => {
+              onClose()
+              router.push(`/tasks?id=${task._resolved!.parent!._id}`)
+            }}
             className="flex items-center gap-1.5 px-2 h-7 text-xs rounded-md bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors max-w-[200px]"
           >
             <ArrowUpRight className="h-3.5 w-3.5 flex-shrink-0" />
             <span className="truncate">Parent: {task._resolved.parent.title}</span>
-          </Link>
+          </button>
         )}
 
         {/* Spacer */}
