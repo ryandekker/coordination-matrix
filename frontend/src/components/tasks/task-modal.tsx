@@ -64,7 +64,7 @@ export function TaskModal({
   const router = useRouter()
   const queryClient = useQueryClient()
   const prevIsOpenRef = useRef(false)
-  const titleInputRef = useRef<HTMLInputElement>(null)
+  const titleInputRef = useRef<HTMLInputElement | null>(null)
   const [isMetadataEditMode, setIsMetadataEditMode] = useState(false)
   const [metadataError, setMetadataError] = useState<string | null>(null)
   const [webhookConfig, setWebhookConfig] = useState<WebhookConfig | undefined>(undefined)
