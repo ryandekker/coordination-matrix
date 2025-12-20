@@ -8,7 +8,6 @@ interface MermaidInteractiveProps {
   className?: string
   selectedNodeId?: string | null
   onNodeClick?: (nodeId: string) => void
-  onAddBetween?: (afterNodeId: string) => void
   onError?: (error: string) => void
 }
 
@@ -19,7 +18,6 @@ export function MermaidInteractive({
   className = '',
   selectedNodeId,
   onNodeClick,
-  onAddBetween,
   onError,
 }: MermaidInteractiveProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -100,126 +98,53 @@ export function MermaidInteractive({
       const nodeElement = node as SVGGElement
       const nodeId = nodeElement.id
 
-      // Extract the step ID from the node ID (format: flowchart-stepId-123)
-      const match = nodeId.match(/flowchart-([^-]+)-/)
-      const stepId = match ? match[1] : nodeId
+      // Extract the step ID from the node ID
+      // Mermaid format: flowchart-{stepId}-{number}
+      // stepId can contain dashes, so we need to extract everything between first "flowchart-" and last "-number"
+      let stepId = nodeId
+      if (nodeId.startsWith('flowchart-')) {
+        // Remove "flowchart-" prefix and the trailing "-number"
+        const withoutPrefix = nodeId.slice('flowchart-'.length)
+        const lastDashIdx = withoutPrefix.lastIndexOf('-')
+        if (lastDashIdx > 0) {
+          stepId = withoutPrefix.slice(0, lastDashIdx)
+        }
+      }
 
       // Make node clickable
       nodeElement.style.cursor = 'pointer'
 
+      // Clone and replace to remove old event listeners
+      const newNode = nodeElement.cloneNode(true) as SVGGElement
+      nodeElement.parentNode?.replaceChild(newNode, nodeElement)
+
       // Add hover effect
-      const originalOpacity = nodeElement.style.opacity
-      nodeElement.addEventListener('mouseenter', () => {
-        nodeElement.style.opacity = '0.8'
+      newNode.addEventListener('mouseenter', () => {
+        newNode.style.opacity = '0.8'
       })
-      nodeElement.addEventListener('mouseleave', () => {
-        nodeElement.style.opacity = originalOpacity || '1'
+      newNode.addEventListener('mouseleave', () => {
+        newNode.style.opacity = '1'
       })
 
       // Handle click
-      nodeElement.addEventListener('click', (e) => {
+      newNode.addEventListener('click', (e) => {
         e.stopPropagation()
+        e.preventDefault()
         onNodeClick?.(stepId)
       })
-    })
 
-    // Highlight selected node
-    if (selectedNodeId) {
-      nodes.forEach((node) => {
-        const nodeElement = node as SVGGElement
-        const nodeId = nodeElement.id
-        const match = nodeId.match(/flowchart-([^-]+)-/)
-        const stepId = match ? match[1] : nodeId
-
-        // Find the shape inside the node (rect, polygon, etc.)
-        const shapes = nodeElement.querySelectorAll('rect, polygon, ellipse, circle, path')
+      // Highlight selected node
+      if (stepId === selectedNodeId) {
+        const shapes = newNode.querySelectorAll('rect, polygon, ellipse, circle, path.basic')
         shapes.forEach((shape) => {
           const shapeElement = shape as SVGElement
-          if (stepId === selectedNodeId) {
-            // Add selection ring
-            shapeElement.style.stroke = '#3b82f6'
-            shapeElement.style.strokeWidth = '3'
-            shapeElement.style.filter = 'drop-shadow(0 0 4px rgba(59, 130, 246, 0.5))'
-          }
+          shapeElement.style.stroke = '#3b82f6'
+          shapeElement.style.strokeWidth = '3'
+          shapeElement.style.filter = 'drop-shadow(0 0 4px rgba(59, 130, 246, 0.5))'
         })
-      })
-    }
-
-    // Add "+" buttons on edges for adding steps
-    if (onAddBetween) {
-      const edges = container.querySelectorAll('.edgePath')
-      edges.forEach((edge) => {
-        // Find the edge path to position the button
-        const pathElement = edge.querySelector('path')
-        if (!pathElement) return
-
-        // Get the midpoint of the path
-        const pathLength = pathElement.getTotalLength()
-        const midPoint = pathElement.getPointAtLength(pathLength / 2)
-
-        // Create add button
-        const addButton = document.createElementNS('http://www.w3.org/2000/svg', 'g')
-        addButton.setAttribute('class', 'add-step-button')
-        addButton.style.cursor = 'pointer'
-        addButton.style.opacity = '0'
-        addButton.style.transition = 'opacity 0.2s'
-
-        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-        circle.setAttribute('cx', String(midPoint.x))
-        circle.setAttribute('cy', String(midPoint.y))
-        circle.setAttribute('r', '10')
-        circle.setAttribute('fill', '#10b981')
-        circle.setAttribute('stroke', 'white')
-        circle.setAttribute('stroke-width', '2')
-
-        const plus = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-        plus.setAttribute('x', String(midPoint.x))
-        plus.setAttribute('y', String(midPoint.y + 4))
-        plus.setAttribute('text-anchor', 'middle')
-        plus.setAttribute('fill', 'white')
-        plus.setAttribute('font-size', '14')
-        plus.setAttribute('font-weight', 'bold')
-        plus.textContent = '+'
-
-        addButton.appendChild(circle)
-        addButton.appendChild(plus)
-
-        // Show on hover over the edge area
-        const hoverArea = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-        hoverArea.setAttribute('cx', String(midPoint.x))
-        hoverArea.setAttribute('cy', String(midPoint.y))
-        hoverArea.setAttribute('r', '20')
-        hoverArea.setAttribute('fill', 'transparent')
-
-        hoverArea.addEventListener('mouseenter', () => {
-          addButton.style.opacity = '1'
-        })
-        hoverArea.addEventListener('mouseleave', () => {
-          addButton.style.opacity = '0'
-        })
-        addButton.addEventListener('mouseenter', () => {
-          addButton.style.opacity = '1'
-        })
-        addButton.addEventListener('mouseleave', () => {
-          addButton.style.opacity = '0'
-        })
-
-        // Get source node ID from edge
-        const edgeClass = edge.getAttribute('class') || ''
-        const sourceMatch = edgeClass.match(/LS-([^\s]+)/)
-        if (sourceMatch) {
-          const sourceId = sourceMatch[1]
-          addButton.addEventListener('click', (e) => {
-            e.stopPropagation()
-            onAddBetween(sourceId)
-          })
-        }
-
-        edge.appendChild(hoverArea)
-        edge.appendChild(addButton)
-      })
-    }
-  }, [svg, selectedNodeId, onNodeClick, onAddBetween])
+      }
+    })
+  }, [svg, selectedNodeId, onNodeClick])
 
   if (error) {
     return (
@@ -250,7 +175,7 @@ export function MermaidInteractive({
     <div
       ref={containerRef}
       className={cn(
-        'mermaid-interactive overflow-auto flex items-center justify-center',
+        'mermaid-interactive flex items-center justify-center',
         className
       )}
       dangerouslySetInnerHTML={{ __html: svg }}

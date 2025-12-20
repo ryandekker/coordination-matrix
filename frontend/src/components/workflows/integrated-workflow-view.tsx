@@ -318,23 +318,15 @@ export function IntegratedWorkflowView({
     updateStep(index, { stepType: type })
   }, [updateStep])
 
-  // Handle adding step between nodes in diagram
-  const handleAddBetween = useCallback((afterNodeId: string) => {
-    const afterIndex = steps.findIndex(s => s.id === afterNodeId)
-    if (afterIndex >= 0) {
-      addStep(afterIndex)
-    }
-  }, [steps, addStep])
-
   return (
-    <div className={cn('flex h-full gap-2', className)}>
+    <div className={cn('flex h-full gap-2 min-h-0', className)}>
       {/* Diagram Panel */}
       <div className={cn(
-        'flex flex-col bg-muted/20 border rounded-lg transition-all',
+        'flex flex-col bg-muted/20 border rounded-lg transition-all min-h-0 overflow-hidden',
         isPanelCollapsed ? 'flex-1' : 'flex-[3]'
       )}>
         {/* Diagram Header */}
-        <div className="flex items-center justify-between px-3 py-2 border-b bg-background/50">
+        <div className="flex items-center justify-between px-3 py-2 border-b bg-background/50 flex-shrink-0">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Layers className="h-4 w-4" />
             <span>Workflow Diagram</span>
@@ -387,7 +379,7 @@ export function IntegratedWorkflowView({
         </div>
 
         {/* Diagram Content */}
-        <div className="flex-1 p-4 overflow-auto">
+        <div className="flex-1 p-4 overflow-auto min-h-0">
           {steps.length === 0 ? (
             <div className="h-full flex items-center justify-center text-muted-foreground">
               <div className="text-center">
@@ -401,24 +393,23 @@ export function IntegratedWorkflowView({
               chart={mermaidCode}
               selectedNodeId={selectedStepId}
               onNodeClick={handleNodeClick}
-              onAddBetween={handleAddBetween}
-              className="min-h-[300px]"
+              className="min-h-[200px]"
             />
           )}
         </div>
 
         {/* Hint */}
         {steps.length > 0 && (
-          <div className="px-3 py-1.5 border-t bg-muted/30 text-xs text-muted-foreground flex items-center gap-1.5">
+          <div className="px-3 py-1.5 border-t bg-muted/30 text-xs text-muted-foreground flex items-center gap-1.5 flex-shrink-0">
             <MousePointerClick className="h-3 w-3" />
-            Click a node to edit • Hover edges to add steps
+            Click a node to edit
           </div>
         )}
       </div>
 
       {/* Config Panel */}
       {!isPanelCollapsed && (
-        <div className="flex-[2] flex flex-col border rounded-lg bg-background">
+        <div className="flex-[2] flex flex-col border rounded-lg bg-background min-h-0 overflow-hidden">
           {selectedStep ? (
             <StepConfigPanel
               step={selectedStep}
@@ -449,7 +440,7 @@ export function IntegratedWorkflowView({
 
           {/* Step list for quick navigation */}
           {steps.length > 0 && (
-            <div className="border-t p-2 bg-muted/20">
+            <div className="border-t p-2 bg-muted/20 flex-shrink-0">
               <div className="text-xs text-muted-foreground mb-1.5 px-1">Quick select:</div>
               <ScrollArea className="max-h-[120px]">
                 <div className="space-y-0.5">
