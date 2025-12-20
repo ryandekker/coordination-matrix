@@ -419,9 +419,10 @@ export function IntegratedWorkflowView({
 
       {/* Config Panel */}
       {!isPanelCollapsed && (
-        <div className="flex-[2] flex flex-col border rounded-lg bg-background min-h-0 overflow-hidden">
+        <div className="flex-[2] flex flex-col border rounded-lg bg-background min-h-0 overflow-hidden" style={{ maxHeight: '100%' }}>
           {selectedStep ? (
-            <StepConfigPanel
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <StepConfigPanel
               step={selectedStep}
               stepIndex={selectedStepIndex}
               allSteps={steps}
@@ -436,6 +437,7 @@ export function IntegratedWorkflowView({
               onAddStepAfter={() => addStep(selectedStepIndex)}
               onChangeType={(type) => changeStepType(selectedStepIndex, type)}
             />
+            </div>
           ) : (
             <div className="flex-1 flex items-center justify-center text-muted-foreground p-4">
               <div className="text-center">
