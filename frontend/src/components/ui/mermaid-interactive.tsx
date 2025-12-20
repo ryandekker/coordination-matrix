@@ -7,6 +7,7 @@ interface MermaidInteractiveProps {
   chart: string
   className?: string
   selectedNodeId?: string | null
+  stepIds?: string[]  // List of step IDs in order for edge buttons
   onNodeClick?: (nodeId: string) => void
   onAddAfter?: (stepId: string) => void
   onError?: (error: string) => void
@@ -18,6 +19,7 @@ export function MermaidInteractive({
   chart,
   className = '',
   selectedNodeId,
+  stepIds = [],
   onNodeClick,
   onAddAfter,
   onError,
@@ -147,93 +149,97 @@ export function MermaidInteractive({
       }
     })
 
-    // Add "+" buttons on edges for adding steps between nodes
-    if (onAddAfter) {
+    // Add "+" buttons on edges between consecutive nodes
+    if (onAddAfter && stepIds.length > 1) {
       const svgElement = container.querySelector('svg')
       if (!svgElement) return
 
-      // Find all edge paths
-      const edgePaths = container.querySelectorAll('.edgePath')
+      // Get positions of all nodes to place + buttons between them
+      const nodePositions: { stepId: string; x: number; y: number; height: number }[] = []
 
-      edgePaths.forEach((edgePath) => {
-        const pathElement = edgePath.querySelector('path')
-        if (!pathElement) return
-
-        // Get the source node ID from the edge class
-        // Mermaid uses classes like "LS-step-123456789 LE-step-987654321"
-        const classList = edgePath.getAttribute('class') || ''
-        const sourceMatch = classList.match(/LS-([^\s]+)/)
-        if (!sourceMatch) return
-
-        const sourceStepId = sourceMatch[1]
-
-        // Get midpoint of the path
-        try {
-          const pathLength = pathElement.getTotalLength()
-          const midPoint = pathElement.getPointAtLength(pathLength / 2)
-
-          // Create the add button group
-          const buttonGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g')
-          buttonGroup.setAttribute('class', 'add-step-btn')
-          buttonGroup.style.cursor = 'pointer'
-          buttonGroup.style.opacity = '0'
-          buttonGroup.style.transition = 'opacity 0.15s'
-
-          // Circle background
-          const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-          circle.setAttribute('cx', String(midPoint.x))
-          circle.setAttribute('cy', String(midPoint.y))
-          circle.setAttribute('r', '10')
-          circle.setAttribute('fill', '#10b981')
-          circle.setAttribute('stroke', 'white')
-          circle.setAttribute('stroke-width', '2')
-
-          // Plus sign
-          const plus = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-          plus.setAttribute('x', String(midPoint.x))
-          plus.setAttribute('y', String(midPoint.y + 4))
-          plus.setAttribute('text-anchor', 'middle')
-          plus.setAttribute('fill', 'white')
-          plus.setAttribute('font-size', '14')
-          plus.setAttribute('font-weight', 'bold')
-          plus.setAttribute('style', 'pointer-events: none')
-          plus.textContent = '+'
-
-          buttonGroup.appendChild(circle)
-          buttonGroup.appendChild(plus)
-
-          // Hover area (larger invisible circle for easier hovering)
-          const hoverArea = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-          hoverArea.setAttribute('cx', String(midPoint.x))
-          hoverArea.setAttribute('cy', String(midPoint.y))
-          hoverArea.setAttribute('r', '18')
-          hoverArea.setAttribute('fill', 'transparent')
-          hoverArea.style.cursor = 'pointer'
-
-          // Show button on hover
-          hoverArea.addEventListener('mouseenter', () => {
-            buttonGroup.style.opacity = '1'
-          })
-          hoverArea.addEventListener('mouseleave', () => {
-            buttonGroup.style.opacity = '0'
-          })
-
-          // Handle click
-          hoverArea.addEventListener('click', (e) => {
-            e.stopPropagation()
-            e.preventDefault()
-            onAddAfter(sourceStepId)
-          })
-
-          // Add to SVG
-          svgElement.appendChild(hoverArea)
-          svgElement.appendChild(buttonGroup)
-        } catch {
-          // getTotalLength might fail on some paths
+      stepIds.forEach(stepId => {
+        // Find the node element for this step
+        const nodeEl = container.querySelector(`[id*="${stepId}"]`)
+        if (nodeEl) {
+          const bbox = (nodeEl as SVGGraphicsElement).getBBox?.()
+          if (bbox) {
+            nodePositions.push({
+              stepId,
+              x: bbox.x + bbox.width / 2,
+              y: bbox.y + bbox.height,
+              height: bbox.height
+            })
+          }
         }
       })
+
+      // Add a + button between each consecutive pair of nodes
+      for (let i = 0; i < nodePositions.length - 1; i++) {
+        const current = nodePositions[i]
+        const next = nodePositions[i + 1]
+
+        // Position the button between the two nodes
+        const midX = (current.x + next.x) / 2
+        const midY = (current.y + next.y - next.height) / 2
+
+        // Create the add button group
+        const buttonGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g')
+        buttonGroup.setAttribute('class', 'add-step-btn')
+        buttonGroup.style.cursor = 'pointer'
+        buttonGroup.style.opacity = '0.3'
+        buttonGroup.style.transition = 'opacity 0.15s'
+
+        // Circle background
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+        circle.setAttribute('cx', String(midX))
+        circle.setAttribute('cy', String(midY))
+        circle.setAttribute('r', '10')
+        circle.setAttribute('fill', '#10b981')
+        circle.setAttribute('stroke', 'white')
+        circle.setAttribute('stroke-width', '2')
+
+        // Plus sign
+        const plus = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+        plus.setAttribute('x', String(midX))
+        plus.setAttribute('y', String(midY + 4))
+        plus.setAttribute('text-anchor', 'middle')
+        plus.setAttribute('fill', 'white')
+        plus.setAttribute('font-size', '14')
+        plus.setAttribute('font-weight', 'bold')
+        plus.setAttribute('style', 'pointer-events: none')
+        plus.textContent = '+'
+
+        buttonGroup.appendChild(circle)
+        buttonGroup.appendChild(plus)
+
+        // Hover area
+        const hoverArea = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+        hoverArea.setAttribute('cx', String(midX))
+        hoverArea.setAttribute('cy', String(midY))
+        hoverArea.setAttribute('r', '18')
+        hoverArea.setAttribute('fill', 'transparent')
+        hoverArea.style.cursor = 'pointer'
+
+        const sourceStepId = current.stepId
+
+        hoverArea.addEventListener('mouseenter', () => {
+          buttonGroup.style.opacity = '1'
+        })
+        hoverArea.addEventListener('mouseleave', () => {
+          buttonGroup.style.opacity = '0.3'
+        })
+
+        hoverArea.addEventListener('click', (e) => {
+          e.stopPropagation()
+          e.preventDefault()
+          onAddAfter(sourceStepId)
+        })
+
+        svgElement.appendChild(hoverArea)
+        svgElement.appendChild(buttonGroup)
+      }
     }
-  }, [svg, selectedNodeId, onNodeClick, onAddAfter])
+  }, [svg, selectedNodeId, stepIds, onNodeClick, onAddAfter])
 
   if (error) {
     return (

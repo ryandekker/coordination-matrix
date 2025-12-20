@@ -400,6 +400,7 @@ export function IntegratedWorkflowView({
             <MermaidInteractive
               chart={mermaidCode}
               selectedNodeId={selectedStepId}
+              stepIds={steps.map(s => s.id)}
               onNodeClick={handleNodeClick}
               onAddAfter={handleAddAfter}
               className="min-h-[200px]"
