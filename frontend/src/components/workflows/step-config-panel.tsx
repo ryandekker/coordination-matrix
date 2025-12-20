@@ -158,8 +158,9 @@ export function StepConfigPanel({
   }))
 
   return (
-    <ScrollArea className="h-full">
-      <div className="p-4 space-y-4">
+    <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+      <ScrollArea className="flex-1">
+        <div className="p-4 space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -856,7 +857,8 @@ export function StepConfigPanel({
           <Plus className="h-4 w-4 mr-2" />
           Add Step After
         </Button>
-      </div>
-    </ScrollArea>
+        </div>
+      </ScrollArea>
+    </div>
   )
 }

@@ -8,6 +8,7 @@ interface MermaidInteractiveProps {
   className?: string
   selectedNodeId?: string | null
   onNodeClick?: (nodeId: string) => void
+  onAddAfter?: (stepId: string) => void
   onError?: (error: string) => void
 }
 
@@ -18,6 +19,7 @@ export function MermaidInteractive({
   className = '',
   selectedNodeId,
   onNodeClick,
+  onAddAfter,
   onError,
 }: MermaidInteractiveProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -144,7 +146,94 @@ export function MermaidInteractive({
         })
       }
     })
-  }, [svg, selectedNodeId, onNodeClick])
+
+    // Add "+" buttons on edges for adding steps between nodes
+    if (onAddAfter) {
+      const svgElement = container.querySelector('svg')
+      if (!svgElement) return
+
+      // Find all edge paths
+      const edgePaths = container.querySelectorAll('.edgePath')
+
+      edgePaths.forEach((edgePath) => {
+        const pathElement = edgePath.querySelector('path')
+        if (!pathElement) return
+
+        // Get the source node ID from the edge class
+        // Mermaid uses classes like "LS-step-123456789 LE-step-987654321"
+        const classList = edgePath.getAttribute('class') || ''
+        const sourceMatch = classList.match(/LS-([^\s]+)/)
+        if (!sourceMatch) return
+
+        const sourceStepId = sourceMatch[1]
+
+        // Get midpoint of the path
+        try {
+          const pathLength = pathElement.getTotalLength()
+          const midPoint = pathElement.getPointAtLength(pathLength / 2)
+
+          // Create the add button group
+          const buttonGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g')
+          buttonGroup.setAttribute('class', 'add-step-btn')
+          buttonGroup.style.cursor = 'pointer'
+          buttonGroup.style.opacity = '0'
+          buttonGroup.style.transition = 'opacity 0.15s'
+
+          // Circle background
+          const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+          circle.setAttribute('cx', String(midPoint.x))
+          circle.setAttribute('cy', String(midPoint.y))
+          circle.setAttribute('r', '10')
+          circle.setAttribute('fill', '#10b981')
+          circle.setAttribute('stroke', 'white')
+          circle.setAttribute('stroke-width', '2')
+
+          // Plus sign
+          const plus = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+          plus.setAttribute('x', String(midPoint.x))
+          plus.setAttribute('y', String(midPoint.y + 4))
+          plus.setAttribute('text-anchor', 'middle')
+          plus.setAttribute('fill', 'white')
+          plus.setAttribute('font-size', '14')
+          plus.setAttribute('font-weight', 'bold')
+          plus.setAttribute('style', 'pointer-events: none')
+          plus.textContent = '+'
+
+          buttonGroup.appendChild(circle)
+          buttonGroup.appendChild(plus)
+
+          // Hover area (larger invisible circle for easier hovering)
+          const hoverArea = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+          hoverArea.setAttribute('cx', String(midPoint.x))
+          hoverArea.setAttribute('cy', String(midPoint.y))
+          hoverArea.setAttribute('r', '18')
+          hoverArea.setAttribute('fill', 'transparent')
+          hoverArea.style.cursor = 'pointer'
+
+          // Show button on hover
+          hoverArea.addEventListener('mouseenter', () => {
+            buttonGroup.style.opacity = '1'
+          })
+          hoverArea.addEventListener('mouseleave', () => {
+            buttonGroup.style.opacity = '0'
+          })
+
+          // Handle click
+          hoverArea.addEventListener('click', (e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            onAddAfter(sourceStepId)
+          })
+
+          // Add to SVG
+          svgElement.appendChild(hoverArea)
+          svgElement.appendChild(buttonGroup)
+        } catch {
+          // getTotalLength might fail on some paths
+        }
+      })
+    }
+  }, [svg, selectedNodeId, onNodeClick, onAddAfter])
 
   if (error) {
     return (

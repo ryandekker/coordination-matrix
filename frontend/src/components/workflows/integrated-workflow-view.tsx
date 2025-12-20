@@ -318,6 +318,14 @@ export function IntegratedWorkflowView({
     updateStep(index, { stepType: type })
   }, [updateStep])
 
+  // Handle adding step after a node (from edge + button)
+  const handleAddAfter = useCallback((afterStepId: string) => {
+    const afterIndex = steps.findIndex(s => s.id === afterStepId)
+    if (afterIndex >= 0) {
+      addStep(afterIndex)
+    }
+  }, [steps, addStep])
+
   return (
     <div className={cn('flex h-full gap-2 min-h-0', className)}>
       {/* Diagram Panel */}
@@ -393,6 +401,7 @@ export function IntegratedWorkflowView({
               chart={mermaidCode}
               selectedNodeId={selectedStepId}
               onNodeClick={handleNodeClick}
+              onAddAfter={handleAddAfter}
               className="min-h-[200px]"
             />
           )}
@@ -402,7 +411,7 @@ export function IntegratedWorkflowView({
         {steps.length > 0 && (
           <div className="px-3 py-1.5 border-t bg-muted/30 text-xs text-muted-foreground flex items-center gap-1.5 flex-shrink-0">
             <MousePointerClick className="h-3 w-3" />
-            Click a node to edit
+            Click node to edit • Hover arrow for +
           </div>
         )}
       </div>
