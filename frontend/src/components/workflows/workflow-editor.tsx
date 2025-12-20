@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/collapsible'
 import { Mermaid } from '@/components/ui/mermaid'
 import { MermaidLiveEditor } from '@/components/ui/mermaid-live-editor'
+import { IntegratedWorkflowView } from './integrated-workflow-view'
 import {
   Tabs,
   TabsContent,
@@ -46,6 +47,7 @@ import {
   FileCode,
   Upload,
   Download,
+  LayoutPanelLeft,
   AlertCircle,
   ChevronDown,
   ChevronRight,
@@ -519,7 +521,7 @@ export function WorkflowEditor({
   const [rootTaskTitleTemplate, setRootTaskTitleTemplate] = useState('')
   const [mermaidCode, setMermaidCode] = useState('')
   const [mermaidError, setMermaidError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState('visual')
+  const [activeTab, setActiveTab] = useState('integrated')
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
@@ -804,13 +806,17 @@ export function WorkflowEditor({
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
             <div className="flex items-center justify-between mb-2">
               <TabsList>
+                <TabsTrigger value="integrated" className="gap-2">
+                  <LayoutPanelLeft className="h-4 w-4" />
+                  Visual
+                </TabsTrigger>
                 <TabsTrigger value="visual" className="gap-2">
                   <GripVertical className="h-4 w-4" />
                   Steps
                 </TabsTrigger>
                 <TabsTrigger value="code" className="gap-2">
                   <FileCode className="h-4 w-4" />
-                  Diagram
+                  Code
                 </TabsTrigger>
               </TabsList>
 
@@ -841,6 +847,21 @@ export function WorkflowEditor({
                 </div>
               )}
             </div>
+
+            {/* Integrated View Tab - Diagram + Step Config */}
+            <TabsContent value="integrated" className="flex-1 overflow-hidden mt-0">
+              <IntegratedWorkflowView
+                steps={steps}
+                workflowId={workflow?._id}
+                users={users}
+                onStepsChange={(newSteps) => {
+                  setSteps(newSteps)
+                  // Auto-generate Mermaid when steps change
+                  setMermaidCode(generateMermaidFromSteps(newSteps, watch('name')))
+                }}
+                className="h-full"
+              />
+            </TabsContent>
 
             {/* Visual Editor Tab */}
             <TabsContent value="visual" className="flex-1 overflow-auto mt-0">
