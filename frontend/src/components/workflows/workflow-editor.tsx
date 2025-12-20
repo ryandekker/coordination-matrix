@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useUsers } from '@/hooks/use-tasks'
+import { workflowsApi, Workflow as ApiWorkflow } from '@/lib/api'
 import {
   Dialog,
   DialogContent,
@@ -49,6 +50,7 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronRight,
+  ChevronsUpDown,
   GitBranch,
   Repeat,
   Merge,
@@ -524,6 +526,10 @@ export function WorkflowEditor({
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
 
+  // Available workflows for Flow step type
+  const [availableWorkflows, setAvailableWorkflows] = useState<ApiWorkflow[]>([])
+  const [loadingWorkflows, setLoadingWorkflows] = useState(false)
+
   // Fetch users for default assignee dropdown
   const { data: usersData } = useUsers()
   const users = usersData?.data || []
@@ -588,6 +594,27 @@ export function WorkflowEditor({
     }
   }, [workflow, reset])
 
+  // Fetch available workflows for Flow step type (nested workflows)
+  useEffect(() => {
+    if (isOpen && availableWorkflows.length === 0 && !loadingWorkflows) {
+      setLoadingWorkflows(true)
+      workflowsApi.list()
+        .then(response => {
+          if (response.data) {
+            // Exclude the current workflow from the list to prevent self-reference
+            const filtered = response.data.filter(w => w._id !== workflow?._id)
+            setAvailableWorkflows(filtered)
+          }
+        })
+        .catch(err => {
+          console.error('Failed to fetch workflows:', err)
+        })
+        .finally(() => {
+          setLoadingWorkflows(false)
+        })
+    }
+  }, [isOpen, workflow?._id])
+
   // Update mermaid when steps change
   // Extract primitive value to avoid infinite re-renders (watch function changes reference every render)
   const workflowName = watch('name')
@@ -620,6 +647,19 @@ export function WorkflowEditor({
       stepType: 'agent',
     }
     setSteps([...steps, newStep])
+    // Auto-expand new step
+    setExpandedSteps(prev => new Set(prev).add(newStep.id))
+  }
+
+  const insertStepAt = (index: number) => {
+    const newStep: WorkflowStep = {
+      id: `step-${Date.now()}`,
+      name: `Step ${index + 1}`,
+      stepType: 'agent',
+    }
+    const newSteps = [...steps]
+    newSteps.splice(index, 0, newStep)
+    setSteps(newSteps)
     // Auto-expand new step
     setExpandedSteps(prev => new Set(prev).add(newStep.id))
   }
@@ -700,150 +740,268 @@ export function WorkflowEditor({
     onSave(workflowData)
   }
 
-  const exportMermaid = () => {
-    const blob = new Blob([mermaidCode], { type: 'text/plain' })
+  // Export complete workflow as JSON (includes all data for full import)
+  const exportWorkflowJson = () => {
+    const workflowData = {
+      name: watch('name') || '',
+      description: watch('description') || '',
+      isActive: watch('isActive'),
+      rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
+      steps,
+      mermaidDiagram: mermaidCode,
+      exportedAt: new Date().toISOString(),
+      version: '1.0',
+    }
+    const blob = new Blob([JSON.stringify(workflowData, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${watch('name') || 'workflow'}.mmd`
+    a.download = `${watch('name') || 'workflow'}.json`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
   }
 
-  const importMermaidFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+  // Import workflow from file (supports both JSON and Mermaid)
+  const importWorkflowFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
 
     const reader = new FileReader()
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       const content = e.target?.result as string
-      setMermaidCode(content)
-      setActiveTab('code')
+      const isJson = file.name.endsWith('.json')
+
+      if (isJson) {
+        try {
+          const data = JSON.parse(content)
+
+          // Apply workflow-level fields
+          if (data.name) setValue('name', data.name)
+          if (data.description !== undefined) setValue('description', data.description)
+          if (data.isActive !== undefined) setValue('isActive', data.isActive)
+          if (data.rootTaskTitleTemplate) setRootTaskTitleTemplate(data.rootTaskTitleTemplate)
+
+          // Apply steps if present
+          if (data.steps && Array.isArray(data.steps)) {
+            // Normalize steps
+            const normalizedSteps = data.steps.map((step: WorkflowStep) => ({
+              ...step,
+              stepType: step.stepType || 'agent',
+              // Preserve the id for round-trip, but generate new ones if missing
+              id: step.id || `step-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            }))
+            setSteps(normalizedSteps)
+            setExpandedSteps(new Set(normalizedSteps.map((s: WorkflowStep) => s.id)))
+          }
+
+          // Apply mermaid diagram if present
+          if (data.mermaidDiagram) {
+            setMermaidCode(data.mermaidDiagram)
+          }
+
+          setActiveTab('visual')
+          setSyncError(null)
+        } catch (err) {
+          setSyncError('Invalid JSON file: ' + (err instanceof Error ? err.message : 'Unknown error'))
+        }
+      } else {
+        // Mermaid file - just update the code and switch to diagram tab
+        setMermaidCode(content)
+        setActiveTab('code')
+        setSyncError(null)
+      }
     }
     reader.readAsText(file)
+
+    // Reset the input so the same file can be selected again
+    event.target.value = ''
+  }
+
+  // Expand/collapse all steps
+  const toggleAllSteps = () => {
+    if (expandedSteps.size === steps.length) {
+      // All expanded, collapse all
+      setExpandedSteps(new Set())
+    } else {
+      // Some or none expanded, expand all
+      setExpandedSteps(new Set(steps.map(s => s.id)))
+    }
   }
 
   const getStepTypeInfo = (stepType?: WorkflowStepType) => {
     return STEP_TYPES.find(st => st.type === (stepType || 'task')) || STEP_TYPES[0]
   }
 
+  // Hidden file input ref for import
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-[90vw] w-full max-h-[90vh] overflow-hidden flex flex-col">
-        <DialogHeader>
-          <DialogTitle>
-            {workflow ? 'Edit Workflow' : 'Create New Workflow'}
-          </DialogTitle>
-        </DialogHeader>
-
         <form onSubmit={handleSubmit(onSubmit)} className="flex-1 flex flex-col overflow-hidden">
-          {/* Basic Info */}
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Name *</label>
-              <Input {...register('name')} placeholder="Workflow name" />
-              {errors.name && (
-                <p className="text-sm text-destructive">{errors.name.message}</p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Description</label>
-              <Input
-                {...register('description')}
-                placeholder="Brief description"
-              />
-            </div>
-          </div>
-
-          {/* Root Task Title Template */}
-          <div className="mb-4">
-            <div className="space-y-1">
-              <label className="text-sm font-medium flex items-center gap-2">
-                <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                Root Task Title Template
-                <span className="text-xs text-muted-foreground">(optional)</span>
-              </label>
-              <div className="flex gap-1">
-                <Input
-                  value={rootTaskTitleTemplate}
-                  onChange={(e) => setRootTaskTitleTemplate(e.target.value)}
-                  placeholder={`e.g., "Process Order: {{input.orderId}}" - defaults to "Workflow: {name}"`}
-                  className="font-mono text-sm"
-                />
-                <TokenBrowser
-                  workflowId={workflow?._id}
-                  previousSteps={[]}
-                  currentStepIndex={0}
-                  onSelectToken={(token) => {
-                    setRootTaskTitleTemplate(prev => prev + token)
-                  }}
-                  variant="text"
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Dynamic title for the workflow&apos;s parent task. Use {`{{input.field}}`} to include data from the workflow input payload.
-                If empty, defaults to &quot;Workflow: {watch('name') || '{name}'}&quot;.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 mb-4">
-            <Checkbox
-              id="isActive"
-              checked={watch('isActive')}
-              onCheckedChange={(checked) => setValue('isActive', !!checked)}
-            />
-            <label htmlFor="isActive" className="text-sm font-medium">
-              Active
-            </label>
-          </div>
-
-          {/* Tabs for Visual/Code */}
+          {/* Tabs and Header - all at top for more workspace */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between mb-2">
-              <TabsList>
-                <TabsTrigger value="visual" className="gap-2">
-                  <GripVertical className="h-4 w-4" />
-                  Steps
-                </TabsTrigger>
-                <TabsTrigger value="code" className="gap-2">
-                  <FileCode className="h-4 w-4" />
-                  Diagram
-                </TabsTrigger>
-              </TabsList>
-
-              {/* Sync button - converts Mermaid code to steps */}
-              {activeTab === 'code' && (
-                <div className="flex items-center gap-2">
-                  {syncError && (
-                    <span className="text-xs text-destructive flex items-center gap-1">
-                      <AlertCircle className="h-3 w-3" />
-                      {syncError}
-                    </span>
+            {/* Header row: Title, Tabs, Import/Export */}
+            <div className="flex items-center justify-between gap-4 pb-3 border-b mb-3">
+              <div className="flex items-center gap-4 flex-1">
+                {/* Workflow name input inline with title */}
+                <div className="flex items-center gap-2 flex-1 max-w-md">
+                  <Input
+                    {...register('name')}
+                    placeholder="Workflow name *"
+                    className="h-9 text-base font-medium"
+                  />
+                  {errors.name && (
+                    <AlertCircle className="h-4 w-4 text-destructive flex-shrink-0" />
                   )}
+                </div>
+
+                {/* Tabs in header */}
+                <TabsList className="h-9">
+                  <TabsTrigger value="visual" className="gap-1.5 h-7">
+                    <GripVertical className="h-4 w-4" />
+                    Steps
+                  </TabsTrigger>
+                  <TabsTrigger value="code" className="gap-1.5 h-7">
+                    <FileCode className="h-4 w-4" />
+                    Diagram
+                  </TabsTrigger>
+                  <TabsTrigger value="settings" className="gap-1.5 h-7">
+                    <Info className="h-4 w-4" />
+                    Settings
+                  </TabsTrigger>
+                </TabsList>
+              </div>
+
+              {/* Import/Export buttons */}
+              <div className="flex items-center gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".json,.mmd"
+                  onChange={importWorkflowFile}
+                  className="hidden"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="h-9 gap-1.5"
+                >
+                  <Upload className="h-4 w-4" />
+                  Import
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={exportWorkflowJson}
+                  className="h-9 gap-1.5"
+                >
+                  <Download className="h-4 w-4" />
+                  Export
+                </Button>
+              </div>
+            </div>
+
+            {/* Sync error display */}
+            {syncError && (
+              <div className="mb-2 px-2 py-1.5 bg-destructive/10 text-destructive text-sm rounded-md flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                {syncError}
+              </div>
+            )}
+
+            {/* Settings Tab */}
+            <TabsContent value="settings" className="flex-1 overflow-auto mt-0">
+              <div className="space-y-4 p-4 bg-muted/30 rounded-lg max-w-2xl">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Description</label>
+                  <Input
+                    {...register('description')}
+                    placeholder="Brief description of this workflow"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-sm font-medium flex items-center gap-2">
+                    <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                    Root Task Title Template
+                    <span className="text-xs text-muted-foreground">(optional)</span>
+                  </label>
+                  <div className="flex gap-1">
+                    <Input
+                      value={rootTaskTitleTemplate}
+                      onChange={(e) => setRootTaskTitleTemplate(e.target.value)}
+                      placeholder={`e.g., "Process Order: {{input.orderId}}"`}
+                      className="font-mono text-sm h-9"
+                    />
+                    <TokenBrowser
+                      workflowId={workflow?._id}
+                      previousSteps={[]}
+                      currentStepIndex={0}
+                      onSelectToken={(token) => {
+                        setRootTaskTitleTemplate(prev => prev + token)
+                      }}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Dynamic title for the workflow&apos;s parent task. Use {`{{input.field}}`} for input data.
+                    Defaults to &quot;Workflow: {watch('name') || '{name}'}&quot;.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 pt-2">
+                  <Checkbox
+                    id="isActive"
+                    checked={watch('isActive')}
+                    onCheckedChange={(checked) => setValue('isActive', !!checked)}
+                  />
+                  <label htmlFor="isActive" className="text-sm font-medium">
+                    Active
+                  </label>
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* Visual Editor Tab - context actions */}
+            <TabsContent value="visual" className="flex-1 flex flex-col overflow-hidden mt-0">
+              {/* Visual tab toolbar */}
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={syncMermaidToSteps}
-                    disabled={isSyncing || !mermaidCode.trim()}
-                    className="gap-2"
+                    onClick={addStep}
+                    className="h-9 gap-1.5"
                   >
-                    {isSyncing ? (
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <ArrowRight className="h-4 w-4" />
-                    )}
-                    {isSyncing ? 'Parsing...' : 'Import to Steps'}
+                    <Plus className="h-4 w-4" />
+                    Add Step
                   </Button>
+                  {steps.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={toggleAllSteps}
+                      className="h-9 gap-1.5 text-muted-foreground"
+                    >
+                      <ChevronsUpDown className="h-4 w-4" />
+                      {expandedSteps.size === steps.length ? 'Collapse All' : 'Expand All'}
+                    </Button>
+                  )}
                 </div>
-              )}
-            </div>
+                <span className="text-xs text-muted-foreground">
+                  {steps.length} step{steps.length !== 1 ? 's' : ''}
+                </span>
+              </div>
 
-            {/* Visual Editor Tab */}
-            <TabsContent value="visual" className="flex-1 overflow-auto mt-0">
+              {/* Steps list */}
+              <div className="flex-1 overflow-auto">
               <div className="space-y-0 p-2 bg-muted/30 rounded-lg">
                 {steps.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
@@ -875,10 +1033,21 @@ export function WorkflowEditor({
 
                       return (
                         <div key={step.id} className="relative">
-                          {/* Arrow between steps */}
+                          {/* Insert button between steps */}
                           {index > 0 && (
-                            <div className="flex items-center justify-center py-1">
+                            <div className="flex items-center justify-center py-2 gap-2">
                               <ArrowDown className="h-4 w-4 text-muted-foreground" />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => insertStepAt(index)}
+                                className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-primary hover:text-primary-foreground"
+                                title="Insert step here"
+                              >
+                                <Plus className="h-3 w-3 mr-1" />
+                                Insert
+                              </Button>
                             </div>
                           )}
 
@@ -946,7 +1115,7 @@ export function WorkflowEditor({
                                 onChange={(e) => updateStep(index, { name: e.target.value })}
                                 onClick={(e) => e.stopPropagation()}
                                 placeholder="Step name"
-                                className="h-8"
+                                className="h-9"
                               />
                             </div>
 
@@ -954,7 +1123,7 @@ export function WorkflowEditor({
                               value={step.stepType}
                               onValueChange={(val) => updateStep(index, { stepType: val as WorkflowStepType })}
                             >
-                              <SelectTrigger className="w-[130px] h-8" onClick={(e) => e.stopPropagation()}>
+                              <SelectTrigger className="w-[130px] h-9" onClick={(e) => e.stopPropagation()}>
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -979,7 +1148,7 @@ export function WorkflowEditor({
                               type="button"
                               variant="ghost"
                               size="sm"
-                              className="h-8 w-8 p-0 text-destructive"
+                              className="h-9 w-9 p-0 text-destructive"
                               onClick={(e) => { e.stopPropagation(); removeStep(index) }}
                             >
                               <Trash2 className="h-4 w-4" />
@@ -1192,7 +1361,7 @@ The agent will receive task context automatically.`}
                                           externalConfig: { ...step.externalConfig, method: val as any }
                                         })}
                                       >
-                                        <SelectTrigger className="h-8">
+                                        <SelectTrigger className="h-9">
                                           <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -1212,7 +1381,7 @@ The agent will receive task context automatically.`}
                                           externalConfig: { ...step.externalConfig, endpoint: e.target.value }
                                         })}
                                         placeholder="https://api.example.com/webhook"
-                                        className="font-mono text-sm h-8"
+                                        className="font-mono text-sm h-9"
                                       />
                                     </div>
                                   </div>
@@ -1662,7 +1831,7 @@ The agent will receive task context automatically.`}
                                           type="button"
                                           variant="ghost"
                                           size="sm"
-                                          className="h-8 w-8 p-0 text-destructive"
+                                          className="h-9 w-9 p-0 text-destructive"
                                           onClick={() => {
                                             const newConns = (step.connections || []).filter((_, i) => i !== connIdx)
                                             updateStep(index, { connections: newConns })
@@ -1733,15 +1902,27 @@ The agent will receive task context automatically.`}
                                   </div>
 
                                   <div className="space-y-1">
-                                    <label className="text-sm font-medium">Flow ID</label>
-                                    <Input
+                                    <label className="text-sm font-medium">Target Workflow</label>
+                                    <Select
                                       value={step.flowId || ''}
-                                      onChange={(e) => updateStep(index, { flowId: e.target.value })}
-                                      placeholder="workflow-id"
-                                      className="font-mono text-sm"
-                                    />
+                                      onValueChange={(value) => updateStep(index, { flowId: value })}
+                                    >
+                                      <SelectTrigger className="h-9">
+                                        <SelectValue placeholder={loadingWorkflows ? 'Loading...' : 'Select a workflow'} />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {availableWorkflows.length === 0 && !loadingWorkflows && (
+                                          <SelectItem value="_none" disabled>No workflows available</SelectItem>
+                                        )}
+                                        {availableWorkflows.map((wf) => (
+                                          <SelectItem key={wf._id} value={wf._id}>
+                                            {wf.name}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
                                     <p className="text-xs text-muted-foreground">
-                                      The ID of the workflow to delegate to.
+                                      The workflow to delegate execution to.
                                     </p>
                                   </div>
                                 </>
@@ -1761,7 +1942,7 @@ The agent will receive task context automatically.`}
                                         value={step.inputSource || 'previous'}
                                         onValueChange={(val) => updateStep(index, { inputSource: val })}
                                       >
-                                        <SelectTrigger className="h-8 text-sm">
+                                        <SelectTrigger className="h-9 text-sm">
                                           <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -1802,7 +1983,7 @@ The agent will receive task context automatically.`}
                                             updateStep(index, { inputPath: newPath })
                                           }}
                                           placeholder="e.g., output.data"
-                                          className="h-8 text-sm font-mono"
+                                          className="h-9 text-sm font-mono"
                                         />
                                         <TokenBrowser
                                           workflowId={workflow?._id}
@@ -1864,16 +2045,7 @@ The agent will receive task context automatically.`}
                   })()
                 )}
 
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={addStep}
-                  className="w-full"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Step
-                </Button>
+              </div>
               </div>
             </TabsContent>
 

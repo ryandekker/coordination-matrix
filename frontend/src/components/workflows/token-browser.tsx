@@ -367,7 +367,7 @@ export function TokenBrowser({
               type="button"
               variant="outline"
               size="sm"
-              className="h-8 w-8 p-0 flex-shrink-0"
+              className="h-9 w-9 p-0 flex-shrink-0"
             >
               <Plus className="h-4 w-4" />
             </Button>
@@ -376,10 +376,10 @@ export function TokenBrowser({
               type="button"
               variant="outline"
               size="sm"
-              className="h-8"
+              className="h-9 gap-1.5 flex-shrink-0"
             >
-              <Plus className="h-3 w-3 mr-1" />
-              Insert Token
+              <Plus className="h-4 w-4" />
+              Token
             </Button>
           )
         )}
