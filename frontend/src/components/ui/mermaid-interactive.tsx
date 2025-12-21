@@ -210,80 +210,65 @@ export function MermaidInteractive({
 
           if (!sourceStepId) return
 
-          // Create the add button group with modern styling
+          // Create minimal plus button - background matches page, plus is accent color
           const buttonGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g')
           buttonGroup.setAttribute('class', 'add-step-btn')
           buttonGroup.style.cursor = 'pointer'
-          buttonGroup.style.opacity = '0'
-          buttonGroup.style.transition = 'all 0.2s ease'
-          buttonGroup.style.transform = 'scale(0.8)'
-          buttonGroup.style.transformOrigin = `${midPoint.x}px ${midPoint.y}px`
+          buttonGroup.style.transition = 'all 0.15s ease'
 
-          // Shadow circle (for depth)
-          const shadow = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-          shadow.setAttribute('cx', String(midPoint.x))
-          shadow.setAttribute('cy', String(midPoint.y + 2))
-          shadow.setAttribute('r', '11')
-          shadow.setAttribute('fill', 'rgba(0,0,0,0.2)')
-
-          // Main circle with gradient-like effect
+          // Background circle - matches page background (appears as negative space)
           const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
           circle.setAttribute('cx', String(midPoint.x))
           circle.setAttribute('cy', String(midPoint.y))
-          circle.setAttribute('r', '11')
-          circle.setAttribute('fill', '#10b981')
-          circle.setAttribute('stroke', 'white')
-          circle.setAttribute('stroke-width', '2')
+          circle.setAttribute('r', '10')
+          circle.setAttribute('fill', '#fafafa')
+          circle.setAttribute('stroke', '#e5e5e5')
+          circle.setAttribute('stroke-width', '1')
+          circle.style.transition = 'all 0.15s ease'
 
-          // Plus icon using paths for crisp rendering
+          // Plus icon - accent colored
           const plusGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g')
-          plusGroup.setAttribute('stroke', 'white')
-          plusGroup.setAttribute('stroke-width', '2.5')
+          plusGroup.setAttribute('stroke', '#10b981')
+          plusGroup.setAttribute('stroke-width', '2')
           plusGroup.setAttribute('stroke-linecap', 'round')
+          plusGroup.style.transition = 'all 0.15s ease'
 
           const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line')
-          hLine.setAttribute('x1', String(midPoint.x - 5))
+          hLine.setAttribute('x1', String(midPoint.x - 4))
           hLine.setAttribute('y1', String(midPoint.y))
-          hLine.setAttribute('x2', String(midPoint.x + 5))
+          hLine.setAttribute('x2', String(midPoint.x + 4))
           hLine.setAttribute('y2', String(midPoint.y))
 
           const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line')
           vLine.setAttribute('x1', String(midPoint.x))
-          vLine.setAttribute('y1', String(midPoint.y - 5))
+          vLine.setAttribute('y1', String(midPoint.y - 4))
           vLine.setAttribute('x2', String(midPoint.x))
-          vLine.setAttribute('y2', String(midPoint.y + 5))
+          vLine.setAttribute('y2', String(midPoint.y + 4))
 
           plusGroup.appendChild(hLine)
           plusGroup.appendChild(vLine)
 
-          buttonGroup.appendChild(shadow)
           buttonGroup.appendChild(circle)
           buttonGroup.appendChild(plusGroup)
 
-          // Hover area - centered on button
-          const hoverArea = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-          hoverArea.setAttribute('cx', String(midPoint.x))
-          hoverArea.setAttribute('cy', String(midPoint.y))
-          hoverArea.setAttribute('r', '20')
-          hoverArea.setAttribute('fill', 'transparent')
-          hoverArea.style.cursor = 'pointer'
-
-          hoverArea.addEventListener('mouseenter', () => {
-            buttonGroup.style.opacity = '1'
-            buttonGroup.style.transform = 'scale(1)'
+          // Hover handlers on the button group itself
+          buttonGroup.addEventListener('mouseenter', () => {
+            circle.setAttribute('fill', '#10b981')
+            circle.setAttribute('stroke', '#10b981')
+            plusGroup.setAttribute('stroke', 'white')
           })
-          hoverArea.addEventListener('mouseleave', () => {
-            buttonGroup.style.opacity = '0'
-            buttonGroup.style.transform = 'scale(0.8)'
+          buttonGroup.addEventListener('mouseleave', () => {
+            circle.setAttribute('fill', '#fafafa')
+            circle.setAttribute('stroke', '#e5e5e5')
+            plusGroup.setAttribute('stroke', '#10b981')
           })
 
-          hoverArea.addEventListener('click', (e) => {
+          buttonGroup.addEventListener('click', (e) => {
             e.stopPropagation()
             e.preventDefault()
             onAddAfter(sourceStepId!)
           })
 
-          svgElement.appendChild(hoverArea)
           svgElement.appendChild(buttonGroup)
         } catch {
           // getTotalLength might fail on some paths
