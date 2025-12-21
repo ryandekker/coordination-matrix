@@ -2,18 +2,16 @@ import { Router, Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
 import { workflowExecutionService } from '../services/workflow-execution-service.js';
 import { StartWorkflowInput, WorkflowRunStatus } from '../types/index.js';
-import { optionalAuth } from '../middleware/auth.js';
+import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
-
-// Apply optional auth to all routes to get user ID from JWT token
-router.use(optionalAuth);
 
 // ============================================================================
 // Start Workflow Run
 // POST /api/workflow-runs
+// Requires authentication (JWT or API key) to prevent spam
 // ============================================================================
-router.post('/', async (req: Request, res: Response): Promise<void> => {
+router.post('/', requireAuth, async (req: Request, res: Response): Promise<void> => {
   try {
     const input: StartWorkflowInput = req.body;
 
@@ -50,7 +48,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
 // List Workflow Runs
 // GET /api/workflow-runs
 // ============================================================================
-router.get('/', async (req: Request, res: Response): Promise<void> => {
+router.get('/', requireAuth, async (req: Request, res: Response): Promise<void> => {
   try {
     const {
       workflowId,
@@ -107,8 +105,9 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
 // ============================================================================
 // Get Workflow Run
 // GET /api/workflow-runs/:id
+// Requires authentication (JWT or API key)
 // ============================================================================
-router.get('/:id', async (req: Request, res: Response): Promise<void> => {
+router.get('/:id', requireAuth, async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     const includeTasks = req.query.includeTasks === 'true';
@@ -142,8 +141,9 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
 // ============================================================================
 // Cancel Workflow Run
 // POST /api/workflow-runs/:id/cancel
+// Requires authentication (JWT or API key)
 // ============================================================================
-router.post('/:id/cancel', async (req: Request, res: Response): Promise<void> => {
+router.post('/:id/cancel', requireAuth, async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
 

@@ -368,14 +368,14 @@ class WorkflowExecutionService {
       workflowRunId: run._id,
       taskType: 'flow',
       executionMode: 'automated',
-      createdById: actorId,
+      createdById: actorId ?? null,
       createdAt: now,
       updatedAt: now,
       metadata: {
         workflowRunId: run._id.toString(),
-        inputPayload: run.inputPayload,
-        externalId: run.externalId,
-        source: run.source,
+        ...(run.inputPayload && { inputPayload: run.inputPayload }),
+        ...(run.externalId && { externalId: run.externalId }),
+        ...(run.source && { source: run.source }),
       },
       // Apply task defaults from workflow run
       ...this.applyTaskDefaults(run, now),
