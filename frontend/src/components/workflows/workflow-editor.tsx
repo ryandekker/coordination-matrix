@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/collapsible'
 import { Mermaid } from '@/components/ui/mermaid'
 import { MermaidLiveEditor } from '@/components/ui/mermaid-live-editor'
+import { IntegratedWorkflowView } from './integrated-workflow-view'
 import {
   Tabs,
   TabsContent,
@@ -47,6 +48,7 @@ import {
   FileCode,
   Upload,
   Download,
+  LayoutPanelLeft,
   AlertCircle,
   ChevronDown,
   ChevronRight,
@@ -521,7 +523,7 @@ export function WorkflowEditor({
   const [rootTaskTitleTemplate, setRootTaskTitleTemplate] = useState('')
   const [mermaidCode, setMermaidCode] = useState('')
   const [mermaidError, setMermaidError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState('visual')
+  const [activeTab, setActiveTab] = useState('integrated')
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
@@ -840,131 +842,132 @@ export function WorkflowEditor({
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-[90vw] w-full max-h-[90vh] overflow-hidden flex flex-col">
-        <form onSubmit={handleSubmit(onSubmit)} className="flex-1 flex flex-col overflow-hidden">
-          {/* Tabs and Header - all at top for more workspace */}
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-            {/* Header row: Title, Tabs, Import/Export */}
-            <div className="flex items-center justify-between gap-4 pb-3 border-b mb-3">
-              <div className="flex items-center gap-4 flex-1">
-                {/* Workflow name input inline with title */}
-                <div className="flex items-center gap-2 flex-1 max-w-md">
-                  <Input
-                    {...register('name')}
-                    placeholder="Workflow name *"
-                    className="h-9 text-base font-medium"
-                  />
-                  {errors.name && (
-                    <AlertCircle className="h-4 w-4 text-destructive flex-shrink-0" />
-                  )}
-                </div>
+        <DialogHeader>
+          <DialogTitle>
+            {workflow ? 'Edit Workflow' : 'Create New Workflow'}
+          </DialogTitle>
+        </DialogHeader>
 
-                {/* Tabs in header */}
-                <TabsList className="h-9">
-                  <TabsTrigger value="visual" className="gap-1.5 h-7">
-                    <GripVertical className="h-4 w-4" />
-                    Steps
-                  </TabsTrigger>
-                  <TabsTrigger value="code" className="gap-1.5 h-7">
-                    <FileCode className="h-4 w-4" />
-                    Diagram
-                  </TabsTrigger>
-                  <TabsTrigger value="settings" className="gap-1.5 h-7">
-                    <Info className="h-4 w-4" />
-                    Settings
-                  </TabsTrigger>
-                </TabsList>
-              </div>
-
-              {/* Import/Export buttons */}
-              <div className="flex items-center gap-2">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".json,.mmd"
-                  onChange={importWorkflowFile}
-                  className="hidden"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="h-9 gap-1.5"
-                >
-                  <Upload className="h-4 w-4" />
-                  Import
+        <form onSubmit={handleSubmit(onSubmit)} className="flex-1 flex flex-col overflow-hidden min-h-0">
+          {/* Compact settings header */}
+          <Collapsible defaultOpen={!workflow}>
+            <div className="flex items-center gap-2 mb-2">
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="sm" className="h-7 px-2 gap-1.5">
+                  <ChevronRight className="h-4 w-4 transition-transform [[data-state=open]>&]:rotate-90" />
+                  Settings
                 </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={exportWorkflowJson}
-                  className="h-9 gap-1.5"
-                >
-                  <Download className="h-4 w-4" />
-                  Export
-                </Button>
+              </CollapsibleTrigger>
+              <div className="flex-1 flex items-center gap-3 text-sm">
+                <span className="font-medium truncate max-w-[200px]">{watch('name') || 'Untitled'}</span>
+                {watch('isActive') && (
+                  <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">Active</span>
+                )}
               </div>
             </div>
-
-            {/* Sync error display */}
-            {syncError && (
-              <div className="mb-2 px-2 py-1.5 bg-destructive/10 text-destructive text-sm rounded-md flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                {syncError}
-              </div>
-            )}
-
-            {/* Settings Tab */}
-            <TabsContent value="settings" className="flex-1 overflow-auto mt-0">
-              <div className="space-y-4 p-4 bg-muted/30 rounded-lg max-w-2xl">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Description</label>
+            <CollapsibleContent className="pb-3 border-b mb-3">
+              {/* Basic Info */}
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium">Name *</label>
+                  <Input {...register('name')} placeholder="Workflow name" className="h-8 text-sm" />
+                  {errors.name && (
+                    <p className="text-xs text-destructive">{errors.name.message}</p>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium">Description</label>
                   <Input
                     {...register('description')}
-                    placeholder="Brief description of this workflow"
+                    placeholder="Brief description"
+                    className="h-8 text-sm"
                   />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-sm font-medium flex items-center gap-2">
-                    <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                    Root Task Title Template
-                    <span className="text-xs text-muted-foreground">(optional)</span>
-                  </label>
-                  <div className="flex gap-1">
-                    <Input
-                      value={rootTaskTitleTemplate}
-                      onChange={(e) => setRootTaskTitleTemplate(e.target.value)}
-                      placeholder={`e.g., "Process Order: {{input.orderId}}"`}
-                      className="font-mono text-sm h-9"
-                    />
-                    <TokenBrowser
-                      workflowId={workflow?._id}
-                      previousSteps={[]}
-                      currentStepIndex={0}
-                      onSelectToken={(token) => {
-                        setRootTaskTitleTemplate(prev => prev + token)
-                      }}
-                    />
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Dynamic title for the workflow&apos;s parent task. Use {`{{input.field}}`} for input data.
-                    Defaults to &quot;Workflow: {watch('name') || '{name}'}&quot;.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2 pt-2">
-                  <Checkbox
-                    id="isActive"
-                    checked={watch('isActive')}
-                    onCheckedChange={(checked) => setValue('isActive', !!checked)}
-                  />
-                  <label htmlFor="isActive" className="text-sm font-medium">
-                    Active
-                  </label>
                 </div>
               </div>
+
+              {/* Root Task Title Template */}
+              <div className="space-y-1 mb-3">
+                <label className="text-xs font-medium flex items-center gap-1.5">
+                  <MessageSquare className="h-3 w-3 text-muted-foreground" />
+                  Root Task Title Template
+                  <span className="text-xs text-muted-foreground">(optional)</span>
+                </label>
+                <div className="flex gap-1">
+                  <Input
+                    value={rootTaskTitleTemplate}
+                    onChange={(e) => setRootTaskTitleTemplate(e.target.value)}
+                    placeholder={`e.g., "Process Order: {{input.orderId}}"`}
+                    className="font-mono text-xs h-8"
+                  />
+                  <TokenBrowser
+                    workflowId={workflow?._id}
+                    previousSteps={[]}
+                    currentStepIndex={0}
+                    onSelectToken={(token) => {
+                      setRootTaskTitleTemplate(prev => prev + token)
+                    }}
+                    variant="text"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="isActive"
+                  checked={watch('isActive')}
+                  onCheckedChange={(checked) => setValue('isActive', !!checked)}
+                />
+                <label htmlFor="isActive" className="text-xs font-medium">
+                  Active
+                </label>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+
+          {/* Tabs for Visual/Code */}
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden min-h-0">
+            <div className="flex items-center justify-between mb-2">
+              <TabsList>
+                <TabsTrigger value="integrated" className="gap-2">
+                  <LayoutPanelLeft className="h-4 w-4" />
+                  Visual
+                </TabsTrigger>
+                <TabsTrigger value="visual" className="gap-2">
+                  <GripVertical className="h-4 w-4" />
+                  Steps
+                </TabsTrigger>
+                <TabsTrigger value="code" className="gap-2">
+                  <FileCode className="h-4 w-4" />
+                  Code
+                </TabsTrigger>
+              </TabsList>
+
+              {/* Sync button - converts Mermaid code to steps */}
+              {activeTab === 'code' && (
+                <div className="flex items-center gap-2">
+                  {syncError && (
+                    <span className="text-xs text-destructive flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" />
+                      {syncError}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Integrated View Tab - Diagram + Step Config */}
+            <TabsContent value="integrated" className="flex-1 mt-0 overflow-hidden min-h-0">
+              <IntegratedWorkflowView
+                steps={steps}
+                workflowId={workflow?._id}
+                users={users}
+                onStepsChange={(newSteps) => {
+                  setSteps(newSteps)
+                  // Auto-generate Mermaid when steps change
+                  setMermaidCode(generateMermaidFromSteps(newSteps, watch('name')))
+                }}
+                className="flex-1 min-h-0"
+              />
             </TabsContent>
 
             {/* Visual Editor Tab - context actions */}
