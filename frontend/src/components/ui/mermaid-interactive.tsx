@@ -212,8 +212,11 @@ export function MermaidInteractive({
 
           // Detect dark mode
           const isDark = document.documentElement.classList.contains('dark')
-          const bgColor = isDark ? '#27272a' : '#fafafa'  // zinc-800 : neutral-50
+          // Default: bg-muted/20 (semi-transparent muted)
+          const defaultBg = isDark ? 'rgba(39, 39, 42, 0.2)' : 'rgba(244, 244, 245, 0.2)'  // zinc-800/20 : zinc-100/20
           const borderColor = isDark ? '#3f3f46' : '#e5e5e5'  // zinc-700 : neutral-200
+          // Hover: white background
+          const hoverBg = isDark ? '#fafafa' : '#ffffff'  // neutral-50 : white
           const accentColor = '#10b981'  // emerald-500
 
           // Create minimal plus button - background matches page, plus is accent color
@@ -222,12 +225,12 @@ export function MermaidInteractive({
           buttonGroup.style.cursor = 'pointer'
           buttonGroup.style.transition = 'all 0.15s ease'
 
-          // Background circle - matches page background (appears as negative space)
+          // Background circle - semi-transparent muted by default
           const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
           circle.setAttribute('cx', String(midPoint.x))
           circle.setAttribute('cy', String(midPoint.y))
           circle.setAttribute('r', '10')
-          circle.setAttribute('fill', bgColor)
+          circle.setAttribute('fill', defaultBg)
           circle.setAttribute('stroke', borderColor)
           circle.setAttribute('stroke-width', '1')
           circle.style.transition = 'all 0.15s ease'
@@ -259,12 +262,12 @@ export function MermaidInteractive({
 
           // Hover handlers on the button group itself
           buttonGroup.addEventListener('mouseenter', () => {
-            circle.setAttribute('fill', accentColor)
+            circle.setAttribute('fill', hoverBg)
             circle.setAttribute('stroke', accentColor)
-            plusGroup.setAttribute('stroke', 'white')
+            plusGroup.setAttribute('stroke', accentColor)
           })
           buttonGroup.addEventListener('mouseleave', () => {
-            circle.setAttribute('fill', bgColor)
+            circle.setAttribute('fill', defaultBg)
             circle.setAttribute('stroke', borderColor)
             plusGroup.setAttribute('stroke', accentColor)
           })
