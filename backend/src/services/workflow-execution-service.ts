@@ -297,20 +297,22 @@ class WorkflowExecutionService {
     } : undefined;
 
     // Create workflow run
+    // Only include optional fields when they have values to avoid MongoDB validation issues
+    // (schema expects null for ObjectId fields, not undefined)
     const run: Omit<WorkflowRun, '_id'> = {
       workflowId,
       status: 'running',
       currentStepIds: [],
       completedStepIds: [],
-      inputPayload: input.inputPayload,
-      taskDefaults,
-      executionOptions: input.executionOptions,
-      externalId: input.externalId,
-      source: input.source,
       callbackSecret: this.generateSecret(),
-      createdById: actorId,
+      createdById: actorId ?? null,
       createdAt: now,
       startedAt: now,
+      ...(input.inputPayload && { inputPayload: input.inputPayload }),
+      ...(taskDefaults && { taskDefaults }),
+      ...(input.executionOptions && { executionOptions: input.executionOptions }),
+      ...(input.externalId && { externalId: input.externalId }),
+      ...(input.source && { source: input.source }),
     };
 
     const runResult = await this.workflowRuns.insertOne(run as WorkflowRun);
