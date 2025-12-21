@@ -154,90 +154,119 @@ export function MermaidInteractive({
       const svgElement = container.querySelector('svg')
       if (!svgElement) return
 
-      // Get positions of all nodes to place + buttons between them
-      const nodePositions: { stepId: string; x: number; y: number; height: number }[] = []
+      // Find actual edge paths and position buttons on them
+      const edgePaths = container.querySelectorAll('.edgePath path, path.flowchart-link')
 
-      stepIds.forEach(stepId => {
-        // Find the node element for this step
-        const nodeEl = container.querySelector(`[id*="${stepId}"]`)
-        if (nodeEl) {
-          const bbox = (nodeEl as SVGGraphicsElement).getBBox?.()
-          if (bbox) {
-            nodePositions.push({
-              stepId,
-              x: bbox.x + bbox.width / 2,
-              y: bbox.y + bbox.height,
-              height: bbox.height
-            })
+      // Build a map of step IDs to their indices
+      const stepIdToIndex = new Map<string, number>()
+      stepIds.forEach((id, idx) => stepIdToIndex.set(id, idx))
+
+      edgePaths.forEach((pathEl) => {
+        const pathElement = pathEl as SVGPathElement
+        try {
+          const pathLength = pathElement.getTotalLength()
+          if (pathLength < 20) return // Skip very short paths
+
+          const midPoint = pathElement.getPointAtLength(pathLength / 2)
+
+          // Try to determine which step this edge comes from
+          // Look at the parent's class for LS-{stepId} pattern
+          const parent = pathElement.closest('.edgePath')
+          let sourceStepId: string | null = null
+
+          if (parent) {
+            const classList = parent.getAttribute('class') || ''
+            // Try to match LS-{stepId} pattern
+            const sourceMatch = classList.match(/LS-([^\s]+)/)
+            if (sourceMatch) {
+              sourceStepId = sourceMatch[1]
+            }
           }
+
+          // If we couldn't find source from class, use position-based detection
+          if (!sourceStepId) {
+            // Find the closest step node above this path's start point
+            const startPoint = pathElement.getPointAtLength(0)
+            let closestStepId: string | null = null
+            let closestDist = Infinity
+
+            stepIds.forEach(stepId => {
+              const nodeEl = container.querySelector(`[id*="${stepId}"]`)
+              if (nodeEl) {
+                const bbox = (nodeEl as SVGGraphicsElement).getBBox?.()
+                if (bbox) {
+                  const nodeCenterX = bbox.x + bbox.width / 2
+                  const nodeBottomY = bbox.y + bbox.height
+                  const dist = Math.hypot(startPoint.x - nodeCenterX, startPoint.y - nodeBottomY)
+                  if (dist < closestDist && dist < 100) {
+                    closestDist = dist
+                    closestStepId = stepId
+                  }
+                }
+              }
+            })
+            sourceStepId = closestStepId
+          }
+
+          if (!sourceStepId) return
+
+          // Create the add button group
+          const buttonGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g')
+          buttonGroup.setAttribute('class', 'add-step-btn')
+          buttonGroup.style.cursor = 'pointer'
+          buttonGroup.style.opacity = '0.4'
+          buttonGroup.style.transition = 'opacity 0.15s'
+
+          // Circle background
+          const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+          circle.setAttribute('cx', String(midPoint.x))
+          circle.setAttribute('cy', String(midPoint.y))
+          circle.setAttribute('r', '10')
+          circle.setAttribute('fill', '#10b981')
+          circle.setAttribute('stroke', 'white')
+          circle.setAttribute('stroke-width', '2')
+
+          // Plus sign
+          const plus = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+          plus.setAttribute('x', String(midPoint.x))
+          plus.setAttribute('y', String(midPoint.y + 4))
+          plus.setAttribute('text-anchor', 'middle')
+          plus.setAttribute('fill', 'white')
+          plus.setAttribute('font-size', '14')
+          plus.setAttribute('font-weight', 'bold')
+          plus.setAttribute('style', 'pointer-events: none')
+          plus.textContent = '+'
+
+          buttonGroup.appendChild(circle)
+          buttonGroup.appendChild(plus)
+
+          // Hover area
+          const hoverArea = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+          hoverArea.setAttribute('cx', String(midPoint.x))
+          hoverArea.setAttribute('cy', String(midPoint.y))
+          hoverArea.setAttribute('r', '18')
+          hoverArea.setAttribute('fill', 'transparent')
+          hoverArea.style.cursor = 'pointer'
+
+          hoverArea.addEventListener('mouseenter', () => {
+            buttonGroup.style.opacity = '1'
+          })
+          hoverArea.addEventListener('mouseleave', () => {
+            buttonGroup.style.opacity = '0.4'
+          })
+
+          hoverArea.addEventListener('click', (e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            onAddAfter(sourceStepId!)
+          })
+
+          svgElement.appendChild(hoverArea)
+          svgElement.appendChild(buttonGroup)
+        } catch {
+          // getTotalLength might fail on some paths
         }
       })
-
-      // Add a + button between each consecutive pair of nodes
-      for (let i = 0; i < nodePositions.length - 1; i++) {
-        const current = nodePositions[i]
-        const next = nodePositions[i + 1]
-
-        // Position the button between the two nodes
-        const midX = (current.x + next.x) / 2
-        const midY = (current.y + next.y - next.height) / 2
-
-        // Create the add button group
-        const buttonGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g')
-        buttonGroup.setAttribute('class', 'add-step-btn')
-        buttonGroup.style.cursor = 'pointer'
-        buttonGroup.style.opacity = '0.3'
-        buttonGroup.style.transition = 'opacity 0.15s'
-
-        // Circle background
-        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-        circle.setAttribute('cx', String(midX))
-        circle.setAttribute('cy', String(midY))
-        circle.setAttribute('r', '10')
-        circle.setAttribute('fill', '#10b981')
-        circle.setAttribute('stroke', 'white')
-        circle.setAttribute('stroke-width', '2')
-
-        // Plus sign
-        const plus = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-        plus.setAttribute('x', String(midX))
-        plus.setAttribute('y', String(midY + 4))
-        plus.setAttribute('text-anchor', 'middle')
-        plus.setAttribute('fill', 'white')
-        plus.setAttribute('font-size', '14')
-        plus.setAttribute('font-weight', 'bold')
-        plus.setAttribute('style', 'pointer-events: none')
-        plus.textContent = '+'
-
-        buttonGroup.appendChild(circle)
-        buttonGroup.appendChild(plus)
-
-        // Hover area
-        const hoverArea = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-        hoverArea.setAttribute('cx', String(midX))
-        hoverArea.setAttribute('cy', String(midY))
-        hoverArea.setAttribute('r', '18')
-        hoverArea.setAttribute('fill', 'transparent')
-        hoverArea.style.cursor = 'pointer'
-
-        const sourceStepId = current.stepId
-
-        hoverArea.addEventListener('mouseenter', () => {
-          buttonGroup.style.opacity = '1'
-        })
-        hoverArea.addEventListener('mouseleave', () => {
-          buttonGroup.style.opacity = '0.3'
-        })
-
-        hoverArea.addEventListener('click', (e) => {
-          e.stopPropagation()
-          e.preventDefault()
-          onAddAfter(sourceStepId)
-        })
-
-        svgElement.appendChild(hoverArea)
-        svgElement.appendChild(buttonGroup)
-      }
     }
   }, [svg, selectedNodeId, stepIds, onNodeClick, onAddAfter])
 
