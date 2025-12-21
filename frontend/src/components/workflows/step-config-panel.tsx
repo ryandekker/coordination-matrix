@@ -36,7 +36,6 @@ import {
   ChevronUp,
   ChevronDown,
 } from 'lucide-react'
-import { ScrollArea } from '@/components/ui/scroll-area'
 
 type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow'
 
@@ -158,9 +157,8 @@ export function StepConfigPanel({
   }))
 
   return (
-    <div className="h-full flex flex-col min-h-0 overflow-hidden">
-      <ScrollArea className="flex-1 h-full">
-        <div className="p-4 space-y-4">
+    <div className="h-full overflow-y-auto">
+      <div className="p-4 space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -857,8 +855,7 @@ export function StepConfigPanel({
           <Plus className="h-4 w-4 mr-2" />
           Add Step After
         </Button>
-        </div>
-      </ScrollArea>
+      </div>
     </div>
   )
 }
