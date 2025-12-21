@@ -327,12 +327,12 @@ export function IntegratedWorkflowView({
   }, [steps, addStep])
 
   return (
-    <div className={cn('flex gap-2', className)} style={{ height: '100%', maxHeight: '100%' }}>
+    <div className={cn('flex gap-2 h-full', className)}>
       {/* Diagram Panel */}
       <div className={cn(
-        'flex flex-col bg-muted/20 border rounded-lg transition-all overflow-hidden',
+        'flex flex-col bg-muted/20 border rounded-lg transition-all overflow-hidden min-h-0',
         isPanelCollapsed ? 'flex-1' : 'flex-[3]'
-      )} style={{ height: '100%' }}>
+      )}>
         {/* Diagram Header */}
         <div className="flex items-center justify-between px-3 py-2 border-b bg-background/50 flex-shrink-0">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -419,9 +419,9 @@ export function IntegratedWorkflowView({
 
       {/* Config Panel */}
       {!isPanelCollapsed && (
-        <div className="flex-[2] flex flex-col border rounded-lg bg-background overflow-hidden" style={{ height: '100%' }}>
+        <div className="flex-[2] flex flex-col border rounded-lg bg-background overflow-hidden min-h-0">
           {selectedStep ? (
-            <div className="flex-1 min-h-0 overflow-hidden">
+            <div className="flex-1 min-h-0 overflow-y-auto">
               <StepConfigPanel
               step={selectedStep}
               stepIndex={selectedStepIndex}

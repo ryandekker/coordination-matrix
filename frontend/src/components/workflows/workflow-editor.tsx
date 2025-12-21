@@ -863,7 +863,7 @@ export function WorkflowEditor({
             </div>
 
             {/* Integrated View Tab - Diagram + Step Config */}
-            <TabsContent value="integrated" className="flex-1 mt-0 overflow-hidden" style={{ height: 'calc(100% - 40px)' }}>
+            <TabsContent value="integrated" className="flex-1 mt-0 overflow-hidden min-h-0">
               <IntegratedWorkflowView
                 steps={steps}
                 workflowId={workflow?._id}
@@ -873,7 +873,7 @@ export function WorkflowEditor({
                   // Auto-generate Mermaid when steps change
                   setMermaidCode(generateMermaidFromSteps(newSteps, watch('name')))
                 }}
-                className="h-full"
+                className="flex-1 min-h-0"
               />
             </TabsContent>
 
