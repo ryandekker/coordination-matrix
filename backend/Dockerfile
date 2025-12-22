@@ -37,4 +37,5 @@ USER nodejs
 
 EXPOSE 3001
 
-CMD ["node", "dist/index.js"]
+# Run migrations before starting the server
+CMD ["sh", "-c", "node dist/migrations/cli.js run && node dist/index.js"]
