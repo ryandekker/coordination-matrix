@@ -115,8 +115,15 @@ function getValueByPathStatic(obj: Record<string, unknown> | undefined, path: st
 }
 
 /**
- * Recursively strips undefined values from an object.
+ * Fields that are optional objectId references.
+ * Old MongoDB validators may reject null for these fields, so we strip them.
+ */
+const NULLABLE_ID_FIELDS = new Set(['parentId', 'createdById', 'assigneeId']);
+
+/**
+ * Recursively strips undefined values and null values for optional objectId fields.
  * MongoDB validation can fail if undefined values are present in documents.
+ * Old validators may also reject null for optional objectId fields.
  */
 function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
   if (obj === null || obj === undefined) return obj;
@@ -131,12 +138,15 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
 
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
-    if (value !== undefined) {
-      if (typeof value === 'object' && value !== null && !(value instanceof Date) && !(value instanceof ObjectId)) {
-        result[key] = stripUndefined(value as Record<string, unknown>);
-      } else {
-        result[key] = value;
-      }
+    // Skip undefined values
+    if (value === undefined) continue;
+    // Skip null values for optional objectId fields (old validators may reject null)
+    if (value === null && NULLABLE_ID_FIELDS.has(key)) continue;
+
+    if (typeof value === 'object' && value !== null && !(value instanceof Date) && !(value instanceof ObjectId)) {
+      result[key] = stripUndefined(value as Record<string, unknown>);
+    } else {
+      result[key] = value;
     }
   }
   return result as T;
@@ -363,11 +373,13 @@ class WorkflowExecutionService {
     const task: Omit<Task, '_id'> = {
       title: taskTitle,
       status: 'in_progress',
+      // Root task has no parent - set null for TypeScript, stripUndefined removes it
       parentId: null,
       workflowId: workflow._id,
       workflowRunId: run._id,
       taskType: 'flow',
       executionMode: 'automated',
+      // Set null for TypeScript, stripUndefined removes it if null
       createdById: actorId ?? null,
       createdAt: now,
       updatedAt: now,
@@ -548,9 +560,10 @@ class WorkflowExecutionService {
       executionMode,
       // Apply run defaults first, then step-specific assignee overrides
       ...runDefaults,
+      // Set null for TypeScript, stripUndefined removes null for optional objectId fields
       assigneeId: step.defaultAssigneeId
         ? new ObjectId(step.defaultAssigneeId)
-        : runDefaults.assigneeId || null,
+        : runDefaults.assigneeId ?? null,
       createdAt: now,
       updatedAt: now,
       metadata: {
