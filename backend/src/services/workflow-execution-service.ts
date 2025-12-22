@@ -363,12 +363,14 @@ class WorkflowExecutionService {
     const task: Omit<Task, '_id'> = {
       title: taskTitle,
       status: 'in_progress',
-      parentId: null,
+      // Root task has no parent - omit field entirely (don't set null)
+      // Old validators may reject null for objectId fields
       workflowId: workflow._id,
       workflowRunId: run._id,
       taskType: 'flow',
       executionMode: 'automated',
-      createdById: actorId ?? null,
+      // Only include createdById if we have an actorId
+      ...(actorId && { createdById: actorId }),
       createdAt: now,
       updatedAt: now,
       metadata: {
@@ -538,6 +540,11 @@ class WorkflowExecutionService {
 
     // Build task object, only including optional string fields if they have values
     // This prevents MongoDB validation errors for undefined string fields
+    // Resolve assignee - only include if we have a value (don't set null)
+    const resolvedAssigneeId = step.defaultAssigneeId
+      ? new ObjectId(step.defaultAssigneeId)
+      : runDefaults.assigneeId;
+
     const task: Omit<Task, '_id'> = {
       title: taskTitle,
       status: initialStatus,
@@ -548,9 +555,8 @@ class WorkflowExecutionService {
       executionMode,
       // Apply run defaults first, then step-specific assignee overrides
       ...runDefaults,
-      assigneeId: step.defaultAssigneeId
-        ? new ObjectId(step.defaultAssigneeId)
-        : runDefaults.assigneeId || null,
+      // Only include assigneeId if we have a value (old validators may reject null)
+      ...(resolvedAssigneeId && { assigneeId: resolvedAssigneeId }),
       createdAt: now,
       updatedAt: now,
       metadata: {
