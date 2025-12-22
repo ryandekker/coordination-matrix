@@ -121,9 +121,20 @@ function getValueByPathStatic(obj: Record<string, unknown> | undefined, path: st
 const NULLABLE_ID_FIELDS = new Set(['parentId', 'createdById', 'assigneeId']);
 
 /**
+ * taskType values that exist in old Atlas validators.
+ * New values like 'flow', 'trigger', 'agent', 'manual', 'webhook' are not in
+ * the old enum and will cause validation failures. We strip these so the
+ * optional taskType field is omitted rather than rejected.
+ */
+const OLD_ATLAS_TASK_TYPES = new Set([
+  'standard', 'decision', 'foreach', 'join', 'external', 'subflow'
+]);
+
+/**
  * Recursively strips undefined values and null values for optional objectId fields.
  * MongoDB validation can fail if undefined values are present in documents.
  * Old validators may also reject null for optional objectId fields.
+ * Also strips taskType values not in the old Atlas enum.
  */
 function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
   if (obj === null || obj === undefined) return obj;
@@ -142,6 +153,8 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
     if (value === undefined) continue;
     // Skip null values for optional objectId fields (old validators may reject null)
     if (value === null && NULLABLE_ID_FIELDS.has(key)) continue;
+    // Skip taskType values not in old Atlas enum (optional field, omit rather than reject)
+    if (key === 'taskType' && typeof value === 'string' && !OLD_ATLAS_TASK_TYPES.has(value)) continue;
 
     if (typeof value === 'object' && value !== null && !(value instanceof Date) && !(value instanceof ObjectId)) {
       result[key] = stripUndefined(value as Record<string, unknown>);
