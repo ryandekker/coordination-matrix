@@ -19,7 +19,7 @@ interface WebhookTaskConfigProps {
   task?: Task | null
   isEditMode: boolean
   webhookConfig?: WebhookConfig
-  onConfigChange: (config: WebhookConfig) => void
+  onConfigChange: (config: WebhookConfig, options?: { skipSave?: boolean }) => void
 }
 
 const HTTP_METHODS: WebhookMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
@@ -47,10 +47,15 @@ export function WebhookTaskConfig({
   const lastAttempt = attempts[attempts.length - 1]
 
   const handleExecute = async () => {
-    if (!task?._id) return
+    if (!task?._id || !webhookConfig) return
     setIsExecuting(true)
     try {
-      await tasksApi.executeWebhook(task._id)
+      const result = await tasksApi.executeWebhook(task._id)
+      // Update local state with new attempt
+      if (result.data) {
+        const newAttempts = [...(webhookConfig.attempts || []), result.data]
+        onConfigChange({ ...webhookConfig, attempts: newAttempts }, { skipSave: true })
+      }
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
       queryClient.invalidateQueries({ queryKey: ['task', task._id] })
     } catch (error) {
@@ -61,10 +66,15 @@ export function WebhookTaskConfig({
   }
 
   const handleRetry = async () => {
-    if (!task?._id) return
+    if (!task?._id || !webhookConfig) return
     setIsRetrying(true)
     try {
-      await tasksApi.retryWebhook(task._id)
+      const result = await tasksApi.retryWebhook(task._id)
+      // Update local state with new attempt
+      if (result.data) {
+        const newAttempts = [...(webhookConfig.attempts || []), result.data]
+        onConfigChange({ ...webhookConfig, attempts: newAttempts }, { skipSave: true })
+      }
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
       queryClient.invalidateQueries({ queryKey: ['task', task._id] })
     } catch (error) {
@@ -274,9 +284,9 @@ export function WebhookTaskConfig({
         {attempts.length > 0 && (
           <div className="space-y-2 pt-2 border-t border-border/50">
             <label className="text-xs font-medium text-muted-foreground">Execution History</label>
-            <div className="space-y-1.5 max-h-40 overflow-y-auto">
+            <div className="space-y-1.5 max-h-60 overflow-y-auto">
               {attempts.map((attempt, index) => (
-                <AttemptRow key={index} attempt={attempt} />
+                <AttemptRow key={index} attempt={attempt} webhookConfig={webhookConfig} />
               ))}
             </div>
           </div>
@@ -330,7 +340,7 @@ export function WebhookTaskConfig({
   return null
 }
 
-function AttemptRow({ attempt }: { attempt: WebhookAttempt }) {
+function AttemptRow({ attempt, webhookConfig }: { attempt: WebhookAttempt; webhookConfig?: WebhookConfig }) {
   const [expanded, setExpanded] = useState(false)
 
   const statusColors = {
@@ -371,17 +381,53 @@ function AttemptRow({ attempt }: { attempt: WebhookAttempt }) {
         )}
       </div>
       {expanded && (
-        <div className="pt-1 space-y-1">
-          {attempt.errorMessage && (
-            <div className="p-1.5 bg-red-500/10 rounded text-red-600 break-all">
-              {attempt.errorMessage}
+        <div className="pt-1 space-y-2">
+          {/* Request Details */}
+          {webhookConfig && (
+            <div className="space-y-1">
+              <div className="text-[10px] font-medium text-muted-foreground uppercase">Request</div>
+              <div className="p-1.5 bg-muted/50 rounded space-y-1">
+                <div className="font-mono text-[10px] break-all">
+                  <span className="text-primary font-semibold">{webhookConfig.method}</span>{' '}
+                  <span>{webhookConfig.url}</span>
+                </div>
+                {webhookConfig.headers && Object.keys(webhookConfig.headers).length > 0 && (
+                  <div className="text-[10px] text-muted-foreground">
+                    <span className="font-medium">Headers:</span>{' '}
+                    <span className="font-mono">{JSON.stringify(webhookConfig.headers)}</span>
+                  </div>
+                )}
+                {webhookConfig.body && webhookConfig.method !== 'GET' && (
+                  <div className="text-[10px]">
+                    <span className="font-medium text-muted-foreground">Body:</span>
+                    <pre className="mt-0.5 p-1 bg-background rounded font-mono text-[10px] break-all whitespace-pre-wrap max-h-20 overflow-y-auto">
+                      {webhookConfig.body}
+                    </pre>
+                  </div>
+                )}
+              </div>
             </div>
           )}
+
+          {/* Error Message */}
+          {attempt.errorMessage && (
+            <div className="space-y-1">
+              <div className="text-[10px] font-medium text-red-500 uppercase">Error</div>
+              <div className="p-1.5 bg-red-500/10 rounded text-red-600 break-all">
+                {attempt.errorMessage}
+              </div>
+            </div>
+          )}
+
+          {/* Response Body */}
           {attempt.responseBody !== undefined && attempt.responseBody !== null && (
-            <div className="p-1.5 bg-muted rounded font-mono text-[10px] break-all max-h-24 overflow-y-auto">
-              {typeof attempt.responseBody === 'string'
-                ? attempt.responseBody
-                : JSON.stringify(attempt.responseBody as object, null, 2)}
+            <div className="space-y-1">
+              <div className="text-[10px] font-medium text-muted-foreground uppercase">Response</div>
+              <pre className="p-1.5 bg-muted rounded font-mono text-[10px] break-all whitespace-pre-wrap max-h-40 overflow-y-auto">
+                {typeof attempt.responseBody === 'string'
+                  ? attempt.responseBody
+                  : JSON.stringify(attempt.responseBody as object, null, 2)}
+              </pre>
             </div>
           )}
         </div>

@@ -96,6 +96,7 @@ export function TaskModal({
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastSavedDataRef = useRef<string>('')
   const pendingChangesRef = useRef<Record<string, unknown> | null>(null)
+  const webhookSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const createTask = useCreateTask()
   const updateTask = useUpdateTask()
@@ -373,6 +374,9 @@ export function TaskModal({
         clearTimeout(autoSaveTimeoutRef.current)
         // Perform the pending save immediately instead of cancelling
         performAutoSave()
+      }
+      if (webhookSaveTimeoutRef.current) {
+        clearTimeout(webhookSaveTimeoutRef.current)
       }
       setMetadataError(null)
       setIsMetadataEditMode(false)
@@ -1029,7 +1033,7 @@ export function TaskModal({
             task={task}
             isEditMode={isEditMode}
             webhookConfig={webhookConfig}
-            onConfigChange={(config) => {
+            onConfigChange={(config, _options) => {
               setWebhookConfig(config)
             }}
           />
@@ -1112,14 +1116,21 @@ export function TaskModal({
             task={task}
             isEditMode={true}
             webhookConfig={webhookConfig}
-            onConfigChange={(config) => {
+            onConfigChange={(config, options) => {
               setWebhookConfig(config)
-              // Auto-save webhook config changes for existing tasks
+              // Skip save if explicitly requested (e.g., after execute/retry)
+              if (options?.skipSave) return
+              // Debounce auto-save webhook config changes for existing tasks
               if (task) {
-                updateTask.mutateAsync({
-                  id: task._id,
-                  data: { webhookConfig: config },
-                })
+                if (webhookSaveTimeoutRef.current) {
+                  clearTimeout(webhookSaveTimeoutRef.current)
+                }
+                webhookSaveTimeoutRef.current = setTimeout(() => {
+                  updateTask.mutateAsync({
+                    id: task._id,
+                    data: { webhookConfig: config },
+                  })
+                }, 800)
               }
             }}
           />
