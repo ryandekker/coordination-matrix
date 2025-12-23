@@ -76,11 +76,21 @@ class WebhookTaskService {
     const attemptNumber = attempts.length + 1;
     const maxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
 
-    // Create new attempt record
+    // Build headers
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...config.headers,
+    };
+
+    // Create new attempt record with request details
     const attempt: WebhookAttempt = {
       attemptNumber,
       startedAt: new Date(),
       status: 'pending',
+      requestUrl: config.url,
+      requestMethod: config.method,
+      requestHeaders: headers,
+      requestBody: config.body && config.method !== 'GET' ? config.body : undefined,
     };
 
     // Update task to in_progress
@@ -102,23 +112,17 @@ class WebhookTaskService {
     let errorMessage: string | undefined;
 
     try {
-      // Build headers
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        ...config.headers,
-      };
-
       // Make the HTTP request with timeout
       const controller = new AbortController();
       const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-      console.log(`[WebhookTaskService] Executing webhook ${id} attempt ${attemptNumber}: ${config.method} ${config.url}`);
+      console.log(`[WebhookTaskService] Executing webhook ${id} attempt ${attemptNumber}: ${attempt.requestMethod} ${attempt.requestUrl}`);
 
-      const response = await fetch(config.url, {
-        method: config.method,
-        headers,
-        body: config.body && config.method !== 'GET' ? config.body : undefined,
+      const response = await fetch(attempt.requestUrl!, {
+        method: attempt.requestMethod,
+        headers: attempt.requestHeaders,
+        body: attempt.requestBody,
         signal: controller.signal,
       });
 

@@ -924,12 +924,16 @@ class WorkflowExecutionService {
 
       const isSuccess = successStatusCodes.includes(response.status);
 
-      // Record the attempt
+      // Record the attempt with request details
       const attempt = {
         attemptNumber: 1,
         startedAt: new Date(startTime),
         completedAt: new Date(),
         status: isSuccess ? 'success' : 'failed',
+        requestUrl: resolvedUrl,
+        requestMethod: method,
+        requestHeaders: resolvedHeaders,
+        requestBody: resolvedBody,
         httpStatus: response.status,
         responseBody: parsedResponse,
         durationMs,
@@ -998,6 +1002,10 @@ class WorkflowExecutionService {
         startedAt: new Date(startTime),
         completedAt: new Date(),
         status: 'failed' as const,
+        requestUrl: resolvedUrl,
+        requestMethod: method,
+        requestHeaders: resolvedHeaders,
+        requestBody: resolvedBody,
         errorMessage: String(error),
         durationMs,
       };

@@ -86,6 +86,12 @@ export interface WebhookAttempt {
   startedAt: Date;
   completedAt?: Date;
   status: 'pending' | 'success' | 'failed';
+  // Request details (resolved from templates)
+  requestUrl?: string;
+  requestMethod?: string;
+  requestHeaders?: Record<string, string>;
+  requestBody?: string;
+  // Response details
   httpStatus?: number;
   responseBody?: unknown;
   errorMessage?: string;

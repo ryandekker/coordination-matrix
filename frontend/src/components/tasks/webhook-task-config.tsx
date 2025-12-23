@@ -286,7 +286,7 @@ export function WebhookTaskConfig({
             <label className="text-xs font-medium text-muted-foreground">Execution History</label>
             <div className="space-y-1.5 max-h-60 overflow-y-auto">
               {attempts.map((attempt, index) => (
-                <AttemptRow key={index} attempt={attempt} webhookConfig={webhookConfig} />
+                <AttemptRow key={index} attempt={attempt} />
               ))}
             </div>
           </div>
@@ -340,7 +340,7 @@ export function WebhookTaskConfig({
   return null
 }
 
-function AttemptRow({ attempt, webhookConfig }: { attempt: WebhookAttempt; webhookConfig?: WebhookConfig }) {
+function AttemptRow({ attempt }: { attempt: WebhookAttempt }) {
   const [expanded, setExpanded] = useState(false)
 
   const statusColors = {
@@ -383,25 +383,25 @@ function AttemptRow({ attempt, webhookConfig }: { attempt: WebhookAttempt; webho
       {expanded && (
         <div className="pt-1 space-y-2">
           {/* Request Details */}
-          {webhookConfig && (
+          {attempt.requestUrl && (
             <div className="space-y-1">
               <div className="text-[10px] font-medium text-muted-foreground uppercase">Request</div>
               <div className="p-1.5 bg-muted/50 rounded space-y-1">
                 <div className="font-mono text-[10px] break-all">
-                  <span className="text-primary font-semibold">{webhookConfig.method}</span>{' '}
-                  <span>{webhookConfig.url}</span>
+                  <span className="text-primary font-semibold">{attempt.requestMethod}</span>{' '}
+                  <span>{attempt.requestUrl}</span>
                 </div>
-                {webhookConfig.headers && Object.keys(webhookConfig.headers).length > 0 && (
+                {attempt.requestHeaders && Object.keys(attempt.requestHeaders).length > 0 && (
                   <div className="text-[10px] text-muted-foreground">
                     <span className="font-medium">Headers:</span>{' '}
-                    <span className="font-mono">{JSON.stringify(webhookConfig.headers)}</span>
+                    <span className="font-mono">{JSON.stringify(attempt.requestHeaders)}</span>
                   </div>
                 )}
-                {webhookConfig.body && webhookConfig.method !== 'GET' && (
+                {attempt.requestBody && attempt.requestMethod !== 'GET' && (
                   <div className="text-[10px]">
                     <span className="font-medium text-muted-foreground">Body:</span>
                     <pre className="mt-0.5 p-1 bg-background rounded font-mono text-[10px] break-all whitespace-pre-wrap max-h-20 overflow-y-auto">
-                      {webhookConfig.body}
+                      {attempt.requestBody}
                     </pre>
                   </div>
                 )}
