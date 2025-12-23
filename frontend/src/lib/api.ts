@@ -1097,6 +1097,51 @@ export const batchJobsApi = {
   },
 }
 
+// API Keys Types
+export interface ApiKey {
+  _id: string
+  name: string
+  description?: string
+  key?: string // Only present on creation/regeneration
+  keyPrefix: string
+  scopes: string[]
+  createdAt: string
+  expiresAt?: string | null
+  lastUsedAt?: string | null
+  isActive: boolean
+}
+
+// API Keys API
+export const apiKeysApi = {
+  list: async (): Promise<ApiResponse<ApiKey[]>> => {
+    const response = await authFetch(`${API_BASE}/auth/api-keys`)
+    return handleResponse(response)
+  },
+
+  create: async (data: { name: string; description?: string; scopes: string[] }): Promise<ApiResponse<ApiKey>> => {
+    const response = await authFetch(`${API_BASE}/auth/api-keys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  delete: async (id: string): Promise<ApiResponse<void>> => {
+    const response = await authFetch(`${API_BASE}/auth/api-keys/${id}`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
+
+  regenerate: async (id: string): Promise<ApiResponse<ApiKey>> => {
+    const response = await authFetch(`${API_BASE}/auth/api-keys/${id}/regenerate`, {
+      method: 'POST',
+    })
+    return handleResponse(response)
+  },
+}
+
 // Webhooks API
 export const webhooksApi = {
   list: async (params?: { isActive?: boolean; limit?: number; offset?: number }): Promise<{

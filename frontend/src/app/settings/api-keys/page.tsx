@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, MoreHorizontal, Copy, RefreshCw, Trash2, Eye, EyeOff, Key } from 'lucide-react'
+import { Plus, MoreHorizontal, Copy, RefreshCw, Trash2, Eye, Key } from 'lucide-react'
 import {
   Table,
   TableBody,
@@ -41,21 +41,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
 import { formatDateTime } from '@/lib/utils'
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
-
-interface ApiKey {
-  _id: string
-  name: string
-  description?: string
-  key?: string // Only present on creation/regeneration
-  keyPrefix: string
-  scopes: string[]
-  createdAt: string
-  expiresAt?: string | null
-  lastUsedAt?: string | null
-  isActive: boolean
-}
+import { apiKeysApi, type ApiKey } from '@/lib/api'
 
 const AVAILABLE_SCOPES = [
   { value: 'tasks:read', label: 'Read Tasks', description: 'View tasks and task details' },
@@ -63,37 +49,6 @@ const AVAILABLE_SCOPES = [
   { value: 'saved-searches:read', label: 'Read Saved Searches', description: 'Access saved searches/views' },
   { value: 'saved-searches:write', label: 'Write Saved Searches', description: 'Create and modify saved searches' },
 ]
-
-async function fetchApiKeys(): Promise<{ data: ApiKey[] }> {
-  const response = await fetch(`${API_BASE}/auth/api-keys`)
-  if (!response.ok) throw new Error('Failed to fetch API keys')
-  return response.json()
-}
-
-async function createApiKey(data: Partial<ApiKey>): Promise<{ data: ApiKey }> {
-  const response = await fetch(`${API_BASE}/auth/api-keys`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  if (!response.ok) throw new Error('Failed to create API key')
-  return response.json()
-}
-
-async function deleteApiKey(id: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/auth/api-keys/${id}`, {
-    method: 'DELETE',
-  })
-  if (!response.ok) throw new Error('Failed to delete API key')
-}
-
-async function regenerateApiKey(id: string): Promise<{ data: ApiKey }> {
-  const response = await fetch(`${API_BASE}/auth/api-keys/${id}/regenerate`, {
-    method: 'POST',
-  })
-  if (!response.ok) throw new Error('Failed to regenerate API key')
-  return response.json()
-}
 
 export default function ApiKeysPage() {
   const queryClient = useQueryClient()
@@ -111,11 +66,11 @@ export default function ApiKeysPage() {
 
   const { data: apiKeysData, isLoading } = useQuery({
     queryKey: ['api-keys'],
-    queryFn: fetchApiKeys,
+    queryFn: apiKeysApi.list,
   })
 
   const createMutation = useMutation({
-    mutationFn: createApiKey,
+    mutationFn: (data: { name: string; description?: string; scopes: string[] }) => apiKeysApi.create(data),
     onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['api-keys'] })
       setIsCreateModalOpen(false)
@@ -127,7 +82,7 @@ export default function ApiKeysPage() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: deleteApiKey,
+    mutationFn: apiKeysApi.delete,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['api-keys'] })
       setKeyToDelete(null)
@@ -135,7 +90,7 @@ export default function ApiKeysPage() {
   })
 
   const regenerateMutation = useMutation({
-    mutationFn: regenerateApiKey,
+    mutationFn: apiKeysApi.regenerate,
     onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['api-keys'] })
       setKeyToRegenerate(null)
