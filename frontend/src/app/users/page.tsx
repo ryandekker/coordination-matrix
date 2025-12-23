@@ -37,39 +37,25 @@ import {
 } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Textarea } from '@/components/ui/textarea'
-import { User } from '@/lib/api'
+import { User, usersApi, authFetch } from '@/lib/api'
 import { formatDateTime } from '@/lib/utils'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
 async function fetchUsers(): Promise<{ data: User[] }> {
-  const response = await fetch(`${API_BASE}/users`)
-  if (!response.ok) throw new Error('Failed to fetch users')
-  return response.json()
+  return usersApi.list()
 }
 
 async function createUser(data: Partial<User>): Promise<{ data: User }> {
-  const response = await fetch(`${API_BASE}/users`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  if (!response.ok) throw new Error('Failed to create user')
-  return response.json()
+  return usersApi.create(data)
 }
 
 async function updateUser(id: string, data: Partial<User>): Promise<{ data: User }> {
-  const response = await fetch(`${API_BASE}/users/${id}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  if (!response.ok) throw new Error('Failed to update user')
-  return response.json()
+  return usersApi.update(id, data)
 }
 
 async function deleteUser(id: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/users/${id}`, {
+  const response = await authFetch(`${API_BASE}/users/${id}`, {
     method: 'DELETE',
   })
   if (!response.ok) throw new Error('Failed to delete user')
