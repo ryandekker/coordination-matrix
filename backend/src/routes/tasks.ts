@@ -66,10 +66,20 @@ function buildFilter(query: Record<string, unknown>, currentUserId?: string): Fi
 
   // Assignee filter
   if (assigneeId) {
-    const resolvedAssigneeId = resolveUserPlaceholder(assigneeId as string, currentUserId);
-    // Skip if placeholder couldn't be resolved (no current user)
-    if (resolvedAssigneeId !== '{{currentUserId}}') {
-      filter.assigneeId = toObjectId(resolvedAssigneeId);
+    if (Array.isArray(assigneeId)) {
+      const resolvedIds = assigneeId
+        .map((id) => resolveUserPlaceholder(id as string, currentUserId))
+        .filter((id) => id !== '{{currentUserId}}')
+        .map((id) => toObjectId(id));
+      if (resolvedIds.length > 0) {
+        filter.assigneeId = { $in: resolvedIds };
+      }
+    } else {
+      const resolvedAssigneeId = resolveUserPlaceholder(assigneeId as string, currentUserId);
+      // Skip if placeholder couldn't be resolved (no current user)
+      if (resolvedAssigneeId !== '{{currentUserId}}') {
+        filter.assigneeId = toObjectId(resolvedAssigneeId);
+      }
     }
   }
 
