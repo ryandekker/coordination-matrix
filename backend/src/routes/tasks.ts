@@ -35,8 +35,19 @@ function buildFilter(query: Record<string, unknown>, currentUserId?: string): Fi
     filter.$text = { $search: search };
   }
 
+  // Check if any filters are active (meaning we should flatten the view)
+  const hasActiveFilters = !!(
+    search ||
+    status ||
+    urgency ||
+    assigneeId ||
+    tags ||
+    (filters && typeof filters === 'object' && Object.keys(filters as object).length > 0)
+  );
+
   // Parent filter - flow tasks should appear at root level even if they have a parent
-  if (rootOnly === 'true' || rootOnly === true) {
+  // When filters are active, skip rootOnly to show all matching tasks (flattened view)
+  if ((rootOnly === 'true' || rootOnly === true) && !hasActiveFilters) {
     // Show root tasks OR flow tasks (flow tasks appear at both root and under parent)
     filter.$or = [
       { parentId: null },
