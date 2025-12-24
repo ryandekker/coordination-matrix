@@ -29,6 +29,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { View, LookupValue, User, Task } from '@/lib/api'
+import { UserChip } from '@/components/ui/user-chip'
 
 interface TaskToolbarProps {
   views: View[]
@@ -374,7 +375,11 @@ export function TaskToolbar({
               checked={((filters.assigneeId as string[]) || []).includes(user._id)}
               onCheckedChange={(checked) => handleAssigneeFilter(user._id, checked)}
             >
-              {user.displayName}
+              <UserChip
+                user={user as Parameters<typeof UserChip>[0]['user']}
+                size="sm"
+                showUnassigned={false}
+              />
             </DropdownMenuCheckboxItem>
           ))}
         </DropdownMenuContent>
