@@ -373,6 +373,7 @@ const InlineTaskRow = memo(function InlineTaskRow({
 }) {
   const [title, setTitle] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const isSubmittingRef = useRef(false)
 
   useEffect(() => {
     if (inputRef.current) {
@@ -383,8 +384,14 @@ const InlineTaskRow = memo(function InlineTaskRow({
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && title.trim()) {
       e.preventDefault()
+      isSubmittingRef.current = true
       onSubmit(title.trim())
       setTitle('')
+      // Re-focus after a brief delay to ensure the input stays focused
+      setTimeout(() => {
+        isSubmittingRef.current = false
+        inputRef.current?.focus()
+      }, 0)
     } else if (e.key === 'Escape') {
       e.preventDefault()
       onCancel()
@@ -394,7 +401,8 @@ const InlineTaskRow = memo(function InlineTaskRow({
   const handleBlur = useCallback(() => {
     // Small delay to allow click on another element to register
     setTimeout(() => {
-      if (!title.trim()) {
+      // Don't cancel if we just submitted (input was cleared but we want to keep it open)
+      if (!title.trim() && !isSubmittingRef.current) {
         onCancel()
       }
     }, 150)
