@@ -718,8 +718,8 @@ function WorkflowRunsList() {
   useEventStream({ onEvent: handleEvent })
 
   const { data: workflowsData } = useQuery({
-    queryKey: ['workflows'],
-    queryFn: () => workflowsApi.list(),
+    queryKey: ['workflows', 'all'],
+    queryFn: () => workflowsApi.list({ includeInactive: true }),
   })
 
   const { data: runsData, isLoading, error, refetch } = useQuery({

@@ -373,8 +373,13 @@ export const usersApi = {
 
 // Workflows API
 export const workflowsApi = {
-  list: async (): Promise<ApiResponse<Workflow[]>> => {
-    const response = await authFetch(`${API_BASE}/workflows`)
+  list: async (options?: { includeInactive?: boolean }): Promise<ApiResponse<Workflow[]>> => {
+    const params = new URLSearchParams()
+    if (options?.includeInactive) {
+      params.set('includeInactive', 'true')
+    }
+    const queryString = params.toString()
+    const response = await authFetch(`${API_BASE}/workflows${queryString ? `?${queryString}` : ''}`)
     return handleResponse(response)
   },
 
