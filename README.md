@@ -107,7 +107,6 @@ Coordination Matrix is a full-stack application for managing AI workflow tasks w
 | `title` | string | Task title (required) |
 | `summary` | string | Task description/summary |
 | `extraPrompt` | string | Additional prompt for AI tasks |
-| `additionalInfo` | string | Supplementary information |
 | `status` | enum | pending, in_progress, on_hold, completed, cancelled |
 | `urgency` | enum | low, normal, high, urgent |
 | `parentId` | ObjectId | Parent task for hierarchy |

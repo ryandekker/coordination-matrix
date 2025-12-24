@@ -121,7 +121,7 @@ export function computeChanges(oldTask: Partial<Task>, newTask: Partial<Task>): 
   const changes: FieldChange[] = [];
   // Track all actual Task fields from the schema
   const trackedFields = [
-    'title', 'summary', 'extraPrompt', 'additionalInfo', 'status', 'urgency',
+    'title', 'summary', 'extraPrompt', 'status', 'urgency',
     'parentId', 'workflowId', 'workflowStage', 'externalId', 'externalHoldDate',
     'assigneeId', 'createdById', 'tags', 'dueAt', 'metadata'
   ];

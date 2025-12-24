@@ -500,7 +500,6 @@ export interface Task {
   title: string
   summary?: string
   extraPrompt?: string
-  additionalInfo?: string
   status: string
   urgency?: string
   parentId: string | null

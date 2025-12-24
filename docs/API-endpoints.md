@@ -203,7 +203,6 @@ See `./scripts/matrix-cli.mjs --help` for all commands.
   "assigneeId": "507f1f77bcf86cd799439011",
   "tags": ["feature", "backend"],
   "extraPrompt": "AI instructions for this task",
-  "additionalInfo": "Extra context",
   "dueAt": "2025-01-15T00:00:00Z",
   "metadata": {
     "customField": "value"
@@ -215,7 +214,6 @@ See `./scripts/matrix-cli.mjs --help` for all commands.
 ```json
 {
   "status": "completed",
-  "additionalInfo": "Task completed with results...",
   "silent": false,
   "actorId": "507f1f77bcf86cd799439011",
   "actorType": "daemon"
@@ -574,7 +572,7 @@ PATCH /api/tasks/:taskId
 PATCH /api/tasks/:taskId
 {
   "status": "completed",
-  "additionalInfo": "Result of processing..."
+  "metadata": {"result": "Result of processing..."}
 }
 ```
 

@@ -26,7 +26,7 @@ Use `{{variable}}` syntax to reference dynamic data:
 | `{{task.status}}` | Current status |
 | `{{task.assignee}}` | Assigned user |
 | `{{task.priority}}` | Priority level |
-| `{{task.additionalInfo}}` | Extra context field |
+| `{{task.metadata}}` | Task metadata object |
 | `{{task.extraPrompt}}` | User-provided extra instructions |
 | `{{previousStep.output}}` | Output from the previous step |
 | `{{workflow.name}}` | Workflow name |
@@ -101,7 +101,6 @@ Analyze the incoming request and determine the appropriate handling path.
 ## Context
 - Task: {{task.title}}
 - Description: {{task.description}}
-- Additional Info: {{task.additionalInfo}}
 
 ## Instructions
 1. Read and understand the request thoroughly

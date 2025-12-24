@@ -131,7 +131,6 @@ export interface Task {
   title: string;
   summary?: string;
   extraPrompt?: string;
-  additionalInfo?: string;
   status: TaskStatus;
   urgency?: Urgency;
 

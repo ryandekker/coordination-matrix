@@ -647,7 +647,6 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       title: taskData.title,
       summary: taskData.summary || '',
       extraPrompt: taskData.extraPrompt || '',
-      additionalInfo: taskData.additionalInfo || '',
       status: taskData.status || 'pending',
       urgency: taskData.urgency || 'normal',
       parentId,
