@@ -1129,16 +1129,8 @@ export function TaskDataTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {tasks.length === 0 && inlineCreationParentId !== '' ? (
-              <TableRow>
-                <TableCell
-                  colSpan={visibleFieldConfigs.length + 4}
-                  className="h-24 text-center text-muted-foreground"
-                >
-                  No tasks found. Click the + button in the Title header to add one.
-                </TableCell>
-              </TableRow>
-            ) : tasks.length === 0 && inlineCreationParentId === '' ? (
+            {/* Root-level inline creation row - shown at TOP */}
+            {inlineCreationParentId === '' && (
               <InlineTaskRow
                 parentId={null}
                 depth={0}
@@ -1148,6 +1140,16 @@ export function TaskDataTable({
                 onCancel={handleCancelInlineCreation}
                 isCreating={createTask.isPending}
               />
+            )}
+            {tasks.length === 0 && inlineCreationParentId !== '' ? (
+              <TableRow>
+                <TableCell
+                  colSpan={visibleFieldConfigs.length + 4}
+                  className="h-24 text-center text-muted-foreground"
+                >
+                  No tasks found. Click the + button in the Title header to add one.
+                </TableCell>
+              </TableRow>
             ) : (
               tasks.map((task) => (
                 <TaskRow
@@ -1185,18 +1187,6 @@ export function TaskDataTable({
                   isCreatingTask={createTask.isPending}
                 />
               ))
-            )}
-            {/* Root-level inline creation row */}
-            {inlineCreationParentId === '' && (
-              <InlineTaskRow
-                parentId={null}
-                depth={0}
-                fieldConfigs={visibleFieldConfigs}
-                colSpan={visibleFieldConfigs.length}
-                onSubmit={(title) => handleSubmitInlineCreation(title, null)}
-                onCancel={handleCancelInlineCreation}
-                isCreating={createTask.isPending}
-              />
             )}
           </TableBody>
         </Table>
