@@ -1022,8 +1022,11 @@ export function TaskDataTable({
     if (fieldConfig.lookupType) {
       let lookup = resolved as { displayName: string; color?: string; code?: string } | undefined
 
-      // If no resolved value, fall back to looking up from the lookups prop
-      if (!lookup && value && typeof value === 'string') {
+      // Check if resolved value matches current value - if not, it's stale from optimistic update
+      // In this case, fall back to looking up from the lookups prop
+      const isStaleResolved = lookup && value && typeof value === 'string' && lookup.code !== value
+
+      if ((!lookup || isStaleResolved) && value && typeof value === 'string') {
         const lookupValues = lookups[fieldConfig.lookupType] || []
         const found = lookupValues.find(lv => lv.code === value)
         if (found) {
