@@ -112,13 +112,13 @@ export function UserChip({
     return (
       <span
         className={cn(
-          'inline-flex items-center rounded-full bg-muted text-muted-foreground whitespace-nowrap',
+          'inline-flex items-center rounded-full bg-muted text-muted-foreground',
           styles.chip,
           className
         )}
       >
         <UserIcon className={cn(styles.icon, 'opacity-50')} />
-        {!avatarOnly && <span>Unassigned</span>}
+        {!avatarOnly && 'Unassigned'}
       </span>
     )
   }
@@ -133,7 +133,7 @@ export function UserChip({
     return (
       <span
         className={cn(
-          'inline-flex items-center rounded-full whitespace-nowrap',
+          'inline-flex items-center rounded-full font-medium',
           styles.chip,
           className
         )}
@@ -145,7 +145,7 @@ export function UserChip({
         }}
       >
         <UserAvatar user={user} size={size} />
-        <span className="font-medium">{user.displayName}</span>
+        {user.displayName}
       </span>
     )
   }
@@ -154,13 +154,13 @@ export function UserChip({
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-full bg-secondary/50 border border-border/50 whitespace-nowrap',
+        'inline-flex items-center rounded-full bg-secondary/50 border border-border/50',
         styles.chip,
         className
       )}
     >
       <UserAvatar user={user} size={size} />
-      <span>{user.displayName}</span>
+      {user.displayName}
     </span>
   )
 }
