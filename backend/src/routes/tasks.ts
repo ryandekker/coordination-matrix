@@ -130,6 +130,33 @@ function buildFilter(query: Record<string, unknown>, currentUserId?: string): Fi
     });
   }
 
+  // Final archived exclusion check: if we ended up with a status filter that explicitly
+  // includes 'archived', remove it from the array (unless includeArchived is true)
+  if (!shouldIncludeArchived) {
+    const currentStatusFilter = (filter as Record<string, unknown>).status;
+    if (currentStatusFilter) {
+      // Status filter exists - check if it explicitly includes 'archived'
+      if (typeof currentStatusFilter === 'object' && '$in' in (currentStatusFilter as object)) {
+        const statusValues = (currentStatusFilter as { $in: unknown[] }).$in;
+        if (Array.isArray(statusValues) && statusValues.includes('archived')) {
+          // Remove 'archived' from the array
+          const filteredValues = statusValues.filter(s => s !== 'archived');
+          if (filteredValues.length > 0) {
+            (filter as Record<string, unknown>).status = { $in: filteredValues };
+          } else {
+            // If no values left, use $ne: 'archived' instead
+            (filter as Record<string, unknown>).status = { $ne: 'archived' };
+          }
+        }
+      } else if (currentStatusFilter === 'archived') {
+        // Single status is 'archived' but includeArchived is false - this shouldn't match anything
+        // Use an impossible condition to return no results
+        (filter as Record<string, unknown>).status = { $in: [] };
+      }
+    }
+    // If no status filter at all, lines 71-73 already added $ne: 'archived'
+  }
+
   return filter;
 }
 
@@ -199,17 +226,21 @@ tasksRouter.get('/', async (req: Request, res: Response, next: NextFunction) => 
 tasksRouter.get('/tree', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { rootId, maxDepth = 10, resolveReferences = 'true' } = req.query;
+    const { rootId, maxDepth = 10, resolveReferences = 'true', includeArchived } = req.query;
+    const shouldIncludeArchived = includeArchived === 'true';
 
-    let filter: Filter<Task> = {};
+    const filter: Filter<Task> = {};
 
     if (rootId) {
       // Get all descendants of this task
       const rootOid = toObjectId(rootId as string);
       const descendants = await getDescendantIds(db, rootOid);
-      filter = {
-        _id: { $in: [rootOid, ...descendants] },
-      };
+      (filter as Record<string, unknown>)._id = { $in: [rootOid, ...descendants] };
+    }
+
+    // By default, exclude archived tasks
+    if (!shouldIncludeArchived) {
+      (filter as Record<string, unknown>).status = { $ne: 'archived' };
     }
 
     const tasks = await db
@@ -542,12 +573,20 @@ tasksRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) 
 tasksRouter.get('/:id/children', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { resolveReferences = 'true' } = req.query;
+    const { resolveReferences = 'true', includeArchived } = req.query;
+    const shouldIncludeArchived = includeArchived === 'true';
 
     const taskId = toObjectId(req.params.id);
+    const filter: Filter<Task> = { parentId: taskId };
+
+    // By default, exclude archived children
+    if (!shouldIncludeArchived) {
+      (filter as Record<string, unknown>).status = { $ne: 'archived' };
+    }
+
     const children = await db
       .collection<Task>('tasks')
-      .find({ parentId: taskId })
+      .find(filter)
       .sort({ createdAt: 1 })
       .toArray();
 
