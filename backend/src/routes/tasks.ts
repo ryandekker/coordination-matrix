@@ -803,27 +803,38 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     if (!silent) {
       const changes = computeChanges(originalTask, result);
       if (changes.length > 0) {
-        // Publish main update event
-        await publishTaskEvent('task.updated', result, {
-          changes,
-          actorId,
-          actorType: actorType as 'user' | 'system' | 'daemon',
-        });
+        // Fields that have their own specific events
+        const fieldsWithSpecificEvents = ['status', 'assigneeId', 'urgency', 'metadata'];
 
-        // Publish field-specific events
-        const specificEvents = getSpecificEventTypes(changes);
-        for (const eventType of specificEvents) {
-          await publishTaskEvent(eventType, result, {
-            changes: changes.filter(c => {
-              if (eventType === 'task.status.changed') return c.field === 'status';
-              if (eventType === 'task.assignee.changed') return c.field === 'assigneeId';
-              if (eventType === 'task.priority.changed') return c.field === 'urgency';
-              if (eventType === 'task.metadata.changed') return c.field === 'metadata';
-              return false;
-            }),
+        // Separate changes into those with specific events and those without
+        const genericChanges = changes.filter(c => !fieldsWithSpecificEvents.includes(c.field));
+        const specificEventChanges = changes.filter(c => fieldsWithSpecificEvents.includes(c.field));
+
+        // Publish task.updated only for changes that don't have specific events
+        if (genericChanges.length > 0) {
+          await publishTaskEvent('task.updated', result, {
+            changes: genericChanges,
             actorId,
             actorType: actorType as 'user' | 'system' | 'daemon',
           });
+        }
+
+        // Publish field-specific events
+        if (specificEventChanges.length > 0) {
+          const specificEvents = getSpecificEventTypes(specificEventChanges);
+          for (const eventType of specificEvents) {
+            await publishTaskEvent(eventType, result, {
+              changes: changes.filter(c => {
+                if (eventType === 'task.status.changed') return c.field === 'status';
+                if (eventType === 'task.assignee.changed') return c.field === 'assigneeId';
+                if (eventType === 'task.priority.changed') return c.field === 'urgency';
+                if (eventType === 'task.metadata.changed') return c.field === 'metadata';
+                return false;
+              }),
+              actorId,
+              actorType: actorType as 'user' | 'system' | 'daemon',
+            });
+          }
         }
       }
     }
