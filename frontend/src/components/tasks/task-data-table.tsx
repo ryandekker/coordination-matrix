@@ -377,7 +377,7 @@ const InlineTaskRow = memo(function InlineTaskRow({
 
   useEffect(() => {
     if (inputRef.current) {
-      inputRef.current.focus()
+      inputRef.current.focus({ preventScroll: true })
     }
   }, [])
 
@@ -390,7 +390,7 @@ const InlineTaskRow = memo(function InlineTaskRow({
       // Re-focus after a brief delay to ensure the input stays focused
       setTimeout(() => {
         isSubmittingRef.current = false
-        inputRef.current?.focus()
+        inputRef.current?.focus({ preventScroll: true })
       }, 0)
     } else if (e.key === 'Escape') {
       e.preventDefault()
