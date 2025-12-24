@@ -191,6 +191,323 @@ workflowsRouter.get('/stats', async (_req: Request, res: Response, next: NextFun
   }
 });
 
+// GET /api/workflows/ai-prompt-context - Generate dynamic prompt context for AI tools
+// NOTE: This must come BEFORE /:id route to avoid being matched as an ID
+workflowsRouter.get('/ai-prompt-context', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+
+    // Fetch available agents
+    const agents = await db
+      .collection('users')
+      .find({ isAgent: true, isActive: true })
+      .project({ _id: 1, displayName: 1, agentPrompt: 1 })
+      .sort({ displayName: 1 })
+      .toArray();
+
+    // Fetch available users (non-agents) for manual task assignment
+    const users = await db
+      .collection('users')
+      .find({ isAgent: { $ne: true }, isActive: true })
+      .project({ _id: 1, displayName: 1, email: 1, role: 1 })
+      .sort({ displayName: 1 })
+      .toArray();
+
+    // Fetch existing workflows (for nesting via flow step)
+    const workflows = await db
+      .collection<Workflow>('workflows')
+      .find({ isActive: true })
+      .project({ _id: 1, name: 1, description: 1, steps: 1 })
+      .sort({ name: 1 })
+      .toArray();
+
+    // Format workflows for context
+    const workflowSummaries = workflows.map((w) => ({
+      id: w._id.toString(),
+      name: w.name,
+      description: w.description,
+      stepCount: w.steps?.length || 0,
+      stepTypes: [...new Set(w.steps?.map((s) => s.stepType) || [])],
+    }));
+
+    // Build the prompt context
+    const promptContext = {
+      // Available assignees
+      agents: agents.map((a) => ({
+        id: a._id.toString(),
+        name: a.displayName,
+        description: a.agentPrompt?.substring(0, 200) || 'No description',
+      })),
+      users: users.map((u) => ({
+        id: u._id.toString(),
+        name: u.displayName,
+        email: u.email,
+        role: u.role,
+      })),
+
+      // Available workflows for nesting
+      existingWorkflows: workflowSummaries,
+
+      // Step type reference
+      stepTypes: {
+        agent: {
+          description: 'AI-powered automated task executed by the daemon',
+          mermaidShape: '["text"]',
+          mermaidClass: 'agent',
+          color: '#3B82F6',
+          commonFields: ['additionalInstructions', 'defaultAssigneeId'],
+          example: { id: 'analyze', name: 'Analyze Document', stepType: 'agent', additionalInstructions: 'Extract key themes.' }
+        },
+        manual: {
+          description: 'Human-in-the-loop task that waits for user action',
+          mermaidShape: '("text")',
+          mermaidClass: 'manual',
+          color: '#8B5CF6',
+          commonFields: ['additionalInstructions', 'defaultAssigneeId'],
+          example: { id: 'approve', name: 'Manager Approval', stepType: 'manual' }
+        },
+        external: {
+          description: 'Calls external API and waits for callback response',
+          mermaidShape: '{{"text"}}',
+          mermaidClass: 'external',
+          color: '#F97316',
+          commonFields: ['externalConfig'],
+          example: { id: 'callApi', name: 'External Validation', stepType: 'external', externalConfig: { endpoint: 'https://api.example.com/validate', method: 'POST' } }
+        },
+        webhook: {
+          description: 'Outbound HTTP call (fire-and-forget or await response)',
+          mermaidShape: '{{"text"}}',
+          mermaidClass: 'external',
+          color: '#F97316',
+          commonFields: ['webhookConfig'],
+          example: { id: 'notify', name: 'Send Notification', stepType: 'webhook', webhookConfig: { url: 'https://hooks.slack.com/xxx', method: 'POST' } }
+        },
+        decision: {
+          description: 'Routes workflow based on conditions',
+          mermaidShape: '{"text"}',
+          mermaidClass: 'decision',
+          color: '#F59E0B',
+          commonFields: ['connections', 'defaultConnection'],
+          example: { id: 'checkStatus', name: 'Is Valid?', stepType: 'decision', connections: [{ targetStepId: 'pass', condition: 'status:valid', label: 'Yes' }], defaultConnection: 'fail' }
+        },
+        foreach: {
+          description: 'Fan-out: Creates parallel child tasks for each item in an array',
+          mermaidShape: '[["Each: text"]]',
+          mermaidClass: 'foreach',
+          color: '#10B981',
+          commonFields: ['itemsPath', 'itemVariable', 'maxItems', 'connections'],
+          example: { id: 'processItems', name: 'Process Each', stepType: 'foreach', itemsPath: 'items', itemVariable: 'item', connections: [{ targetStepId: 'handleItem' }] }
+        },
+        join: {
+          description: 'Fan-in: Waits for all parallel tasks from ForEach to complete',
+          mermaidShape: '[["Join: text"]]',
+          mermaidClass: 'join',
+          color: '#6366F1',
+          commonFields: ['awaitStepId', 'minSuccessPercent'],
+          example: { id: 'aggregate', name: 'Aggregate Results', stepType: 'join', awaitStepId: 'processItems', minSuccessPercent: 90 }
+        },
+        flow: {
+          description: 'Delegates execution to a nested/child workflow',
+          mermaidShape: '[["Run: text"]]',
+          mermaidClass: 'flow',
+          color: '#EC4899',
+          commonFields: ['flowId', 'inputMapping'],
+          example: { id: 'runSub', name: 'Run Subprocess', stepType: 'flow', flowId: 'workflow_id_here' }
+        }
+      },
+
+      // Template variable reference
+      templateVariables: {
+        inputPayload: {
+          syntax: '{{input.path.to.value}}',
+          description: 'Access values from the input payload passed to the workflow or step',
+          examples: ['{{input.userId}}', '{{input.document.title}}', '{{input.items.0.name}}']
+        },
+        loopVariables: {
+          syntax: '{{item}} or {{_item}}, {{_index}}, {{_total}}',
+          description: 'Available inside ForEach child tasks',
+          examples: ['{{item.email}}', '{{recipient.name}}', '{{_index}} of {{_total}}']
+        },
+        callbackUrls: {
+          syntax: '{{callbackUrl}}, {{systemWebhookUrl}}, {{callbackSecret}}',
+          description: 'System-generated URLs for external service callbacks',
+          examples: ['{{callbackUrl}}', '{{callbackSecret}}']
+        },
+        foreachStreaming: {
+          syntax: '{{foreachWebhookUrl}}',
+          description: 'URL for external services to stream items to a ForEach step',
+          examples: ['{{foreachWebhookUrl}}']
+        }
+      },
+
+      // Mermaid syntax quick reference
+      mermaidSyntax: {
+        header: 'flowchart TD',
+        shapeMapping: {
+          agent: { shape: '["label"]', example: 'step1["AI Review"]' },
+          manual: { shape: '("label")', example: 'step2("Human Review")' },
+          external: { shape: '{{"label"}}', example: 'step3{{"API Call"}}' },
+          decision: { shape: '{"label"}', example: 'step4{"Is Valid?"}' },
+          foreach: { shape: '[["Each: label"]]', example: 'step5[["Each: Process"]]' },
+          join: { shape: '[["Join: label"]]', example: 'step6[["Join: Aggregate"]]' },
+          flow: { shape: '[["Run: label"]]', example: 'step7[["Run: Subprocess"]]' }
+        },
+        connections: {
+          simple: 'stepA --> stepB',
+          labeled: 'stepA -->|"Label"| stepB'
+        },
+        requiredClasses: [
+          'classDef agent fill:#3B82F6,color:#fff',
+          'classDef manual fill:#8B5CF6,color:#fff',
+          'classDef external fill:#F97316,color:#fff',
+          'classDef decision fill:#F59E0B,color:#fff',
+          'classDef foreach fill:#10B981,color:#fff',
+          'classDef join fill:#6366F1,color:#fff',
+          'classDef flow fill:#EC4899,color:#fff'
+        ],
+        metadataComment: '%% @step(nodeId): {"key": "value"}'
+      },
+
+      // Important rules
+      rules: [
+        'Every step must have: id, name, stepType',
+        'Always quote Mermaid labels with double quotes',
+        'Never use inline style statements in Mermaid',
+        'Decision steps require connections array with conditions',
+        'ForEach steps need itemsPath or expect external callback',
+        'Join steps should specify awaitStepId to match a ForEach',
+        'Node shapes in Mermaid carry semantic meaning - don\'t change them'
+      ]
+    };
+
+    res.json({ data: promptContext });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/workflows/ai-prompt - Generate a complete AI prompt for workflow generation
+// NOTE: This must come BEFORE /:id route to avoid being matched as an ID
+workflowsRouter.get('/ai-prompt', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { format = 'markdown', includeContext = 'true' } = req.query;
+
+    // Fetch context data
+    const agents = await db
+      .collection('users')
+      .find({ isAgent: true, isActive: true })
+      .project({ _id: 1, displayName: 1 })
+      .sort({ displayName: 1 })
+      .toArray();
+
+    const users = await db
+      .collection('users')
+      .find({ isAgent: { $ne: true }, isActive: true })
+      .project({ _id: 1, displayName: 1, email: 1 })
+      .sort({ displayName: 1 })
+      .toArray();
+
+    const workflows = await db
+      .collection<Workflow>('workflows')
+      .find({ isActive: true })
+      .project({ _id: 1, name: 1 })
+      .sort({ name: 1 })
+      .toArray();
+
+    // Build the prompt
+    let prompt = `# Workflow Generation Instructions
+
+You are generating a workflow for the Coordination Matrix system. Workflows can be defined as JSON or Mermaid diagrams.
+
+## Step Types
+
+| Type | Purpose | Mermaid Shape |
+|------|---------|---------------|
+| agent | AI-automated task | \`["text"]\` rectangle |
+| manual | Human task | \`("text")\` rounded |
+| external | API call + callback | \`{{"text"}}\` hexagon |
+| webhook | Fire-and-forget HTTP | \`{{"text"}}\` hexagon |
+| decision | Conditional routing | \`{"text"}\` diamond |
+| foreach | Fan-out loop | \`[["Each: text"]]\` |
+| join | Fan-in aggregation | \`[["Join: text"]]\` |
+| flow | Nested workflow | \`[["Run: text"]]\` |
+
+## Template Variables
+
+- \`{{input.path}}\` - Access input payload values
+- \`{{item}}\`, \`{{_index}}\`, \`{{_total}}\` - ForEach loop context
+- \`{{callbackUrl}}\` - System callback URL for external steps
+- \`{{foreachWebhookUrl}}\` - URL to stream items to ForEach
+
+## Important Rules
+
+1. Every step needs: id, name, stepType
+2. Always quote Mermaid labels with double quotes
+3. Never use inline style statements
+4. Include all classDef definitions in Mermaid
+5. Decision steps require connections with conditions
+`;
+
+    if (includeContext === 'true') {
+      prompt += `
+## Available Context
+
+### Agents (for defaultAssigneeId on agent steps)
+${agents.length > 0 ? agents.map(a => `- ${a.displayName} (${a._id})`).join('\n') : '- No agents configured'}
+
+### Users (for defaultAssigneeId on manual steps)
+${users.length > 0 ? users.map(u => `- ${u.displayName}${u.email ? ` <${u.email}>` : ''} (${u._id})`).join('\n') : '- No users configured'}
+
+### Existing Workflows (for flowId on flow steps)
+${workflows.length > 0 ? workflows.map(w => `- ${w.name} (${w._id})`).join('\n') : '- No existing workflows'}
+`;
+    }
+
+    prompt += `
+## Output Format
+
+${format === 'json' ? `
+Provide the workflow as JSON:
+\`\`\`json
+{
+  "name": "Workflow Name",
+  "description": "What this workflow does",
+  "steps": [
+    { "id": "step1", "name": "Step Name", "stepType": "agent" }
+  ]
+}
+\`\`\`` : `
+Provide the workflow as Mermaid:
+\`\`\`mermaid
+flowchart TD
+    step1["Step Name"]
+    step2("Manual Step")
+
+    step1 --> step2
+
+    classDef agent fill:#3B82F6,color:#fff
+    classDef manual fill:#8B5CF6,color:#fff
+
+    class step1 agent
+    class step2 manual
+
+    %% @step(step1): {"additionalInstructions":"Instructions here"}
+\`\`\``}
+`;
+
+    res.json({
+      data: {
+        prompt,
+        format,
+        includeContext: includeContext === 'true'
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/workflows/:id - Get a specific workflow
 workflowsRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -886,318 +1203,3 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
 
   return lines.join('\n');
 }
-
-// GET /api/workflows/ai-prompt-context - Generate dynamic prompt context for AI tools
-workflowsRouter.get('/ai-prompt-context', async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const db = getDb();
-
-    // Fetch available agents
-    const agents = await db
-      .collection('users')
-      .find({ isAgent: true, isActive: true })
-      .project({ _id: 1, displayName: 1, agentPrompt: 1 })
-      .sort({ displayName: 1 })
-      .toArray();
-
-    // Fetch available users (non-agents) for manual task assignment
-    const users = await db
-      .collection('users')
-      .find({ isAgent: { $ne: true }, isActive: true })
-      .project({ _id: 1, displayName: 1, email: 1, role: 1 })
-      .sort({ displayName: 1 })
-      .toArray();
-
-    // Fetch existing workflows (for nesting via flow step)
-    const workflows = await db
-      .collection<Workflow>('workflows')
-      .find({ isActive: true })
-      .project({ _id: 1, name: 1, description: 1, steps: 1 })
-      .sort({ name: 1 })
-      .toArray();
-
-    // Format workflows for context
-    const workflowSummaries = workflows.map((w) => ({
-      id: w._id.toString(),
-      name: w.name,
-      description: w.description,
-      stepCount: w.steps?.length || 0,
-      stepTypes: [...new Set(w.steps?.map((s) => s.stepType) || [])],
-    }));
-
-    // Build the prompt context
-    const promptContext = {
-      // Available assignees
-      agents: agents.map((a) => ({
-        id: a._id.toString(),
-        name: a.displayName,
-        description: a.agentPrompt?.substring(0, 200) || 'No description',
-      })),
-      users: users.map((u) => ({
-        id: u._id.toString(),
-        name: u.displayName,
-        email: u.email,
-        role: u.role,
-      })),
-
-      // Available workflows for nesting
-      existingWorkflows: workflowSummaries,
-
-      // Step type reference
-      stepTypes: {
-        agent: {
-          description: 'AI-powered automated task executed by the daemon',
-          mermaidShape: '["text"]',
-          mermaidClass: 'agent',
-          color: '#3B82F6',
-          commonFields: ['additionalInstructions', 'defaultAssigneeId'],
-          example: { id: 'analyze', name: 'Analyze Document', stepType: 'agent', additionalInstructions: 'Extract key themes.' }
-        },
-        manual: {
-          description: 'Human-in-the-loop task that waits for user action',
-          mermaidShape: '("text")',
-          mermaidClass: 'manual',
-          color: '#8B5CF6',
-          commonFields: ['additionalInstructions', 'defaultAssigneeId'],
-          example: { id: 'approve', name: 'Manager Approval', stepType: 'manual' }
-        },
-        external: {
-          description: 'Calls external API and waits for callback response',
-          mermaidShape: '{{"text"}}',
-          mermaidClass: 'external',
-          color: '#F97316',
-          commonFields: ['externalConfig'],
-          example: { id: 'callApi', name: 'External Validation', stepType: 'external', externalConfig: { endpoint: 'https://api.example.com/validate', method: 'POST' } }
-        },
-        webhook: {
-          description: 'Outbound HTTP call (fire-and-forget or await response)',
-          mermaidShape: '{{"text"}}',
-          mermaidClass: 'external',
-          color: '#F97316',
-          commonFields: ['webhookConfig'],
-          example: { id: 'notify', name: 'Send Notification', stepType: 'webhook', webhookConfig: { url: 'https://hooks.slack.com/xxx', method: 'POST' } }
-        },
-        decision: {
-          description: 'Routes workflow based on conditions',
-          mermaidShape: '{"text"}',
-          mermaidClass: 'decision',
-          color: '#F59E0B',
-          commonFields: ['connections', 'defaultConnection'],
-          example: { id: 'checkStatus', name: 'Is Valid?', stepType: 'decision', connections: [{ targetStepId: 'pass', condition: 'status:valid', label: 'Yes' }], defaultConnection: 'fail' }
-        },
-        foreach: {
-          description: 'Fan-out: Creates parallel child tasks for each item in an array',
-          mermaidShape: '[["Each: text"]]',
-          mermaidClass: 'foreach',
-          color: '#10B981',
-          commonFields: ['itemsPath', 'itemVariable', 'maxItems', 'connections'],
-          example: { id: 'processItems', name: 'Process Each', stepType: 'foreach', itemsPath: 'items', itemVariable: 'item', connections: [{ targetStepId: 'handleItem' }] }
-        },
-        join: {
-          description: 'Fan-in: Waits for all parallel tasks from ForEach to complete',
-          mermaidShape: '[["Join: text"]]',
-          mermaidClass: 'join',
-          color: '#6366F1',
-          commonFields: ['awaitStepId', 'minSuccessPercent'],
-          example: { id: 'aggregate', name: 'Aggregate Results', stepType: 'join', awaitStepId: 'processItems', minSuccessPercent: 90 }
-        },
-        flow: {
-          description: 'Delegates execution to a nested/child workflow',
-          mermaidShape: '[["Run: text"]]',
-          mermaidClass: 'flow',
-          color: '#EC4899',
-          commonFields: ['flowId', 'inputMapping'],
-          example: { id: 'runSub', name: 'Run Subprocess', stepType: 'flow', flowId: 'workflow_id_here' }
-        }
-      },
-
-      // Template variable reference
-      templateVariables: {
-        inputPayload: {
-          syntax: '{{input.path.to.value}}',
-          description: 'Access values from the input payload passed to the workflow or step',
-          examples: ['{{input.userId}}', '{{input.document.title}}', '{{input.items.0.name}}']
-        },
-        loopVariables: {
-          syntax: '{{item}} or {{_item}}, {{_index}}, {{_total}}',
-          description: 'Available inside ForEach child tasks',
-          examples: ['{{item.email}}', '{{recipient.name}}', '{{_index}} of {{_total}}']
-        },
-        callbackUrls: {
-          syntax: '{{callbackUrl}}, {{systemWebhookUrl}}, {{callbackSecret}}',
-          description: 'System-generated URLs for external service callbacks',
-          examples: ['{{callbackUrl}}', '{{callbackSecret}}']
-        },
-        foreachStreaming: {
-          syntax: '{{foreachWebhookUrl}}',
-          description: 'URL for external services to stream items to a ForEach step',
-          examples: ['{{foreachWebhookUrl}}']
-        }
-      },
-
-      // Mermaid syntax quick reference
-      mermaidSyntax: {
-        header: 'flowchart TD',
-        shapeMapping: {
-          agent: { shape: '["label"]', example: 'step1["AI Review"]' },
-          manual: { shape: '("label")', example: 'step2("Human Review")' },
-          external: { shape: '{{"label"}}', example: 'step3{{"API Call"}}' },
-          decision: { shape: '{"label"}', example: 'step4{"Is Valid?"}' },
-          foreach: { shape: '[["Each: label"]]', example: 'step5[["Each: Process"]]' },
-          join: { shape: '[["Join: label"]]', example: 'step6[["Join: Aggregate"]]' },
-          flow: { shape: '[["Run: label"]]', example: 'step7[["Run: Subprocess"]]' }
-        },
-        connections: {
-          simple: 'stepA --> stepB',
-          labeled: 'stepA -->|"Label"| stepB'
-        },
-        requiredClasses: [
-          'classDef agent fill:#3B82F6,color:#fff',
-          'classDef manual fill:#8B5CF6,color:#fff',
-          'classDef external fill:#F97316,color:#fff',
-          'classDef decision fill:#F59E0B,color:#fff',
-          'classDef foreach fill:#10B981,color:#fff',
-          'classDef join fill:#6366F1,color:#fff',
-          'classDef flow fill:#EC4899,color:#fff'
-        ],
-        metadataComment: '%% @step(nodeId): {"key": "value"}'
-      },
-
-      // Important rules
-      rules: [
-        'Every step must have: id, name, stepType',
-        'Always quote Mermaid labels with double quotes',
-        'Never use inline style statements in Mermaid',
-        'Decision steps require connections array with conditions',
-        'ForEach steps need itemsPath or expect external callback',
-        'Join steps should specify awaitStepId to match a ForEach',
-        'Node shapes in Mermaid carry semantic meaning - don\'t change them'
-      ]
-    };
-
-    res.json({ data: promptContext });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// GET /api/workflows/ai-prompt - Generate a complete AI prompt for workflow generation
-workflowsRouter.get('/ai-prompt', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const db = getDb();
-    const { format = 'markdown', includeContext = 'true' } = req.query;
-
-    // Fetch context data
-    const agents = await db
-      .collection('users')
-      .find({ isAgent: true, isActive: true })
-      .project({ _id: 1, displayName: 1 })
-      .sort({ displayName: 1 })
-      .toArray();
-
-    const users = await db
-      .collection('users')
-      .find({ isAgent: { $ne: true }, isActive: true })
-      .project({ _id: 1, displayName: 1, email: 1 })
-      .sort({ displayName: 1 })
-      .toArray();
-
-    const workflows = await db
-      .collection<Workflow>('workflows')
-      .find({ isActive: true })
-      .project({ _id: 1, name: 1 })
-      .sort({ name: 1 })
-      .toArray();
-
-    // Build the prompt
-    let prompt = `# Workflow Generation Instructions
-
-You are generating a workflow for the Coordination Matrix system. Workflows can be defined as JSON or Mermaid diagrams.
-
-## Step Types
-
-| Type | Purpose | Mermaid Shape |
-|------|---------|---------------|
-| agent | AI-automated task | \`["text"]\` rectangle |
-| manual | Human task | \`("text")\` rounded |
-| external | API call + callback | \`{{"text"}}\` hexagon |
-| webhook | Fire-and-forget HTTP | \`{{"text"}}\` hexagon |
-| decision | Conditional routing | \`{"text"}\` diamond |
-| foreach | Fan-out loop | \`[["Each: text"]]\` |
-| join | Fan-in aggregation | \`[["Join: text"]]\` |
-| flow | Nested workflow | \`[["Run: text"]]\` |
-
-## Template Variables
-
-- \`{{input.path}}\` - Access input payload values
-- \`{{item}}\`, \`{{_index}}\`, \`{{_total}}\` - ForEach loop context
-- \`{{callbackUrl}}\` - System callback URL for external steps
-- \`{{foreachWebhookUrl}}\` - URL to stream items to ForEach
-
-## Important Rules
-
-1. Every step needs: id, name, stepType
-2. Always quote Mermaid labels with double quotes
-3. Never use inline style statements
-4. Include all classDef definitions in Mermaid
-5. Decision steps require connections with conditions
-`;
-
-    if (includeContext === 'true') {
-      prompt += `
-## Available Context
-
-### Agents (for defaultAssigneeId on agent steps)
-${agents.length > 0 ? agents.map(a => `- ${a.displayName} (${a._id})`).join('\n') : '- No agents configured'}
-
-### Users (for defaultAssigneeId on manual steps)
-${users.length > 0 ? users.map(u => `- ${u.displayName}${u.email ? ` <${u.email}>` : ''} (${u._id})`).join('\n') : '- No users configured'}
-
-### Existing Workflows (for flowId on flow steps)
-${workflows.length > 0 ? workflows.map(w => `- ${w.name} (${w._id})`).join('\n') : '- No existing workflows'}
-`;
-    }
-
-    prompt += `
-## Output Format
-
-${format === 'json' ? `
-Provide the workflow as JSON:
-\`\`\`json
-{
-  "name": "Workflow Name",
-  "description": "What this workflow does",
-  "steps": [
-    { "id": "step1", "name": "Step Name", "stepType": "agent" }
-  ]
-}
-\`\`\`` : `
-Provide the workflow as Mermaid:
-\`\`\`mermaid
-flowchart TD
-    step1["Step Name"]
-    step2("Manual Step")
-
-    step1 --> step2
-
-    classDef agent fill:#3B82F6,color:#fff
-    classDef manual fill:#8B5CF6,color:#fff
-
-    class step1 agent
-    class step2 manual
-
-    %% @step(step1): {"additionalInstructions":"Instructions here"}
-\`\`\``}
-`;
-
-    res.json({
-      data: {
-        prompt,
-        format,
-        includeContext: includeContext === 'true'
-      }
-    });
-  } catch (error) {
-    next(error);
-  }
-})
