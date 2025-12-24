@@ -13,6 +13,76 @@ class ActivityLogService {
   private initialized = false;
 
   /**
+   * Resolve actor information for activity log entries
+   * Populates the `actor` field with displayName and email from the users collection
+   */
+  private async populateActors(
+    entries: ActivityLogEntry[]
+  ): Promise<ActivityLogEntry[]> {
+    if (entries.length === 0) return entries;
+
+    const db = getDb();
+
+    // Collect unique actorIds that need resolution
+    const actorIds = new Set<string>();
+    for (const entry of entries) {
+      if (entry.actorId && entry.actorType === 'user') {
+        actorIds.add(entry.actorId.toString());
+      }
+    }
+
+    if (actorIds.size === 0) {
+      // No user actors to resolve, just set actor based on actorType
+      return entries.map((entry) => ({
+        ...entry,
+        actor:
+          entry.actorType === 'system'
+            ? { displayName: 'System' }
+            : entry.actorType === 'daemon'
+              ? { displayName: 'Automation Daemon' }
+              : null,
+      }));
+    }
+
+    // Fetch users in bulk
+    const userObjectIds = Array.from(actorIds).map((id) => new ObjectId(id));
+    const users = await db
+      .collection('users')
+      .find(
+        { _id: { $in: userObjectIds } },
+        { projection: { _id: 1, displayName: 1, email: 1 } }
+      )
+      .toArray();
+
+    // Create lookup map
+    const userMap = new Map<
+      string,
+      { displayName: string; email?: string }
+    >();
+    for (const user of users) {
+      userMap.set(user._id.toString(), {
+        displayName: user.displayName || 'Unknown User',
+        email: user.email,
+      });
+    }
+
+    // Populate actor field
+    return entries.map((entry) => {
+      if (entry.actorType === 'system') {
+        return { ...entry, actor: { displayName: 'System' } };
+      }
+      if (entry.actorType === 'daemon') {
+        return { ...entry, actor: { displayName: 'Automation Daemon' } };
+      }
+      if (entry.actorId) {
+        const actor = userMap.get(entry.actorId.toString());
+        return { ...entry, actor: actor || { displayName: 'Unknown User' } };
+      }
+      return { ...entry, actor: null };
+    });
+  }
+
+  /**
    * Initialize the service and subscribe to events
    */
   initialize(): void {
@@ -135,7 +205,10 @@ class ActivityLogService {
       db.collection('activity_logs').countDocuments(filter),
     ]);
 
-    return { data: entries, total };
+    // Populate actor information
+    const populatedEntries = await this.populateActors(entries);
+
+    return { data: populatedEntries, total };
   }
 
   /**
@@ -173,7 +246,10 @@ class ActivityLogService {
       db.collection('activity_logs').countDocuments(filter),
     ]);
 
-    return { data: entries, total };
+    // Populate actor information
+    const populatedEntries = await this.populateActors(entries);
+
+    return { data: populatedEntries, total };
   }
 
   /**
