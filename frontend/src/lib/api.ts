@@ -595,6 +595,8 @@ export interface User {
   isActive: boolean
   isAgent?: boolean               // Is this user an AI agent?
   agentPrompt?: string            // Agent's base prompt/persona
+  profilePicture?: string         // URL to profile picture (for humans)
+  botColor?: string               // Custom color for bot users (hex code)
   createdAt?: string
   updatedAt?: string
 }

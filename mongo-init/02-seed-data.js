@@ -366,6 +366,34 @@ const users = [
     isActive: true,
     createdAt: new Date(),
   },
+  // Bot users with custom colors
+  {
+    displayName: 'Code Reviewer',
+    role: 'operator',
+    isActive: true,
+    isAgent: true,
+    agentPrompt: 'You are a code review assistant that analyzes code for quality and best practices.',
+    botColor: '#10b981', // Emerald green
+    createdAt: new Date(),
+  },
+  {
+    displayName: 'Content Writer',
+    role: 'operator',
+    isActive: true,
+    isAgent: true,
+    agentPrompt: 'You are a content writing assistant that helps create engaging content.',
+    botColor: '#8b5cf6', // Purple
+    createdAt: new Date(),
+  },
+  {
+    displayName: 'Research Assistant',
+    role: 'operator',
+    isActive: true,
+    isAgent: true,
+    agentPrompt: 'You are a research assistant that gathers and synthesizes information.',
+    botColor: '#f59e0b', // Amber
+    createdAt: new Date(),
+  },
 ];
 
 const userResult = db.users.insertMany(users);

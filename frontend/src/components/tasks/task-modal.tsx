@@ -43,6 +43,7 @@ import {
 import { Settings2, Database, Activity, Workflow, ExternalLink, ArrowUpRight } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { UserChip, UserAvatar } from '@/components/ui/user-chip'
 
 interface TaskModalProps {
   task: Task | null
@@ -624,30 +625,18 @@ export function TaskModal({
               value={field.value as string || '_unassigned'}
               onValueChange={(val) => field.onChange(val === '_unassigned' ? null : val)}
             >
-              <SelectTrigger className="h-7 w-auto gap-1.5 px-2 text-xs border-0 bg-transparent hover:bg-muted">
-                {currentAssignee ? (
-                  <>
-                    <span className="w-4 h-4 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-medium">
-                      {currentAssignee.displayName.charAt(0).toUpperCase()}
-                    </span>
-                    <span>{currentAssignee.displayName}</span>
-                  </>
-                ) : (
-                  <span className="text-muted-foreground">Unassigned</span>
-                )}
+              <SelectTrigger className="h-7 w-auto gap-0 px-0.5 text-xs border-0 bg-transparent hover:bg-muted">
+                <UserChip user={currentAssignee} size="sm" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="_unassigned">Unassigned</SelectItem>
+                <SelectItem value="_unassigned">
+                  <UserChip user={null} size="sm" />
+                </SelectItem>
                 {users
                   .filter((user) => user._id && user.isActive)
                   .map((user) => (
                     <SelectItem key={user._id} value={user._id}>
-                      <div className="flex items-center gap-2">
-                        <span className="w-4 h-4 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-medium">
-                          {user.displayName.charAt(0).toUpperCase()}
-                        </span>
-                        {user.displayName}
-                      </div>
+                      <UserChip user={user} size="sm" />
                     </SelectItem>
                   ))}
               </SelectContent>
@@ -918,17 +907,14 @@ export function TaskModal({
                       <SelectValue placeholder="Unassigned" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="_unassigned">Unassigned</SelectItem>
+                      <SelectItem value="_unassigned">
+                        <UserChip user={null} size="sm" />
+                      </SelectItem>
                       {users
                         .filter((user) => user._id && user.isActive)
                         .map((user) => (
                           <SelectItem key={user._id} value={user._id}>
-                            <div className="flex items-center gap-2">
-                              <span className="w-4 h-4 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-medium">
-                                {user.displayName.charAt(0).toUpperCase()}
-                              </span>
-                              {user.displayName}
-                            </div>
+                            <UserChip user={user} size="sm" />
                           </SelectItem>
                         ))}
                     </SelectContent>
