@@ -28,7 +28,10 @@ function resolveUserPlaceholder(value: string, currentUserId?: string): string {
 // Helper to build filter from query params
 function buildFilter(query: Record<string, unknown>, currentUserId?: string): Filter<Task> {
   const filter: Filter<Task> = {};
-  const { search, filters, parentId, rootOnly, status, urgency, assigneeId, tags } = query;
+  const { search, filters, parentId, rootOnly, status, urgency, assigneeId, tags, includeArchived } = query;
+
+  // By default, exclude archived tasks unless explicitly requested
+  const shouldIncludeArchived = includeArchived === 'true' || includeArchived === true;
 
   // Text search
   if (search && typeof search === 'string') {
@@ -48,11 +51,15 @@ function buildFilter(query: Record<string, unknown>, currentUserId?: string): Fi
 
   // Status filter
   if (status) {
+    // Explicit status filter provided - use it as-is
     if (Array.isArray(status)) {
       (filter as Record<string, unknown>).status = { $in: status };
     } else {
       (filter as Record<string, unknown>).status = status as string;
     }
+  } else if (!shouldIncludeArchived) {
+    // No explicit status filter - exclude archived by default
+    (filter as Record<string, unknown>).status = { $ne: 'archived' };
   }
 
   // Urgency filter

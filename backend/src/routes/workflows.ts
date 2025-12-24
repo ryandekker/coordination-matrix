@@ -121,12 +121,20 @@ interface Workflow {
 }
 
 // GET /api/workflows - List all workflows
-workflowsRouter.get('/', async (_req: Request, res: Response, next: NextFunction) => {
+workflowsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
+    const { includeInactive } = req.query;
+
+    // By default, only show active workflows unless explicitly requested
+    const filter: Record<string, unknown> = {};
+    if (includeInactive !== 'true' && includeInactive !== true) {
+      filter.isActive = true;
+    }
+
     const workflows = await db
       .collection<Workflow>('workflows')
-      .find()
+      .find(filter)
       .sort({ name: 1 })
       .toArray();
 

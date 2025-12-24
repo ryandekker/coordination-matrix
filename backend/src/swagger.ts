@@ -675,6 +675,7 @@ All responses follow this structure:
             { name: 'rootOnly', in: 'query', schema: { type: 'boolean' } },
             { name: 'tags', in: 'query', schema: { type: 'string' }, description: 'Comma-separated tags' },
             { name: 'resolveReferences', in: 'query', schema: { type: 'boolean' }, description: 'Include resolved assignee/workflow objects' },
+            { name: 'includeArchived', in: 'query', schema: { type: 'boolean', default: false }, description: 'Include archived tasks (excluded by default)' },
           ],
           responses: {
             200: {
@@ -879,6 +880,9 @@ All responses follow this structure:
         get: {
           tags: ['Workflows'],
           summary: 'List all workflows',
+          parameters: [
+            { name: 'includeInactive', in: 'query', schema: { type: 'boolean', default: false }, description: 'Include inactive workflows (excluded by default)' },
+          ],
           responses: {
             200: {
               description: 'List of workflows',

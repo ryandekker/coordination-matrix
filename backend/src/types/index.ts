@@ -11,7 +11,8 @@ export type TaskStatus =
   | 'on_hold'
   | 'completed'
   | 'failed'       // Execution failed (distinct from on_hold)
-  | 'cancelled';
+  | 'cancelled'
+  | 'archived';    // Soft-deleted / hidden from default views
 
 export type Urgency = 'low' | 'normal' | 'high' | 'urgent';
 
