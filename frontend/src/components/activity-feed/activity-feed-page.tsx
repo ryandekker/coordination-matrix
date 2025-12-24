@@ -16,12 +16,15 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { UserChip } from '@/components/ui/user-chip'
 import {
   ChevronLeft,
   ChevronRight,
   Filter,
   X,
   RefreshCw,
+  Bot,
+  Settings,
 } from 'lucide-react'
 
 const EVENT_TYPES = [
@@ -85,18 +88,18 @@ function formatFieldChange(change: FieldChange): string {
 
 interface ActivityRowProps {
   entry: ActivityLogEntry
-  getUserName: (userId: string) => string
+  users: Array<{ _id: string; displayName: string; email?: string; isAgent?: boolean; botColor?: string; profilePicture?: string }>
   getTaskName: (taskId: string) => string
 }
 
-function ActivityRow({ entry, getUserName, getTaskName }: ActivityRowProps) {
+function ActivityRow({ entry, users, getTaskName }: ActivityRowProps) {
   const label = EVENT_TYPE_LABELS[entry.eventType] || entry.eventType
   const colorClass = EVENT_TYPE_COLORS[entry.eventType] || 'text-muted-foreground'
   const dotColorClass = EVENT_DOT_COLORS[entry.eventType] || 'bg-muted-foreground'
 
-  const actorDisplay = entry.actorType === 'user' && entry.actorId
-    ? getUserName(entry.actorId)
-    : entry.actorType
+  const actorUser = entry.actorType === 'user' && entry.actorId
+    ? users.find(u => u._id === entry.actorId)
+    : undefined
 
   const taskName = getTaskName(entry.taskId)
 
@@ -120,9 +123,25 @@ function ActivityRow({ entry, getUserName, getTaskName }: ActivityRowProps) {
       </Link>
 
       {/* Actor */}
-      <span className="flex-shrink-0 w-24 truncate text-muted-foreground" title={actorDisplay}>
-        {actorDisplay}
-      </span>
+      <div className="flex-shrink-0 w-28">
+        {entry.actorType === 'user' ? (
+          <UserChip
+            user={actorUser as Parameters<typeof UserChip>[0]['user']}
+            size="sm"
+            showUnassigned={false}
+          />
+        ) : entry.actorType === 'daemon' ? (
+          <div className="inline-flex items-center gap-1 h-5 px-1.5 rounded-full bg-purple-500/15 text-purple-600 dark:text-purple-400 text-xs border border-purple-500/30">
+            <Bot className="h-2.5 w-2.5" />
+            Daemon
+          </div>
+        ) : (
+          <div className="inline-flex items-center gap-1 h-5 px-1.5 rounded-full bg-slate-500/15 text-slate-600 dark:text-slate-400 text-xs border border-slate-500/30">
+            <Settings className="h-2.5 w-2.5" />
+            System
+          </div>
+        )}
+      </div>
 
       {/* Changes or comment */}
       <div className="flex-1 min-w-0 text-muted-foreground truncate">
@@ -163,11 +182,6 @@ export function ActivityFeedPage() {
   // Fetch users for actor display and filtering
   const { data: usersData } = useUsers()
   const users = usersData?.data || []
-
-  const getUserName = (userId: string): string => {
-    const user = users.find(u => u._id === userId)
-    return user?.displayName || user?.email || userId.slice(-6)
-  }
 
   const getTaskName = (taskId: string): string => {
     const task = taskCache[taskId]
@@ -370,7 +384,7 @@ export function ActivityFeedPage() {
         <span className="w-1.5" />
         <span className="w-16">Event</span>
         <span className="w-48">Task</span>
-        <span className="w-24">Actor</span>
+        <span className="w-28">Actor</span>
         <span className="flex-1">Details</span>
         <span className="w-24 text-right">When</span>
       </div>
@@ -395,7 +409,7 @@ export function ActivityFeedPage() {
               <ActivityRow
                 key={entry._id}
                 entry={entry}
-                getUserName={getUserName}
+                users={users}
                 getTaskName={getTaskName}
               />
             ))}
