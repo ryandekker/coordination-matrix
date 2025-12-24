@@ -157,7 +157,7 @@ export const migration: Migration = {
     console.log(`[Migration] Removed additionalInfo from ${result.modifiedCount} tasks`);
   },
 
-  async down(db: Db): Promise<void> {
+  async down(_db: Db): Promise<void> {
     // Note: We cannot restore the data that was removed
     // This just adds the field back to the validator
     console.log('[Migration] Rolling back - additionalInfo field will be allowed again but data is not restored');

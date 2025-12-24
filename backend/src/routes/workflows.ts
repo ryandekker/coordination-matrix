@@ -128,7 +128,7 @@ workflowsRouter.get('/', async (req: Request, res: Response, next: NextFunction)
 
     // By default, only show active workflows unless explicitly requested
     const filter: Record<string, unknown> = {};
-    if (includeInactive !== 'true' && includeInactive !== true) {
+    if (includeInactive !== 'true') {
       filter.isActive = true;
     }
 
@@ -235,7 +235,7 @@ workflowsRouter.get('/ai-prompt-context', async (_req: Request, res: Response, n
       name: w.name,
       description: w.description,
       stepCount: w.steps?.length || 0,
-      stepTypes: [...new Set(w.steps?.map((s) => s.stepType) || [])],
+      stepTypes: [...new Set(w.steps?.map((s: { stepType: string }) => s.stepType) || [])],
     }));
 
     // Build the prompt context
