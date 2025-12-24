@@ -26,6 +26,7 @@ import { webhookService } from './services/webhook-service.js';
 import { batchJobService } from './services/batch-job-service.js';
 import { workflowExecutionService } from './services/workflow-execution-service.js';
 import { webhookTaskService } from './services/webhook-task-service.js';
+import { processCallbackFiles, hasCallbackFiles } from './services/callback-file-service.js';
 import { setupSwagger } from './swagger.js';
 
 const app = express();
@@ -71,7 +72,32 @@ app.post('/api/workflow-runs/:id/foreach/:stepId/item', async (req, res) => {
       return;
     }
 
-    const { item, expectedCount, complete } = req.body;
+    let { item, expectedCount, complete } = req.body;
+    let filesProcessed = 0;
+
+    // Process any embedded files in the item
+    // Files can be sent in item.files array with base64 content
+    if (item && hasCallbackFiles(item)) {
+      const db = (await import('./db/connection.js')).getDb();
+      const task = await db.collection('tasks').findOne({
+        workflowRunId: new ObjectId(id),
+        workflowStepId: stepId,
+      });
+
+      if (task) {
+        const { processedFiles, cleanedPayload } = await processCallbackFiles(
+          item,
+          {
+            workflowRunId: id,
+            stepId,
+            taskId: task._id.toString(),
+          }
+        );
+        item = cleanedPayload;
+        filesProcessed = processedFiles.length;
+        console.log(`[ForeachCallback] Processed ${filesProcessed} files from item`);
+      }
+    }
 
     // Validate payload
     if (item === undefined && expectedCount === undefined && !complete) {
@@ -89,7 +115,10 @@ app.post('/api/workflow-runs/:id/foreach/:stepId/item', async (req, res) => {
     );
 
     console.log(`[ForeachCallback] Success: received=${result.receivedCount}/${result.expectedCount}`);
-    res.json(result);
+    res.json({
+      ...result,
+      ...(filesProcessed > 0 && { filesProcessed }),
+    });
   } catch (error: unknown) {
     console.error('[ForeachCallback] Error:', error);
 
@@ -144,7 +173,40 @@ app.post('/api/workflow-runs/:id/callback/:stepId', async (req, res) => {
       return;
     }
 
-    const payload = req.body;
+    let payload = req.body;
+    let processedFiles: Array<{ _id: string; filename: string; mimeType: string; size: number; url: string }> = [];
+
+    // Process any embedded files in the callback payload
+    // Files are sent as base64-encoded content in the `files` array
+    if (hasCallbackFiles(payload)) {
+      // We need to find the task first to get its ID for file attachment
+      // The task lookup happens in handleExternalCallback, but we need it here for files
+      // So we'll add a pre-processing step that gets the task ID
+      const db = (await import('./db/connection.js')).getDb();
+      const run = await db.collection('workflow_runs').findOne({ _id: new ObjectId(id) });
+
+      if (run) {
+        // Find the task for this step
+        const task = await db.collection('tasks').findOne({
+          workflowRunId: new ObjectId(id),
+          workflowStepId: stepId,
+        });
+
+        if (task) {
+          const { processedFiles: files, cleanedPayload } = await processCallbackFiles(
+            payload,
+            {
+              workflowRunId: id,
+              stepId,
+              taskId: task._id.toString(),
+            }
+          );
+          processedFiles = files;
+          payload = cleanedPayload;
+          console.log(`[WorkflowRuns] Processed ${processedFiles.length} files from callback`);
+        }
+      }
+    }
 
     // Build request info for logging
     const requestInfo = {
@@ -164,6 +226,7 @@ app.post('/api/workflow-runs/:id/callback/:stepId', async (req, res) => {
       acknowledged: true,
       taskId: task._id,
       taskStatus: task.status,
+      ...(processedFiles.length > 0 && { filesProcessed: processedFiles.length }),
     });
   } catch (error: unknown) {
     console.error('[WorkflowRuns] Callback error:', error);
