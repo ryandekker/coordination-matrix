@@ -193,7 +193,7 @@ db.views.createIndex({ createdById: 1 });
 // ============================================================================
 db.createCollection('users');
 
-db.users.createIndex({ email: 1 }, { unique: true });
+db.users.createIndex({ email: 1 }, { unique: true, sparse: true });
 db.users.createIndex({ isActive: 1 });
 
 // ============================================================================

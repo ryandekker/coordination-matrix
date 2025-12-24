@@ -73,10 +73,15 @@ function buildFilter(query: Record<string, unknown>, currentUserId?: string): Fi
 
   // Assignee filter
   if (assigneeId) {
-    const resolvedAssigneeId = resolveUserPlaceholder(assigneeId as string, currentUserId);
-    // Skip if placeholder couldn't be resolved (no current user)
-    if (resolvedAssigneeId !== '{{currentUserId}}') {
-      filter.assigneeId = toObjectId(resolvedAssigneeId);
+    // Handle special __unassigned__ marker for null values
+    if (assigneeId === '__unassigned__' || (Array.isArray(assigneeId) && assigneeId.includes('__unassigned__'))) {
+      filter.assigneeId = { $eq: null } as unknown as ObjectId;
+    } else {
+      const resolvedAssigneeId = resolveUserPlaceholder(assigneeId as string, currentUserId);
+      // Skip if placeholder couldn't be resolved (no current user)
+      if (resolvedAssigneeId !== '{{currentUserId}}') {
+        filter.assigneeId = toObjectId(resolvedAssigneeId);
+      }
     }
   }
 
@@ -90,8 +95,14 @@ function buildFilter(query: Record<string, unknown>, currentUserId?: string): Fi
   if (filters && typeof filters === 'object') {
     Object.entries(filters as Record<string, unknown>).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== '') {
+        // Handle special __unassigned__ marker for null values (e.g., assigneeId: ['__unassigned__'])
+        if (Array.isArray(value) && value.includes('__unassigned__')) {
+          (filter as Record<string, unknown>)[key] = { $eq: null };
+        // Handle arrays - convert to $in query for multi-value filters (e.g., status: ['pending', 'in_progress'])
+        } else if (Array.isArray(value)) {
+          (filter as Record<string, unknown>)[key] = { $in: value };
         // Handle ObjectId fields
-        if (key.endsWith('Id') && typeof value === 'string' && ObjectId.isValid(value)) {
+        } else if (key.endsWith('Id') && typeof value === 'string' && ObjectId.isValid(value)) {
           (filter as Record<string, unknown>)[key] = new ObjectId(value);
         } else {
           (filter as Record<string, unknown>)[key] = value;

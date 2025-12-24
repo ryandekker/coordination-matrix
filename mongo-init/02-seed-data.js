@@ -322,6 +322,19 @@ const views = [
     visibleColumns: ['title', 'status', 'urgency', 'assigneeId', 'dueAt'],
     createdAt: new Date(),
   },
+  {
+    name: 'Unassigned',
+    collectionName: 'tasks',
+    isDefault: false,
+    isSystem: true,
+    filters: {
+      assigneeId: ['__unassigned__'],
+      status: ['pending', 'in_progress', 'waiting', 'on_hold']
+    },
+    sorting: [{ field: 'urgency', direction: 'desc' }, { field: 'createdAt', direction: 'asc' }],
+    visibleColumns: ['title', 'status', 'urgency', 'workflowId', 'workflowStage', 'dueAt', 'createdAt'],
+    createdAt: new Date(),
+  },
 ];
 
 db.views.insertMany(views);
