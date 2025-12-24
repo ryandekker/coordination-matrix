@@ -278,7 +278,7 @@ export function StepConfigPanel({
                 <div className="text-blue-800 dark:text-blue-200">
                   <p className="font-medium">AI Agent Task</p>
                   <p className="text-xs mt-1">
-                    This step is handled by an AI agent. Additional instructions are optional.
+                    This step is handled by an AI agent. The prompt is optional.
                   </p>
                 </div>
               </div>
@@ -310,12 +310,12 @@ export function StepConfigPanel({
             <div className="space-y-1">
               <label className="text-sm font-medium flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-amber-500" />
-                Additional Instructions
+                Prompt
               </label>
               <Textarea
                 value={step.additionalInstructions || step.prompt || ''}
                 onChange={(e) => onUpdate({ additionalInstructions: e.target.value })}
-                placeholder="Add extra context for the agent if needed..."
+                placeholder="Instructions for the AI agent..."
                 className="min-h-[80px] font-mono text-sm"
               />
               <TokenBrowser

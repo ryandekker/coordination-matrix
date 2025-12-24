@@ -586,8 +586,10 @@ function assemblePrompt(task, agent, workflowStep) {
   }
 
   // 3. Workflow step prompt (stage-specific instructions)
-  if (workflowStep?.prompt) {
-    sections.push(`## Workflow Step: ${workflowStep.name}\n${workflowStep.prompt}`);
+  // Note: UI saves to 'additionalInstructions', legacy code may use 'prompt'
+  const stepPrompt = workflowStep?.prompt || workflowStep?.additionalInstructions;
+  if (stepPrompt) {
+    sections.push(`## Workflow Step: ${workflowStep.name}\n${stepPrompt}`);
   }
 
   // 4. Output schema (if specified by workflow step)
