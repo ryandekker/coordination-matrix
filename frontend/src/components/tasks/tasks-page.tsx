@@ -94,7 +94,7 @@ export function TasksPage() {
   const taskIdFromUrl = searchParams.get('taskId')
   const parentIdFromUrl = searchParams.get('parentId')  // For viewing a flow's children
 
-  const [selectedView, setSelectedView] = useState<string | null>(viewIdFromUrl)
+  const [selectedView, setSelectedView] = useState<string | null>(null)
   const [filters, setFilters] = useState<Record<string, unknown>>({})
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -181,12 +181,13 @@ export function TasksPage() {
     localStorage.setItem('taskList.expandAllPreference', String(enabled))
   }, [])
 
-  // Sync view from URL
+  // Sync view from URL - only apply view settings once the view is loaded
   useEffect(() => {
-    if (viewIdFromUrl && viewIdFromUrl !== selectedView) {
-      setSelectedView(viewIdFromUrl)
+    if (viewIdFromUrl) {
       const view = views.find((v: View) => v._id === viewIdFromUrl)
-      if (view) {
+      if (view && selectedView !== viewIdFromUrl) {
+        // View found and not yet applied - apply its settings
+        setSelectedView(viewIdFromUrl)
         setFilters(view.filters || {})
         if (view.sorting && view.sorting.length > 0) {
           setSortBy(view.sorting[0].field)
@@ -196,6 +197,8 @@ export function TasksPage() {
         // Extract search from filters if present
         if (view.filters?.search) {
           setSearch(view.filters.search as string)
+        } else {
+          setSearch('')
         }
       }
     } else if (!viewIdFromUrl && selectedView) {
