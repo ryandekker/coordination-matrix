@@ -528,11 +528,13 @@ export function useEventStream(options?: {
         break
 
       case 'task.comment.added':
-        // Invalidate activity logs for this task
-        queryClient.invalidateQueries({ queryKey: ['activity-logs', 'task', event.taskId] })
-        queryClient.invalidateQueries({ queryKey: ['activity-logs', 'recent'] })
+        // Comments are also activity, but handled below
         break
     }
+
+    // All task events create activity log entries - invalidate activity logs
+    queryClient.invalidateQueries({ queryKey: ['activity-logs', 'task', event.taskId] })
+    queryClient.invalidateQueries({ queryKey: ['activity-logs', 'recent'] })
 
     // Also invalidate workflow-related queries if task has workflowId
     if (event.task?.workflowId) {
