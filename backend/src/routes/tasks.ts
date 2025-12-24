@@ -519,18 +519,38 @@ tasksRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) 
   }
 });
 
-// GET /api/tasks/:id/children - Get direct children of a task
+// GET /api/tasks/:id/children - Get direct children of a task with pagination
 tasksRouter.get('/:id/children', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { resolveReferences = 'true' } = req.query;
+    const {
+      resolveReferences = 'true',
+      page = 1,
+      limit = 50,
+      sortBy = 'createdAt',
+      sortOrder = 'asc',
+    } = req.query;
 
     const taskId = toObjectId(req.params.id);
-    const children = await db
-      .collection<Task>('tasks')
-      .find({ parentId: taskId })
-      .sort({ createdAt: 1 })
-      .toArray();
+
+    // Parse pagination params
+    const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
+    const limitNum = Math.min(200, Math.max(1, parseInt(limit as string, 10) || 50));
+    const skip = (pageNum - 1) * limitNum;
+
+    const sort: Sort = { [sortBy as string]: sortOrder === 'asc' ? 1 : -1 };
+
+    // Get children with pagination and total count
+    const [children, total] = await Promise.all([
+      db
+        .collection<Task>('tasks')
+        .find({ parentId: taskId })
+        .sort(sort)
+        .skip(skip)
+        .limit(limitNum)
+        .toArray(),
+      db.collection<Task>('tasks').countDocuments({ parentId: taskId }),
+    ]);
 
     // Add child count to each task to enable expand/collapse UI
     const taskIds = children.map(t => t._id);
@@ -554,7 +574,15 @@ tasksRouter.get('/:id/children', async (req: Request, res: Response, next: NextF
       resolvedChildren = await resolver.resolveDocuments(childrenWithChildInfo);
     }
 
-    res.json({ data: resolvedChildren });
+    res.json({
+      data: resolvedChildren,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    });
   } catch (error) {
     next(error);
   }

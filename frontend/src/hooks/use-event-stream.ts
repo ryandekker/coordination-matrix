@@ -454,13 +454,18 @@ export function useEventStream(options?: {
       case 'task.metadata.changed':
         // Update the specific task in cache if we have task data
         if (event.task) {
+          const taskData = event.task as Task
+          const isChildTask = !!taskData.parentId
+
           // Update individual task cache
           queryClient.setQueryData(['task', event.taskId], (old: unknown) => {
             if (!old) return old
             const oldData = old as { data: Task }
+            // Preserve existing children array if present (don't overwrite with empty)
+            const preservedChildren = oldData.data.children || []
             return {
               ...oldData,
-              data: { ...oldData.data, ...event.task }
+              data: { ...oldData.data, ...event.task, children: event.task.children?.length ? event.task.children : preservedChildren }
             }
           })
 
@@ -470,9 +475,14 @@ export function useEventStream(options?: {
             const oldData = old as { data: Task[]; pagination: unknown }
             return {
               ...oldData,
-              data: oldData.data.map((task: Task) =>
-                task._id === event.taskId ? { ...task, ...event.task } : task
-              )
+              data: oldData.data.map((task: Task) => {
+                if (task._id === event.taskId) {
+                  // Preserve existing children array
+                  const preservedChildren = task.children || []
+                  return { ...task, ...event.task, children: event.task.children?.length ? event.task.children : preservedChildren }
+                }
+                return task
+              })
             }
           })
 
@@ -486,17 +496,38 @@ export function useEventStream(options?: {
             }
           })
 
-          // Update children caches if this task appears in them
-          queryClient.setQueriesData({ queryKey: ['task-children'] }, (old: unknown) => {
-            if (!old) return old
-            const oldData = old as { data: Task[] }
-            return {
-              ...oldData,
-              data: oldData.data.map((task: Task) =>
+          // For child tasks, invalidate all cached pages for the parent's children
+          // This is more reliable than optimistic updates for nested data
+          if (isChildTask) {
+            // Invalidate all queries that start with ['task-children', parentId]
+            // This covers all pagination variations
+            queryClient.invalidateQueries({
+              predicate: (query) => {
+                const key = query.queryKey
+                return Array.isArray(key) &&
+                  key[0] === 'task-children' &&
+                  key[1] === taskData.parentId
+              },
+              refetchType: 'active'
+            })
+          }
+
+          // Also try optimistic update for immediate feedback on any matching query
+          queryClient.setQueriesData(
+            { predicate: (query) => Array.isArray(query.queryKey) && query.queryKey[0] === 'task-children' },
+            (old: unknown) => {
+              if (!old) return old
+              const oldData = old as { data: Task[]; pagination?: unknown }
+              const updatedData = oldData.data.map((task: Task) =>
                 task._id === event.taskId ? { ...task, ...event.task } : task
               )
+              // Only return new object if something changed
+              if (updatedData.some((t, i) => t !== oldData.data[i])) {
+                return { ...oldData, data: updatedData }
+              }
+              return old
             }
-          })
+          )
         }
         break
 

@@ -46,10 +46,19 @@ export function useTaskTree(params?: Record<string, string>) {
   })
 }
 
-export function useTaskChildren(parentId: string | null) {
+interface UseTaskChildrenOptions {
+  page?: number
+  limit?: number
+  sortBy?: string
+  sortOrder?: 'asc' | 'desc'
+}
+
+export function useTaskChildren(parentId: string | null, options?: UseTaskChildrenOptions) {
+  const { page = 1, limit = 50, sortBy = 'createdAt', sortOrder = 'asc' } = options || {}
+
   return useQuery({
-    queryKey: ['task-children', parentId],
-    queryFn: () => (parentId ? tasksApi.getChildren(parentId) : null),
+    queryKey: ['task-children', parentId, { page, limit, sortBy, sortOrder }],
+    queryFn: () => (parentId ? tasksApi.getChildren(parentId, { page, limit, sortBy, sortOrder }) : null),
     enabled: !!parentId,
   })
 }
