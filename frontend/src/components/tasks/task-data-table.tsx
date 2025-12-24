@@ -56,6 +56,7 @@ import { Task, FieldConfig, LookupValue, User } from '@/lib/api'
 import { useTaskChildren, useUpdateTask, useDeleteTask, useBulkUpdateTasks, useBulkDeleteTasks, useLookups } from '@/hooks/use-tasks'
 import { formatDateTime, cn } from '@/lib/utils'
 import { TASK_TYPE_CONFIG, getTaskTypeConfig } from '@/lib/task-type-config'
+import { UserChip } from '@/components/ui/user-chip'
 
 // Task type icon component with tooltip - uses shared config
 const TaskTypeIcon = memo(function TaskTypeIcon({ taskType, batchCounters }: { taskType?: string; batchCounters?: { processedCount?: number; expectedCount?: number } }) {
@@ -147,14 +148,16 @@ const BulkActionsBar = memo(function BulkActionsBar({
           </SelectContent>
         </Select>
         <Select onValueChange={(val) => onAssigneeChange(val === '__unassign__' ? null : val)} disabled={isUpdating}>
-          <SelectTrigger className="h-8 w-[140px]">
+          <SelectTrigger className="h-8 w-[160px]">
             <SelectValue placeholder="Set assignee" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__unassign__">Unassigned</SelectItem>
+            <SelectItem value="__unassign__">
+              <UserChip user={null} size="sm" />
+            </SelectItem>
             {users.map((user) => (
               <SelectItem key={user._id} value={user._id}>
-                {user.displayName}
+                <UserChip user={user} size="sm" />
               </SelectItem>
             ))}
           </SelectContent>
@@ -814,10 +817,31 @@ export function TaskDataTable({
       // Also try looking up directly by the field path
       const ref = (task._resolved?.[fieldName as keyof typeof task._resolved] ||
         task._resolved?.[fieldConfig.fieldPath as keyof typeof task._resolved]) as
+        | User
         | { displayName?: string; name?: string }
         | undefined
-      if (ref?.displayName || ref?.name) {
-        return <div className="text-center">{ref.displayName || ref.name}</div>
+
+      // For user references, use UserChip
+      if (fieldConfig.referenceCollection === 'users') {
+        if (ref && '_id' in ref) {
+          return (
+            <div className="flex justify-center">
+              <UserChip user={ref as User} size="sm" />
+            </div>
+          )
+        }
+        // No assignee - show unassigned
+        return (
+          <div className="flex justify-center">
+            <UserChip user={null} size="sm" />
+          </div>
+        )
+      }
+
+      // For other references (teams, etc.), show displayName or name
+      const refDisplay = ref as { displayName?: string; name?: string } | undefined
+      if (refDisplay?.displayName || refDisplay?.name) {
+        return <div className="text-center">{refDisplay.displayName || refDisplay.name}</div>
       }
       // If no resolved value, show dash
       return <span className="block text-center text-muted-foreground">-</span>
