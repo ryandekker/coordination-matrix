@@ -94,7 +94,7 @@ export function TasksPage() {
   const taskIdFromUrl = searchParams.get('taskId')
   const parentIdFromUrl = searchParams.get('parentId')  // For viewing a flow's children
 
-  const [selectedView, setSelectedView] = useState<string | null>(viewIdFromUrl)
+  const [selectedView, setSelectedView] = useState<string | null>(null)
   const [filters, setFilters] = useState<Record<string, unknown>>({})
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -137,15 +137,15 @@ export function TasksPage() {
   useEventStream()
 
   const rawTasks = tasksData?.data || []
-  // When viewing a flow's children, prepend the parent flow task to show it at the top
+  // When viewing a flow's children, show just the parent with its children attached
   const tasks = useMemo(() => {
     if (parentIdFromUrl && flowParentTask?.data) {
-      // Add children reference to parent so it can be expanded
+      // Return parent with children attached - they'll expand inline
       const parentWithChildren: Task = {
         ...flowParentTask.data,
-        children: rawTasks, // Use actual tasks as children for proper expansion
+        children: rawTasks,
       }
-      return [parentWithChildren, ...rawTasks]
+      return [parentWithChildren]
     }
     return rawTasks
   }, [parentIdFromUrl, flowParentTask?.data, rawTasks])
@@ -181,12 +181,13 @@ export function TasksPage() {
     localStorage.setItem('taskList.expandAllPreference', String(enabled))
   }, [])
 
-  // Sync view from URL
+  // Sync view from URL - only apply view settings once the view is loaded
   useEffect(() => {
-    if (viewIdFromUrl && viewIdFromUrl !== selectedView) {
-      setSelectedView(viewIdFromUrl)
+    if (viewIdFromUrl) {
       const view = views.find((v: View) => v._id === viewIdFromUrl)
-      if (view) {
+      if (view && selectedView !== viewIdFromUrl) {
+        // View found and not yet applied - apply its settings
+        setSelectedView(viewIdFromUrl)
         setFilters(view.filters || {})
         if (view.sorting && view.sorting.length > 0) {
           setSortBy(view.sorting[0].field)
@@ -196,6 +197,8 @@ export function TasksPage() {
         // Extract search from filters if present
         if (view.filters?.search) {
           setSearch(view.filters.search as string)
+        } else {
+          setSearch('')
         }
       }
     } else if (!viewIdFromUrl && selectedView) {
@@ -442,6 +445,7 @@ export function TasksPage() {
         onPageChange={setPage}
         expandAllEnabled={expandAllEnabled}
         onExpandAllChange={handleExpandAllChange}
+        autoExpandIds={parentIdFromUrl ? [parentIdFromUrl] : undefined}
       />
 
       <TaskModal

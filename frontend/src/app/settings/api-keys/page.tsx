@@ -40,8 +40,23 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { formatDateTime } from '@/lib/utils'
-import { apiKeysApi, type ApiKey } from '@/lib/api'
+import { apiKeysApi, usersApi, type ApiKey } from '@/lib/api'
+
+interface User {
+  _id: string
+  displayName: string
+  email?: string
+  role: string
+  isActive: boolean
+}
 
 const AVAILABLE_SCOPES = [
   { value: 'tasks:read', label: 'Read Tasks', description: 'View tasks and task details' },
@@ -61,12 +76,18 @@ export default function ApiKeysPage() {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
+    userId: '' as string,
     scopes: ['tasks:read', 'saved-searches:read'] as string[],
   })
 
   const { data: apiKeysData, isLoading } = useQuery({
     queryKey: ['api-keys'],
     queryFn: apiKeysApi.list,
+  })
+
+  const { data: usersData } = useQuery({
+    queryKey: ['users'],
+    queryFn: () => usersApi.list(),
   })
 
   const createMutation = useMutation({
@@ -101,18 +122,26 @@ export default function ApiKeysPage() {
   })
 
   const apiKeys = apiKeysData?.data || []
+  const users = usersData?.data || []
 
   const resetForm = () => {
     setFormData({
       name: '',
       description: '',
+      userId: '',
       scopes: ['tasks:read', 'saved-searches:read'],
     })
   }
 
   const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    createMutation.mutate(formData)
+    const payload = {
+      name: formData.name,
+      description: formData.description,
+      scopes: formData.scopes,
+      ...(formData.userId && { userId: formData.userId }),
+    }
+    createMutation.mutate(payload)
   }
 
   const handleScopeChange = (scope: string, checked: boolean) => {
@@ -279,6 +308,28 @@ export default function ApiKeysPage() {
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 placeholder="What will this key be used for?"
               />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Acts As User</label>
+              <Select
+                value={formData.userId || 'none'}
+                onValueChange={(value) => setFormData({ ...formData, userId: value === 'none' ? '' : value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a user (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No user (API key only)</SelectItem>
+                  {users.map((user) => (
+                    <SelectItem key={user._id} value={user._id}>
+                      {user.displayName}{user.email ? ` (${user.email})` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                When set, this API key will inherit the selected user&apos;s permissions.
+              </p>
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Scopes</label>

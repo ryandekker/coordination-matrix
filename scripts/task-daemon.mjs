@@ -180,7 +180,7 @@ Response Handling:
     - CONTINUE: status -> "completed", creates follow-up task
     - ESCALATE: status -> "on_hold"
     - HOLD: status -> "on_hold"
-  - Stores response output in additionalInfo
+  - Stores response output in metadata.executionLog
 
 Examples:
   # Process tasks using CLI args
@@ -347,10 +347,10 @@ async function updateTask(config, taskId, updates) {
     return true;
   }
 
-  // Truncate additionalInfo if too long (keep under 100KB)
-  if (updates.additionalInfo && updates.additionalInfo.length > 100000) {
-    console.log(`[DEBUG] Truncating additionalInfo from ${updates.additionalInfo.length} to 100000 chars`);
-    updates.additionalInfo = updates.additionalInfo.substring(0, 100000) + '\n\n[truncated]';
+  // Truncate executionLog in metadata if too long (keep under 100KB)
+  if (updates.metadata?.executionLog && updates.metadata.executionLog.length > 100000) {
+    console.log(`[DEBUG] Truncating executionLog from ${updates.metadata.executionLog.length} to 100000 chars`);
+    updates.metadata.executionLog = updates.metadata.executionLog.substring(0, 100000) + '\n\n[truncated]';
   }
 
   try {
@@ -460,7 +460,7 @@ function assemblePrompt(task, agent, workflowStep) {
     title: task.title,
     summary: task.summary || null,
     tags: task.tags || [],
-    additionalInfo: task.additionalInfo || null,
+    executionLog: task.metadata?.executionLog || null,
     workflowStage: task.workflowStage || null,
     inputPayload: task.metadata?.inputPayload || null,
   };
@@ -602,7 +602,7 @@ async function handleStageTransition(config, task, workflow, parsedResponse) {
         assigneeId: nextStep.defaultAssigneeId || task.assigneeId,
         extraPrompt: nextStep.prompt || '',
         status: 'pending',
-        additionalInfo: `Previous step output:\n${parsedResponse.data.output}`,
+        metadata: { previousOutput: parsedResponse.data.output },
         tags: task.tags || [],
       });
 
@@ -626,7 +626,7 @@ async function handleStageTransition(config, task, workflow, parsedResponse) {
       assigneeId: task.assigneeId,
       extraPrompt: parsedResponse.data.nextActionReason,
       status: 'pending',
-      additionalInfo: `Previous output:\n${parsedResponse.data.output}`,
+      metadata: { previousOutput: parsedResponse.data.output },
       tags: task.tags || [],
     });
 

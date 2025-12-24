@@ -24,10 +24,6 @@ db.createCollection('tasks', {
           bsonType: 'string',
           description: 'Extra prompt for AI tasks'
         },
-        additionalInfo: {
-          bsonType: 'string',
-          description: 'Additional information'
-        },
         status: {
           bsonType: 'string',
           enum: ['pending', 'in_progress', 'on_hold', 'waiting', 'completed', 'failed', 'cancelled', 'archived'],
@@ -197,7 +193,7 @@ db.views.createIndex({ createdById: 1 });
 // ============================================================================
 db.createCollection('users');
 
-db.users.createIndex({ email: 1 }, { unique: true });
+db.users.createIndex({ email: 1 }, { unique: true, sparse: true });
 db.users.createIndex({ isActive: 1 });
 
 // ============================================================================
@@ -838,5 +834,124 @@ db.batch_items.createIndex({ batchJobId: 1, itemKey: 1 }, { unique: true });
 db.batch_items.createIndex({ batchJobId: 1, status: 1 });
 db.batch_items.createIndex({ batchJobId: 1, createdAt: 1 });
 db.batch_items.createIndex({ externalId: 1 });
+
+// ============================================================================
+// API KEYS COLLECTION - API key storage with optional user association
+// ============================================================================
+db.createCollection('api_keys', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['name', 'keyHash', 'keyPrefix', 'scopes', 'createdAt', 'isActive'],
+      properties: {
+        name: {
+          bsonType: 'string',
+          description: 'Human-readable name for the API key'
+        },
+        description: {
+          bsonType: ['string', 'null'],
+          description: 'Optional description of what this key is used for'
+        },
+        keyHash: {
+          bsonType: 'string',
+          description: 'SHA256 hash of the API key (never store raw key)'
+        },
+        keyPrefix: {
+          bsonType: 'string',
+          description: 'Prefix of the key for display purposes'
+        },
+        scopes: {
+          bsonType: 'array',
+          items: { bsonType: 'string' },
+          description: 'Array of permission scopes'
+        },
+        createdById: {
+          bsonType: ['objectId', 'null'],
+          description: 'User who created this API key'
+        },
+        userId: {
+          bsonType: ['objectId', 'null'],
+          description: 'User this API key acts as - when set, inherits user permissions'
+        },
+        createdAt: {
+          bsonType: 'date',
+          description: 'When the key was created'
+        },
+        expiresAt: {
+          bsonType: ['date', 'null'],
+          description: 'When the key expires (null = never)'
+        },
+        lastUsedAt: {
+          bsonType: ['date', 'null'],
+          description: 'When the key was last used'
+        },
+        isActive: {
+          bsonType: 'bool',
+          description: 'Whether the key is active'
+        }
+      }
+    }
+  }
+});
+
+// Index on keyHash for authentication lookups
+db.api_keys.createIndex({ keyHash: 1 }, { unique: true });
+// Index on userId to find keys tied to a specific user
+db.api_keys.createIndex({ userId: 1 });
+// Index on createdById to find keys created by a user
+db.api_keys.createIndex({ createdById: 1 });
+// Index on isActive for filtering
+db.api_keys.createIndex({ isActive: 1 });
+
+// ============================================================================
+// TAGS COLLECTION - Structured tag definitions with colors
+// ============================================================================
+db.createCollection('tags', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['name', 'color', 'createdAt', 'isActive'],
+      properties: {
+        name: {
+          bsonType: 'string',
+          description: 'Tag name (unique, lowercase) - required'
+        },
+        displayName: {
+          bsonType: 'string',
+          description: 'Human-readable display name'
+        },
+        color: {
+          bsonType: 'string',
+          description: 'Hex color code for the tag - required'
+        },
+        description: {
+          bsonType: ['string', 'null'],
+          description: 'Optional description of the tag purpose'
+        },
+        isActive: {
+          bsonType: 'bool',
+          description: 'Whether the tag is active'
+        },
+        createdById: {
+          bsonType: ['objectId', 'null'],
+          description: 'User who created this tag'
+        },
+        createdAt: {
+          bsonType: 'date',
+          description: 'When the tag was created'
+        },
+        updatedAt: {
+          bsonType: ['date', 'null'],
+          description: 'When the tag was last updated'
+        }
+      }
+    }
+  }
+});
+
+// Unique index on tag name (case-insensitive matching)
+db.tags.createIndex({ name: 1 }, { unique: true });
+// Index for active tags
+db.tags.createIndex({ isActive: 1 });
 
 print('Database initialization complete!');

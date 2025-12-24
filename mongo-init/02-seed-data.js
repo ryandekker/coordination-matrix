@@ -79,20 +79,6 @@ const fieldConfigs = [
   },
   {
     collectionName: 'tasks',
-    fieldPath: 'additionalInfo',
-    displayName: 'Additional Info',
-    fieldType: 'textarea',
-    isRequired: false,
-    isEditable: true,
-    isSearchable: true,
-    isSortable: false,
-    isFilterable: false,
-    displayOrder: 4,
-    width: 400,
-    defaultVisible: false,
-  },
-  {
-    collectionName: 'tasks',
     fieldPath: 'status',
     displayName: 'Status',
     fieldType: 'select',
@@ -336,6 +322,19 @@ const views = [
     visibleColumns: ['title', 'status', 'urgency', 'assigneeId', 'dueAt'],
     createdAt: new Date(),
   },
+  {
+    name: 'Unassigned',
+    collectionName: 'tasks',
+    isDefault: false,
+    isSystem: true,
+    filters: {
+      assigneeId: ['__unassigned__'],
+      status: ['pending', 'in_progress', 'waiting', 'on_hold']
+    },
+    sorting: [{ field: 'urgency', direction: 'desc' }, { field: 'createdAt', direction: 'asc' }],
+    visibleColumns: ['title', 'status', 'urgency', 'workflowId', 'workflowStage', 'dueAt', 'createdAt'],
+    createdAt: new Date(),
+  },
 ];
 
 db.views.insertMany(views);
@@ -378,6 +377,34 @@ const users = [
     displayName: 'Emma Wilson',
     role: 'viewer',
     isActive: true,
+    createdAt: new Date(),
+  },
+  // Bot users with custom colors
+  {
+    displayName: 'Code Reviewer',
+    role: 'operator',
+    isActive: true,
+    isAgent: true,
+    agentPrompt: 'You are a code review assistant that analyzes code for quality and best practices.',
+    botColor: '#10b981', // Emerald green
+    createdAt: new Date(),
+  },
+  {
+    displayName: 'Content Writer',
+    role: 'operator',
+    isActive: true,
+    isAgent: true,
+    agentPrompt: 'You are a content writing assistant that helps create engaging content.',
+    botColor: '#8b5cf6', // Purple
+    createdAt: new Date(),
+  },
+  {
+    displayName: 'Research Assistant',
+    role: 'operator',
+    isActive: true,
+    isAgent: true,
+    agentPrompt: 'You are a research assistant that gathers and synthesizes information.',
+    botColor: '#f59e0b', // Amber
     createdAt: new Date(),
   },
 ];
@@ -435,7 +462,6 @@ const rootTask1 = {
   title: 'Q4 Marketing Campaign',
   summary: 'Plan and execute the Q4 marketing campaign including email, social media, and content marketing.',
   extraPrompt: 'Focus on product launches and holiday promotions',
-  additionalInfo: 'Budget: $50,000. Timeline: October-December',
   status: 'in_progress',
   urgency: 'high',
   parentId: null,
@@ -458,7 +484,6 @@ const childTask1_1 = {
   title: 'Email Marketing Campaign',
   summary: 'Create and schedule email campaigns for Q4 promotions',
   extraPrompt: '',
-  additionalInfo: 'Target: 50,000 subscribers',
   status: 'in_progress',
   urgency: 'high',
   parentId: rootTask1Id,
@@ -480,7 +505,6 @@ const grandchildTask1_1_1 = {
   title: 'Design Email Templates',
   summary: 'Create responsive email templates for holiday promotions',
   extraPrompt: '',
-  additionalInfo: '',
   status: 'completed',
   urgency: 'normal',
   parentId: childTask1_1Id,
@@ -502,7 +526,6 @@ const grandchildTask1_1_2 = {
   title: 'Write Email Copy',
   summary: 'Write compelling email copy for promotional campaigns',
   extraPrompt: 'Use conversational tone, highlight value propositions',
-  additionalInfo: '',
   status: 'in_progress',
   urgency: 'high',
   parentId: childTask1_1Id,
@@ -525,7 +548,6 @@ const childTask1_2 = {
   title: 'Social Media Campaign',
   summary: 'Plan and execute social media posts across all platforms',
   extraPrompt: '',
-  additionalInfo: 'Platforms: Instagram, Twitter, LinkedIn, Facebook',
   status: 'pending',
   urgency: 'normal',
   parentId: rootTask1Id,
@@ -548,7 +570,6 @@ const rootTask2 = {
   title: 'Website Redesign Project',
   summary: 'Complete redesign of the company website with new branding',
   extraPrompt: '',
-  additionalInfo: 'Must maintain SEO rankings during migration',
   status: 'on_hold',
   urgency: 'normal',
   parentId: null,
@@ -570,7 +591,6 @@ const rootTask3 = {
   title: 'Fix Login Authentication Bug',
   summary: 'Users reporting intermittent login failures',
   extraPrompt: 'Check session handling and token expiration',
-  additionalInfo: 'Error logs show timeout on auth service',
   status: 'in_progress',
   urgency: 'urgent',
   parentId: null,
@@ -592,7 +612,6 @@ const rootTask4 = {
   title: 'Update API Documentation',
   summary: 'Update REST API docs with new endpoints from v2.5 release',
   extraPrompt: '',
-  additionalInfo: 'Include code examples in Python and JavaScript',
   status: 'pending',
   urgency: 'low',
   parentId: null,
@@ -614,7 +633,6 @@ const rootTask5 = {
   title: 'Quarterly Performance Review',
   summary: 'Conduct Q3 performance reviews for the team',
   extraPrompt: '',
-  additionalInfo: '',
   status: 'completed',
   urgency: 'normal',
   parentId: null,
@@ -636,7 +654,6 @@ const rootTask6 = {
   title: 'Legacy System Migration',
   summary: 'Migrate data from legacy CRM to new system',
   extraPrompt: '',
-  additionalInfo: 'Project cancelled due to vendor change',
   status: 'cancelled',
   urgency: 'low',
   parentId: null,
@@ -659,7 +676,6 @@ const additionalTasks = [
     title: 'Implement Dark Mode',
     summary: 'Add dark mode support to the web application',
     extraPrompt: 'Follow system preferences by default',
-    additionalInfo: '',
     status: 'pending',
     urgency: 'low',
     parentId: null,
@@ -679,7 +695,6 @@ const additionalTasks = [
     title: 'Security Audit Review',
     summary: 'Review findings from external security audit',
     extraPrompt: '',
-    additionalInfo: 'Report attached in shared drive',
     status: 'in_progress',
     urgency: 'high',
     parentId: null,
@@ -699,7 +714,6 @@ const additionalTasks = [
     title: 'Customer Feedback Analysis',
     summary: 'Analyze customer feedback from Q3 surveys',
     extraPrompt: 'Identify top 3 improvement areas',
-    additionalInfo: '',
     status: 'completed',
     urgency: 'normal',
     parentId: null,
@@ -914,5 +928,52 @@ for (let i = 1; i <= 32; i++) {
 }
 
 db.batch_items.insertMany(batchItems);
+
+// ============================================================================
+// TAGS - Predefined tags with colors
+// ============================================================================
+
+const tags = [
+  // Category tags
+  { name: 'marketing', displayName: 'Marketing', color: '#8B5CF6', description: 'Marketing related tasks', isActive: true, createdAt: new Date() },
+  { name: 'design', displayName: 'Design', color: '#EC4899', description: 'Design and UI/UX tasks', isActive: true, createdAt: new Date() },
+  { name: 'feature', displayName: 'Feature', color: '#10B981', description: 'New feature development', isActive: true, createdAt: new Date() },
+  { name: 'bug', displayName: 'Bug', color: '#EF4444', description: 'Bug fixes and issues', isActive: true, createdAt: new Date() },
+  { name: 'documentation', displayName: 'Documentation', color: '#6366F1', description: 'Documentation tasks', isActive: true, createdAt: new Date() },
+  { name: 'security', displayName: 'Security', color: '#F97316', description: 'Security related tasks', isActive: true, createdAt: new Date() },
+
+  // Priority/status tags
+  { name: 'urgent', displayName: 'Urgent', color: '#DC2626', description: 'Urgent priority items', isActive: true, createdAt: new Date() },
+  { name: 'blocked', displayName: 'Blocked', color: '#9CA3AF', description: 'Blocked by dependencies', isActive: true, createdAt: new Date() },
+
+  // Department tags
+  { name: 'hr', displayName: 'HR', color: '#14B8A6', description: 'Human resources tasks', isActive: true, createdAt: new Date() },
+  { name: 'research', displayName: 'Research', color: '#0EA5E9', description: 'Research tasks', isActive: true, createdAt: new Date() },
+
+  // Type tags
+  { name: 'email', displayName: 'Email', color: '#A855F7', description: 'Email related tasks', isActive: true, createdAt: new Date() },
+  { name: 'social-media', displayName: 'Social Media', color: '#3B82F6', description: 'Social media tasks', isActive: true, createdAt: new Date() },
+  { name: 'api', displayName: 'API', color: '#22C55E', description: 'API development tasks', isActive: true, createdAt: new Date() },
+  { name: 'ui', displayName: 'UI', color: '#F472B6', description: 'User interface tasks', isActive: true, createdAt: new Date() },
+
+  // Process tags
+  { name: 'campaign', displayName: 'Campaign', color: '#FBBF24', description: 'Campaign tasks', isActive: true, createdAt: new Date() },
+  { name: 'q4', displayName: 'Q4', color: '#84CC16', description: 'Q4 tasks', isActive: true, createdAt: new Date() },
+  { name: 'review', displayName: 'Review', color: '#06B6D4', description: 'Review tasks', isActive: true, createdAt: new Date() },
+  { name: 'audit', displayName: 'Audit', color: '#F59E0B', description: 'Audit tasks', isActive: true, createdAt: new Date() },
+  { name: 'compliance', displayName: 'Compliance', color: '#64748B', description: 'Compliance tasks', isActive: true, createdAt: new Date() },
+
+  // Technical tags
+  { name: 'website', displayName: 'Website', color: '#7C3AED', description: 'Website tasks', isActive: true, createdAt: new Date() },
+  { name: 'rebrand', displayName: 'Rebrand', color: '#BE185D', description: 'Rebranding tasks', isActive: true, createdAt: new Date() },
+  { name: 'authentication', displayName: 'Authentication', color: '#B91C1C', description: 'Authentication tasks', isActive: true, createdAt: new Date() },
+  { name: 'copywriting', displayName: 'Copywriting', color: '#7DD3FC', description: 'Copywriting tasks', isActive: true, createdAt: new Date() },
+  { name: 'accessibility', displayName: 'Accessibility', color: '#34D399', description: 'Accessibility tasks', isActive: true, createdAt: new Date() },
+  { name: 'customer-feedback', displayName: 'Customer Feedback', color: '#FB923C', description: 'Customer feedback tasks', isActive: true, createdAt: new Date() },
+  { name: 'migration', displayName: 'Migration', color: '#A78BFA', description: 'Migration tasks', isActive: true, createdAt: new Date() },
+  { name: 'cancelled', displayName: 'Cancelled', color: '#9CA3AF', description: 'Cancelled items', isActive: true, createdAt: new Date() },
+];
+
+db.tags.insertMany(tags);
 
 print('Seed data inserted successfully!');

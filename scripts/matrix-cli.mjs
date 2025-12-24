@@ -434,7 +434,6 @@ async function cmdTaskCreate(args) {
   if (args.workflow) task.workflowId = args.workflow;
   if (args.tags) task.tags = args.tags.split(',').map(t => t.trim());
   if (args.prompt) task.extraPrompt = args.prompt;
-  if (args.info) task.additionalInfo = args.info;
   if (args.due) task.dueAt = args.due;
   if (args.metadata) {
     try {
@@ -456,8 +455,8 @@ async function cmdTaskCreate(args) {
       const stdinData = JSON.parse(input);
       Object.assign(task, stdinData);
     } catch {
-      // If not JSON, treat as additionalInfo
-      task.additionalInfo = input;
+      // If not JSON, treat as summary
+      task.summary = input;
     }
   }
 
@@ -493,7 +492,6 @@ async function cmdTaskUpdate(args) {
   if (args.assignee) updates.assigneeId = args.assignee;
   if (args.tags) updates.tags = args.tags.split(',').map(t => t.trim());
   if (args.prompt) updates.extraPrompt = args.prompt;
-  if (args.info) updates.additionalInfo = args.info;
   if (args.due) updates.dueAt = args.due;
   if (args.parent) updates.parentId = args.parent;
   if (args.metadata) {

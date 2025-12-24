@@ -373,8 +373,13 @@ export const usersApi = {
 
 // Workflows API
 export const workflowsApi = {
-  list: async (): Promise<ApiResponse<Workflow[]>> => {
-    const response = await authFetch(`${API_BASE}/workflows`)
+  list: async (options?: { includeInactive?: boolean }): Promise<ApiResponse<Workflow[]>> => {
+    const params = new URLSearchParams()
+    if (options?.includeInactive) {
+      params.set('includeInactive', 'true')
+    }
+    const queryString = params.toString()
+    const response = await authFetch(`${API_BASE}/workflows${queryString ? `?${queryString}` : ''}`)
     return handleResponse(response)
   },
 
@@ -506,7 +511,6 @@ export interface Task {
   title: string
   summary?: string
   extraPrompt?: string
-  additionalInfo?: string
   status: string
   urgency?: string
   parentId: string | null
@@ -602,6 +606,8 @@ export interface User {
   isActive: boolean
   isAgent?: boolean               // Is this user an AI agent?
   agentPrompt?: string            // Agent's base prompt/persona
+  profilePicture?: string         // URL to profile picture (for humans)
+  botColor?: string               // Custom color for bot users (hex code)
   createdAt?: string
   updatedAt?: string
 }
@@ -681,6 +687,11 @@ export interface ActivityLogEntry {
   comment?: string
   timestamp: string
   metadata?: Record<string, unknown>
+  // Populated user info (resolved by backend)
+  actor?: {
+    displayName: string
+    email?: string
+  } | null
 }
 
 // Workflow Run Types

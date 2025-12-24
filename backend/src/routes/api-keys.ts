@@ -14,6 +14,8 @@ export interface ApiKey {
   keyPrefix: string;
   scopes: string[];
   createdById: ObjectId | null;
+  // User ID that this API key acts as - when set, the key inherits the user's permissions
+  userId?: ObjectId | null;
   createdAt: Date;
   expiresAt?: Date | null;
   lastUsedAt?: Date | null;
@@ -33,14 +35,21 @@ function hashApiKey(key: string): string {
 }
 
 // GET /api/auth/api-keys - List all API keys (without the actual keys)
+// Query params:
+//   - createdById: Filter by who created the key
+//   - actsAsUserId: Filter by which user the key acts as (inherits permissions from)
+//   - includeInactive: Include revoked/inactive keys
 apiKeysRouter.get('/', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
-    const { userId, includeInactive } = req.query;
+    const { createdById, actsAsUserId, includeInactive } = req.query;
 
     const filter: Record<string, unknown> = {};
-    if (userId) {
-      filter.createdById = new ObjectId(userId as string);
+    if (createdById) {
+      filter.createdById = new ObjectId(createdById as string);
+    }
+    if (actsAsUserId) {
+      filter.userId = new ObjectId(actsAsUserId as string);
     }
     if (!includeInactive) {
       filter.isActive = true;
@@ -83,10 +92,23 @@ apiKeysRouter.get('/:id', async (req: Request, res: Response, next: NextFunction
 apiKeysRouter.post('/', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
-    const { name, description, scopes, expiresAt, createdById } = req.body;
+    const { name, description, scopes, expiresAt, createdById, userId } = req.body;
 
     if (!name) {
       throw createError('name is required', 400);
+    }
+
+    // Validate userId if provided - must reference an active user
+    let validatedUserId: ObjectId | null = null;
+    if (userId) {
+      const user = await db.collection('users').findOne({
+        _id: new ObjectId(userId),
+        isActive: true,
+      });
+      if (!user) {
+        throw createError('userId must reference an active user', 400);
+      }
+      validatedUserId = new ObjectId(userId);
     }
 
     // Generate the raw API key
@@ -102,6 +124,7 @@ apiKeysRouter.post('/', async (req: Request, res: Response, next: NextFunction):
       keyPrefix,
       scopes: scopes || ['tasks:read', 'saved-searches:read'],
       createdById: createdById ? new ObjectId(createdById) : null,
+      userId: validatedUserId,
       createdAt: now,
       expiresAt: expiresAt ? new Date(expiresAt) : null,
       lastUsedAt: null,
@@ -119,6 +142,7 @@ apiKeysRouter.post('/', async (req: Request, res: Response, next: NextFunction):
         key: rawKey, // Only returned once!
         keyPrefix: newApiKey.keyPrefix,
         scopes: newApiKey.scopes,
+        userId: newApiKey.userId,
         createdAt: newApiKey.createdAt,
         expiresAt: newApiKey.expiresAt,
         isActive: newApiKey.isActive,
@@ -150,6 +174,23 @@ apiKeysRouter.patch('/:id', async (req: Request, res: Response, next: NextFuncti
       allowedUpdates.expiresAt = updates.expiresAt ? new Date(updates.expiresAt) : null;
     }
     if (updates.isActive !== undefined) allowedUpdates.isActive = updates.isActive;
+
+    // Allow updating userId (the user this key acts as)
+    if (updates.userId !== undefined) {
+      if (updates.userId === null) {
+        allowedUpdates.userId = null;
+      } else {
+        // Validate that the user exists and is active
+        const user = await db.collection('users').findOne({
+          _id: new ObjectId(updates.userId),
+          isActive: true,
+        });
+        if (!user) {
+          throw createError('userId must reference an active user', 400);
+        }
+        allowedUpdates.userId = new ObjectId(updates.userId);
+      }
+    }
 
     const result = await db.collection<ApiKey>('api_keys').findOneAndUpdate(
       { _id: keyId },

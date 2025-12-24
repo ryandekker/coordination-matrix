@@ -203,7 +203,6 @@ See `./scripts/matrix-cli.mjs --help` for all commands.
   "assigneeId": "507f1f77bcf86cd799439011",
   "tags": ["feature", "backend"],
   "extraPrompt": "AI instructions for this task",
-  "additionalInfo": "Extra context",
   "dueAt": "2025-01-15T00:00:00Z",
   "metadata": {
     "customField": "value"
@@ -215,7 +214,6 @@ See `./scripts/matrix-cli.mjs --help` for all commands.
 ```json
 {
   "status": "completed",
-  "additionalInfo": "Task completed with results...",
   "silent": false,
   "actorId": "507f1f77bcf86cd799439011",
   "actorType": "daemon"
@@ -253,7 +251,31 @@ See `./scripts/matrix-cli.mjs --help` for all commands.
 | DELETE | `/:id` | Delete workflow |
 | POST | `/:id/duplicate` | Duplicate workflow |
 | POST | `/parse-mermaid` | Parse Mermaid to steps |
-| POST | `/generate-mermaid` | Generate Mermaid |
+| POST | `/generate-mermaid` | Generate Mermaid from steps |
+| GET | `/ai-prompt-context` | Get context for AI workflow generation |
+| GET | `/ai-prompt` | Get complete AI prompt for workflow generation |
+
+#### AI Workflow Generation
+
+Use these endpoints to generate workflows with AI tools:
+
+**Get AI Prompt Context** - Returns structured data for building custom prompts:
+```bash
+curl http://localhost:3001/api/workflows/ai-prompt-context
+```
+
+Response includes: available agents, users, existing workflows, step types, template variables, and Mermaid syntax reference.
+
+**Get AI Prompt** - Returns a complete markdown prompt ready to use:
+```bash
+# Mermaid format (default)
+curl "http://localhost:3001/api/workflows/ai-prompt?format=mermaid&includeContext=true"
+
+# JSON format
+curl "http://localhost:3001/api/workflows/ai-prompt?format=json"
+```
+
+See [AI Workflow Generation Guide](./ai-workflow-generation.md) for comprehensive documentation.
 
 **Workflow Step Types:**
 - `agent` - AI agent task
@@ -574,7 +596,7 @@ PATCH /api/tasks/:taskId
 PATCH /api/tasks/:taskId
 {
   "status": "completed",
-  "additionalInfo": "Result of processing..."
+  "metadata": {"result": "Result of processing..."}
 }
 ```
 

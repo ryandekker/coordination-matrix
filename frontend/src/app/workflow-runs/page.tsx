@@ -2,7 +2,7 @@
 
 import { useState, Suspense, useCallback, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useEventStream, TaskEventData } from '@/hooks/use-event-stream'
+import { useEventStream, EventData } from '@/hooks/use-event-stream'
 import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import {
@@ -255,8 +255,8 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
 
   // Real-time updates - invalidate this run's data when related tasks change
-  const handleEvent = useCallback((event: TaskEventData) => {
-    if (event.task?.workflowId) {
+  const handleEvent = useCallback((event: EventData) => {
+    if ('task' in event && event.task?.workflowId) {
       queryClient.invalidateQueries({ queryKey: ['workflow-run', runId] })
     }
   }, [queryClient, runId])
@@ -709,8 +709,8 @@ function WorkflowRunsList() {
   const [page, setPage] = useState(1)
 
   // Real-time updates - invalidate workflow runs when tasks change
-  const handleEvent = useCallback((event: TaskEventData) => {
-    if (event.task?.workflowId) {
+  const handleEvent = useCallback((event: EventData) => {
+    if ('task' in event && event.task?.workflowId) {
       queryClient.invalidateQueries({ queryKey: ['workflow-runs'] })
     }
   }, [queryClient])
@@ -718,8 +718,8 @@ function WorkflowRunsList() {
   useEventStream({ onEvent: handleEvent })
 
   const { data: workflowsData } = useQuery({
-    queryKey: ['workflows'],
-    queryFn: () => workflowsApi.list(),
+    queryKey: ['workflows', 'all'],
+    queryFn: () => workflowsApi.list({ includeInactive: true }),
   })
 
   const { data: runsData, isLoading, error, refetch } = useQuery({

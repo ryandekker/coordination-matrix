@@ -28,7 +28,10 @@ function resolveUserPlaceholder(value: string, currentUserId?: string): string {
 // Helper to build filter from query params
 function buildFilter(query: Record<string, unknown>, currentUserId?: string): Filter<Task> {
   const filter: Filter<Task> = {};
-  const { search, filters, parentId, rootOnly, status, urgency, assigneeId, tags } = query;
+  const { search, filters, parentId, rootOnly, status, urgency, assigneeId, tags, includeArchived } = query;
+
+  // By default, exclude archived tasks unless explicitly requested
+  const shouldIncludeArchived = includeArchived === 'true' || includeArchived === true;
 
   // Text search
   if (search && typeof search === 'string') {
@@ -59,11 +62,15 @@ function buildFilter(query: Record<string, unknown>, currentUserId?: string): Fi
 
   // Status filter
   if (status) {
+    // Explicit status filter provided - use it as-is
     if (Array.isArray(status)) {
       (filter as Record<string, unknown>).status = { $in: status };
     } else {
       (filter as Record<string, unknown>).status = status as string;
     }
+  } else if (!shouldIncludeArchived) {
+    // No explicit status filter - exclude archived by default
+    (filter as Record<string, unknown>).status = { $ne: 'archived' };
   }
 
   // Urgency filter
@@ -77,7 +84,10 @@ function buildFilter(query: Record<string, unknown>, currentUserId?: string): Fi
 
   // Assignee filter
   if (assigneeId) {
-    if (Array.isArray(assigneeId)) {
+    // Handle special __unassigned__ marker for null values
+    if (assigneeId === '__unassigned__' || (Array.isArray(assigneeId) && assigneeId.includes('__unassigned__'))) {
+      filter.assigneeId = { $eq: null } as unknown as ObjectId;
+    } else if (Array.isArray(assigneeId)) {
       const resolvedIds = assigneeId
         .map((id) => resolveUserPlaceholder(id as string, currentUserId))
         .filter((id) => id !== '{{currentUserId}}')
@@ -104,8 +114,14 @@ function buildFilter(query: Record<string, unknown>, currentUserId?: string): Fi
   if (filters && typeof filters === 'object') {
     Object.entries(filters as Record<string, unknown>).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== '') {
+        // Handle special __unassigned__ marker for null values (e.g., assigneeId: ['__unassigned__'])
+        if (Array.isArray(value) && value.includes('__unassigned__')) {
+          (filter as Record<string, unknown>)[key] = { $eq: null };
+        // Handle arrays - convert to $in query for multi-value filters (e.g., status: ['pending', 'in_progress'])
+        } else if (Array.isArray(value)) {
+          (filter as Record<string, unknown>)[key] = { $in: value };
         // Handle ObjectId fields
-        if (key.endsWith('Id') && typeof value === 'string' && ObjectId.isValid(value)) {
+        } else if (key.endsWith('Id') && typeof value === 'string' && ObjectId.isValid(value)) {
           (filter as Record<string, unknown>)[key] = new ObjectId(value);
         } else {
           (filter as Record<string, unknown>)[key] = value;
@@ -668,7 +684,6 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       title: taskData.title,
       summary: taskData.summary || '',
       extraPrompt: taskData.extraPrompt || '',
-      additionalInfo: taskData.additionalInfo || '',
       status: taskData.status || 'pending',
       urgency: taskData.urgency || 'normal',
       parentId,
@@ -697,8 +712,15 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
 
     // Publish task.created event unless silent
     if (!silent && insertedTask) {
+      // Get actor from request body, or fall back to authenticated user
+      const actorId = taskData.createdById
+        ? toObjectId(taskData.createdById)
+        : req.user?.userId
+          ? toObjectId(req.user.userId)
+          : null;
+
       await publishTaskEvent('task.created', insertedTask, {
-        actorId: taskData.createdById ? toObjectId(taskData.createdById) : null,
+        actorId,
         actorType: 'user',
       });
     }
@@ -716,7 +738,12 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     const taskId = toObjectId(req.params.id);
     const updates = req.body;
     const silent = updates.silent === true;
-    const actorId = updates.actorId ? toObjectId(updates.actorId) : null;
+    // Get actor from request body, or fall back to authenticated user
+    const actorId = updates.actorId
+      ? toObjectId(updates.actorId)
+      : req.user?.userId
+        ? toObjectId(req.user.userId)
+        : null;
     const actorType = updates.actorType || 'user';
     delete updates.silent;
     delete updates.actorId;
@@ -795,27 +822,38 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     if (!silent) {
       const changes = computeChanges(originalTask, result);
       if (changes.length > 0) {
-        // Publish main update event
-        await publishTaskEvent('task.updated', result, {
-          changes,
-          actorId,
-          actorType: actorType as 'user' | 'system' | 'daemon',
-        });
+        // Fields that have their own specific events
+        const fieldsWithSpecificEvents = ['status', 'assigneeId', 'urgency', 'metadata'];
 
-        // Publish field-specific events
-        const specificEvents = getSpecificEventTypes(changes);
-        for (const eventType of specificEvents) {
-          await publishTaskEvent(eventType, result, {
-            changes: changes.filter(c => {
-              if (eventType === 'task.status.changed') return c.field === 'status';
-              if (eventType === 'task.assignee.changed') return c.field === 'assigneeId';
-              if (eventType === 'task.priority.changed') return c.field === 'urgency';
-              if (eventType === 'task.metadata.changed') return c.field === 'metadata';
-              return false;
-            }),
+        // Separate changes into those with specific events and those without
+        const genericChanges = changes.filter(c => !fieldsWithSpecificEvents.includes(c.field));
+        const specificEventChanges = changes.filter(c => fieldsWithSpecificEvents.includes(c.field));
+
+        // Publish task.updated only for changes that don't have specific events
+        if (genericChanges.length > 0) {
+          await publishTaskEvent('task.updated', result, {
+            changes: genericChanges,
             actorId,
             actorType: actorType as 'user' | 'system' | 'daemon',
           });
+        }
+
+        // Publish field-specific events
+        if (specificEventChanges.length > 0) {
+          const specificEvents = getSpecificEventTypes(specificEventChanges);
+          for (const eventType of specificEvents) {
+            await publishTaskEvent(eventType, result, {
+              changes: changes.filter(c => {
+                if (eventType === 'task.status.changed') return c.field === 'status';
+                if (eventType === 'task.assignee.changed') return c.field === 'assigneeId';
+                if (eventType === 'task.priority.changed') return c.field === 'urgency';
+                if (eventType === 'task.metadata.changed') return c.field === 'metadata';
+                return false;
+              }),
+              actorId,
+              actorType: actorType as 'user' | 'system' | 'daemon',
+            });
+          }
         }
       }
     }
@@ -832,7 +870,12 @@ tasksRouter.put('/:id/move', async (req: Request, res: Response, next: NextFunct
     const db = getDb();
     const taskId = toObjectId(req.params.id);
     const { newParentId, silent, actorId: actorIdStr } = req.body;
-    const actorId = actorIdStr ? toObjectId(actorIdStr) : null;
+    // Get actor from request body, or fall back to authenticated user
+    const actorId = actorIdStr
+      ? toObjectId(actorIdStr)
+      : req.user?.userId
+        ? toObjectId(req.user.userId)
+        : null;
 
     const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
     if (!task) {
@@ -948,7 +991,12 @@ tasksRouter.delete('/:id', async (req: Request, res: Response, next: NextFunctio
     const db = getDb();
     const taskId = toObjectId(req.params.id);
     const { deleteChildren = 'true', silent = 'false', actorId: actorIdStr } = req.query;
-    const actorId = actorIdStr ? toObjectId(actorIdStr as string) : null;
+    // Get actor from query params, or fall back to authenticated user
+    const actorId = actorIdStr
+      ? toObjectId(actorIdStr as string)
+      : req.user?.userId
+        ? toObjectId(req.user.userId)
+        : null;
 
     const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
     if (!task) {

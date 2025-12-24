@@ -128,7 +128,7 @@ usersRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) 
 usersRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { email, displayName, role, isAgent, agentPrompt } = req.body;
+    const { email, displayName, role, isAgent, agentPrompt, profilePicture, botColor } = req.body;
 
     if (!displayName) {
       throw createError('displayName is required', 400);
@@ -163,11 +163,20 @@ usersRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       newUser.email = email;
     }
 
+    // Set profile picture for human users
+    if (profilePicture && !isAgent) {
+      newUser.profilePicture = profilePicture;
+    }
+
     // Set agent fields if this is an agent user
     if (isAgent) {
       newUser.isAgent = true;
       if (agentPrompt) {
         newUser.agentPrompt = agentPrompt;
+      }
+      // Set bot color for agent users
+      if (botColor) {
+        newUser.botColor = botColor;
       }
     }
 
@@ -193,10 +202,15 @@ usersRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     updates.updatedAt = new Date();
 
     // Handle agent-specific fields
-    // isAgent and agentPrompt can be updated
-    // If isAgent is being set to false/undefined, clear agentPrompt
+    // isAgent, agentPrompt, and botColor can be updated
+    // If isAgent is being set to false/undefined, clear agent fields
     if (updates.isAgent === false) {
       updates.agentPrompt = null;
+      updates.botColor = null;
+    }
+    // If isAgent is being set to true, clear human-specific fields
+    if (updates.isAgent === true) {
+      updates.profilePicture = null;
     }
 
     const result = await db.collection<User>('users').findOneAndUpdate(

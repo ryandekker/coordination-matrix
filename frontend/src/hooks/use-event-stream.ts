@@ -1,10 +1,10 @@
 'use client'
 
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Task } from '@/lib/api'
 
-// Event types from the backend
+// Task event types from the backend
 export type TaskEventType =
   | 'task.created'
   | 'task.updated'
@@ -14,6 +14,21 @@ export type TaskEventType =
   | 'task.priority.changed'
   | 'task.metadata.changed'
   | 'task.comment.added'
+  | 'task.moved'
+
+// Workflow run event types from the backend
+export type WorkflowRunEventType =
+  | 'workflow.run.created'
+  | 'workflow.run.started'
+  | 'workflow.run.step.started'
+  | 'workflow.run.step.completed'
+  | 'workflow.run.step.failed'
+  | 'workflow.run.completed'
+  | 'workflow.run.failed'
+  | 'workflow.run.cancelled'
+
+// Combined event type
+export type EventType = TaskEventType | WorkflowRunEventType
 
 export interface FieldChange {
   field: string
@@ -31,10 +46,35 @@ export interface TaskEventData {
   task?: Partial<Task>
 }
 
+export interface WorkflowRunEventData {
+  id: string
+  type: WorkflowRunEventType
+  workflowRunId: string
+  timestamp: string
+  stepId?: string
+  taskId?: string
+  error?: string
+  workflowRun?: {
+    _id: string
+    workflowId: string
+    status: string
+    currentStepIds: string[]
+    completedStepIds: string[]
+    failedStepId?: string
+    error?: string
+    createdAt: string
+    startedAt?: string
+    completedAt?: string
+  }
+}
+
+// Union type for all event data
+export type EventData = TaskEventData | WorkflowRunEventData
+
 // Global event stream manager - shared across all hooks
 class EventStreamManager {
   private eventSource: EventSource | null = null
-  private listeners: Map<string, Set<(event: TaskEventData) => void>> = new Map()
+  private listeners: Map<string, Set<(event: EventData) => void>> = new Map()
   private connectionListeners: Set<(connected: boolean) => void> = new Set()
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null
   private disconnectTimeout: ReturnType<typeof setTimeout> | null = null
@@ -91,7 +131,7 @@ class EventStreamManager {
       })
 
       // Listen for all task events
-      const eventTypes: TaskEventType[] = [
+      const taskEventTypes: TaskEventType[] = [
         'task.created',
         'task.updated',
         'task.deleted',
@@ -100,17 +140,43 @@ class EventStreamManager {
         'task.priority.changed',
         'task.metadata.changed',
         'task.comment.added',
+        'task.moved',
       ]
 
-      eventTypes.forEach(type => {
+      taskEventTypes.forEach(type => {
         this.eventSource?.addEventListener(type, (event: MessageEvent) => {
           try {
             const data: TaskEventData = JSON.parse(event.data)
-            console.log(`[EventStream] Event: ${type}`, { taskId: data.taskId, parentId: data.task?.parentId })
+            console.log(`[EventStream] Task event: ${type}`, { taskId: data.taskId, parentId: data.task?.parentId })
             this.notifyListeners(type, data)
             this.notifyListeners('*', data) // Also notify wildcard listeners
           } catch (error) {
-            console.error('[EventStream] Error parsing event:', error)
+            console.error('[EventStream] Error parsing task event:', error)
+          }
+        })
+      })
+
+      // Listen for workflow run events
+      const workflowRunEventTypes: WorkflowRunEventType[] = [
+        'workflow.run.created',
+        'workflow.run.started',
+        'workflow.run.step.started',
+        'workflow.run.step.completed',
+        'workflow.run.step.failed',
+        'workflow.run.completed',
+        'workflow.run.failed',
+        'workflow.run.cancelled',
+      ]
+
+      workflowRunEventTypes.forEach(type => {
+        this.eventSource?.addEventListener(type, (event: MessageEvent) => {
+          try {
+            const data: WorkflowRunEventData = JSON.parse(event.data)
+            console.log(`[EventStream] Workflow run event: ${type}`, { workflowRunId: data.workflowRunId, stepId: data.stepId })
+            this.notifyListeners(type, data)
+            this.notifyListeners('*', data) // Also notify wildcard listeners
+          } catch (error) {
+            console.error('[EventStream] Error parsing workflow run event:', error)
           }
         })
       })
@@ -153,7 +219,7 @@ class EventStreamManager {
     this._isConnected = false
   }
 
-  subscribe(eventType: TaskEventType | '*', callback: (event: TaskEventData) => void): () => void {
+  subscribe(eventType: EventType | '*', callback: (event: EventData) => void): () => void {
     if (!this.listeners.has(eventType)) {
       this.listeners.set(eventType, new Set())
     }
@@ -201,7 +267,7 @@ class EventStreamManager {
     }
   }
 
-  private notifyListeners(eventType: string, data: TaskEventData): void {
+  private notifyListeners(eventType: string, data: EventData): void {
     this.listeners.get(eventType)?.forEach(callback => {
       try {
         callback(data)
@@ -233,13 +299,23 @@ class EventStreamManager {
 // Singleton instance
 const eventStreamManager = new EventStreamManager()
 
+// Helper to check if event is a task event
+function isTaskEvent(event: EventData): event is TaskEventData {
+  return 'taskId' in event && event.type.startsWith('task.')
+}
+
+// Helper to check if event is a workflow run event
+function isWorkflowRunEvent(event: EventData): event is WorkflowRunEventData {
+  return 'workflowRunId' in event && event.type.startsWith('workflow.')
+}
+
 /**
- * Hook to subscribe to real-time task events
+ * Hook to subscribe to real-time task and workflow run events
  * Automatically manages connection lifecycle
  */
 export function useEventStream(options?: {
-  eventTypes?: (TaskEventType | '*')[]
-  onEvent?: (event: TaskEventData) => void
+  eventTypes?: (EventType | '*')[]
+  onEvent?: (event: EventData) => void
   enabled?: boolean
 }) {
   const { eventTypes = ['*'], onEvent, enabled = true } = options || {}
@@ -247,10 +323,32 @@ export function useEventStream(options?: {
   const onEventRef = useRef(onEvent)
   onEventRef.current = onEvent
 
-  // Handle task cache updates
-  const handleTaskEvent = useCallback((event: TaskEventData) => {
+  // Handle all events (task + workflow run)
+  const handleEvent = useCallback((event: EventData) => {
     // Call custom handler if provided
     onEventRef.current?.(event)
+
+    // Handle workflow run events - invalidate caches
+    if (isWorkflowRunEvent(event)) {
+      switch (event.type) {
+        case 'workflow.run.created':
+        case 'workflow.run.started':
+        case 'workflow.run.step.started':
+        case 'workflow.run.step.completed':
+        case 'workflow.run.step.failed':
+        case 'workflow.run.completed':
+        case 'workflow.run.failed':
+        case 'workflow.run.cancelled':
+          // Invalidate workflow run queries
+          queryClient.invalidateQueries({ queryKey: ['workflow-runs'] })
+          queryClient.invalidateQueries({ queryKey: ['workflow-run', event.workflowRunId] })
+          break
+      }
+      return
+    }
+
+    // Handle task events
+    if (!isTaskEvent(event)) return
 
     // Update React Query cache based on event type
     switch (event.type) {
@@ -352,7 +450,6 @@ export function useEventStream(options?: {
 
       case 'task.updated':
       case 'task.status.changed':
-      case 'task.assignee.changed':
       case 'task.priority.changed':
       case 'task.metadata.changed':
         // Update the specific task in cache if we have task data
@@ -403,6 +500,14 @@ export function useEventStream(options?: {
         }
         break
 
+      case 'task.assignee.changed':
+        // Assignee changes need full refetch to get resolved user data (name, email, etc.)
+        queryClient.invalidateQueries({ queryKey: ['tasks'] })
+        queryClient.invalidateQueries({ queryKey: ['task', event.taskId] })
+        queryClient.invalidateQueries({ queryKey: ['task-tree'] })
+        queryClient.invalidateQueries({ queryKey: ['task-children'] })
+        break
+
       case 'task.deleted':
         // Remove from caches
         queryClient.removeQueries({ queryKey: ['task', event.taskId] })
@@ -411,12 +516,32 @@ export function useEventStream(options?: {
         queryClient.invalidateQueries({ queryKey: ['task-children'] })
         break
 
+      case 'task.moved':
+        // Task parent changed - invalidate relevant caches
+        queryClient.invalidateQueries({ queryKey: ['tasks'] })
+        queryClient.invalidateQueries({ queryKey: ['task-tree'] })
+        queryClient.invalidateQueries({ queryKey: ['task-children'] })
+        // Update the specific task if we have task data
+        if (event.task) {
+          queryClient.setQueryData(['task', event.taskId], (old: unknown) => {
+            if (!old) return old
+            const oldData = old as { data: Task }
+            return {
+              ...oldData,
+              data: { ...oldData.data, ...event.task }
+            }
+          })
+        }
+        break
+
       case 'task.comment.added':
-        // Invalidate activity logs for this task
-        queryClient.invalidateQueries({ queryKey: ['activity-logs', 'task', event.taskId] })
-        queryClient.invalidateQueries({ queryKey: ['activity-logs', 'recent'] })
+        // Comments are also activity, but handled below
         break
     }
+
+    // All task events create activity log entries - invalidate activity logs
+    queryClient.invalidateQueries({ queryKey: ['activity-logs', 'task', event.taskId] })
+    queryClient.invalidateQueries({ queryKey: ['activity-logs', 'recent'] })
 
     // Also invalidate workflow-related queries if task has workflowId
     if (event.task?.workflowId) {
@@ -428,13 +553,13 @@ export function useEventStream(options?: {
     if (!enabled) return
 
     const unsubscribers = eventTypes.map(type =>
-      eventStreamManager.subscribe(type, handleTaskEvent)
+      eventStreamManager.subscribe(type, handleEvent)
     )
 
     return () => {
       unsubscribers.forEach(unsub => unsub())
     }
-  }, [enabled, eventTypes.join(','), handleTaskEvent])
+  }, [enabled, eventTypes.join(','), handleEvent])
 
   return {
     isConnected: eventStreamManager.isConnected,
@@ -442,19 +567,19 @@ export function useEventStream(options?: {
 }
 
 /**
- * Hook to get connection status
+ * Hook to get connection status with reactive updates
  */
 export function useEventStreamStatus() {
-  const statusRef = useRef(eventStreamManager.isConnected)
+  const [isConnected, setIsConnected] = useState(eventStreamManager.isConnected)
 
   useEffect(() => {
     const unsubscribe = eventStreamManager.onConnectionChange((connected) => {
-      statusRef.current = connected
+      setIsConnected(connected)
     })
     return unsubscribe
   }, [])
 
-  return { isConnected: statusRef.current }
+  return { isConnected }
 }
 
 // Helper to recursively update a task in a tree structure

@@ -39,6 +39,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Textarea } from '@/components/ui/textarea'
 import { User, usersApi, authFetch } from '@/lib/api'
 import { formatDateTime } from '@/lib/utils'
+import { getAuthHeader } from '@/lib/auth'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
@@ -57,6 +58,7 @@ async function updateUser(id: string, data: Partial<User>): Promise<{ data: User
 async function deleteUser(id: string): Promise<void> {
   const response = await authFetch(`${API_BASE}/users/${id}`, {
     method: 'DELETE',
+    headers: { ...getAuthHeader() },
   })
   if (!response.ok) throw new Error('Failed to delete user')
 }
@@ -71,6 +73,7 @@ export default function UsersPage() {
     role: 'viewer' as string,
     isAgent: false,
     agentPrompt: '',
+    botColor: '#3B82F6',
   })
 
   const { data: usersData, isLoading } = useQuery({
@@ -105,7 +108,7 @@ export default function UsersPage() {
 
   const openCreateModal = () => {
     setEditingUser(null)
-    setFormData({ email: '', displayName: '', role: 'viewer', isAgent: false, agentPrompt: '' })
+    setFormData({ email: '', displayName: '', role: 'viewer', isAgent: false, agentPrompt: '', botColor: '#3B82F6' })
     setIsModalOpen(true)
   }
 
@@ -117,6 +120,7 @@ export default function UsersPage() {
       role: user.role,
       isAgent: user.isAgent || false,
       agentPrompt: user.agentPrompt || '',
+      botColor: user.botColor || '#3B82F6',
     })
     setIsModalOpen(true)
   }
@@ -124,7 +128,7 @@ export default function UsersPage() {
   const closeModal = () => {
     setIsModalOpen(false)
     setEditingUser(null)
-    setFormData({ email: '', displayName: '', role: 'viewer', isAgent: false, agentPrompt: '' })
+    setFormData({ email: '', displayName: '', role: 'viewer', isAgent: false, agentPrompt: '', botColor: '#3B82F6' })
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -194,10 +198,16 @@ export default function UsersPage() {
                   <TableCell className="font-medium">{user.displayName}</TableCell>
                   <TableCell>
                     {user.isAgent ? (
-                      <Badge variant="outline" className="text-blue-600 border-blue-600">
-                        <Bot className="mr-1 h-3 w-3" />
-                        Agent
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="h-3 w-3 rounded-full shrink-0"
+                          style={{ backgroundColor: user.botColor || '#3B82F6' }}
+                        />
+                        <Badge variant="outline" className="text-blue-600 border-blue-600">
+                          <Bot className="mr-1 h-3 w-3" />
+                          Agent
+                        </Badge>
+                      </div>
                     ) : (
                       <Badge variant="outline" className="text-gray-500 border-gray-500">
                         Human
@@ -313,18 +323,38 @@ export default function UsersPage() {
               </Select>
             </div>
             {formData.isAgent && (
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Agent Prompt</label>
-                <Textarea
-                  value={formData.agentPrompt}
-                  onChange={(e) => setFormData({ ...formData, agentPrompt: e.target.value })}
-                  placeholder="Enter the agent's base prompt/persona (optional). This will be prepended to task instructions."
-                  rows={4}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Define the agent&apos;s personality, capabilities, and constraints. Leave empty to use default daemon behavior.
-                </p>
-              </div>
+              <>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Agent Prompt</label>
+                  <Textarea
+                    value={formData.agentPrompt}
+                    onChange={(e) => setFormData({ ...formData, agentPrompt: e.target.value })}
+                    placeholder="Enter the agent's base prompt/persona (optional). This will be prepended to task instructions."
+                    rows={4}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Define the agent&apos;s personality, capabilities, and constraints. Leave empty to use default daemon behavior.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Agent Color</label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="color"
+                      value={formData.botColor}
+                      onChange={(e) => setFormData({ ...formData, botColor: e.target.value })}
+                      className="h-10 w-14 cursor-pointer rounded border border-input bg-background p-1"
+                    />
+                    <Input
+                      value={formData.botColor}
+                      onChange={(e) => setFormData({ ...formData, botColor: e.target.value })}
+                      placeholder="#3B82F6"
+                      className="w-28 font-mono text-sm"
+                    />
+                    <span className="text-sm text-muted-foreground">Used to identify this agent in the UI</span>
+                  </div>
+                </div>
+              </>
             )}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={closeModal}>

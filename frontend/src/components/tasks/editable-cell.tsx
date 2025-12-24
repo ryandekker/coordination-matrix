@@ -27,6 +27,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { FieldConfig, LookupValue, User, Task, tasksApi } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useQuery } from '@tanstack/react-query'
+import { UserChip } from '@/components/ui/user-chip'
 
 // Debounce hook for search
 function useDebounce<T>(value: T, delay: number): T {
@@ -179,9 +180,8 @@ export const EditableCell = memo(function EditableCell({
                     setIsEditing(false)
                     setSearchQuery('')
                   }}
-                  className="text-muted-foreground"
                 >
-                  Unassigned
+                  <UserChip user={null} size="sm" />
                 </CommandItem>
                 {filteredUsers.map((user) => (
                   <CommandItem
@@ -200,8 +200,10 @@ export const EditableCell = memo(function EditableCell({
                       )}
                     />
                     <div className="flex flex-col">
-                      <span>{user.displayName}</span>
-                      <span className="text-xs text-muted-foreground">{user.email}</span>
+                      <UserChip user={user} size="sm" />
+                      {user.email && (
+                        <span className="text-xs text-muted-foreground ml-5">{user.email}</span>
+                      )}
                     </div>
                   </CommandItem>
                 ))}

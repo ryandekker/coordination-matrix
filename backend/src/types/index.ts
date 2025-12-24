@@ -11,7 +11,8 @@ export type TaskStatus =
   | 'on_hold'
   | 'completed'
   | 'failed'       // Execution failed (distinct from on_hold)
-  | 'cancelled';
+  | 'cancelled'
+  | 'archived';    // Soft-deleted / hidden from default views
 
 export type Urgency = 'low' | 'normal' | 'high' | 'urgent';
 
@@ -137,7 +138,6 @@ export interface Task {
   title: string;
   summary?: string;
   extraPrompt?: string;
-  additionalInfo?: string;
   status: TaskStatus;
   urgency?: Urgency;
 
@@ -341,6 +341,8 @@ export interface User {
   isActive: boolean;
   isAgent?: boolean;              // Is this user an AI agent?
   agentPrompt?: string;           // Agent's base prompt/persona
+  profilePicture?: string;        // URL to profile picture (for humans)
+  botColor?: string;              // Custom color for bot users (hex code)
   teamIds?: ObjectId[];
   preferences?: Record<string, unknown>;
   createdAt: Date;
@@ -457,6 +459,11 @@ export interface ActivityLogEntry {
   comment?: string;
   timestamp: Date;
   metadata?: Record<string, unknown>;
+  // Populated user info (not stored in DB, resolved at query time)
+  actor?: {
+    displayName: string;
+    email?: string;
+  } | null;
 }
 
 // ============================================================================
@@ -927,4 +934,20 @@ export interface BatchCallbackPayload {
   success: boolean;
   result?: Record<string, unknown>;
   error?: string;
+}
+
+// ============================================================================
+// Tag Types
+// ============================================================================
+
+export interface Tag {
+  _id: ObjectId;
+  name: string;                    // Unique, lowercase tag identifier
+  displayName: string;             // Human-readable display name
+  color: string;                   // Hex color code
+  description?: string | null;     // Optional description
+  isActive: boolean;
+  createdById?: ObjectId | null;
+  createdAt: Date;
+  updatedAt?: Date | null;
 }

@@ -6,6 +6,8 @@ import { useTaskActivity, useAddComment } from '@/hooks/use-activity-logs'
 import { ActivityLogEntry, FieldChange } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { UserChip } from '@/components/ui/user-chip'
+import type { User } from '@/lib/api'
 
 interface TaskActivityProps {
   taskId: string
@@ -50,6 +52,117 @@ function formatFieldChange(change: FieldChange, compact: boolean): string {
   return `${change.field}: ${formatValue(change.oldValue)} → ${formatValue(change.newValue)}`
 }
 
+// Threshold for truncating comments (approximate line count * chars per line)
+const COMMENT_TRUNCATE_THRESHOLD = 100
+
+function ExpandableText({
+  text,
+  className,
+  truncateClassName,
+  expandedClassName
+}: {
+  text: string
+  className?: string
+  truncateClassName?: string
+  expandedClassName?: string
+}) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  const shouldTruncate = text.length > COMMENT_TRUNCATE_THRESHOLD
+
+  if (!shouldTruncate) {
+    return <p className={className}>{text}</p>
+  }
+
+  return (
+    <div>
+      <p
+        className={cn(
+          className,
+          'cursor-pointer hover:bg-muted/30 rounded px-1 -mx-1 transition-colors',
+          isExpanded ? expandedClassName : truncateClassName
+        )}
+        onClick={(e) => {
+          e.stopPropagation()
+          setIsExpanded(!isExpanded)
+        }}
+        title={isExpanded ? 'Click to collapse' : 'Click to expand'}
+      >
+        {text}
+      </p>
+      <button
+        onClick={(e) => {
+          e.stopPropagation()
+          setIsExpanded(!isExpanded)
+        }}
+        className="text-[10px] text-primary hover:underline mt-0.5"
+      >
+        {isExpanded ? 'Show less' : 'Show more'}
+      </button>
+    </div>
+  )
+}
+
+function ExpandableChanges({
+  changes,
+  compact,
+  initialLimit = 2
+}: {
+  changes: FieldChange[]
+  compact: boolean
+  initialLimit?: number
+}) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  const hasMore = changes.length > initialLimit
+
+  const displayedChanges = isExpanded ? changes : changes.slice(0, initialLimit)
+
+  if (compact) {
+    return (
+      <div className="text-[10px] text-muted-foreground mt-0.5 space-y-0">
+        {displayedChanges.map((change, idx) => (
+          <div key={idx} className={cn('font-mono', !isExpanded && 'truncate')}>
+            {formatFieldChange(change, true)}
+          </div>
+        ))}
+        {hasMore && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              setIsExpanded(!isExpanded)
+            }}
+            className="text-primary hover:underline"
+          >
+            {isExpanded ? 'Show less' : `+${changes.length - initialLimit} more`}
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <ul className="mt-1 text-xs text-muted-foreground space-y-0.5">
+      {displayedChanges.map((change, idx) => (
+        <li key={idx} className="font-mono">
+          {formatFieldChange(change, false)}
+        </li>
+      ))}
+      {hasMore && (
+        <li>
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              setIsExpanded(!isExpanded)
+            }}
+            className="text-primary hover:underline"
+          >
+            {isExpanded ? 'Show less' : `+${changes.length - initialLimit} more`}
+          </button>
+        </li>
+      )}
+    </ul>
+  )
+}
+
 function ActivityEntry({ entry, compact, isNew }: { entry: ActivityLogEntry; compact?: boolean; isNew?: boolean }) {
   const label = EVENT_TYPE_LABELS[entry.eventType] || entry.eventType
   const colorClass = EVENT_TYPE_COLORS[entry.eventType] || 'bg-muted-foreground'
@@ -62,28 +175,24 @@ function ActivityEntry({ entry, compact, isNew }: { entry: ActivityLogEntry; com
       )}>
         <div className={cn('w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0', colorClass)} />
         <div className="flex-1 min-w-0">
-          <div className="flex items-baseline gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-xs font-medium">{label}</span>
+            <UserChip user={entry.actor as User | null} size="sm" />
             <span className="text-[10px] text-muted-foreground">
               {formatDistanceToNow(new Date(entry.timestamp), { addSuffix: true })}
             </span>
           </div>
 
           {entry.comment && (
-            <p className="text-xs text-foreground mt-0.5 line-clamp-2">{entry.comment}</p>
+            <ExpandableText
+              text={entry.comment}
+              className="text-xs text-foreground mt-0.5"
+              truncateClassName="line-clamp-2"
+            />
           )}
 
           {entry.changes && entry.changes.length > 0 && (
-            <div className="text-[10px] text-muted-foreground mt-0.5 space-y-0">
-              {entry.changes.slice(0, 2).map((change, idx) => (
-                <div key={idx} className="font-mono truncate">
-                  {formatFieldChange(change, true)}
-                </div>
-              ))}
-              {entry.changes.length > 2 && (
-                <div className="text-muted-foreground">+{entry.changes.length - 2} more</div>
-              )}
-            </div>
+            <ExpandableChanges changes={entry.changes} compact={true} initialLimit={2} />
           )}
         </div>
       </div>
@@ -105,22 +214,19 @@ function ActivityEntry({ entry, compact, isNew }: { entry: ActivityLogEntry; com
         </div>
 
         {entry.comment && (
-          <p className="mt-1 text-sm text-foreground">{entry.comment}</p>
+          <ExpandableText
+            text={entry.comment}
+            className="mt-1 text-sm text-foreground"
+            truncateClassName="line-clamp-3"
+          />
         )}
 
         {entry.changes && entry.changes.length > 0 && (
-          <ul className="mt-1 text-xs text-muted-foreground space-y-0.5">
-            {entry.changes.map((change, idx) => (
-              <li key={idx} className="font-mono">
-                {formatFieldChange(change, false)}
-              </li>
-            ))}
-          </ul>
+          <ExpandableChanges changes={entry.changes} compact={false} initialLimit={3} />
         )}
 
-        <div className="mt-0.5 text-xs text-muted-foreground">
-          by {entry.actorType}
-          {entry.actorId && <span className="ml-1 opacity-70">({entry.actorId.slice(-6)})</span>}
+        <div className="mt-1">
+          <UserChip user={entry.actor as User | null} size="sm" />
         </div>
       </div>
     </div>

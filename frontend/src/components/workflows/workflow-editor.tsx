@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useUsers } from '@/hooks/use-tasks'
 import { workflowsApi, Workflow as ApiWorkflow } from '@/lib/api'
+import { getAuthHeader } from '@/lib/auth'
 import {
   Dialog,
   DialogContent,
@@ -975,6 +976,64 @@ export function WorkflowEditor({
                   <label htmlFor="isActive" className="text-sm font-medium">
                     Active
                   </label>
+                </div>
+
+                {/* AI Prompt Helper Section */}
+                <div className="border-t pt-4 mt-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Sparkles className="h-4 w-4 text-purple-500" />
+                    <h3 className="text-sm font-medium">AI Workflow Generation</h3>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-3">
+                    Generate workflow definitions using AI. Copy the prompt below and paste it into your AI tool,
+                    or use the context endpoint to build custom integrations.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={async () => {
+                        try {
+                          const response = await fetch(`${API_BASE}/workflows/ai-prompt?format=mermaid&includeContext=true`, {
+                            headers: getAuthHeader(),
+                          })
+                          const data = await response.json()
+                          await navigator.clipboard.writeText(data.data.prompt)
+                          // Could add a toast notification here
+                        } catch (err) {
+                          console.error('Failed to copy AI prompt:', err)
+                        }
+                      }}
+                    >
+                      <Sparkles className="h-3 w-3" />
+                      Copy AI Prompt (Mermaid)
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={async () => {
+                        try {
+                          const response = await fetch(`${API_BASE}/workflows/ai-prompt?format=json&includeContext=true`, {
+                            headers: getAuthHeader(),
+                          })
+                          const data = await response.json()
+                          await navigator.clipboard.writeText(data.data.prompt)
+                        } catch (err) {
+                          console.error('Failed to copy AI prompt:', err)
+                        }
+                      }}
+                    >
+                      <Sparkles className="h-3 w-3" />
+                      Copy AI Prompt (JSON)
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    API: <code className="bg-muted px-1 rounded">GET /api/workflows/ai-prompt-context</code> for structured context data.
+                  </p>
                 </div>
               </div>
             </TabsContent>

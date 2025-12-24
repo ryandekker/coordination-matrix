@@ -53,9 +53,10 @@ import {
 } from '@/components/ui/tooltip'
 import { EditableCell } from './editable-cell'
 import { Task, FieldConfig, LookupValue, User } from '@/lib/api'
-import { useTaskChildren, useUpdateTask, useDeleteTask, useBulkUpdateTasks, useBulkDeleteTasks, useLookups } from '@/hooks/use-tasks'
+import { useTaskChildren, useUpdateTask, useDeleteTask, useBulkUpdateTasks, useBulkDeleteTasks, useLookups, useCreateTask } from '@/hooks/use-tasks'
 import { formatDateTime, cn } from '@/lib/utils'
 import { TASK_TYPE_CONFIG, getTaskTypeConfig } from '@/lib/task-type-config'
+import { UserChip } from '@/components/ui/user-chip'
 
 // Task type icon component with tooltip - uses shared config
 const TaskTypeIcon = memo(function TaskTypeIcon({ taskType, batchCounters }: { taskType?: string; batchCounters?: { processedCount?: number; expectedCount?: number } }) {
@@ -147,14 +148,16 @@ const BulkActionsBar = memo(function BulkActionsBar({
           </SelectContent>
         </Select>
         <Select onValueChange={(val) => onAssigneeChange(val === '__unassign__' ? null : val)} disabled={isUpdating}>
-          <SelectTrigger className="h-8 w-[140px]">
+          <SelectTrigger className="h-8 w-[160px]">
             <SelectValue placeholder="Set assignee" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__unassign__">Unassigned</SelectItem>
+            <SelectItem value="__unassign__">
+              <UserChip user={null} size="sm" />
+            </SelectItem>
             {users.map((user) => (
               <SelectItem key={user._id} value={user._id}>
-                {user.displayName}
+                <UserChip user={user} size="sm" />
               </SelectItem>
             ))}
           </SelectContent>
@@ -216,6 +219,7 @@ interface TaskDataTableProps {
   onPageChange: (page: number) => void
   expandAllEnabled: boolean
   onExpandAllChange: (enabled: boolean) => void
+  autoExpandIds?: string[]
 }
 
 // Memoized Title cell component with special edit behavior
@@ -229,6 +233,7 @@ const TitleCell = memo(function TitleCell({
   onEdit,
   renderCellValue,
   onNavigateToFlow,
+  onAddSubtask,
 }: {
   task: Task
   fieldConfig: FieldConfig
@@ -239,6 +244,7 @@ const TitleCell = memo(function TitleCell({
   onEdit: () => void
   renderCellValue: (task: Task, fc: FieldConfig) => React.ReactNode
   onNavigateToFlow?: (taskId: string) => void
+  onAddSubtask?: () => void
 }) {
   const [isInlineEditing, setIsInlineEditing] = useState(false)
   const [editValue, setEditValue] = useState(task.title || '')
@@ -317,20 +323,156 @@ const TitleCell = memo(function TitleCell({
           >
             {renderCellValue(task, fieldConfig)}
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-5 w-5 p-0 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
-            onClick={(e) => {
-              e.stopPropagation()
-              setIsInlineEditing(true)
-            }}
-          >
-            <Pencil className="h-3 w-3" />
-          </Button>
+          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-5 w-5 p-0"
+              onClick={(e) => {
+                e.stopPropagation()
+                setIsInlineEditing(true)
+              }}
+              title="Edit title"
+            >
+              <Pencil className="h-3 w-3" />
+            </Button>
+            {onAddSubtask && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-5 w-5 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onAddSubtask()
+                }}
+                title="Add subtask"
+              >
+                <Plus className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
         </>
       )}
     </div>
+  )
+})
+
+// Inline task creation row component
+const InlineTaskRow = memo(function InlineTaskRow({
+  parentId,
+  depth,
+  fieldConfigs,
+  colSpan,
+  onSubmit,
+  onCancel,
+  isCreating,
+}: {
+  parentId: string | null
+  depth: number
+  fieldConfigs: FieldConfig[]
+  colSpan: number
+  onSubmit: (title: string) => void
+  onCancel: () => void
+  isCreating: boolean
+}) {
+  const [title, setTitle] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  const isSubmittingRef = useRef(false)
+
+  const prevIsCreatingRef = useRef(isCreating)
+
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.focus({ preventScroll: true })
+    }
+  }, [])
+
+  // Refocus when isCreating transitions from true to false (creation complete)
+  useEffect(() => {
+    if (prevIsCreatingRef.current && !isCreating) {
+      setTimeout(() => {
+        inputRef.current?.focus({ preventScroll: true })
+      }, 0)
+    }
+    prevIsCreatingRef.current = isCreating
+  }, [isCreating])
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && title.trim()) {
+      e.preventDefault()
+      isSubmittingRef.current = true
+      onSubmit(title.trim())
+      setTitle('')
+      // Re-focus immediately
+      requestAnimationFrame(() => {
+        inputRef.current?.focus({ preventScroll: true })
+      })
+      // Keep submitting flag true longer than blur delay (150ms)
+      setTimeout(() => {
+        isSubmittingRef.current = false
+      }, 200)
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      onCancel()
+    }
+  }, [title, onSubmit, onCancel])
+
+  const handleBlur = useCallback(() => {
+    // Small delay to allow click on another element to register
+    setTimeout(() => {
+      // Don't cancel if:
+      // 1. We just submitted (isSubmittingRef is true)
+      // 2. The input is still/again focused (we refocused after submit)
+      // 3. There's text in the input
+      if (isSubmittingRef.current) return
+      if (inputRef.current && document.activeElement === inputRef.current) return
+      if (!title.trim()) {
+        onCancel()
+      }
+    }, 150)
+  }, [title, onCancel])
+
+  return (
+    <TableRow className={cn(depth > 0 && 'bg-muted/30', 'bg-blue-50/50 dark:bg-blue-950/20')}>
+      <TableCell className="w-12 pl-3 pr-0">
+        <div className="flex justify-center">
+          <div className="h-5 w-5" />
+        </div>
+      </TableCell>
+      <TableCell className="w-10 p-0">
+        <div className="flex justify-center">
+          <Plus className="h-4 w-4 text-muted-foreground" />
+        </div>
+      </TableCell>
+      <TableCell colSpan={colSpan} className="py-0.5 px-1">
+        <div style={{ paddingLeft: depth * 16 }} className="flex items-center gap-1">
+          <div className="w-6 flex-shrink-0" />
+          <Input
+            ref={inputRef}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={handleBlur}
+            placeholder={parentId ? "New subtask title... (Enter to save, Esc to cancel)" : "New task title... (Enter to save, Esc to cancel)"}
+            disabled={isCreating}
+            className="h-7 text-sm border-blue-200 dark:border-blue-800 bg-transparent shadow-none focus-visible:ring-1 focus-visible:ring-blue-400 px-2 rounded flex-1"
+          />
+          {isCreating && (
+            <div className="animate-spin rounded-full h-4 w-4 border-2 border-primary border-t-transparent" />
+          )}
+        </div>
+      </TableCell>
+      <TableCell>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0"
+          onClick={onCancel}
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      </TableCell>
+    </TableRow>
   )
 })
 
@@ -362,6 +504,11 @@ const TaskRow = memo(function TaskRow({
   onNavigateToFlow,
   isPulsing,
   onTriggerPulse,
+  inlineCreationParentId,
+  onStartInlineCreation,
+  onCancelInlineCreation,
+  onSubmitInlineCreation,
+  isCreatingTask,
 }: {
   task: Task
   fieldConfigs: FieldConfig[]
@@ -389,6 +536,11 @@ const TaskRow = memo(function TaskRow({
   onNavigateToFlow: (taskId: string) => void
   isPulsing: boolean
   onTriggerPulse: (taskId: string, shouldScroll?: boolean) => void
+  inlineCreationParentId: string | null
+  onStartInlineCreation: (parentId: string) => void
+  onCancelInlineCreation: () => void
+  onSubmitInlineCreation: (title: string, parentId: string | null) => void
+  isCreatingTask: boolean
 }) {
   const isFlowTask = task.taskType === 'flow'
 
@@ -473,6 +625,7 @@ const TaskRow = memo(function TaskRow({
                 onEdit={onEdit}
                 renderCellValue={renderCellValue}
                 onNavigateToFlow={onNavigateToFlow}
+                onAddSubtask={() => onStartInlineCreation(task._id)}
               />
             ) : (
               <>
@@ -557,8 +710,25 @@ const TaskRow = memo(function TaskRow({
             onNavigateToFlow={onNavigateToFlow}
             isPulsing={pulsingRows.has(child._id)}
             onTriggerPulse={onTriggerPulse}
+            inlineCreationParentId={inlineCreationParentId}
+            onStartInlineCreation={onStartInlineCreation}
+            onCancelInlineCreation={onCancelInlineCreation}
+            onSubmitInlineCreation={onSubmitInlineCreation}
+            isCreatingTask={isCreatingTask}
           />
         ))}
+      {/* Render inline creation row for this task's subtasks */}
+      {inlineCreationParentId === task._id && (
+        <InlineTaskRow
+          parentId={task._id}
+          depth={depth + 1}
+          fieldConfigs={fieldConfigs}
+          colSpan={fieldConfigs.length}
+          onSubmit={(title) => onSubmitInlineCreation(title, task._id)}
+          onCancel={onCancelInlineCreation}
+          isCreating={isCreatingTask}
+        />
+      )}
     </>
   )
 })
@@ -579,11 +749,16 @@ export function TaskDataTable({
   onPageChange,
   expandAllEnabled,
   onExpandAllChange,
+  autoExpandIds,
 }: TaskDataTableProps) {
   const router = useRouter()
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(() => new Set(autoExpandIds || []))
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
   const [pulsingRows, setPulsingRows] = useState<Set<string>>(new Set())
+  // Inline creation state: null = not creating, string = parentId being created under (empty string = root level)
+  const [inlineCreationParentId, setInlineCreationParentId] = useState<string | null>(null)
+
+  const createTask = useCreateTask()
 
   // Highlight a row (clears others, persists until another is clicked)
   // Clear first to restart animation if same row is clicked again
@@ -650,6 +825,23 @@ export function TaskDataTable({
       })
     }
   }, [tasksWithChildren, expandAllEnabled])
+
+  // Auto-expand rows when autoExpandIds changes (e.g., viewing a parent task)
+  useEffect(() => {
+    if (autoExpandIds && autoExpandIds.length > 0) {
+      setExpandedRows(prev => {
+        const next = new Set(prev)
+        let changed = false
+        for (const id of autoExpandIds) {
+          if (!next.has(id)) {
+            next.add(id)
+            changed = true
+          }
+        }
+        return changed ? next : prev
+      })
+    }
+  }, [autoExpandIds])
 
   const updateTask = useUpdateTask()
   const deleteTask = useDeleteTask()
@@ -777,6 +969,37 @@ export function TaskDataTable({
     }
   }, [deleteTask])
 
+  // Inline creation handlers
+  const handleStartInlineCreation = useCallback((parentId: string) => {
+    setInlineCreationParentId(parentId)
+    // Auto-expand the parent if not already expanded
+    if (!expandedRows.has(parentId)) {
+      setExpandedRows(prev => new Set([...Array.from(prev), parentId]))
+    }
+  }, [expandedRows])
+
+  const handleCancelInlineCreation = useCallback(() => {
+    setInlineCreationParentId(null)
+  }, [])
+
+  const handleSubmitInlineCreation = useCallback(async (title: string, parentId: string | null) => {
+    try {
+      await createTask.mutateAsync({
+        title,
+        status: 'pending',
+        parentId: parentId || undefined,
+      })
+      // Keep the inline row open for adding more tasks (don't clear inlineCreationParentId)
+    } catch (error) {
+      console.error('Failed to create task:', error)
+    }
+  }, [createTask])
+
+  // Start root-level inline creation
+  const handleStartRootInlineCreation = useCallback(() => {
+    setInlineCreationParentId('')  // Empty string = root level
+  }, [])
+
   const renderSortIcon = useCallback((field: string) => {
     const config = fieldConfigMap.get(field)
     if (!config?.isSortable) return null
@@ -796,15 +1019,37 @@ export function TaskDataTable({
     const resolved = task._resolved?.[fieldConfig.fieldPath as keyof typeof task._resolved]
 
     // Handle lookup fields (status, priority, etc.)
-    if (fieldConfig.lookupType && resolved) {
-      const lookup = resolved as { displayName: string; color?: string }
-      return (
-        <div className="flex justify-center">
-          <Badge color={lookup.color} variant="outline">
-            {lookup.displayName}
-          </Badge>
-        </div>
-      )
+    if (fieldConfig.lookupType) {
+      let lookup = resolved as { displayName: string; color?: string; code?: string } | undefined
+
+      // If no resolved value, fall back to looking up from the lookups prop
+      if (!lookup && value && typeof value === 'string') {
+        const lookupValues = lookups[fieldConfig.lookupType] || []
+        const found = lookupValues.find(lv => lv.code === value)
+        if (found) {
+          lookup = { displayName: found.displayName, color: found.color, code: found.code }
+        }
+      }
+
+      if (lookup) {
+        return (
+          <div className="flex justify-center">
+            <Badge color={lookup.color} variant="outline">
+              {lookup.displayName}
+            </Badge>
+          </div>
+        )
+      }
+      // If still no lookup found, show the raw value in a basic badge
+      if (value && typeof value === 'string') {
+        return (
+          <div className="flex justify-center">
+            <Badge variant="outline">
+              {value}
+            </Badge>
+          </div>
+        )
+      }
     }
 
     // Handle reference fields (user, team)
@@ -814,10 +1059,31 @@ export function TaskDataTable({
       // Also try looking up directly by the field path
       const ref = (task._resolved?.[fieldName as keyof typeof task._resolved] ||
         task._resolved?.[fieldConfig.fieldPath as keyof typeof task._resolved]) as
+        | User
         | { displayName?: string; name?: string }
         | undefined
-      if (ref?.displayName || ref?.name) {
-        return <div className="text-center">{ref.displayName || ref.name}</div>
+
+      // For user references, use UserChip
+      if (fieldConfig.referenceCollection === 'users') {
+        if (ref && '_id' in ref) {
+          return (
+            <div className="flex justify-center">
+              <UserChip user={ref as User} size="sm" />
+            </div>
+          )
+        }
+        // No assignee - show unassigned
+        return (
+          <div className="flex justify-center">
+            <UserChip user={null} size="sm" />
+          </div>
+        )
+      }
+
+      // For other references (teams, etc.), show displayName or name
+      const refDisplay = ref as { displayName?: string; name?: string } | undefined
+      if (refDisplay?.displayName || refDisplay?.name) {
+        return <div className="text-center">{refDisplay.displayName || refDisplay.name}</div>
       }
       // If no resolved value, show dash
       return <span className="block text-center text-muted-foreground">-</span>
@@ -872,7 +1138,7 @@ export function TaskDataTable({
       return <span>{value?.toString()}</span>
     }
     return <div className="text-center">{value?.toString()}</div>
-  }, [])
+  }, [lookups])
 
   if (isLoading) {
     return (
@@ -935,6 +1201,20 @@ export function TaskDataTable({
                   <div className="flex items-center">
                     {fc.displayName}
                     {renderSortIcon(fc.fieldPath)}
+                    {fc.fieldPath === 'title' && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 ml-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleStartRootInlineCreation()
+                        }}
+                        title="Add new task"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
                 </TableHead>
               ))}
@@ -942,13 +1222,25 @@ export function TaskDataTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {tasks.length === 0 ? (
+            {/* Root-level inline creation row - shown at TOP */}
+            {inlineCreationParentId === '' && (
+              <InlineTaskRow
+                parentId={null}
+                depth={0}
+                fieldConfigs={visibleFieldConfigs}
+                colSpan={visibleFieldConfigs.length}
+                onSubmit={(title) => handleSubmitInlineCreation(title, null)}
+                onCancel={handleCancelInlineCreation}
+                isCreating={createTask.isPending}
+              />
+            )}
+            {tasks.length === 0 && inlineCreationParentId !== '' ? (
               <TableRow>
                 <TableCell
                   colSpan={visibleFieldConfigs.length + 4}
                   className="h-24 text-center text-muted-foreground"
                 >
-                  No tasks found.
+                  No tasks found. Click the + button in the Title header to add one.
                 </TableCell>
               </TableRow>
             ) : (
@@ -981,6 +1273,11 @@ export function TaskDataTable({
                   onNavigateToFlow={handleNavigateToFlow}
                   isPulsing={pulsingRows.has(task._id)}
                   onTriggerPulse={triggerPulse}
+                  inlineCreationParentId={inlineCreationParentId}
+                  onStartInlineCreation={handleStartInlineCreation}
+                  onCancelInlineCreation={handleCancelInlineCreation}
+                  onSubmitInlineCreation={handleSubmitInlineCreation}
+                  isCreatingTask={createTask.isPending}
                 />
               ))
             )}

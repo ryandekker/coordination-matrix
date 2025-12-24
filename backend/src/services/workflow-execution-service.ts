@@ -33,7 +33,12 @@ type WorkflowRunEventHandler = (event: WorkflowRunEvent) => void | Promise<void>
  *   {{workflowRunId}} - Current workflow run ID
  *   {{stepId}} - Current step ID
  *   {{taskId}} - Current task ID
- *   {{input.path.to.value}} - Value from input payload
+ *   {{input.path.to.value}} - Value from input payload (explicit prefix)
+ *   {{message}} - Direct access to inputPayload.message (no prefix needed)
+ *   {{item}} - Current item in foreach loop
+ *   {{_index}} - Current index in foreach loop
+ *   {{_total}} - Total count in foreach loop
+ *   {{anyVariable}} - Direct lookup from input payload
  */
 function resolveTemplateVariables(
   template: string,
@@ -88,6 +93,31 @@ function resolveTemplateVariables(
     result = result.replace(/\{\{input\.([^}]+)\}\}/g, (_, path) => {
       const value = getValueByPathStatic(context.inputPayload!, path);
       return value !== undefined ? String(value) : '';
+    });
+  }
+
+  // Replace direct variable references ({{message}}, {{item}}, {{_index}}, etc.)
+  // This allows foreach items and other payload properties to be accessed without "input." prefix
+  if (context.inputPayload) {
+    result = result.replace(/\{\{([^}]+)\}\}/g, (match, path) => {
+      const trimmedPath = path.trim();
+      // Skip already-resolved system variables (they start with specific prefixes we've already handled)
+      if (['callbackUrl', 'systemWebhookUrl', 'foreachWebhookUrl', 'workflowRunId', 'stepId', 'taskId', 'callbackSecret'].includes(trimmedPath)) {
+        return match;
+      }
+      // Skip input. prefix (already handled above)
+      if (trimmedPath.startsWith('input.')) {
+        return match;
+      }
+      const value = getValueByPathStatic(context.inputPayload!, trimmedPath);
+      if (value !== undefined && value !== null) {
+        if (typeof value === 'object') {
+          return JSON.stringify(value);
+        }
+        return String(value);
+      }
+      // Return empty string for unresolved variables (consistent with input.* behavior)
+      return '';
     });
   }
 
@@ -257,6 +287,7 @@ class WorkflowExecutionService {
   }
 
   private async publish(event: WorkflowRunEvent): Promise<void> {
+    // Publish to internal handlers
     const wildcardHandlers = this.handlers.get('*') || new Set();
     for (const handler of wildcardHandlers) {
       try {
@@ -273,6 +304,13 @@ class WorkflowExecutionService {
       } catch (error) {
         console.error(`[WorkflowExecutionService] Handler error for ${event.type}:`, error);
       }
+    }
+
+    // Also publish to the main event bus for SSE streaming
+    try {
+      await eventBus.publishWorkflowRunEvent(event);
+    } catch (error) {
+      console.error(`[WorkflowExecutionService] Error publishing to event bus:`, error);
     }
   }
 

@@ -111,7 +111,6 @@ All responses follow this structure:
             title: { type: 'string', example: 'Implement feature X' },
             summary: { type: 'string', nullable: true },
             extraPrompt: { type: 'string', nullable: true, description: 'AI prompt for task execution' },
-            additionalInfo: { type: 'string', nullable: true, description: 'Execution output/notes' },
             status: { $ref: '#/components/schemas/TaskStatus' },
             urgency: { $ref: '#/components/schemas/Urgency' },
             parentId: { $ref: '#/components/schemas/ObjectId', nullable: true },
@@ -140,7 +139,6 @@ All responses follow this structure:
             title: { type: 'string', example: 'New task' },
             summary: { type: 'string' },
             extraPrompt: { type: 'string' },
-            additionalInfo: { type: 'string' },
             status: { $ref: '#/components/schemas/TaskStatus' },
             urgency: { $ref: '#/components/schemas/Urgency' },
             parentId: { type: 'string', nullable: true },
@@ -159,7 +157,6 @@ All responses follow this structure:
             title: { type: 'string' },
             summary: { type: 'string' },
             extraPrompt: { type: 'string' },
-            additionalInfo: { type: 'string' },
             status: { $ref: '#/components/schemas/TaskStatus' },
             urgency: { $ref: '#/components/schemas/Urgency' },
             parentId: { type: 'string', nullable: true },
@@ -354,6 +351,31 @@ All responses follow this structure:
             icon: { type: 'string' },
             sortOrder: { type: 'integer' },
             isActive: { type: 'boolean' },
+          },
+        },
+
+        // Tag schemas
+        Tag: {
+          type: 'object',
+          properties: {
+            _id: { $ref: '#/components/schemas/ObjectId' },
+            name: { type: 'string', example: 'bug', description: 'Lowercase tag identifier' },
+            displayName: { type: 'string', example: 'Bug', description: 'Human-readable display name' },
+            color: { type: 'string', example: '#EF4444', description: 'Hex color code' },
+            description: { type: 'string', example: 'Bug fixes and issues', nullable: true },
+            isActive: { type: 'boolean', example: true },
+            createdAt: { type: 'string', format: 'date-time' },
+            updatedAt: { type: 'string', format: 'date-time', nullable: true },
+          },
+        },
+        TagInput: {
+          type: 'object',
+          required: ['name'],
+          properties: {
+            name: { type: 'string', example: 'bug', description: 'Tag name (will be normalized to lowercase)' },
+            displayName: { type: 'string', example: 'Bug', description: 'Optional display name' },
+            color: { type: 'string', example: '#EF4444', description: 'Hex color code (defaults to gray)' },
+            description: { type: 'string', example: 'Bug fixes and issues' },
           },
         },
 
@@ -675,6 +697,7 @@ All responses follow this structure:
             { name: 'rootOnly', in: 'query', schema: { type: 'boolean' } },
             { name: 'tags', in: 'query', schema: { type: 'string' }, description: 'Comma-separated tags' },
             { name: 'resolveReferences', in: 'query', schema: { type: 'boolean' }, description: 'Include resolved assignee/workflow objects' },
+            { name: 'includeArchived', in: 'query', schema: { type: 'boolean', default: false }, description: 'Include archived tasks (excluded by default)' },
           ],
           responses: {
             200: {
@@ -879,6 +902,9 @@ All responses follow this structure:
         get: {
           tags: ['Workflows'],
           summary: 'List all workflows',
+          parameters: [
+            { name: 'includeInactive', in: 'query', schema: { type: 'boolean', default: false }, description: 'Include inactive workflows (excluded by default)' },
+          ],
           responses: {
             200: {
               description: 'List of workflows',
@@ -975,6 +1001,96 @@ All responses follow this structure:
           },
           responses: {
             200: { description: 'Parsed steps' },
+          },
+        },
+      },
+      '/api/workflows/generate-mermaid': {
+        post: {
+          tags: ['Workflows'],
+          summary: 'Generate Mermaid diagram from workflow steps',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['steps'],
+                  properties: {
+                    steps: { type: 'array', items: { type: 'object' } },
+                    name: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: 'Generated Mermaid diagram' },
+          },
+        },
+      },
+      '/api/workflows/ai-prompt-context': {
+        get: {
+          tags: ['Workflows', 'AI'],
+          summary: 'Get dynamic context for AI workflow generation',
+          description: 'Returns structured data about available agents, users, workflows, step types, template variables, and Mermaid syntax. Use this to build prompts for AI tools generating workflows.',
+          responses: {
+            200: {
+              description: 'AI prompt context data',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      data: {
+                        type: 'object',
+                        properties: {
+                          agents: { type: 'array', description: 'Available AI agents' },
+                          users: { type: 'array', description: 'Available users for manual tasks' },
+                          existingWorkflows: { type: 'array', description: 'Workflows available for nesting' },
+                          stepTypes: { type: 'object', description: 'Step type definitions and examples' },
+                          templateVariables: { type: 'object', description: 'Template variable reference' },
+                          mermaidSyntax: { type: 'object', description: 'Mermaid syntax reference' },
+                          rules: { type: 'array', description: 'Important validation rules' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      '/api/workflows/ai-prompt': {
+        get: {
+          tags: ['Workflows', 'AI'],
+          summary: 'Generate a complete AI prompt for workflow generation',
+          description: 'Returns a markdown-formatted prompt ready to be used with AI tools. Includes step type reference, template variables, and optionally available context (agents, users, workflows).',
+          parameters: [
+            { name: 'format', in: 'query', schema: { type: 'string', enum: ['markdown', 'json'] }, description: 'Output format preference (default: markdown)' },
+            { name: 'includeContext', in: 'query', schema: { type: 'string', enum: ['true', 'false'] }, description: 'Include available agents/users/workflows (default: true)' },
+          ],
+          responses: {
+            200: {
+              description: 'AI prompt for workflow generation',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      data: {
+                        type: 'object',
+                        properties: {
+                          prompt: { type: 'string', description: 'The complete prompt text' },
+                          format: { type: 'string' },
+                          includeContext: { type: 'boolean' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -1372,6 +1488,151 @@ All responses follow this structure:
           },
           responses: {
             201: { description: 'Lookup created' },
+          },
+        },
+      },
+
+      // Tags endpoints
+      '/api/tags': {
+        get: {
+          tags: ['Tags'],
+          summary: 'Get all tags',
+          description: 'Returns all active tags. Daemons and agents should use this endpoint to get the list of available tags.',
+          parameters: [
+            { name: 'includeInactive', in: 'query', schema: { type: 'boolean' }, description: 'Include inactive tags' },
+            { name: 'search', in: 'query', schema: { type: 'string' }, description: 'Search by name or displayName' },
+          ],
+          responses: {
+            200: {
+              description: 'List of tags',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      data: { type: 'array', items: { $ref: '#/components/schemas/Tag' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        post: {
+          tags: ['Tags'],
+          summary: 'Create a new tag',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/TagInput' },
+              },
+            },
+          },
+          responses: {
+            201: {
+              description: 'Tag created',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      data: { $ref: '#/components/schemas/Tag' },
+                    },
+                  },
+                },
+              },
+            },
+            409: { description: 'Tag with this name already exists' },
+          },
+        },
+      },
+      '/api/tags/{id}': {
+        get: {
+          tags: ['Tags'],
+          summary: 'Get a tag by ID',
+          parameters: [
+            { name: 'id', in: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } },
+          ],
+          responses: {
+            200: { description: 'Tag found' },
+            404: { description: 'Tag not found' },
+          },
+        },
+        patch: {
+          tags: ['Tags'],
+          summary: 'Update a tag',
+          parameters: [
+            { name: 'id', in: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/TagInput' },
+              },
+            },
+          },
+          responses: {
+            200: { description: 'Tag updated' },
+            404: { description: 'Tag not found' },
+            409: { description: 'Tag with this name already exists' },
+          },
+        },
+        delete: {
+          tags: ['Tags'],
+          summary: 'Deactivate a tag (soft delete)',
+          parameters: [
+            { name: 'id', in: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } },
+          ],
+          responses: {
+            200: { description: 'Tag deactivated' },
+            404: { description: 'Tag not found' },
+          },
+        },
+      },
+      '/api/tags/ensure': {
+        post: {
+          tags: ['Tags'],
+          summary: 'Ensure tags exist (create if they do not)',
+          description: 'Bulk operation to ensure multiple tags exist. Useful for migrations or bulk operations.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['tags'],
+                  properties: {
+                    tags: {
+                      type: 'array',
+                      items: {
+                        oneOf: [
+                          { type: 'string' },
+                          { $ref: '#/components/schemas/TagInput' },
+                        ],
+                      },
+                      description: 'Array of tag names or tag objects',
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: 'Tags ensured',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      data: { type: 'array', items: { $ref: '#/components/schemas/Tag' } },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },
