@@ -607,12 +607,18 @@ export function TaskModal({
           )}
         />
 
-        {/* Urgency - inline select */}
+        {/* Urgency - inline select with immediate save */}
         <Controller
           name="urgency"
           control={control}
           render={({ field }) => (
-            <Select value={field.value as string || ''} onValueChange={field.onChange}>
+            <Select value={field.value as string || ''} onValueChange={(value) => {
+              field.onChange(value)
+              // Immediately save urgency changes - don't wait for debounce
+              if (task) {
+                updateTask.mutate({ id: task._id, data: { urgency: value } })
+              }
+            }}>
               <SelectTrigger
                 className="h-7 w-auto gap-1.5 px-2 text-xs border-0 bg-transparent hover:bg-muted"
                 style={currentUrgencyOption?.color ? {
@@ -643,14 +649,21 @@ export function TaskModal({
           )}
         />
 
-        {/* Assignee - inline select */}
+        {/* Assignee - inline select with immediate save */}
         <Controller
           name="assigneeId"
           control={control}
           render={({ field }) => (
             <Select
               value={field.value as string || '_unassigned'}
-              onValueChange={(val) => field.onChange(val === '_unassigned' ? null : val)}
+              onValueChange={(val) => {
+                const newValue = val === '_unassigned' ? null : val
+                field.onChange(newValue)
+                // Immediately save assignee changes - don't wait for debounce
+                if (task) {
+                  updateTask.mutate({ id: task._id, data: { assigneeId: newValue } })
+                }
+              }}
             >
               <SelectTrigger className="h-7 w-auto gap-0 px-0.5 text-xs border-0 bg-transparent hover:bg-muted">
                 <UserChip user={currentAssignee} size="sm" />
