@@ -40,7 +40,13 @@ import {
   DEFAULT_TASK_MODAL_TAB,
   type TaskModalTab,
 } from '@/lib/task-type-config'
-import { Settings2, Database, Activity, Workflow, ExternalLink, ArrowUpRight, ListTree } from 'lucide-react'
+import { Settings2, Database, Activity, Workflow, ExternalLink, ArrowUpRight, ListTree, Plus, Loader2 } from 'lucide-react'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { UserChip, UserAvatar } from '@/components/ui/user-chip'
@@ -1376,10 +1382,44 @@ export function TaskModal({
 
   // Subtasks content for sidebar
   const SubtasksContent = () => {
+    const subtaskInputRef = useRef<HTMLInputElement>(null)
+    const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
+    const [isCreatingSubtask, setIsCreatingSubtask] = useState(false)
+
     // Handle clicking a subtask to open its modal
     const handleSubtaskClick = (subtaskId: string) => {
       onClose()
       router.push(`/tasks?taskId=${subtaskId}`)
+    }
+
+    // Handle creating a new subtask
+    const handleCreateSubtask = async () => {
+      if (!newSubtaskTitle.trim() || !task) return
+
+      setIsCreatingSubtask(true)
+      try {
+        await createTask.mutateAsync({
+          title: newSubtaskTitle.trim(),
+          parentId: task._id,
+          status: 'pending',
+          taskType: 'agent',
+        })
+        setNewSubtaskTitle('')
+        // Refocus input for quick multiple creation
+        setTimeout(() => {
+          subtaskInputRef.current?.focus()
+        }, 50)
+      } finally {
+        setIsCreatingSubtask(false)
+      }
+    }
+
+    // Handle keydown in input
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault()
+        handleCreateSubtask()
+      }
     }
 
     return (
@@ -1390,17 +1430,37 @@ export function TaskModal({
           </label>
         </div>
 
+        {/* Quick create input */}
+        <div className="relative">
+          <Plus className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <input
+            ref={subtaskInputRef}
+            type="text"
+            value={newSubtaskTitle}
+            onChange={(e) => setNewSubtaskTitle(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Add subtask... (Enter to create)"
+            disabled={isCreatingSubtask}
+            className={cn(
+              'w-full h-8 pl-8 pr-8 text-sm rounded-md border border-input bg-background',
+              'placeholder:text-muted-foreground/60',
+              'focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary',
+              'disabled:opacity-50 disabled:cursor-not-allowed'
+            )}
+          />
+          {isCreatingSubtask && (
+            <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground animate-spin" />
+          )}
+        </div>
+
         {isLoadingChildren ? (
           <div className="flex items-center justify-center py-8 text-muted-foreground">
             <span className="text-sm">Loading subtasks...</span>
           </div>
         ) : subtasks.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-            <ListTree className="h-8 w-8 mb-2 opacity-50" />
-            <span className="text-sm">No subtasks</span>
-            <p className="text-xs mt-1 text-center">
-              Create subtasks from the task table
-            </p>
+          <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
+            <ListTree className="h-6 w-6 mb-1.5 opacity-50" />
+            <span className="text-xs">No subtasks yet</span>
           </div>
         ) : (
           <div className="space-y-1">
@@ -1427,26 +1487,42 @@ export function TaskModal({
                     style={{ color: subtaskTypeConfig.hexColor }}
                   />
 
-                  {/* Status dot */}
+                  {/* Status badge */}
                   <span
-                    className="h-2 w-2 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: subtaskStatus?.color || '#888' }}
-                    title={subtaskStatus?.displayName || subtask.status}
-                  />
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0"
+                    style={{
+                      backgroundColor: `${subtaskStatus?.color || '#888'}20`,
+                      color: subtaskStatus?.color || '#888',
+                    }}
+                  >
+                    <span
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ backgroundColor: subtaskStatus?.color || '#888' }}
+                    />
+                    {subtaskStatus?.displayName || subtask.status}
+                  </span>
 
                   {/* Title */}
                   <span className="flex-1 text-sm truncate" title={subtask.title}>
                     {subtask.title}
                   </span>
 
-                  {/* Assignee avatar */}
+                  {/* Assignee avatar with tooltip */}
                   {subtaskAssignee ? (
-                    <span
-                      className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-medium flex-shrink-0"
-                      title={subtaskAssignee.displayName}
-                    >
-                      {subtaskAssignee.displayName.charAt(0).toUpperCase()}
-                    </span>
+                    <TooltipProvider delayDuration={200}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-medium flex-shrink-0 cursor-default"
+                          >
+                            {subtaskAssignee.displayName.charAt(0).toUpperCase()}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="left" className="text-xs">
+                          {subtaskAssignee.displayName}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   ) : (
                     <span className="w-5 h-5 flex-shrink-0" />
                   )}
