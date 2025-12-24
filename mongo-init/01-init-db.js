@@ -903,4 +903,55 @@ db.api_keys.createIndex({ createdById: 1 });
 // Index on isActive for filtering
 db.api_keys.createIndex({ isActive: 1 });
 
+// ============================================================================
+// TAGS COLLECTION - Structured tag definitions with colors
+// ============================================================================
+db.createCollection('tags', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['name', 'color', 'createdAt', 'isActive'],
+      properties: {
+        name: {
+          bsonType: 'string',
+          description: 'Tag name (unique, lowercase) - required'
+        },
+        displayName: {
+          bsonType: 'string',
+          description: 'Human-readable display name'
+        },
+        color: {
+          bsonType: 'string',
+          description: 'Hex color code for the tag - required'
+        },
+        description: {
+          bsonType: ['string', 'null'],
+          description: 'Optional description of the tag purpose'
+        },
+        isActive: {
+          bsonType: 'bool',
+          description: 'Whether the tag is active'
+        },
+        createdById: {
+          bsonType: ['objectId', 'null'],
+          description: 'User who created this tag'
+        },
+        createdAt: {
+          bsonType: 'date',
+          description: 'When the tag was created'
+        },
+        updatedAt: {
+          bsonType: ['date', 'null'],
+          description: 'When the tag was last updated'
+        }
+      }
+    }
+  }
+});
+
+// Unique index on tag name (case-insensitive matching)
+db.tags.createIndex({ name: 1 }, { unique: true });
+// Index for active tags
+db.tags.createIndex({ isActive: 1 });
+
 print('Database initialization complete!');
