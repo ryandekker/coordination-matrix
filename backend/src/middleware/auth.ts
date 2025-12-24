@@ -17,6 +17,8 @@ export interface ApiKey {
   keyPrefix: string;
   scopes: string[];
   createdById: unknown;
+  // User ID that this API key acts as - when set, the key inherits the user's permissions
+  userId?: unknown;
   createdAt: Date;
   expiresAt?: Date | null;
   lastUsedAt?: Date | null;
@@ -82,12 +84,33 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       ).catch(() => { /* ignore errors */ });
 
       req.apiKey = apiKey;
-      // Create a synthetic user for API key auth
-      req.user = {
-        userId: apiKey.createdById?.toString() || 'api-key-user',
-        email: `api-key-${apiKey.keyPrefix}@system`,
-        role: 'api',
-      };
+
+      // If the API key is tied to a user, look up that user and inherit their role
+      if (apiKey.userId) {
+        const user = await db.collection('users').findOne({
+          _id: apiKey.userId,
+          isActive: true,
+        });
+
+        if (!user) {
+          res.status(401).json({ error: 'API key is tied to an inactive or deleted user' });
+          return;
+        }
+
+        // Use the associated user's identity and role
+        req.user = {
+          userId: user._id.toString(),
+          email: user.email || `api-key-${apiKey.keyPrefix}@system`,
+          role: user.role,
+        };
+      } else {
+        // Create a synthetic user for API key auth (no user association)
+        req.user = {
+          userId: apiKey.createdById?.toString() || 'api-key-user',
+          email: `api-key-${apiKey.keyPrefix}@system`,
+          role: 'api',
+        };
+      }
       next();
       return;
     } catch (error) {

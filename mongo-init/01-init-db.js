@@ -839,4 +839,72 @@ db.batch_items.createIndex({ batchJobId: 1, status: 1 });
 db.batch_items.createIndex({ batchJobId: 1, createdAt: 1 });
 db.batch_items.createIndex({ externalId: 1 });
 
+// ============================================================================
+// API KEYS COLLECTION - API key storage with optional user association
+// ============================================================================
+db.createCollection('api_keys', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['name', 'keyHash', 'keyPrefix', 'scopes', 'createdAt', 'isActive'],
+      properties: {
+        name: {
+          bsonType: 'string',
+          description: 'Human-readable name for the API key'
+        },
+        description: {
+          bsonType: ['string', 'null'],
+          description: 'Optional description of what this key is used for'
+        },
+        keyHash: {
+          bsonType: 'string',
+          description: 'SHA256 hash of the API key (never store raw key)'
+        },
+        keyPrefix: {
+          bsonType: 'string',
+          description: 'Prefix of the key for display purposes'
+        },
+        scopes: {
+          bsonType: 'array',
+          items: { bsonType: 'string' },
+          description: 'Array of permission scopes'
+        },
+        createdById: {
+          bsonType: ['objectId', 'null'],
+          description: 'User who created this API key'
+        },
+        userId: {
+          bsonType: ['objectId', 'null'],
+          description: 'User this API key acts as - when set, inherits user permissions'
+        },
+        createdAt: {
+          bsonType: 'date',
+          description: 'When the key was created'
+        },
+        expiresAt: {
+          bsonType: ['date', 'null'],
+          description: 'When the key expires (null = never)'
+        },
+        lastUsedAt: {
+          bsonType: ['date', 'null'],
+          description: 'When the key was last used'
+        },
+        isActive: {
+          bsonType: 'bool',
+          description: 'Whether the key is active'
+        }
+      }
+    }
+  }
+});
+
+// Index on keyHash for authentication lookups
+db.api_keys.createIndex({ keyHash: 1 }, { unique: true });
+// Index on userId to find keys tied to a specific user
+db.api_keys.createIndex({ userId: 1 });
+// Index on createdById to find keys created by a user
+db.api_keys.createIndex({ createdById: 1 });
+// Index on isActive for filtering
+db.api_keys.createIndex({ isActive: 1 });
+
 print('Database initialization complete!');
