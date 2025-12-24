@@ -518,7 +518,7 @@ const TaskRow = memo(function TaskRow({
   isExpanded: boolean
   isSelected: boolean
   onToggleExpand: () => void
-  onToggleSelect: () => void
+  onToggleSelect: (isShiftKey?: boolean) => void
   onCellUpdate: (taskId: string, field: string, value: unknown) => void
   onEdit: () => void
   onDelete: () => void
@@ -528,7 +528,7 @@ const TaskRow = memo(function TaskRow({
   selectedRows: Set<string>
   pulsingRows: Set<string>
   toggleRowExpansion: (taskId: string) => void
-  toggleRowSelection: (taskId: string) => void
+  toggleRowSelection: (taskId: string, isShiftKey?: boolean) => void
   handleDeleteTask: (taskId: string) => void
   handleEditTask: (task: Task) => void
   handleCreateSubtask: (task: Task) => void
@@ -585,7 +585,14 @@ const TaskRow = memo(function TaskRow({
       >
         <TableCell className="w-12 pl-3 pr-0">
           <div className="flex justify-center">
-            <Checkbox checked={isSelected} onCheckedChange={onToggleSelect} className="h-5 w-5" />
+            <Checkbox
+                checked={isSelected}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggleSelect(e.shiftKey)
+                }}
+                className="h-5 w-5"
+              />
           </div>
         </TableCell>
         <TableCell className="w-10 p-0">
@@ -692,7 +699,7 @@ const TaskRow = memo(function TaskRow({
             isExpanded={expandedRows.has(child._id)}
             isSelected={selectedRows.has(child._id)}
             onToggleExpand={() => toggleRowExpansion(child._id)}
-            onToggleSelect={() => toggleRowSelection(child._id)}
+            onToggleSelect={(isShiftKey) => toggleRowSelection(child._id, isShiftKey)}
             onCellUpdate={onCellUpdate}
             onEdit={() => handleEditTask(child)}
             onDelete={() => handleDeleteTask(child._id)}
@@ -755,6 +762,7 @@ export function TaskDataTable({
   const [expandedRows, setExpandedRows] = useState<Set<string>>(() => new Set(autoExpandIds || []))
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
   const [pulsingRows, setPulsingRows] = useState<Set<string>>(new Set())
+  const [lastSelectedId, setLastSelectedId] = useState<string | null>(null)
   // Inline creation state: null = not creating, string = parentId being created under (empty string = root level)
   const [inlineCreationParentId, setInlineCreationParentId] = useState<string | null>(null)
 
@@ -852,6 +860,44 @@ export function TaskDataTable({
     setSelectedRows(new Set())
   }, [])
 
+  // Helper: Flatten visible tasks in display order (respecting expanded state)
+  const flattenVisibleTasks = useCallback((taskList: Task[], expanded: Set<string>): string[] => {
+    const result: string[] = []
+    const traverse = (items: Task[]) => {
+      for (const task of items) {
+        result.push(task._id)
+        if (expanded.has(task._id) && task.children && task.children.length > 0) {
+          traverse(task.children)
+        }
+      }
+    }
+    traverse(taskList)
+    return result
+  }, [])
+
+  // Helper: Collect a task ID and all its descendant IDs recursively
+  const collectAllDescendantIds = useCallback((task: Task): string[] => {
+    const result: string[] = [task._id]
+    if (task.children && task.children.length > 0) {
+      for (const child of task.children) {
+        result.push(...collectAllDescendantIds(child))
+      }
+    }
+    return result
+  }, [])
+
+  // Helper: Find a task by ID in the task tree
+  const findTaskById = useCallback((taskList: Task[], taskId: string): Task | null => {
+    for (const task of taskList) {
+      if (task._id === taskId) return task
+      if (task.children && task.children.length > 0) {
+        const found = findTaskById(task.children, taskId)
+        if (found) return found
+      }
+    }
+    return null
+  }, [])
+
   const handleBulkStatusChange = useCallback(async (status: string) => {
     const taskIds = Array.from(selectedRows)
     try {
@@ -937,17 +983,57 @@ export function TaskDataTable({
     })
   }, [tasksWithChildren, onExpandAllChange])
 
-  const toggleRowSelection = useCallback((taskId: string) => {
-    setSelectedRows((prev) => {
-      const newSelected = new Set(prev)
-      if (newSelected.has(taskId)) {
-        newSelected.delete(taskId)
-      } else {
-        newSelected.add(taskId)
+  const toggleRowSelection = useCallback((taskId: string, isShiftKey = false) => {
+    if (isShiftKey && lastSelectedId && lastSelectedId !== taskId) {
+      // Shift+click: select range between lastSelectedId and taskId, including children
+      const visibleOrder = flattenVisibleTasks(tasks, expandedRows)
+      const fromIndex = visibleOrder.indexOf(lastSelectedId)
+      const toIndex = visibleOrder.indexOf(taskId)
+
+      if (fromIndex !== -1 && toIndex !== -1) {
+        const [startIndex, endIndex] = fromIndex < toIndex
+          ? [fromIndex, toIndex]
+          : [toIndex, fromIndex]
+
+        // Get all task IDs in the range
+        const rangeIds = visibleOrder.slice(startIndex, endIndex + 1)
+
+        // For each task in the range, also include all its descendants
+        const allIds = new Set<string>()
+        for (const id of rangeIds) {
+          allIds.add(id)
+          // Find the task and collect all its descendants
+          const task = findTaskById(tasks, id)
+          if (task && task.children && task.children.length > 0) {
+            for (const childId of collectAllDescendantIds(task)) {
+              allIds.add(childId)
+            }
+          }
+        }
+
+        setSelectedRows((prev) => {
+          const newSelected = new Set(prev)
+          for (const id of allIds) {
+            newSelected.add(id)
+          }
+          return newSelected
+        })
       }
-      return newSelected
-    })
-  }, [])
+    } else {
+      // Regular click: toggle single row
+      setSelectedRows((prev) => {
+        const newSelected = new Set(prev)
+        if (newSelected.has(taskId)) {
+          newSelected.delete(taskId)
+        } else {
+          newSelected.add(taskId)
+        }
+        return newSelected
+      })
+    }
+    // Always update last selected ID
+    setLastSelectedId(taskId)
+  }, [lastSelectedId, tasks, expandedRows, flattenVisibleTasks, findTaskById, collectAllDescendantIds])
 
   const toggleAllSelection = useCallback(() => {
     setSelectedRows((prev) => {
@@ -1255,7 +1341,7 @@ export function TaskDataTable({
                   isExpanded={expandedRows.has(task._id)}
                   isSelected={selectedRows.has(task._id)}
                   onToggleExpand={() => toggleRowExpansion(task._id)}
-                  onToggleSelect={() => toggleRowSelection(task._id)}
+                  onToggleSelect={(isShiftKey) => toggleRowSelection(task._id, isShiftKey)}
                   onCellUpdate={handleCellUpdate}
                   onEdit={() => handleEditTaskWithPulse(task)}
                   onDelete={() => handleDeleteTask(task._id)}
