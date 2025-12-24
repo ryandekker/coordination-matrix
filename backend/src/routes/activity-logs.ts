@@ -88,16 +88,23 @@ activityLogsRouter.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const taskId = toObjectId(req.params.taskId);
-      const { comment, actorId, actorType = 'user' } = req.body;
+      const { comment, actorId: actorIdStr, actorType = 'user' } = req.body;
 
       if (!comment || typeof comment !== 'string' || comment.trim().length === 0) {
         throw createError('Comment is required', 400);
       }
 
+      // Get actor from request body, or fall back to authenticated user
+      const actorId = actorIdStr
+        ? toObjectId(actorIdStr)
+        : req.user?.userId
+          ? toObjectId(req.user.userId)
+          : null;
+
       const entry = await activityLogService.addComment(
         taskId,
         comment.trim(),
-        actorId ? toObjectId(actorId) : null,
+        actorId,
         actorType as 'user' | 'system' | 'daemon'
       );
 

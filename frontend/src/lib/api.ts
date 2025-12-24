@@ -677,6 +677,11 @@ export interface ActivityLogEntry {
   comment?: string
   timestamp: string
   metadata?: Record<string, unknown>
+  // Populated user info (resolved by backend)
+  actor?: {
+    displayName: string
+    email?: string
+  } | null
 }
 
 // Workflow Run Types
