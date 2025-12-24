@@ -40,7 +40,15 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { formatDateTime } from '@/lib/utils'
+import { getAuthHeader } from '@/lib/auth'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
@@ -51,9 +59,18 @@ interface ApiKey {
   key?: string // Only present on creation/regeneration
   keyPrefix: string
   scopes: string[]
+  userId?: string | null
   createdAt: string
   expiresAt?: string | null
   lastUsedAt?: string | null
+  isActive: boolean
+}
+
+interface User {
+  _id: string
+  displayName: string
+  email?: string
+  role: string
   isActive: boolean
 }
 
@@ -65,15 +82,25 @@ const AVAILABLE_SCOPES = [
 ]
 
 async function fetchApiKeys(): Promise<{ data: ApiKey[] }> {
-  const response = await fetch(`${API_BASE}/auth/api-keys`)
+  const response = await fetch(`${API_BASE}/auth/api-keys`, {
+    headers: getAuthHeader(),
+  })
   if (!response.ok) throw new Error('Failed to fetch API keys')
+  return response.json()
+}
+
+async function fetchUsers(): Promise<{ data: User[] }> {
+  const response = await fetch(`${API_BASE}/users?isActive=true`, {
+    headers: getAuthHeader(),
+  })
+  if (!response.ok) throw new Error('Failed to fetch users')
   return response.json()
 }
 
 async function createApiKey(data: Partial<ApiKey>): Promise<{ data: ApiKey }> {
   const response = await fetch(`${API_BASE}/auth/api-keys`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
     body: JSON.stringify(data),
   })
   if (!response.ok) throw new Error('Failed to create API key')
@@ -83,6 +110,7 @@ async function createApiKey(data: Partial<ApiKey>): Promise<{ data: ApiKey }> {
 async function deleteApiKey(id: string): Promise<void> {
   const response = await fetch(`${API_BASE}/auth/api-keys/${id}`, {
     method: 'DELETE',
+    headers: getAuthHeader(),
   })
   if (!response.ok) throw new Error('Failed to delete API key')
 }
@@ -90,6 +118,7 @@ async function deleteApiKey(id: string): Promise<void> {
 async function regenerateApiKey(id: string): Promise<{ data: ApiKey }> {
   const response = await fetch(`${API_BASE}/auth/api-keys/${id}/regenerate`, {
     method: 'POST',
+    headers: getAuthHeader(),
   })
   if (!response.ok) throw new Error('Failed to regenerate API key')
   return response.json()
@@ -106,12 +135,18 @@ export default function ApiKeysPage() {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
+    userId: '' as string,
     scopes: ['tasks:read', 'saved-searches:read'] as string[],
   })
 
   const { data: apiKeysData, isLoading } = useQuery({
     queryKey: ['api-keys'],
     queryFn: fetchApiKeys,
+  })
+
+  const { data: usersData } = useQuery({
+    queryKey: ['users'],
+    queryFn: fetchUsers,
   })
 
   const createMutation = useMutation({
@@ -146,18 +181,26 @@ export default function ApiKeysPage() {
   })
 
   const apiKeys = apiKeysData?.data || []
+  const users = usersData?.data || []
 
   const resetForm = () => {
     setFormData({
       name: '',
       description: '',
+      userId: '',
       scopes: ['tasks:read', 'saved-searches:read'],
     })
   }
 
   const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    createMutation.mutate(formData)
+    const payload = {
+      name: formData.name,
+      description: formData.description,
+      scopes: formData.scopes,
+      ...(formData.userId && { userId: formData.userId }),
+    }
+    createMutation.mutate(payload)
   }
 
   const handleScopeChange = (scope: string, checked: boolean) => {
@@ -324,6 +367,28 @@ export default function ApiKeysPage() {
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 placeholder="What will this key be used for?"
               />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Acts As User</label>
+              <Select
+                value={formData.userId || 'none'}
+                onValueChange={(value) => setFormData({ ...formData, userId: value === 'none' ? '' : value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a user (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No user (API key only)</SelectItem>
+                  {users.map((user) => (
+                    <SelectItem key={user._id} value={user._id}>
+                      {user.displayName}{user.email ? ` (${user.email})` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                When set, this API key will inherit the selected user&apos;s permissions.
+              </p>
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Scopes</label>
