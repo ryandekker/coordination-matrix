@@ -277,7 +277,28 @@ export function TaskModal({
   const buildTaskData = useCallback((data: Record<string, unknown>): Partial<Task> => {
     const taskData: Partial<Task> = {}
 
+    // Process core fields first (header fields like status, urgency, assigneeId)
+    const coreFields = Object.keys(coreDefaultValues)
+    coreFields.forEach((field) => {
+      const value = data[field]
+      if (field === 'tags' && typeof value === 'string') {
+        taskData[field as keyof Task] = value
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean) as never
+      } else if (field === 'dueAt') {
+        taskData[field as keyof Task] = (value ? new Date(value as string).toISOString() : null) as never
+      } else if (field === 'workflowId' || field === 'assigneeId') {
+        taskData[field as keyof Task] = (value || null) as never
+      } else {
+        taskData[field as keyof Task] = value as never
+      }
+    })
+
+    // Then process additional fields from field configs (skip if already handled)
     editableFields.forEach((fc) => {
+      if (coreFields.includes(fc.fieldPath)) return
+
       const value = data[fc.fieldPath]
 
       if (fc.fieldType === 'tags' && typeof value === 'string') {
