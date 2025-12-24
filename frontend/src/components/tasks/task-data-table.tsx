@@ -387,11 +387,14 @@ const InlineTaskRow = memo(function InlineTaskRow({
       isSubmittingRef.current = true
       onSubmit(title.trim())
       setTitle('')
-      // Re-focus after a brief delay to ensure the input stays focused
+      // Re-focus immediately
+      requestAnimationFrame(() => {
+        inputRef.current?.focus({ preventScroll: true })
+      })
+      // Keep submitting flag true longer than blur delay (150ms)
       setTimeout(() => {
         isSubmittingRef.current = false
-        inputRef.current?.focus({ preventScroll: true })
-      }, 0)
+      }, 200)
     } else if (e.key === 'Escape') {
       e.preventDefault()
       onCancel()
