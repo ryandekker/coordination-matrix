@@ -219,6 +219,7 @@ interface TaskDataTableProps {
   onPageChange: (page: number) => void
   expandAllEnabled: boolean
   onExpandAllChange: (enabled: boolean) => void
+  autoExpandIds?: string[]
 }
 
 // Memoized Title cell component with special edit behavior
@@ -720,9 +721,10 @@ export function TaskDataTable({
   onPageChange,
   expandAllEnabled,
   onExpandAllChange,
+  autoExpandIds,
 }: TaskDataTableProps) {
   const router = useRouter()
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(() => new Set(autoExpandIds || []))
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
   const [pulsingRows, setPulsingRows] = useState<Set<string>>(new Set())
   // Inline creation state: null = not creating, string = parentId being created under (empty string = root level)
@@ -795,6 +797,23 @@ export function TaskDataTable({
       })
     }
   }, [tasksWithChildren, expandAllEnabled])
+
+  // Auto-expand rows when autoExpandIds changes (e.g., viewing a parent task)
+  useEffect(() => {
+    if (autoExpandIds && autoExpandIds.length > 0) {
+      setExpandedRows(prev => {
+        const next = new Set(prev)
+        let changed = false
+        for (const id of autoExpandIds) {
+          if (!next.has(id)) {
+            next.add(id)
+            changed = true
+          }
+        }
+        return changed ? next : prev
+      })
+    }
+  }, [autoExpandIds])
 
   const updateTask = useUpdateTask()
   const deleteTask = useDeleteTask()
