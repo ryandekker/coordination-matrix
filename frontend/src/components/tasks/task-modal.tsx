@@ -674,7 +674,7 @@ export function TaskModal({
             type="button"
             onClick={() => {
               onClose()
-              router.push(`/tasks?taskId=${task._resolved!.parent!._id}`)
+              router.push(`/tasks?parentId=${task._resolved!.parent!._id}`)
             }}
             className="flex items-center gap-1.5 px-2 h-7 text-xs rounded-md bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors max-w-[200px]"
           >
