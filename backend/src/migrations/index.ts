@@ -16,6 +16,7 @@ import { migration as addActivityLogsCollection } from './2025-12-19-001-add-act
 import { migration as addWebhooksCollections } from './2025-12-19-002-add-webhooks-collections.js';
 import { migration as addDaemonBatchCollections } from './2025-12-19-003-add-daemon-batch-collections.js';
 import { migration as addMissingTaskIndexes } from './2025-12-19-004-add-missing-task-indexes.js';
+import { migration as addWaitingStatusLookup } from './2024-12-24-001-add-waiting-status-lookup.js';
 
 // Register all migrations in order
 export const migrations: Migration[] = [
@@ -27,4 +28,5 @@ export const migrations: Migration[] = [
   addWebhooksCollections,
   addDaemonBatchCollections,
   addMissingTaskIndexes,
+  addWaitingStatusLookup,
 ];
