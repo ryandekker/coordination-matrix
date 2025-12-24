@@ -9,7 +9,7 @@ import { TaskModal } from './task-modal'
 import { ColumnConfigModal } from './column-config-modal'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { useTasks, useTask, useLookups, useFieldConfigs, useViews, useUsers, useCreateView, useUpdateView } from '@/hooks/use-tasks'
+import { useTasks, useTask, useLookups, useFieldConfigs, useViews, useUsers, useWorkflows, useCreateView, useUpdateView } from '@/hooks/use-tasks'
 import { useEventStream } from '@/hooks/use-event-stream'
 import { Task, View, FieldConfig } from '@/lib/api'
 
@@ -130,6 +130,7 @@ export function TasksPage() {
   const { data: fieldConfigsData } = useFieldConfigs('tasks')
   const { data: viewsData, refetch: refetchViews } = useViews('tasks')
   const { data: usersData } = useUsers()
+  const { data: workflowsData } = useWorkflows()
   const createViewMutation = useCreateView()
   const updateViewMutation = useUpdateView()
 
@@ -157,6 +158,7 @@ export function TasksPage() {
     : FALLBACK_FIELD_CONFIGS
   const views = viewsData?.data || []
   const users = usersData?.data || []
+  const workflows = workflowsData?.data || []
 
   // Check if any tasks have children (for expand all button)
   const hasAnyChildren = useMemo(() => {
@@ -434,6 +436,7 @@ export function TasksPage() {
         fieldConfigs={fieldConfigs}
         lookups={lookups}
         users={users}
+        workflows={workflows}
         visibleColumns={effectiveVisibleColumns}
         sortBy={sortBy}
         sortOrder={sortOrder}

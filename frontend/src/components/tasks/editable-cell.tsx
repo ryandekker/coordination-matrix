@@ -24,7 +24,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { Checkbox } from '@/components/ui/checkbox'
-import { FieldConfig, LookupValue, User, Task, tasksApi } from '@/lib/api'
+import { FieldConfig, LookupValue, User, Task, Workflow, tasksApi } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useQuery } from '@tanstack/react-query'
 import { UserChip } from '@/components/ui/user-chip'
@@ -51,6 +51,8 @@ interface EditableCellProps {
   fieldConfig: FieldConfig
   lookups: Record<string, LookupValue[]>
   users?: User[]
+  workflows?: Workflow[]
+  task?: Task
   onSave: (value: unknown) => void
   children: ReactNode
   isTitle?: boolean
@@ -61,6 +63,8 @@ export const EditableCell = memo(function EditableCell({
   fieldConfig,
   lookups,
   users = [],
+  workflows = [],
+  task,
   onSave,
   children,
   isTitle = false,
@@ -233,6 +237,60 @@ export const EditableCell = memo(function EditableCell({
           setSearchQuery('')
         }}
       />
+    )
+  }
+
+  // Handle workflowStage field with dropdown
+  if (fieldConfig.fieldPath === 'workflowStage' && task) {
+    const workflow = workflows.find(w => w._id === task.workflowId)
+    const workflowStages = workflow?.steps?.map(s => s.name) || workflow?.stages || []
+    const hasWorkflow = !!task.workflowId && workflowStages.length > 0
+
+    if (isEditing && hasWorkflow) {
+      return (
+        <div className="relative w-full">
+          <div className="cursor-pointer py-0.5">{children}</div>
+          <div ref={containerRef} className="absolute left-0 top-0 z-50 min-w-[180px]">
+            <Select
+              value={editValue as string || '_none'}
+              onValueChange={(val) => {
+                const newValue = val === '_none' ? '' : val
+                setEditValue(newValue)
+                onSave(newValue)
+                setIsEditing(false)
+              }}
+              open={true}
+              onOpenChange={(open) => !open && handleCancel()}
+            >
+              <SelectTrigger className="sr-only">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_none">None</SelectItem>
+                {workflowStages.map((stage) => (
+                  <SelectItem key={stage} value={stage}>
+                    {stage}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      )
+    }
+
+    // Non-editing state: clickable to edit if has workflow, otherwise just display
+    return (
+      <div
+        className={cn(
+          "py-0.5 rounded transition-colors",
+          hasWorkflow ? "cursor-pointer hover:bg-muted/50" : "cursor-default"
+        )}
+        onClick={() => hasWorkflow && setIsEditing(true)}
+        title={!hasWorkflow ? "Assign a workflow to set stage" : undefined}
+      >
+        {children}
+      </div>
     )
   }
 
