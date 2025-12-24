@@ -450,7 +450,6 @@ export function useEventStream(options?: {
 
       case 'task.updated':
       case 'task.status.changed':
-      case 'task.assignee.changed':
       case 'task.priority.changed':
       case 'task.metadata.changed':
         // Update the specific task in cache if we have task data
@@ -499,6 +498,14 @@ export function useEventStream(options?: {
             }
           })
         }
+        break
+
+      case 'task.assignee.changed':
+        // Assignee changes need full refetch to get resolved user data (name, email, etc.)
+        queryClient.invalidateQueries({ queryKey: ['tasks'] })
+        queryClient.invalidateQueries({ queryKey: ['task', event.taskId] })
+        queryClient.invalidateQueries({ queryKey: ['task-tree'] })
+        queryClient.invalidateQueries({ queryKey: ['task-children'] })
         break
 
       case 'task.deleted':
