@@ -57,6 +57,55 @@ function CopyButton({ value }: { value: unknown }) {
   )
 }
 
+// Threshold for truncating long strings
+const STRING_TRUNCATE_THRESHOLD = 200
+
+function ExpandableString({ value, className }: { value: string; className?: string }) {
+  const [isExpanded, setIsExpanded] = React.useState(false)
+  const shouldTruncate = value.length > STRING_TRUNCATE_THRESHOLD
+
+  const displayValue = shouldTruncate && !isExpanded
+    ? value.substring(0, STRING_TRUNCATE_THRESHOLD) + '...'
+    : value
+
+  if (!shouldTruncate) {
+    return (
+      <span className={cn("text-green-700 dark:text-green-400", className)}>
+        &quot;{value}&quot;
+      </span>
+    )
+  }
+
+  return (
+    <span className={cn("text-green-700 dark:text-green-400", className)}>
+      &quot;
+      <span
+        className={cn(
+          "cursor-pointer hover:bg-green-500/10 rounded transition-colors",
+          isExpanded && "whitespace-pre-wrap break-all"
+        )}
+        onClick={(e) => {
+          e.stopPropagation()
+          setIsExpanded(!isExpanded)
+        }}
+        title={isExpanded ? 'Click to collapse' : 'Click to expand full text'}
+      >
+        {displayValue}
+      </span>
+      &quot;
+      <button
+        onClick={(e) => {
+          e.stopPropagation()
+          setIsExpanded(!isExpanded)
+        }}
+        className="ml-1 text-[10px] text-primary hover:underline"
+      >
+        {isExpanded ? 'less' : `+${value.length - STRING_TRUNCATE_THRESHOLD} chars`}
+      </button>
+    </span>
+  )
+}
+
 function JsonNode({ keyName, value, depth, defaultExpanded, maxInitialDepth, isLast = true }: JsonNodeProps) {
   const isObject = value !== null && typeof value === 'object' && !Array.isArray(value)
   const isArray = Array.isArray(value)
@@ -81,13 +130,7 @@ function JsonNode({ keyName, value, depth, defaultExpanded, maxInitialDepth, isL
       return <span className="text-blue-600 dark:text-blue-400">{val}</span>
     }
     if (typeof val === 'string') {
-      // Truncate long strings
-      const displayValue = val.length > 200 ? val.substring(0, 200) + '...' : val
-      return (
-        <span className="text-green-700 dark:text-green-400">
-          &quot;{displayValue}&quot;
-        </span>
-      )
+      return <ExpandableString value={val} />
     }
     return <span>{String(val)}</span>
   }
