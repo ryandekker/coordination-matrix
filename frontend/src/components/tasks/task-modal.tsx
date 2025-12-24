@@ -50,6 +50,7 @@ import {
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { UserChip, UserAvatar } from '@/components/ui/user-chip'
+import { TagInput } from '@/components/ui/tag-input'
 
 interface TaskModalProps {
   task: Task | null
@@ -173,7 +174,7 @@ export function TaskModal({
     workflowStage: '',
     assigneeId: null,
     dueAt: null,
-    tags: '',
+    tags: [] as string[],
     taskType: 'agent',
   }
 
@@ -195,7 +196,7 @@ export function TaskModal({
             values[fc.fieldPath] = fc.defaultValue || ''
             break
           case 'tags':
-            values[fc.fieldPath] = ''
+            values[fc.fieldPath] = []
             break
           case 'reference':
             values[fc.fieldPath] = null
@@ -252,8 +253,9 @@ export function TaskModal({
       // First, load core fields from the task (like taskType)
       Object.keys(coreDefaultValues).forEach((field) => {
         const value = (task as unknown as Record<string, unknown>)[field]
-        if (field === 'tags' && Array.isArray(value)) {
-          values[field] = value.join(', ')
+        if (field === 'tags') {
+          // Keep tags as array
+          values[field] = Array.isArray(value) ? value : []
         } else if (field === 'dueAt' && value) {
           values[field] = new Date(value as string).toISOString().slice(0, 16)
         } else {
@@ -264,8 +266,9 @@ export function TaskModal({
       // Then load editable fields (may override some core fields)
       editableFields.forEach((fc) => {
         const value = (task as unknown as Record<string, unknown>)[fc.fieldPath]
-        if (fc.fieldType === 'tags' && Array.isArray(value)) {
-          values[fc.fieldPath] = value.join(', ')
+        if (fc.fieldType === 'tags') {
+          // Keep tags as array
+          values[fc.fieldPath] = Array.isArray(value) ? value : []
         } else if (fc.fieldType === 'datetime' && value) {
           values[fc.fieldPath] = new Date(value as string).toISOString().slice(0, 16)
         } else if (fc.fieldType === 'reference' && value) {
@@ -298,11 +301,9 @@ export function TaskModal({
     const coreFields = Object.keys(coreDefaultValues)
     coreFields.forEach((field) => {
       const value = data[field]
-      if (field === 'tags' && typeof value === 'string') {
-        taskData[field as keyof Task] = value
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean) as never
+      if (field === 'tags') {
+        // Tags are now stored as array directly
+        taskData[field as keyof Task] = (Array.isArray(value) ? value : []) as never
       } else if (field === 'dueAt') {
         taskData[field as keyof Task] = (value ? new Date(value as string).toISOString() : null) as never
       } else if (field === 'workflowId' || field === 'assigneeId') {
@@ -318,11 +319,9 @@ export function TaskModal({
 
       const value = data[fc.fieldPath]
 
-      if (fc.fieldType === 'tags' && typeof value === 'string') {
-        taskData[fc.fieldPath as keyof Task] = value
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean) as never
+      if (fc.fieldType === 'tags') {
+        // Tags are now stored as array directly
+        taskData[fc.fieldPath as keyof Task] = (Array.isArray(value) ? value : []) as never
       } else if (fc.fieldType === 'datetime' && value) {
         taskData[fc.fieldPath as keyof Task] = new Date(value as string).toISOString() as never
       } else if (fc.fieldType === 'datetime' && !value) {
@@ -436,11 +435,9 @@ export function TaskModal({
     const coreFields = Object.keys(coreDefaultValues)
     coreFields.forEach((field) => {
       const value = data[field]
-      if (field === 'tags' && typeof value === 'string') {
-        taskData[field as keyof Task] = value
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean) as never
+      if (field === 'tags') {
+        // Tags are now stored as array directly
+        taskData[field as keyof Task] = (Array.isArray(value) ? value : []) as never
       } else if (field === 'dueAt') {
         taskData[field as keyof Task] = (value ? new Date(value as string).toISOString() : null) as never
       } else if (field === 'workflowId' || field === 'assigneeId') {
@@ -457,11 +454,9 @@ export function TaskModal({
 
       const value = data[fc.fieldPath]
 
-      if (fc.fieldType === 'tags' && typeof value === 'string') {
-        taskData[fc.fieldPath as keyof Task] = value
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean) as never
+      if (fc.fieldType === 'tags') {
+        // Tags are now stored as array directly
+        taskData[fc.fieldPath as keyof Task] = (Array.isArray(value) ? value : []) as never
       } else if (fc.fieldType === 'datetime' && value) {
         taskData[fc.fieldPath as keyof Task] = new Date(value as string).toISOString() as never
       } else if (fc.fieldType === 'datetime' && !value) {
@@ -1021,10 +1016,16 @@ export function TaskModal({
         {/* Tags */}
         <div className="space-y-1">
           <label className="text-xs font-medium text-muted-foreground">Tags</label>
-          <Input
-            {...register('tags')}
-            placeholder="tag1, tag2, tag3"
-            className="h-8 text-sm"
+          <Controller
+            name="tags"
+            control={control}
+            render={({ field }) => (
+              <TagInput
+                value={Array.isArray(field.value) ? field.value : []}
+                onChange={field.onChange}
+                placeholder="Add tags..."
+              />
+            )}
           />
         </div>
 

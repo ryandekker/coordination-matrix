@@ -354,6 +354,31 @@ All responses follow this structure:
           },
         },
 
+        // Tag schemas
+        Tag: {
+          type: 'object',
+          properties: {
+            _id: { $ref: '#/components/schemas/ObjectId' },
+            name: { type: 'string', example: 'bug', description: 'Lowercase tag identifier' },
+            displayName: { type: 'string', example: 'Bug', description: 'Human-readable display name' },
+            color: { type: 'string', example: '#EF4444', description: 'Hex color code' },
+            description: { type: 'string', example: 'Bug fixes and issues', nullable: true },
+            isActive: { type: 'boolean', example: true },
+            createdAt: { type: 'string', format: 'date-time' },
+            updatedAt: { type: 'string', format: 'date-time', nullable: true },
+          },
+        },
+        TagInput: {
+          type: 'object',
+          required: ['name'],
+          properties: {
+            name: { type: 'string', example: 'bug', description: 'Tag name (will be normalized to lowercase)' },
+            displayName: { type: 'string', example: 'Bug', description: 'Optional display name' },
+            color: { type: 'string', example: '#EF4444', description: 'Hex color code (defaults to gray)' },
+            description: { type: 'string', example: 'Bug fixes and issues' },
+          },
+        },
+
         // Activity Log schemas
         ActivityLog: {
           type: 'object',
@@ -1369,6 +1394,151 @@ All responses follow this structure:
           },
           responses: {
             201: { description: 'Lookup created' },
+          },
+        },
+      },
+
+      // Tags endpoints
+      '/api/tags': {
+        get: {
+          tags: ['Tags'],
+          summary: 'Get all tags',
+          description: 'Returns all active tags. Daemons and agents should use this endpoint to get the list of available tags.',
+          parameters: [
+            { name: 'includeInactive', in: 'query', schema: { type: 'boolean' }, description: 'Include inactive tags' },
+            { name: 'search', in: 'query', schema: { type: 'string' }, description: 'Search by name or displayName' },
+          ],
+          responses: {
+            200: {
+              description: 'List of tags',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      data: { type: 'array', items: { $ref: '#/components/schemas/Tag' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        post: {
+          tags: ['Tags'],
+          summary: 'Create a new tag',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/TagInput' },
+              },
+            },
+          },
+          responses: {
+            201: {
+              description: 'Tag created',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      data: { $ref: '#/components/schemas/Tag' },
+                    },
+                  },
+                },
+              },
+            },
+            409: { description: 'Tag with this name already exists' },
+          },
+        },
+      },
+      '/api/tags/{id}': {
+        get: {
+          tags: ['Tags'],
+          summary: 'Get a tag by ID',
+          parameters: [
+            { name: 'id', in: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } },
+          ],
+          responses: {
+            200: { description: 'Tag found' },
+            404: { description: 'Tag not found' },
+          },
+        },
+        patch: {
+          tags: ['Tags'],
+          summary: 'Update a tag',
+          parameters: [
+            { name: 'id', in: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/TagInput' },
+              },
+            },
+          },
+          responses: {
+            200: { description: 'Tag updated' },
+            404: { description: 'Tag not found' },
+            409: { description: 'Tag with this name already exists' },
+          },
+        },
+        delete: {
+          tags: ['Tags'],
+          summary: 'Deactivate a tag (soft delete)',
+          parameters: [
+            { name: 'id', in: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } },
+          ],
+          responses: {
+            200: { description: 'Tag deactivated' },
+            404: { description: 'Tag not found' },
+          },
+        },
+      },
+      '/api/tags/ensure': {
+        post: {
+          tags: ['Tags'],
+          summary: 'Ensure tags exist (create if they do not)',
+          description: 'Bulk operation to ensure multiple tags exist. Useful for migrations or bulk operations.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['tags'],
+                  properties: {
+                    tags: {
+                      type: 'array',
+                      items: {
+                        oneOf: [
+                          { type: 'string' },
+                          { $ref: '#/components/schemas/TagInput' },
+                        ],
+                      },
+                      description: 'Array of tag names or tag objects',
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: 'Tags ensured',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      data: { type: 'array', items: { $ref: '#/components/schemas/Tag' } },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },

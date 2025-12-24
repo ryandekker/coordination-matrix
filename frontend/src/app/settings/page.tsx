@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Database, Palette, Bell, Shield, Webhook, Activity, Key } from 'lucide-react'
+import { Database, Palette, Bell, Shield, Webhook, Activity, Key, Tags } from 'lucide-react'
 
 const settingsItems = [
   {
@@ -9,6 +9,12 @@ const settingsItems = [
     description: 'Configure which fields are displayed, editable, and searchable',
     href: '/settings/fields',
     icon: Database,
+  },
+  {
+    name: 'Tags',
+    description: 'Create and manage tags with custom colors for task categorization',
+    href: '/settings/tags',
+    icon: Tags,
   },
   {
     name: 'API Keys',

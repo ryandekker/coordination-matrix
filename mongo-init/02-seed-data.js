@@ -916,4 +916,51 @@ for (let i = 1; i <= 32; i++) {
 
 db.batch_items.insertMany(batchItems);
 
+// ============================================================================
+// TAGS - Predefined tags with colors
+// ============================================================================
+
+const tags = [
+  // Category tags
+  { name: 'marketing', displayName: 'Marketing', color: '#8B5CF6', description: 'Marketing related tasks', isActive: true, createdAt: new Date() },
+  { name: 'design', displayName: 'Design', color: '#EC4899', description: 'Design and UI/UX tasks', isActive: true, createdAt: new Date() },
+  { name: 'feature', displayName: 'Feature', color: '#10B981', description: 'New feature development', isActive: true, createdAt: new Date() },
+  { name: 'bug', displayName: 'Bug', color: '#EF4444', description: 'Bug fixes and issues', isActive: true, createdAt: new Date() },
+  { name: 'documentation', displayName: 'Documentation', color: '#6366F1', description: 'Documentation tasks', isActive: true, createdAt: new Date() },
+  { name: 'security', displayName: 'Security', color: '#F97316', description: 'Security related tasks', isActive: true, createdAt: new Date() },
+
+  // Priority/status tags
+  { name: 'urgent', displayName: 'Urgent', color: '#DC2626', description: 'Urgent priority items', isActive: true, createdAt: new Date() },
+  { name: 'blocked', displayName: 'Blocked', color: '#9CA3AF', description: 'Blocked by dependencies', isActive: true, createdAt: new Date() },
+
+  // Department tags
+  { name: 'hr', displayName: 'HR', color: '#14B8A6', description: 'Human resources tasks', isActive: true, createdAt: new Date() },
+  { name: 'research', displayName: 'Research', color: '#0EA5E9', description: 'Research tasks', isActive: true, createdAt: new Date() },
+
+  // Type tags
+  { name: 'email', displayName: 'Email', color: '#A855F7', description: 'Email related tasks', isActive: true, createdAt: new Date() },
+  { name: 'social-media', displayName: 'Social Media', color: '#3B82F6', description: 'Social media tasks', isActive: true, createdAt: new Date() },
+  { name: 'api', displayName: 'API', color: '#22C55E', description: 'API development tasks', isActive: true, createdAt: new Date() },
+  { name: 'ui', displayName: 'UI', color: '#F472B6', description: 'User interface tasks', isActive: true, createdAt: new Date() },
+
+  // Process tags
+  { name: 'campaign', displayName: 'Campaign', color: '#FBBF24', description: 'Campaign tasks', isActive: true, createdAt: new Date() },
+  { name: 'q4', displayName: 'Q4', color: '#84CC16', description: 'Q4 tasks', isActive: true, createdAt: new Date() },
+  { name: 'review', displayName: 'Review', color: '#06B6D4', description: 'Review tasks', isActive: true, createdAt: new Date() },
+  { name: 'audit', displayName: 'Audit', color: '#F59E0B', description: 'Audit tasks', isActive: true, createdAt: new Date() },
+  { name: 'compliance', displayName: 'Compliance', color: '#64748B', description: 'Compliance tasks', isActive: true, createdAt: new Date() },
+
+  // Technical tags
+  { name: 'website', displayName: 'Website', color: '#7C3AED', description: 'Website tasks', isActive: true, createdAt: new Date() },
+  { name: 'rebrand', displayName: 'Rebrand', color: '#BE185D', description: 'Rebranding tasks', isActive: true, createdAt: new Date() },
+  { name: 'authentication', displayName: 'Authentication', color: '#B91C1C', description: 'Authentication tasks', isActive: true, createdAt: new Date() },
+  { name: 'copywriting', displayName: 'Copywriting', color: '#7DD3FC', description: 'Copywriting tasks', isActive: true, createdAt: new Date() },
+  { name: 'accessibility', displayName: 'Accessibility', color: '#34D399', description: 'Accessibility tasks', isActive: true, createdAt: new Date() },
+  { name: 'customer-feedback', displayName: 'Customer Feedback', color: '#FB923C', description: 'Customer feedback tasks', isActive: true, createdAt: new Date() },
+  { name: 'migration', displayName: 'Migration', color: '#A78BFA', description: 'Migration tasks', isActive: true, createdAt: new Date() },
+  { name: 'cancelled', displayName: 'Cancelled', color: '#9CA3AF', description: 'Cancelled items', isActive: true, createdAt: new Date() },
+];
+
+db.tags.insertMany(tags);
+
 print('Seed data inserted successfully!');

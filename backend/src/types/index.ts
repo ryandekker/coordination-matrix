@@ -928,3 +928,19 @@ export interface BatchCallbackPayload {
   result?: Record<string, unknown>;
   error?: string;
 }
+
+// ============================================================================
+// Tag Types
+// ============================================================================
+
+export interface Tag {
+  _id: ObjectId;
+  name: string;                    // Unique, lowercase tag identifier
+  displayName: string;             // Human-readable display name
+  color: string;                   // Hex color code
+  description?: string | null;     // Optional description
+  isActive: boolean;
+  createdById?: ObjectId | null;
+  createdAt: Date;
+  updatedAt?: Date | null;
+}
