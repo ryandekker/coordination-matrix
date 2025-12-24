@@ -2,6 +2,10 @@
 
 You are editing or generating Mermaid flowchart diagrams for the Coordination Matrix workflow system. Follow these conventions exactly to ensure compatibility.
 
+> **For AI Tools:** See the comprehensive [AI Workflow Generation Guide](./ai-workflow-generation.md) for complete documentation including JSON format, template variables, and step type configuration.
+>
+> **Dynamic Context API:** Use `GET /api/workflows/ai-prompt-context` to fetch available agents, users, and workflows for your prompts.
+
 ## Critical Rules
 
 1. **DO NOT include inline `style` statements** - The app applies styling via class assignments
@@ -22,14 +26,16 @@ flowchart TD
 
 All labels should be quoted with double quotes to handle special characters safely.
 
-| Step Type | Execution | Shape | Syntax | Example |
-|-----------|-----------|-------|--------|---------|
-| Task | Automated | Rectangle | `["text"]` | `step1["Review Code"]` |
-| Task | Manual | Stadium | `(["text"])` | `step2(["Human Review"])` |
-| Decision | - | Diamond | `{"text"}` | `step3{"Is Valid?"}` |
-| ForEach | - | Subroutine | `[["Each: text"]]` | `step4[["Each: Process Item"]]` |
-| Join | - | Subroutine | `[["Join: text"]]` | `step5[["Join: Merge Results"]]` |
-| Flow | - | Subroutine | `[["Run: text"]]` | `step6[["Run: Subprocess"]]` |
+| Step Type | Shape | Syntax | Example |
+|-----------|-------|--------|---------|
+| Agent (AI) | Rectangle | `["text"]` | `step1["Review Code"]` |
+| Manual (Human) | Stadium | `("text")` | `step2("Human Review")` |
+| External (API + callback) | Hexagon | `{{"text"}}` | `step3{{"API Call"}}` |
+| Webhook (Fire-and-forget) | Hexagon | `{{"text"}}` | `step3{{"Notify"}}` |
+| Decision | Diamond | `{"text"}` | `step4{"Is Valid?"}` |
+| ForEach | Subroutine | `[["Each: text"]]` | `step5[["Each: Process Item"]]` |
+| Join | Subroutine | `[["Join: text"]]` | `step6[["Join: Merge Results"]]` |
+| Flow | Subroutine | `[["Run: text"]]` | `step7[["Run: Subprocess"]]` |
 
 ### Escaping Special Characters in Labels
 
@@ -40,11 +46,12 @@ All labels should be quoted with double quotes to handle special characters safe
 ### Class Definitions (Required)
 
 ```
-classDef automated fill:#3B82F6,color:#fff,stroke:#2563EB
+classDef agent fill:#3B82F6,color:#fff,stroke:#2563EB
 classDef manual fill:#8B5CF6,color:#fff,stroke:#7C3AED
+classDef external fill:#F97316,color:#fff,stroke:#EA580C
 classDef decision fill:#F59E0B,color:#fff,stroke:#D97706
 classDef foreach fill:#10B981,color:#fff,stroke:#059669
-classDef join fill:#8B5CF6,color:#fff,stroke:#7C3AED
+classDef join fill:#6366F1,color:#fff,stroke:#4F46E5
 classDef flow fill:#EC4899,color:#fff,stroke:#DB2777
 ```
 
@@ -52,9 +59,10 @@ classDef flow fill:#EC4899,color:#fff,stroke:#DB2777
 
 After defining classes, assign them to nodes:
 ```
-class step1 automated
+class step1 agent
 class step2 manual
-class step3 decision
+class step3 external
+class step4 decision
 ```
 
 ### Connections
@@ -77,24 +85,25 @@ flowchart TD
     step1["Reported"]
     step2{"Investigating"}
     step3[["Each: Fix Issues"]]
-    step4(["Testing"])
-    step5(["Deployed"])
+    step4("Testing")
+    step5("Deployed")
 
     step1 --> step2
-    step2 -->|Needs Fix| step3
-    step2 -->|Cannot Reproduce| step5
+    step2 -->|"Needs Fix"| step3
+    step2 -->|"Cannot Reproduce"| step5
     step3 --> step4
-    step4 -->|Pass| step5
-    step4 -->|Fail| step3
+    step4 -->|"Pass"| step5
+    step4 -->|"Fail"| step3
 
-    classDef automated fill:#3B82F6,color:#fff,stroke:#2563EB
+    classDef agent fill:#3B82F6,color:#fff,stroke:#2563EB
     classDef manual fill:#8B5CF6,color:#fff,stroke:#7C3AED
+    classDef external fill:#F97316,color:#fff,stroke:#EA580C
     classDef decision fill:#F59E0B,color:#fff,stroke:#D97706
     classDef foreach fill:#10B981,color:#fff,stroke:#059669
-    classDef join fill:#8B5CF6,color:#fff,stroke:#7C3AED
+    classDef join fill:#6366F1,color:#fff,stroke:#4F46E5
     classDef flow fill:#EC4899,color:#fff,stroke:#DB2777
 
-    class step1 automated
+    class step1 agent
     class step2 decision
     class step3 foreach
     class step4,step5 manual
@@ -115,9 +124,9 @@ flowchart TD
 2. Match node shapes to step types as defined above
 3. Always quote labels with double quotes
 4. Create linear flow by default, add branches for decisions
-5. Include all three `classDef` declarations
+5. Include all seven `classDef` declarations (agent, manual, external, decision, foreach, join, flow)
 6. Add `class nodeId className` for every node
-7. Label decision branches clearly with `-->|Label|` syntax
+7. Label decision branches clearly with `-->|"Label"|` syntax (quote the label)
 
 ## Invalid Patterns to Avoid
 
@@ -134,23 +143,33 @@ step1 --> step2 --> step3          %% Chain connections separately
 ```
 flowchart TD
     %% Node definitions (quoted labels, correct shapes)
-    step1["..."]
-    step2{"..."}
+    step1["Agent Task"]
+    step2("Manual Task")
+    step3{{"External API"}}
+    step4{"Decision Point"}
 
     %% Connections
     step1 --> step2
+    step2 --> step3
+    step3 --> step4
 
-    %% Class definitions (all 6 classes)
-    classDef automated fill:#3B82F6,color:#fff,stroke:#2563EB
+    %% Class definitions (all 7 classes)
+    classDef agent fill:#3B82F6,color:#fff,stroke:#2563EB
     classDef manual fill:#8B5CF6,color:#fff,stroke:#7C3AED
+    classDef external fill:#F97316,color:#fff,stroke:#EA580C
     classDef decision fill:#F59E0B,color:#fff,stroke:#D97706
     classDef foreach fill:#10B981,color:#fff,stroke:#059669
-    classDef join fill:#8B5CF6,color:#fff,stroke:#7C3AED
+    classDef join fill:#6366F1,color:#fff,stroke:#4F46E5
     classDef flow fill:#EC4899,color:#fff,stroke:#DB2777
 
     %% Class assignments (can group nodes: class nodeA,nodeB className)
-    class step1 automated
-    class step2 decision
+    class step1 agent
+    class step2 manual
+    class step3 external
+    class step4 decision
+
+    %% Step configuration (preserved on import)
+    %% @step(step1): {"additionalInstructions":"Analyze the input data."}
 ```
 
 Return the Mermaid code inside a markdown code block:

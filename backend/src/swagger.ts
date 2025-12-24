@@ -1004,6 +1004,96 @@ All responses follow this structure:
           },
         },
       },
+      '/api/workflows/generate-mermaid': {
+        post: {
+          tags: ['Workflows'],
+          summary: 'Generate Mermaid diagram from workflow steps',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['steps'],
+                  properties: {
+                    steps: { type: 'array', items: { type: 'object' } },
+                    name: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: 'Generated Mermaid diagram' },
+          },
+        },
+      },
+      '/api/workflows/ai-prompt-context': {
+        get: {
+          tags: ['Workflows', 'AI'],
+          summary: 'Get dynamic context for AI workflow generation',
+          description: 'Returns structured data about available agents, users, workflows, step types, template variables, and Mermaid syntax. Use this to build prompts for AI tools generating workflows.',
+          responses: {
+            200: {
+              description: 'AI prompt context data',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      data: {
+                        type: 'object',
+                        properties: {
+                          agents: { type: 'array', description: 'Available AI agents' },
+                          users: { type: 'array', description: 'Available users for manual tasks' },
+                          existingWorkflows: { type: 'array', description: 'Workflows available for nesting' },
+                          stepTypes: { type: 'object', description: 'Step type definitions and examples' },
+                          templateVariables: { type: 'object', description: 'Template variable reference' },
+                          mermaidSyntax: { type: 'object', description: 'Mermaid syntax reference' },
+                          rules: { type: 'array', description: 'Important validation rules' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      '/api/workflows/ai-prompt': {
+        get: {
+          tags: ['Workflows', 'AI'],
+          summary: 'Generate a complete AI prompt for workflow generation',
+          description: 'Returns a markdown-formatted prompt ready to be used with AI tools. Includes step type reference, template variables, and optionally available context (agents, users, workflows).',
+          parameters: [
+            { name: 'format', in: 'query', schema: { type: 'string', enum: ['markdown', 'json'] }, description: 'Output format preference (default: markdown)' },
+            { name: 'includeContext', in: 'query', schema: { type: 'string', enum: ['true', 'false'] }, description: 'Include available agents/users/workflows (default: true)' },
+          ],
+          responses: {
+            200: {
+              description: 'AI prompt for workflow generation',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      data: {
+                        type: 'object',
+                        properties: {
+                          prompt: { type: 'string', description: 'The complete prompt text' },
+                          format: { type: 'string' },
+                          includeContext: { type: 'boolean' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
 
       // Workflow Runs endpoints
       '/api/workflow-runs': {
