@@ -318,8 +318,9 @@ const TitleCell = memo(function TitleCell({
       ) : (
         <>
           <div
-            className="flex-1 min-w-0 cursor-pointer hover:underline truncate"
+            className="flex-1 min-w-0 max-w-[300px] cursor-pointer hover:underline truncate"
             onClick={onEdit}
+            title={task.title}
           >
             {renderCellValue(task, fieldConfig)}
           </div>
