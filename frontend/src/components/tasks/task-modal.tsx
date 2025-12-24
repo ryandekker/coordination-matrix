@@ -27,7 +27,7 @@ import {
   TabsTrigger,
 } from '@/components/ui/tabs'
 import { Task, FieldConfig, LookupValue, TaskType, WebhookConfig } from '@/lib/api'
-import { useCreateTask, useUpdateTask, useUsers, useWorkflows, useTasks } from '@/hooks/use-tasks'
+import { useCreateTask, useUpdateTask, useUsers, useWorkflows, useTasks, useTaskChildren } from '@/hooks/use-tasks'
 import { cn } from '@/lib/utils'
 import { TaskActivity } from './task-activity'
 import { WebhookTaskConfig } from './webhook-task-config'
@@ -40,7 +40,7 @@ import {
   DEFAULT_TASK_MODAL_TAB,
   type TaskModalTab,
 } from '@/lib/task-type-config'
-import { Settings2, Database, Activity, Workflow, ExternalLink, ArrowUpRight } from 'lucide-react'
+import { Settings2, Database, Activity, Workflow, ExternalLink, ArrowUpRight, ListTree } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { UserChip, UserAvatar } from '@/components/ui/user-chip'
@@ -112,9 +112,15 @@ export function TaskModal({
     enabled: isOpen && !!task // Only fetch when editing an existing task
   })
 
+  // Fetch subtasks for the current task
+  const { data: childrenData, isLoading: isLoadingChildren } = useTaskChildren(
+    isOpen && task ? task._id : null
+  )
+
   const users = usersData?.data || []
   const workflows = workflowsData?.data || []
   const allTasks = tasksData?.data || []
+  const subtasks = childrenData?.data || []
 
   const statusOptions = lookups['task_status'] || []
   const urgencyOptions = lookups['urgency'] || []
@@ -1319,6 +1325,91 @@ export function TaskModal({
     </div>
   )
 
+  // Subtasks content for sidebar
+  const SubtasksContent = () => {
+    // Handle clicking a subtask to open its modal
+    const handleSubtaskClick = (subtaskId: string) => {
+      onClose()
+      router.push(`/tasks?taskId=${subtaskId}`)
+    }
+
+    return (
+      <div className="p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium text-muted-foreground">
+            Subtasks {subtasks.length > 0 && `(${subtasks.length})`}
+          </label>
+        </div>
+
+        {isLoadingChildren ? (
+          <div className="flex items-center justify-center py-8 text-muted-foreground">
+            <span className="text-sm">Loading subtasks...</span>
+          </div>
+        ) : subtasks.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+            <ListTree className="h-8 w-8 mb-2 opacity-50" />
+            <span className="text-sm">No subtasks</span>
+            <p className="text-xs mt-1 text-center">
+              Create subtasks from the task table
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {subtasks.map((subtask) => {
+              const subtaskStatus = statusOptions.find(s => s.code === subtask.status)
+              const subtaskAssignee = users.find(u => u._id === subtask.assigneeId)
+              const subtaskTypeConfig = getTaskTypeConfig(subtask.taskType)
+              const SubtaskTypeIcon = subtaskTypeConfig.icon
+
+              return (
+                <button
+                  key={subtask._id}
+                  type="button"
+                  onClick={() => handleSubtaskClick(subtask._id)}
+                  className={cn(
+                    'w-full flex items-center gap-2 px-3 py-2 rounded-md text-left',
+                    'bg-muted/30 hover:bg-muted/60 transition-colors',
+                    'border border-transparent hover:border-border'
+                  )}
+                >
+                  {/* Task type icon */}
+                  <SubtaskTypeIcon
+                    className="h-3.5 w-3.5 flex-shrink-0"
+                    style={{ color: subtaskTypeConfig.hexColor }}
+                  />
+
+                  {/* Status dot */}
+                  <span
+                    className="h-2 w-2 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: subtaskStatus?.color || '#888' }}
+                    title={subtaskStatus?.displayName || subtask.status}
+                  />
+
+                  {/* Title */}
+                  <span className="flex-1 text-sm truncate" title={subtask.title}>
+                    {subtask.title}
+                  </span>
+
+                  {/* Assignee avatar */}
+                  {subtaskAssignee ? (
+                    <span
+                      className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-medium flex-shrink-0"
+                      title={subtaskAssignee.displayName}
+                    >
+                      {subtaskAssignee.displayName.charAt(0).toUpperCase()}
+                    </span>
+                  ) : (
+                    <span className="w-5 h-5 flex-shrink-0" />
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   // Edit mode - two column layout with tabbed sidebar
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -1367,6 +1458,16 @@ export function TaskModal({
                   <span className="text-xs">Config</span>
                 </TabsTrigger>
                 <TabsTrigger
+                  value={TASK_MODAL_TABS.SUBTASKS}
+                  className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent py-2.5"
+                >
+                  <ListTree className="h-3.5 w-3.5" />
+                  <span className="text-xs">Subtasks</span>
+                  {subtasks.length > 0 && (
+                    <span className="ml-0.5 text-[10px] bg-muted px-1 rounded">{subtasks.length}</span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger
                   value={TASK_MODAL_TABS.METADATA}
                   className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent py-2.5"
                 >
@@ -1384,6 +1485,10 @@ export function TaskModal({
 
               <TabsContent value={TASK_MODAL_TABS.TYPE_CONFIG} className="flex-1 min-h-0 overflow-y-auto mt-0">
                 <TypeConfigContent />
+              </TabsContent>
+
+              <TabsContent value={TASK_MODAL_TABS.SUBTASKS} className="flex-1 min-h-0 overflow-y-auto mt-0">
+                <SubtasksContent />
               </TabsContent>
 
               <TabsContent value={TASK_MODAL_TABS.METADATA} className="flex-1 min-h-0 overflow-y-auto mt-0">
