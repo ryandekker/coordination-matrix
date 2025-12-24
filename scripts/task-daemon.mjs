@@ -28,9 +28,10 @@
 
 import { parseArgs } from 'node:util';
 import { execSync } from 'node:child_process';
-import { writeFileSync, unlinkSync } from 'node:fs';
+import { writeFileSync, unlinkSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { parse as parseYaml } from 'yaml';
 
 // ============================================================================
 // Base Daemon Prompt - Ensures JSON responses
@@ -62,9 +63,51 @@ Rules:
 // Configuration
 // ============================================================================
 
+function loadConfigFile(configPath) {
+  if (!existsSync(configPath)) {
+    console.error(`Error: Config file not found: ${configPath}`);
+    process.exit(1);
+  }
+
+  const content = readFileSync(configPath, 'utf8');
+
+  // Parse as YAML (also handles JSON)
+  try {
+    return parseYaml(content);
+  } catch (e) {
+    console.error(`Error parsing config file: ${e.message}`);
+    process.exit(1);
+  }
+}
+
+function listJobs(configData) {
+  console.log('\nAvailable jobs:');
+  console.log('─'.repeat(60));
+
+  if (!configData.jobs || Object.keys(configData.jobs).length === 0) {
+    console.log('  (no jobs defined)');
+    return;
+  }
+
+  for (const [name, job] of Object.entries(configData.jobs)) {
+    const enabled = job.enabled !== false ? '✓' : '✗';
+    const exec = job.exec || configData.defaults?.exec || 'claude';
+    console.log(`  ${enabled} ${name}`);
+    console.log(`      view: ${job.viewId || '(missing)'}`);
+    console.log(`      exec: ${exec}`);
+    if (job.description) {
+      console.log(`      desc: ${job.description}`);
+    }
+  }
+  console.log('');
+}
+
 function parseConfig() {
   const { values } = parseArgs({
     options: {
+      config: { type: 'string', short: 'c' },
+      job: { type: 'string', short: 'j' },
+      list: { type: 'boolean', short: 'l' },
       view: { type: 'string', short: 'v' },
       'api-key': { type: 'string', short: 'k' },
       'api-url': { type: 'string', short: 'u' },
@@ -88,9 +131,13 @@ Parses JSON responses and handles workflow stage transitions.
 
 Usage:
   node scripts/task-daemon.mjs --view <viewId> [options]
+  node scripts/task-daemon.mjs --config <file> --job <name> [options]
 
 Options:
-  --view, -v <id>       Required. The saved search/view ID to poll
+  --config, -c <file>   Load configuration from YAML/JSON file
+  --job, -j <name>      Run a specific job from the config file
+  --list, -l            List available jobs from config file
+  --view, -v <id>       The saved search/view ID to poll (or use config)
   --api-key, -k <key>   API key for authentication (or MATRIX_API_KEY env)
   --api-url, -u <url>   API base URL (default: http://localhost:3001/api)
   --interval, -i <ms>   Polling interval in ms (default: 5000)
@@ -99,6 +146,26 @@ Options:
   --dry-run, -d         Don't execute, just show what would be done
   --no-update, -n       Don't update task status after execution
   --help, -h            Show this help message
+
+Config File Format (YAML):
+  # Default settings for all jobs
+  defaults:
+    apiUrl: https://api.example.com/api
+    apiKey: cm_ak_live_xxxxx
+    interval: 5000
+    exec: claude
+
+  # Define multiple jobs
+  jobs:
+    content-review:
+      description: Review content tasks
+      viewId: abc123def456
+      exec: "claude --model claude-sonnet-4-20250514"
+
+    triage:
+      description: Auto-triage incoming tasks
+      viewId: xyz789
+      exec: "custom-triage-command"
 
 Prompt Assembly (layered):
   1. Base daemon prompt (ensures JSON response)
@@ -116,30 +183,85 @@ Response Handling:
   - Stores response output in additionalInfo
 
 Examples:
-  # Process tasks continuously with Claude (default)
+  # Process tasks using CLI args
   node scripts/task-daemon.mjs --view <viewId>
 
-  # Process just one task and exit
-  node scripts/task-daemon.mjs --view <viewId> --once
+  # List jobs from config file
+  node scripts/task-daemon.mjs --config daemon-jobs.yaml --list
+
+  # Run a specific job from config
+  node scripts/task-daemon.mjs --config daemon-jobs.yaml --job content-review
+
+  # Run job once (override config)
+  node scripts/task-daemon.mjs --config daemon-jobs.yaml --job triage --once
 
   # Dry run to see assembled prompts
-  node scripts/task-daemon.mjs --view <viewId> --once --dry-run
+  node scripts/task-daemon.mjs --config daemon-jobs.yaml --job triage --dry-run
 `);
     process.exit(0);
   }
 
-  const viewId = values.view || process.env.MATRIX_VIEW_ID;
-  const apiKey = values['api-key'] || process.env.MATRIX_API_KEY || '';
-  const apiUrl = values['api-url'] || process.env.MATRIX_API_URL || 'http://localhost:3001/api';
-  const interval = parseInt(values.interval || '5000', 10);
-  const execCmd = values.exec || process.env.MATRIX_EXEC_CMD || 'claude';
+  // If config file specified, load it
+  let configData = null;
+  if (values.config) {
+    configData = loadConfigFile(values.config);
+
+    // List jobs and exit
+    if (values.list) {
+      listJobs(configData);
+      process.exit(0);
+    }
+  }
+
+  // Build config from file + CLI overrides
+  let viewId, apiKey, apiUrl, interval, execCmd;
+
+  if (configData && values.job) {
+    // Load from config file with job name
+    const job = configData.jobs?.[values.job];
+    if (!job) {
+      console.error(`Error: Job "${values.job}" not found in config file`);
+      console.log('\nAvailable jobs:');
+      for (const name of Object.keys(configData.jobs || {})) {
+        console.log(`  - ${name}`);
+      }
+      process.exit(1);
+    }
+
+    if (job.enabled === false) {
+      console.error(`Error: Job "${values.job}" is disabled`);
+      process.exit(1);
+    }
+
+    const defaults = configData.defaults || {};
+
+    // Job settings override defaults, CLI overrides everything
+    viewId = values.view || job.viewId || defaults.viewId;
+    apiKey = values['api-key'] || job.apiKey || defaults.apiKey || process.env.MATRIX_API_KEY || '';
+    apiUrl = values['api-url'] || job.apiUrl || defaults.apiUrl || process.env.MATRIX_API_URL || 'http://localhost:3001/api';
+    interval = parseInt(values.interval || job.interval || defaults.interval || '5000', 10);
+    execCmd = values.exec || job.exec || defaults.exec || process.env.MATRIX_EXEC_CMD || 'claude';
+  } else {
+    // Use CLI args / env vars only
+    viewId = values.view || process.env.MATRIX_VIEW_ID;
+    apiKey = values['api-key'] || process.env.MATRIX_API_KEY || '';
+    apiUrl = values['api-url'] || process.env.MATRIX_API_URL || 'http://localhost:3001/api';
+    interval = parseInt(values.interval || '5000', 10);
+    execCmd = values.exec || process.env.MATRIX_EXEC_CMD || 'claude';
+  }
 
   if (!viewId) {
-    console.error('Error: --view is required (or set MATRIX_VIEW_ID env var)');
+    if (configData) {
+      console.error('Error: --job is required when using --config');
+      listJobs(configData);
+    } else {
+      console.error('Error: --view is required (or use --config with --job)');
+    }
     process.exit(1);
   }
 
   return {
+    jobName: values.job || null,
     viewId,
     apiKey,
     apiUrl,
@@ -271,6 +393,34 @@ async function createTask(config, taskData) {
   }
 }
 
+async function addTaskComment(config, taskId, comment) {
+  if (config.noUpdate) {
+    console.log(`[Skip comment] Would add comment to task ${taskId}: ${comment}`);
+    return true;
+  }
+
+  try {
+    const response = await fetch(`${config.apiUrl}/activity-logs/task/${taskId}/comments`, {
+      method: 'POST',
+      headers: getHeaders(config),
+      body: JSON.stringify({
+        comment,
+        actorType: 'daemon',
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`Failed to add comment (${response.status}): ${error}`);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('Add comment error:', error.message || error);
+    return false;
+  }
+}
+
 // ============================================================================
 // Prompt Assembly
 // ============================================================================
@@ -297,12 +447,14 @@ function assemblePrompt(task, agent, workflowStep) {
   }
 
   // 5. Task context as structured data
+  // Note: inputPayload contains webhook/external input data (e.g., email content)
   const context = {
     title: task.title,
     summary: task.summary || null,
     tags: task.tags || [],
     additionalInfo: task.additionalInfo || null,
     workflowStage: task.workflowStage || null,
+    inputPayload: task.metadata?.inputPayload || null,
   };
   sections.push(`## Task Context\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\``);
 
@@ -542,22 +694,31 @@ async function processTask(config, task) {
   const timestamp = new Date().toISOString();
 
   if (result.exitCode !== 0) {
-    // Command failed - set to failed status
-    console.log(`Setting task status to 'failed'...`);
+    // Command failed - set to on_hold status for retry, unassign task
+    console.log(`Setting task status to 'on_hold'...`);
     const errorInfo = result.stderr || `Exit code: ${result.exitCode}`;
 
+    const output = {
+      timestamp,
+      status: 'FAILED',
+      action: 'HOLD',
+      error: {
+        exitCode: result.exitCode,
+        message: errorInfo.substring(0, 2000),
+      },
+    };
+
     await updateTask(config, task._id, {
-      status: 'failed',
-      additionalInfo: [
-        task.additionalInfo || '',
-        '',
-        '---',
-        `## Execution Failed (${timestamp})`,
-        `Exit code: ${result.exitCode}`,
-        '',
-        errorInfo.substring(0, 1000),
-      ].filter(Boolean).join('\n'),
+      status: 'on_hold',
+      assignee: null,
+      metadata: {
+        ...(task.metadata || {}),
+        output,
+      },
     });
+
+    // Add comment to activity feed
+    await addTaskComment(config, task._id, `Daemon processing failed (exit code ${result.exitCode}). Task placed on hold.`);
     return;
   }
 
@@ -566,22 +727,27 @@ async function processTask(config, task) {
 
   if (!parsedResponse.success) {
     console.log(`[WARN] Failed to parse JSON response: ${parsedResponse.error}`);
-    console.log(`[WARN] Raw response saved to additionalInfo`);
+    console.log(`[WARN] Raw response saved to metadata.output`);
+
+    const output = {
+      timestamp,
+      status: 'PARTIAL',
+      action: 'COMPLETE',
+      parseError: parsedResponse.error,
+      rawOutput: parsedResponse.raw?.substring(0, 5000) || '',
+    };
 
     // Still mark as completed but note the parsing failure
     await updateTask(config, task._id, {
       status: 'completed',
-      additionalInfo: [
-        task.additionalInfo || '',
-        '',
-        '---',
-        `## Response (${timestamp}) - Parse Error`,
-        `Error: ${parsedResponse.error}`,
-        '',
-        'Raw output:',
-        parsedResponse.raw?.substring(0, 5000) || '',
-      ].filter(Boolean).join('\n'),
+      metadata: {
+        ...(task.metadata || {}),
+        output,
+      },
     });
+
+    // Add comment to activity feed
+    await addTaskComment(config, task._id, `Daemon completed but response parsing failed. Task marked as completed with partial output.`);
     return;
   }
 
@@ -607,21 +773,18 @@ async function processTask(config, task) {
 
   console.log(`Setting task status to '${newStatus}'...`);
 
-  // Update task with response
-  const newInfo = [
-    task.additionalInfo || '',
-    '',
-    '---',
-    `## Response (${timestamp})`,
-    `Status: ${parsedResponse.data.status}`,
-    `Action: ${parsedResponse.data.nextAction}`,
-    parsedResponse.data.nextActionReason ? `Reason: ${parsedResponse.data.nextActionReason}` : '',
-    '',
-    `Summary: ${parsedResponse.data.summary}`,
-    '',
-    'Output:',
-    parsedResponse.data.output,
-  ].filter(Boolean).join('\n');
+  // Build output for metadata
+  const output = {
+    timestamp,
+    status: parsedResponse.data.status,
+    action: parsedResponse.data.nextAction,
+    reason: parsedResponse.data.nextActionReason || null,
+    summary: parsedResponse.data.summary,
+    result: parsedResponse.data.output,
+    confidence: parsedResponse.data.metadata?.confidence || null,
+    suggestedTags: parsedResponse.data.metadata?.suggestedTags || [],
+    suggestedNextStage: parsedResponse.data.metadata?.suggestedNextStage || null,
+  };
 
   // Merge suggested tags if provided
   let tagsUpdate = undefined;
@@ -631,11 +794,30 @@ async function processTask(config, task) {
     tagsUpdate = Array.from(existingTags);
   }
 
-  await updateTask(config, task._id, {
+  // Merge with existing metadata
+  const updatedMetadata = {
+    ...(task.metadata || {}),
+    output,
+  };
+
+  // Only unassign on failures (ESCALATE/HOLD), otherwise keep current assignee
+  const isFailure = newStatus === 'on_hold';
+  const updatePayload = {
     status: newStatus,
-    additionalInfo: newInfo,
+    metadata: updatedMetadata,
     ...(tagsUpdate && { tags: tagsUpdate }),
-  });
+    ...(isFailure && { assignee: null }),
+  };
+
+  await updateTask(config, task._id, updatePayload);
+
+  // Add comment to activity feed with summary
+  const action = parsedResponse.data.nextAction;
+  const reason = parsedResponse.data.nextActionReason || parsedResponse.data.summary;
+  const commentText = isFailure
+    ? `Daemon: ${action} - ${reason}`
+    : `Daemon completed: ${reason}`;
+  await addTaskComment(config, task._id, commentText);
 
   // Handle stage transitions for workflows
   await handleStageTransition(config, task, workflow, parsedResponse);
@@ -646,15 +828,17 @@ async function processTask(config, task) {
 // ============================================================================
 
 async function runDaemon(config) {
-  console.log(`Task Daemon started`);
-  console.log(`  View ID: ${config.viewId}`);
-  console.log(`  API URL: ${config.apiUrl}`);
-  console.log(`  Command: ${config.exec}`);
-  console.log(`  Mode: ${config.once ? 'once' : 'continuous'}`);
-  console.log(`  Idle Interval: ${config.interval}ms`);
-  console.log(`  Dry Run: ${config.dryRun}`);
-  console.log(`  Update Status: ${!config.noUpdate}`);
-  console.log('');
+  console.log(`\n${'═'.repeat(60)}`);
+  console.log(`  Task Daemon${config.jobName ? ` - Job: ${config.jobName}` : ''}`);
+  console.log(`${'═'.repeat(60)}`);
+  console.log(`  View ID:      ${config.viewId}`);
+  console.log(`  API URL:      ${config.apiUrl}`);
+  console.log(`  Command:      ${config.exec}`);
+  console.log(`  Mode:         ${config.once ? 'once' : 'continuous'}`);
+  console.log(`  Interval:     ${config.interval}ms`);
+  console.log(`  Dry Run:      ${config.dryRun}`);
+  console.log(`  Update Tasks: ${!config.noUpdate}`);
+  console.log(`${'═'.repeat(60)}\n`);
 
   // Handle graceful shutdown
   let shuttingDown = false;

@@ -1,0 +1,60 @@
+# Task Daemon Jobs Configuration
+# Copy this file to daemon-jobs.yaml and configure for your environment
+#
+# Usage:
+#   node scripts/task-daemon.mjs --config scripts/daemon-jobs.yaml --list
+#   node scripts/task-daemon.mjs --config scripts/daemon-jobs.yaml --job <name>
+#   node scripts/task-daemon.mjs --config scripts/daemon-jobs.yaml --job <name> --once
+
+# Default settings applied to all jobs (can be overridden per-job)
+defaults:
+  # Production API URL
+  apiUrl: https://your-app.example.com/api
+
+  # API key for authentication (or use MATRIX_API_KEY env var)
+  # apiKey: cm_ak_live_xxxxxxxxxxxxx
+
+  # Default polling interval (ms)
+  interval: 5000
+
+  # Default command to execute
+  exec: claude
+
+# Define your processing jobs
+jobs:
+  # Example: Content review job using Claude Sonnet
+  content-review:
+    description: Review and process content tasks
+    viewId: YOUR_VIEW_ID_HERE
+    exec: "claude --model claude-sonnet-4-20250514"
+    interval: 10000
+
+  # Example: Fast triage job using Haiku
+  triage:
+    description: Quick triage of incoming tasks
+    viewId: YOUR_TRIAGE_VIEW_ID
+    exec: "claude --model claude-haiku"
+    interval: 3000
+
+  # Example: Code analysis with custom command
+  code-analysis:
+    description: Analyze code-related tasks
+    viewId: YOUR_CODE_VIEW_ID
+    exec: "claude --model claude-sonnet-4-20250514 --allowedTools Edit,Read,Bash"
+    interval: 15000
+
+  # Example: Disabled job (won't run)
+  legacy-processor:
+    enabled: false
+    description: Old processor (disabled)
+    viewId: OLD_VIEW_ID
+    exec: "legacy-command"
+
+# Tips:
+# - Create views in the UI that filter tasks by status, tags, or assignee
+# - Each job should target a specific view/queue of tasks
+# - Use different Claude models based on task complexity:
+#   - claude-haiku: Fast, simple tasks (triage, classification)
+#   - claude-sonnet: Balanced (most tasks)
+#   - claude-opus: Complex reasoning tasks
+# - Custom exec commands can be any CLI that accepts prompts via stdin
