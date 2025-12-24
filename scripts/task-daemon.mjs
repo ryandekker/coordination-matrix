@@ -7,17 +7,27 @@
  * Parses JSON responses and handles stage transitions.
  *
  * Usage:
- *   node scripts/task-daemon.mjs --view <viewId> [options]
+ *   node scripts/task-daemon.mjs                   # Start all enabled jobs from config
+ *   node scripts/task-daemon.mjs --job <name>      # Start a specific job
+ *   node scripts/task-daemon.mjs --view <viewId>   # Start with a specific view (no config)
+ *   node scripts/task-daemon.mjs --stop            # Stop all running daemon jobs
+ *   node scripts/task-daemon.mjs --status          # Show status of running jobs
  *
  * Options:
- *   --view <id>       Required. The saved search/view ID to poll
- *   --api-key <key>   API key for authentication (or use MATRIX_API_KEY env var)
- *   --api-url <url>   API base URL (default: http://localhost:3001/api)
- *   --interval <ms>   Polling interval in ms (default: 5000)
- *   --once            Run once and exit (don't poll)
- *   --exec <cmd>      Command to execute (default: "claude")
- *   --dry-run         Don't execute, just show what would be done
- *   --no-update       Don't update task status after execution
+ *   --config, -c <file>   Config file (default: scripts/daemon-jobs.yaml)
+ *   --job, -j <name>      Run a specific job from config
+ *   --view, -v <id>       View ID to poll (if not using config)
+ *   --api-key, -k <key>   API key for authentication (or MATRIX_API_KEY env)
+ *   --api-url, -u <url>   API base URL (default: http://localhost:3001/api)
+ *   --interval, -i <ms>   Polling interval in ms (default: 5000)
+ *   --once, -o            Run once and exit (don't poll)
+ *   --exec, -e <cmd>      Command to execute (default: "claude")
+ *   --dry-run, -d         Don't execute, just show what would be done
+ *   --no-update, -n       Don't update task status after execution
+ *   --stop                Stop all running daemon jobs
+ *   --status              Show status of running daemon jobs
+ *   --list, -l            List available jobs from config
+ *   --help, -h            Show help
  *
  * Environment Variables:
  *   MATRIX_API_KEY    API key for authentication
@@ -27,11 +37,18 @@
  */
 
 import { parseArgs } from 'node:util';
-import { execSync } from 'node:child_process';
-import { writeFileSync, unlinkSync, readFileSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { execSync, spawn } from 'node:child_process';
+import { writeFileSync, unlinkSync, readFileSync, existsSync, mkdirSync, createWriteStream, readdirSync } from 'node:fs';
+import { tmpdir, homedir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
+
+// Get script directory for default config path
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const DEFAULT_CONFIG_PATH = join(__dirname, 'daemon-jobs.yaml');
+const PID_DIR = join(homedir(), '.matrix-daemon');
 
 // ============================================================================
 // Base Daemon Prompt - Ensures JSON responses
@@ -60,13 +77,114 @@ Rules:
 - Respond with ONLY the JSON object, nothing else`;
 
 // ============================================================================
+// PID File Management
+// ============================================================================
+
+function ensurePidDir() {
+  if (!existsSync(PID_DIR)) {
+    mkdirSync(PID_DIR, { recursive: true });
+  }
+}
+
+function getPidFile(jobName) {
+  return join(PID_DIR, `${jobName}.pid`);
+}
+
+function getLogFile(jobName) {
+  return join(PID_DIR, `${jobName}.log`);
+}
+
+function savePid(jobName, pid) {
+  ensurePidDir();
+  writeFileSync(getPidFile(jobName), String(pid));
+}
+
+function readPid(jobName) {
+  const pidFile = getPidFile(jobName);
+  if (!existsSync(pidFile)) return null;
+  try {
+    return parseInt(readFileSync(pidFile, 'utf8').trim(), 10);
+  } catch {
+    return null;
+  }
+}
+
+function removePid(jobName) {
+  const pidFile = getPidFile(jobName);
+  try { unlinkSync(pidFile); } catch {}
+}
+
+function isProcessRunning(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getRunningJobs() {
+  ensurePidDir();
+  const jobs = [];
+  try {
+    const files = readdirSync(PID_DIR);
+    for (const file of files) {
+      if (file.endsWith('.pid')) {
+        const jobName = file.replace('.pid', '');
+        const pid = readPid(jobName);
+        if (pid && isProcessRunning(pid)) {
+          jobs.push({ name: jobName, pid });
+        } else if (pid) {
+          // Stale PID file, clean up
+          removePid(jobName);
+        }
+      }
+    }
+  } catch {}
+  return jobs;
+}
+
+function stopAllJobs() {
+  const running = getRunningJobs();
+  if (running.length === 0) {
+    console.log('No daemon jobs are running.');
+    return;
+  }
+
+  console.log(`Stopping ${running.length} daemon job(s)...`);
+  for (const { name, pid } of running) {
+    try {
+      process.kill(pid, 'SIGTERM');
+      console.log(`  ✓ Stopped ${name} (PID ${pid})`);
+      removePid(name);
+    } catch (e) {
+      console.log(`  ✗ Failed to stop ${name} (PID ${pid}): ${e.message}`);
+    }
+  }
+}
+
+function showStatus() {
+  const running = getRunningJobs();
+  console.log('\nDaemon Job Status:');
+  console.log('─'.repeat(50));
+
+  if (running.length === 0) {
+    console.log('  No daemon jobs are running.');
+  } else {
+    for (const { name, pid } of running) {
+      console.log(`  ✓ ${name} (PID ${pid})`);
+    }
+  }
+  console.log('');
+}
+
+// ============================================================================
 // Configuration
 // ============================================================================
 
 function loadConfigFile(configPath) {
   if (!existsSync(configPath)) {
-    console.error(`Error: Config file not found: ${configPath}`);
-    process.exit(1);
+    return null;
   }
 
   const content = readFileSync(configPath, 'utf8');
@@ -116,28 +234,46 @@ function parseConfig() {
       exec: { type: 'string', short: 'e' },
       'dry-run': { type: 'boolean', short: 'd' },
       'no-update': { type: 'boolean', short: 'n' },
+      stop: { type: 'boolean' },
+      status: { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
     },
     strict: true,
   });
 
+  // Handle --stop command
+  if (values.stop) {
+    stopAllJobs();
+    process.exit(0);
+  }
+
+  // Handle --status command
+  if (values.status) {
+    showStatus();
+    process.exit(0);
+  }
+
   if (values.help) {
     console.log(`
 Task Retrieval Daemon
 
-Polls a saved search (view), retrieves tasks, and executes them with Claude.
+Polls saved views (task queues), retrieves tasks, and executes them with Claude.
 Assembles prompts from: base + agent + workflow step + task context.
 Parses JSON responses and handles workflow stage transitions.
 
 Usage:
-  node scripts/task-daemon.mjs --view <viewId> [options]
-  node scripts/task-daemon.mjs --config <file> --job <name> [options]
+  node scripts/task-daemon.mjs                   # Start all enabled jobs as background processes
+  node scripts/task-daemon.mjs --job <name>      # Start a specific job in foreground
+  node scripts/task-daemon.mjs --view <viewId>   # Start with a specific view (no config)
+  node scripts/task-daemon.mjs --stop            # Stop all running daemon jobs
+  node scripts/task-daemon.mjs --status          # Show status of running jobs
+  node scripts/task-daemon.mjs --list            # List available jobs from config
 
 Options:
-  --config, -c <file>   Load configuration from YAML/JSON file
-  --job, -j <name>      Run a specific job from the config file
+  --config, -c <file>   Config file (default: scripts/daemon-jobs.yaml)
+  --job, -j <name>      Run a specific job from the config file (foreground)
   --list, -l            List available jobs from config file
-  --view, -v <id>       The saved search/view ID to poll (or use config)
+  --view, -v <id>       The saved search/view ID to poll (no config needed)
   --api-key, -k <key>   API key for authentication (or MATRIX_API_KEY env)
   --api-url, -u <url>   API base URL (default: http://localhost:3001/api)
   --interval, -i <ms>   Polling interval in ms (default: 5000)
@@ -145,6 +281,8 @@ Options:
   --exec, -e <cmd>      Command to execute (default: "claude")
   --dry-run, -d         Don't execute, just show what would be done
   --no-update, -n       Don't update task status after execution
+  --stop                Stop all running daemon jobs
+  --status              Show status of running daemon jobs
   --help, -h            Show this help message
 
 Config File Format (YAML):
@@ -201,16 +339,18 @@ Examples:
     process.exit(0);
   }
 
-  // If config file specified, load it
-  let configData = null;
-  if (values.config) {
-    configData = loadConfigFile(values.config);
+  // Load config file (use default if not specified)
+  const configPath = values.config || DEFAULT_CONFIG_PATH;
+  let configData = loadConfigFile(configPath);
 
-    // List jobs and exit
-    if (values.list) {
-      listJobs(configData);
-      process.exit(0);
+  // Handle --list command
+  if (values.list) {
+    if (!configData) {
+      console.error(`Error: Config file not found: ${configPath}`);
+      process.exit(1);
     }
+    listJobs(configData);
+    process.exit(0);
   }
 
   // Build config from file + CLI overrides
@@ -241,26 +381,35 @@ Examples:
     apiUrl = values['api-url'] || job.apiUrl || defaults.apiUrl || process.env.MATRIX_API_URL || 'http://localhost:3001/api';
     interval = parseInt(values.interval || job.interval || defaults.interval || '5000', 10);
     execCmd = values.exec || job.exec || defaults.exec || process.env.MATRIX_EXEC_CMD || 'claude';
-  } else {
-    // Use CLI args / env vars only
-    viewId = values.view || process.env.MATRIX_VIEW_ID;
+  } else if (values.view) {
+    // Use CLI args / env vars only (explicit --view provided)
+    viewId = values.view;
     apiKey = values['api-key'] || process.env.MATRIX_API_KEY || '';
     apiUrl = values['api-url'] || process.env.MATRIX_API_URL || 'http://localhost:3001/api';
     interval = parseInt(values.interval || '5000', 10);
     execCmd = values.exec || process.env.MATRIX_EXEC_CMD || 'claude';
-  }
-
-  if (!viewId) {
-    if (configData) {
-      console.error('Error: --job is required when using --config');
-      listJobs(configData);
-    } else {
-      console.error('Error: --view is required (or use --config with --job)');
-    }
+  } else if (configData && !values.job) {
+    // No job or view specified - start all enabled jobs as background processes
+    return {
+      mode: 'start-all',
+      configData,
+      configPath,
+      once: values.once || false,
+    };
+  } else {
+    // No config file and no view
+    console.error('Error: No config file found and no --view specified');
+    console.error(`  Config tried: ${configPath}`);
+    console.error('');
+    console.error('Usage:');
+    console.error('  node scripts/task-daemon.mjs                   # Start all jobs from config');
+    console.error('  node scripts/task-daemon.mjs --view <viewId>   # Start with specific view');
+    console.error('  node scripts/task-daemon.mjs --job <name>      # Start specific job');
     process.exit(1);
   }
 
   return {
+    mode: 'single',
     jobName: values.job || null,
     viewId,
     apiKey,
@@ -898,6 +1047,82 @@ async function runDaemon(config) {
   }
 }
 
+// ============================================================================
+// Start All Jobs Mode
+// ============================================================================
+
+function startAllJobs(config) {
+  const { configData, configPath } = config;
+
+  // Get all enabled jobs
+  const enabledJobs = Object.entries(configData.jobs || {})
+    .filter(([_, job]) => job.enabled !== false)
+    .map(([name, job]) => ({ name, ...job }));
+
+  if (enabledJobs.length === 0) {
+    console.error('No enabled jobs found in config file.');
+    console.log(`\nConfig: ${configPath}`);
+    process.exit(1);
+  }
+
+  // Check for already running jobs
+  const running = getRunningJobs();
+  const runningNames = new Set(running.map(j => j.name));
+
+  console.log(`\n${'═'.repeat(60)}`);
+  console.log('  Task Daemon - Starting All Jobs');
+  console.log(`${'═'.repeat(60)}`);
+  console.log(`  Config: ${configPath}`);
+  console.log(`  Jobs:   ${enabledJobs.length} enabled`);
+  console.log(`${'═'.repeat(60)}\n`);
+
+  let started = 0;
+  let skipped = 0;
+
+  for (const job of enabledJobs) {
+    if (runningNames.has(job.name)) {
+      console.log(`  ⏭ ${job.name} - already running`);
+      skipped++;
+      continue;
+    }
+
+    // Spawn background process for this job
+    const logFile = getLogFile(job.name);
+    const args = ['--job', job.name];
+    if (config.once) args.push('--once');
+
+    const child = spawn('node', [__filename, '--config', configPath, ...args], {
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    // Save PID
+    savePid(job.name, child.pid);
+
+    // Pipe output to log file
+    const logStream = createWriteStream(logFile, { flags: 'a' });
+    logStream.write(`\n--- Started at ${new Date().toISOString()} ---\n`);
+    child.stdout.pipe(logStream);
+    child.stderr.pipe(logStream);
+
+    child.unref();
+
+    console.log(`  ✓ ${job.name} (PID ${child.pid})`);
+    started++;
+  }
+
+  console.log('');
+  console.log(`Started: ${started}, Skipped: ${skipped}`);
+  console.log(`\nUse --status to check running jobs`);
+  console.log(`Use --stop to stop all jobs`);
+  console.log(`Logs: ${PID_DIR}/*.log`);
+}
+
 // Main entry point
 const config = parseConfig();
-runDaemon(config);
+
+if (config.mode === 'start-all') {
+  startAllJobs(config);
+} else {
+  runDaemon(config);
+}
