@@ -974,7 +974,7 @@ export function TaskDataTable({
     setInlineCreationParentId(parentId)
     // Auto-expand the parent if not already expanded
     if (!expandedRows.has(parentId)) {
-      setExpandedRows(prev => new Set([...prev, parentId]))
+      setExpandedRows(prev => new Set([...Array.from(prev), parentId]))
     }
   }, [expandedRows])
 

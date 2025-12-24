@@ -2,7 +2,7 @@
 
 import { useState, useMemo, Suspense, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useEventStream, TaskEventData } from '@/hooks/use-event-stream'
+import { useEventStream, EventData } from '@/hooks/use-event-stream'
 import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import {
@@ -1373,7 +1373,7 @@ function RequestsList() {
   const [cancelConfirm, setCancelConfirm] = useState<BatchJob | null>(null)
 
   // Real-time updates - invalidate request queries when tasks change
-  const handleEvent = useCallback((event: TaskEventData) => {
+  const handleEvent = useCallback((event: EventData) => {
     // Task changes may affect external jobs, batch jobs, and workflow callbacks
     queryClient.invalidateQueries({ queryKey: ['external-jobs-list'] })
     queryClient.invalidateQueries({ queryKey: ['batch-jobs-list'] })

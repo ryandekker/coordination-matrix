@@ -543,6 +543,11 @@ export function TaskModal({
     }
   }, [handleCreateSubtask])
 
+  // Handle clicking on a subtask to navigate to it
+  const handleSubtaskClick = useCallback((subtaskId: string) => {
+    router.push(`/tasks?taskId=${subtaskId}`, { scroll: false })
+  }, [router])
+
   // Editable header with key fields for existing tasks
   const EditableHeader = () => {
     if (!task) return null

@@ -207,7 +207,7 @@ export function ActivityFeedPage() {
 
   // Fetch task names for activity entries
   useEffect(() => {
-    const taskIds = [...new Set(entries.map(e => e.taskId))]
+    const taskIds = Array.from(new Set(entries.map(e => e.taskId)))
     const missingIds = taskIds.filter(id => !taskCache[id])
 
     if (missingIds.length > 0) {
