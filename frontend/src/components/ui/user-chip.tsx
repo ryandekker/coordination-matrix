@@ -110,7 +110,7 @@ export function UserChip({
   if (!user) {
     if (!showUnassigned) return null
     return (
-      <span
+      <div
         className={cn(
           'inline-flex items-center rounded-full bg-muted text-muted-foreground',
           styles.chip,
@@ -119,7 +119,7 @@ export function UserChip({
       >
         <UserIcon className={cn(styles.icon, 'opacity-50')} />
         {!avatarOnly && 'Unassigned'}
-      </span>
+      </div>
     )
   }
 
@@ -131,7 +131,7 @@ export function UserChip({
   if (user.isAgent) {
     const botColor = user.botColor || '#6366f1'
     return (
-      <span
+      <div
         className={cn(
           'inline-flex items-center rounded-full font-medium',
           styles.chip,
@@ -146,13 +146,13 @@ export function UserChip({
       >
         <UserAvatar user={user} size={size} />
         {user.displayName}
-      </span>
+      </div>
     )
   }
 
   // Human user chip styling
   return (
-    <span
+    <div
       className={cn(
         'inline-flex items-center rounded-full bg-secondary/50 border border-border/50',
         styles.chip,
@@ -161,7 +161,7 @@ export function UserChip({
     >
       <UserAvatar user={user} size={size} />
       {user.displayName}
-    </span>
+    </div>
   )
 }
 
