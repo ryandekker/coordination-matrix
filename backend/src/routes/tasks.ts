@@ -676,8 +676,15 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
 
     // Publish task.created event unless silent
     if (!silent && insertedTask) {
+      // Get actor from request body, or fall back to authenticated user
+      const actorId = taskData.createdById
+        ? toObjectId(taskData.createdById)
+        : req.user?.userId
+          ? toObjectId(req.user.userId)
+          : null;
+
       await publishTaskEvent('task.created', insertedTask, {
-        actorId: taskData.createdById ? toObjectId(taskData.createdById) : null,
+        actorId,
         actorType: 'user',
       });
     }
@@ -695,7 +702,12 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     const taskId = toObjectId(req.params.id);
     const updates = req.body;
     const silent = updates.silent === true;
-    const actorId = updates.actorId ? toObjectId(updates.actorId) : null;
+    // Get actor from request body, or fall back to authenticated user
+    const actorId = updates.actorId
+      ? toObjectId(updates.actorId)
+      : req.user?.userId
+        ? toObjectId(req.user.userId)
+        : null;
     const actorType = updates.actorType || 'user';
     delete updates.silent;
     delete updates.actorId;
@@ -811,7 +823,12 @@ tasksRouter.put('/:id/move', async (req: Request, res: Response, next: NextFunct
     const db = getDb();
     const taskId = toObjectId(req.params.id);
     const { newParentId, silent, actorId: actorIdStr } = req.body;
-    const actorId = actorIdStr ? toObjectId(actorIdStr) : null;
+    // Get actor from request body, or fall back to authenticated user
+    const actorId = actorIdStr
+      ? toObjectId(actorIdStr)
+      : req.user?.userId
+        ? toObjectId(req.user.userId)
+        : null;
 
     const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
     if (!task) {
@@ -927,7 +944,12 @@ tasksRouter.delete('/:id', async (req: Request, res: Response, next: NextFunctio
     const db = getDb();
     const taskId = toObjectId(req.params.id);
     const { deleteChildren = 'true', silent = 'false', actorId: actorIdStr } = req.query;
-    const actorId = actorIdStr ? toObjectId(actorIdStr as string) : null;
+    // Get actor from query params, or fall back to authenticated user
+    const actorId = actorIdStr
+      ? toObjectId(actorIdStr as string)
+      : req.user?.userId
+        ? toObjectId(req.user.userId)
+        : null;
 
     const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
     if (!task) {
