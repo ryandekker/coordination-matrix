@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useCallback } from 'react'
-import { Search, Filter, Columns, ChevronDown, X, Bookmark, Tag, ChevronsDownUp, ChevronsUpDown } from 'lucide-react'
+import { Search, Filter, Columns, ChevronDown, X, Bookmark, Tag, ChevronsDownUp, ChevronsUpDown, Archive } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -179,6 +179,13 @@ export function TaskToolbar({
     })
   }, [filters, onFilterChange])
 
+  const handleIncludeArchivedChange = useCallback((checked: boolean) => {
+    onFilterChange({
+      ...filters,
+      includeArchived: checked || undefined,
+    })
+  }, [filters, onFilterChange])
+
   const clearAllFilters = useCallback(() => {
     onFilterChange({})
     onSearchChange('')
@@ -225,6 +232,10 @@ export function TaskToolbar({
       result.push({ key: `tag-${tag}`, label: 'Tag', value: tag })
     })
 
+    if (filters.includeArchived) {
+      result.push({ key: 'includeArchived', label: 'Show', value: 'Archived' })
+    }
+
     return result
   }, [search, filters, statusOptions, urgencyOptions, users])
 
@@ -243,8 +254,10 @@ export function TaskToolbar({
     } else if (filterKey.startsWith('tag-')) {
       const tag = filterKey.replace('tag-', '')
       handleTagFilter(tag, false)
+    } else if (filterKey === 'includeArchived') {
+      handleIncludeArchivedChange(false)
     }
-  }, [onSearchChange, handleStatusFilter, handleUrgencyFilter, handleAssigneeFilter, handleTagFilter])
+  }, [onSearchChange, handleStatusFilter, handleUrgencyFilter, handleAssigneeFilter, handleTagFilter, handleIncludeArchivedChange])
 
   return (
     <div className="space-y-2">
@@ -291,7 +304,7 @@ export function TaskToolbar({
         <DropdownMenuContent align="start" className="w-56">
           <DropdownMenuLabel>Filter by Status</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          {statusOptions.map((status) => (
+          {statusOptions.filter(s => s.code !== 'archived').map((status) => (
             <DropdownMenuCheckboxItem
               key={status.code}
               checked={((filters.status as string[]) || []).includes(status.code)}
@@ -304,6 +317,14 @@ export function TaskToolbar({
               {status.displayName}
             </DropdownMenuCheckboxItem>
           ))}
+          <DropdownMenuSeparator />
+          <DropdownMenuCheckboxItem
+            checked={filters.includeArchived === true}
+            onCheckedChange={handleIncludeArchivedChange}
+          >
+            <Archive className="mr-2 h-4 w-4 text-muted-foreground" />
+            Include Archived
+          </DropdownMenuCheckboxItem>
         </DropdownMenuContent>
       </DropdownMenu>
 

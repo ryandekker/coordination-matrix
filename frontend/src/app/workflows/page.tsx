@@ -177,7 +177,8 @@ interface WorkflowWithStats extends WorkflowData {
 }
 
 async function fetchWorkflows(): Promise<{ data: WorkflowData[] }> {
-  const response = await authFetch(`${API_BASE}/workflows`)
+  // Include inactive workflows so frontend filtering can show all statuses
+  const response = await authFetch(`${API_BASE}/workflows?includeInactive=true`)
   if (!response.ok) {
     throw new Error('Failed to fetch workflows')
   }
