@@ -206,6 +206,7 @@ export const TASK_MODAL_TAB_KEY = 'task-modal-last-tab'
 // Available tabs in the task modal right sidebar
 export const TASK_MODAL_TABS = {
   TYPE_CONFIG: 'type-config',
+  SUBTASKS: 'subtasks',
   METADATA: 'metadata',
   ACTIVITY: 'activity',
 } as const
