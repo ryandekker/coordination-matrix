@@ -408,8 +408,13 @@ const InlineTaskRow = memo(function InlineTaskRow({
   const handleBlur = useCallback(() => {
     // Small delay to allow click on another element to register
     setTimeout(() => {
-      // Don't cancel if we just submitted (input was cleared but we want to keep it open)
-      if (!title.trim() && !isSubmittingRef.current) {
+      // Don't cancel if:
+      // 1. We just submitted (isSubmittingRef is true)
+      // 2. The input is still/again focused (we refocused after submit)
+      // 3. There's text in the input
+      if (isSubmittingRef.current) return
+      if (inputRef.current && document.activeElement === inputRef.current) return
+      if (!title.trim()) {
         onCancel()
       }
     }, 150)
