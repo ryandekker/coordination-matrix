@@ -42,8 +42,8 @@ const BASE_DAEMON_PROMPT = `You are a task automation agent. You MUST respond wi
 Response schema:
 {
   "status": "SUCCESS" | "PARTIAL" | "BLOCKED" | "FAILED",
-  "summary": "1-2 sentence summary",
-  "output": "The actual work product (string, can contain newlines)",
+  "summary": "1-2 sentence summary of what was done",
+  "output": { /* Structured result object - schema defined by task/workflow */ },
   "nextAction": "COMPLETE" | "CONTINUE" | "ESCALATE" | "HOLD",
   "nextActionReason": "Optional: reason for CONTINUE/ESCALATE/HOLD",
   "metadata": {
@@ -56,7 +56,7 @@ Response schema:
 Rules:
 - status: SUCCESS if task fully completed, PARTIAL if partially done, BLOCKED if cannot proceed, FAILED if error
 - nextAction: COMPLETE to finish, CONTINUE to spawn follow-up, ESCALATE for human help, HOLD to pause
-- output: Put your actual work here (code, analysis, etc.) - escape newlines as \\n in JSON string
+- output: A structured JSON object containing your work result. Follow the schema specified in the workflow/task instructions.
 - Respond with ONLY the JSON object, nothing else`;
 
 // ============================================================================
@@ -441,12 +441,20 @@ function assemblePrompt(task, agent, workflowStep) {
     sections.push(`## Workflow Step: ${workflowStep.name}\n${workflowStep.prompt}`);
   }
 
-  // 4. Task-specific prompt
+  // 4. Output schema (if specified by workflow step)
+  if (workflowStep?.outputSchema) {
+    const schemaStr = typeof workflowStep.outputSchema === 'string'
+      ? workflowStep.outputSchema
+      : JSON.stringify(workflowStep.outputSchema, null, 2);
+    sections.push(`## Output Schema\nYour "output" field in the response MUST be a JSON object matching this schema:\n\`\`\`json\n${schemaStr}\n\`\`\``);
+  }
+
+  // 5. Task-specific prompt
   if (task.extraPrompt) {
     sections.push(`## Task Instructions\n${task.extraPrompt}`);
   }
 
-  // 5. Task context as structured data
+  // 6. Task context as structured data
   // Note: inputPayload contains webhook/external input data (e.g., email content)
   const context = {
     title: task.title,
@@ -773,6 +781,17 @@ async function processTask(config, task) {
 
   console.log(`Setting task status to '${newStatus}'...`);
 
+  // Ensure result is always an object, not a string
+  let resultData = parsedResponse.data.output;
+  if (typeof resultData === 'string') {
+    try {
+      resultData = JSON.parse(resultData);
+    } catch {
+      // If it's not valid JSON, wrap it
+      resultData = { text: resultData };
+    }
+  }
+
   // Build output for metadata
   const output = {
     timestamp,
@@ -780,7 +799,7 @@ async function processTask(config, task) {
     action: parsedResponse.data.nextAction,
     reason: parsedResponse.data.nextActionReason || null,
     summary: parsedResponse.data.summary,
-    result: parsedResponse.data.output,
+    result: resultData,
     confidence: parsedResponse.data.metadata?.confidence || null,
     suggestedTags: parsedResponse.data.metadata?.suggestedTags || [],
     suggestedNextStage: parsedResponse.data.metadata?.suggestedNextStage || null,
