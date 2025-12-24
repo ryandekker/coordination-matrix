@@ -518,6 +518,26 @@ export function TaskModal({
   // Get task type config for current type
   const currentTypeConfig = getTaskTypeConfig(currentTaskType)
 
+  // Handle creating a new subtask (defined here before early return to satisfy hooks rules)
+  const handleCreateSubtask = useCallback(async () => {
+    if (!newSubtaskTitle.trim() || !task) return
+
+    setIsCreatingSubtask(true)
+    try {
+      await createTask.mutateAsync({
+        title: newSubtaskTitle.trim(),
+        parentId: task._id,
+        status: 'pending',
+        taskType: 'agent',
+      })
+      setNewSubtaskTitle('')
+    } finally {
+      setIsCreatingSubtask(false)
+      // Refocus input after state updates
+      subtaskInputRef.current?.focus()
+    }
+  }, [newSubtaskTitle, task, createTask])
+
   // Editable header with key fields for existing tasks
   const EditableHeader = () => {
     if (!task) return null
@@ -1387,26 +1407,6 @@ export function TaskModal({
       )}
     </div>
   )
-
-  // Handle creating a new subtask
-  const handleCreateSubtask = useCallback(async () => {
-    if (!newSubtaskTitle.trim() || !task) return
-
-    setIsCreatingSubtask(true)
-    try {
-      await createTask.mutateAsync({
-        title: newSubtaskTitle.trim(),
-        parentId: task._id,
-        status: 'pending',
-        taskType: 'agent',
-      })
-      setNewSubtaskTitle('')
-    } finally {
-      setIsCreatingSubtask(false)
-      // Refocus input after state updates
-      subtaskInputRef.current?.focus()
-    }
-  }, [newSubtaskTitle, task, createTask])
 
   // Subtasks content for sidebar
   const SubtasksContent = () => {
