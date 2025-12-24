@@ -24,10 +24,6 @@ db.createCollection('tasks', {
           bsonType: 'string',
           description: 'Extra prompt for AI tasks'
         },
-        additionalInfo: {
-          bsonType: 'string',
-          description: 'Additional information'
-        },
         status: {
           bsonType: 'string',
           enum: ['pending', 'in_progress', 'on_hold', 'waiting', 'completed', 'failed', 'cancelled', 'archived'],

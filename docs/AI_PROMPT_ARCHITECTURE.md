@@ -20,7 +20,7 @@ export interface Task {
   title: string;
   summary?: string;
   extraPrompt?: string;           // Primary AI instruction field
-  additionalInfo?: string;        // Context storage, receives AI responses
+  metadata?: Record<string, unknown>;  // Task outputs, results, and custom data
   status: TaskStatus;
   urgency?: Urgency;
   parentId: ObjectId | null;
@@ -65,8 +65,8 @@ interface WorkflowStep {
 The daemon currently:
 1. Polls a saved view for pending tasks
 2. Uses `extraPrompt` as main instruction (if present)
-3. Appends task context (title, summary, tags, additionalInfo)
-4. Executes Claude and stores results in `additionalInfo`
+3. Appends task context (title, summary, tags, metadata)
+4. Executes Claude and stores results in `metadata.executionLog`
 5. Sets status to `completed` on success, `on_hold` on failure
 
 ---
@@ -257,7 +257,7 @@ Prompts are assembled from multiple sources in this order:
 │                                                             │
 │  4. Task Prompt (task-level)                                │
 │     - extraPrompt: specific instructions                    │
-│     - Task context: title, summary, tags, additionalInfo    │
+│     - Task context: title, summary, tags, metadata          │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -353,7 +353,7 @@ function assemblePrompt(task, agent, workflowStep) {
     title: task.title,
     summary: task.summary || null,
     tags: task.tags || [],
-    additionalInfo: task.additionalInfo || null,
+    executionLog: task.metadata?.executionLog || null,
     workflowStage: task.workflowStage || null,
   };
   sections.push(`## Task Context\n${JSON.stringify(context, null, 2)}`);
@@ -647,7 +647,7 @@ async function spawnForeachTasks(
   // Mark parent as waiting
   await updateTask(parentTask._id, {
     status: 'waiting',
-    additionalInfo: JSON.stringify({
+    metadata: {
       ...output,
       foreachSpawned: items.length,
       foreachTag,
@@ -674,8 +674,8 @@ async function checkJoinCondition(
   });
 
   const parentTask = await getTask(triggeringTask.parentId!);
-  const parentInfo = JSON.parse(parentTask.additionalInfo || '{}');
-  const expectedCount = parentInfo.foreachSpawned;
+  const parentMetadata = parentTask.metadata || {};
+  const expectedCount = parentMetadata.foreachSpawned;
 
   if (completedTasks.length < expectedCount) {
     return; // Not all complete yet
@@ -683,7 +683,7 @@ async function checkJoinCondition(
 
   // All complete - aggregate and create join task
   const aggregatedResults = completedTasks.map(t => ({
-    output: JSON.parse(t.additionalInfo || '{}'),
+    output: t.metadata || {},
   }));
 
   await createTask({
@@ -693,7 +693,7 @@ async function checkJoinCondition(
     parentId: parentTask._id,
     extraPrompt: joinStep.prompt,
     status: 'pending',
-    additionalInfo: JSON.stringify({ aggregatedResults }),
+    metadata: { aggregatedResults },
   });
 }
 ```
@@ -781,7 +781,7 @@ function getValueByPath(obj: unknown, path: string): unknown {
 
 ### Open Questions
 
-1. **Context Carry-Forward:** How much context should flow from task to task? All additionalInfo, or summarized?
+1. **Context Carry-Forward:** How much context should flow from task to task? All metadata, or summarized?
 
 2. **Human-in-the-Loop Notifications:** When a task is `ESCALATE`d, what notification mechanism should trigger?
 

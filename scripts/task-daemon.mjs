@@ -113,7 +113,7 @@ Response Handling:
     - CONTINUE: status -> "completed", creates follow-up task
     - ESCALATE: status -> "on_hold"
     - HOLD: status -> "on_hold"
-  - Stores response output in additionalInfo
+  - Stores response output in metadata.executionLog
 
 Examples:
   # Process tasks continuously with Claude (default)
@@ -225,10 +225,10 @@ async function updateTask(config, taskId, updates) {
     return true;
   }
 
-  // Truncate additionalInfo if too long (keep under 100KB)
-  if (updates.additionalInfo && updates.additionalInfo.length > 100000) {
-    console.log(`[DEBUG] Truncating additionalInfo from ${updates.additionalInfo.length} to 100000 chars`);
-    updates.additionalInfo = updates.additionalInfo.substring(0, 100000) + '\n\n[truncated]';
+  // Truncate executionLog in metadata if too long (keep under 100KB)
+  if (updates.metadata?.executionLog && updates.metadata.executionLog.length > 100000) {
+    console.log(`[DEBUG] Truncating executionLog from ${updates.metadata.executionLog.length} to 100000 chars`);
+    updates.metadata.executionLog = updates.metadata.executionLog.substring(0, 100000) + '\n\n[truncated]';
   }
 
   try {
@@ -301,7 +301,7 @@ function assemblePrompt(task, agent, workflowStep) {
     title: task.title,
     summary: task.summary || null,
     tags: task.tags || [],
-    additionalInfo: task.additionalInfo || null,
+    executionLog: task.metadata?.executionLog || null,
     workflowStage: task.workflowStage || null,
   };
   sections.push(`## Task Context\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\``);
@@ -442,7 +442,7 @@ async function handleStageTransition(config, task, workflow, parsedResponse) {
         assigneeId: nextStep.defaultAssigneeId || task.assigneeId,
         extraPrompt: nextStep.prompt || '',
         status: 'pending',
-        additionalInfo: `Previous step output:\n${parsedResponse.data.output}`,
+        metadata: { previousOutput: parsedResponse.data.output },
         tags: task.tags || [],
       });
 
@@ -466,7 +466,7 @@ async function handleStageTransition(config, task, workflow, parsedResponse) {
       assigneeId: task.assigneeId,
       extraPrompt: parsedResponse.data.nextActionReason,
       status: 'pending',
-      additionalInfo: `Previous output:\n${parsedResponse.data.output}`,
+      metadata: { previousOutput: parsedResponse.data.output },
       tags: task.tags || [],
     });
 
@@ -548,15 +548,18 @@ async function processTask(config, task) {
 
     await updateTask(config, task._id, {
       status: 'failed',
-      additionalInfo: [
-        task.additionalInfo || '',
-        '',
-        '---',
-        `## Execution Failed (${timestamp})`,
-        `Exit code: ${result.exitCode}`,
-        '',
-        errorInfo.substring(0, 1000),
-      ].filter(Boolean).join('\n'),
+      metadata: {
+        ...(task.metadata || {}),
+        executionLog: [
+          task.metadata?.executionLog || '',
+          '',
+          '---',
+          `## Execution Failed (${timestamp})`,
+          `Exit code: ${result.exitCode}`,
+          '',
+          errorInfo.substring(0, 1000),
+        ].filter(Boolean).join('\n'),
+      },
     });
     return;
   }
@@ -566,21 +569,24 @@ async function processTask(config, task) {
 
   if (!parsedResponse.success) {
     console.log(`[WARN] Failed to parse JSON response: ${parsedResponse.error}`);
-    console.log(`[WARN] Raw response saved to additionalInfo`);
+    console.log(`[WARN] Raw response saved to metadata.executionLog`);
 
     // Still mark as completed but note the parsing failure
     await updateTask(config, task._id, {
       status: 'completed',
-      additionalInfo: [
-        task.additionalInfo || '',
-        '',
-        '---',
-        `## Response (${timestamp}) - Parse Error`,
-        `Error: ${parsedResponse.error}`,
-        '',
-        'Raw output:',
-        parsedResponse.raw?.substring(0, 5000) || '',
-      ].filter(Boolean).join('\n'),
+      metadata: {
+        ...(task.metadata || {}),
+        executionLog: [
+          task.metadata?.executionLog || '',
+          '',
+          '---',
+          `## Response (${timestamp}) - Parse Error`,
+          `Error: ${parsedResponse.error}`,
+          '',
+          'Raw output:',
+          parsedResponse.raw?.substring(0, 5000) || '',
+        ].filter(Boolean).join('\n'),
+      },
     });
     return;
   }
@@ -608,8 +614,8 @@ async function processTask(config, task) {
   console.log(`Setting task status to '${newStatus}'...`);
 
   // Update task with response
-  const newInfo = [
-    task.additionalInfo || '',
+  const newExecutionLog = [
+    task.metadata?.executionLog || '',
     '',
     '---',
     `## Response (${timestamp})`,
@@ -633,7 +639,10 @@ async function processTask(config, task) {
 
   await updateTask(config, task._id, {
     status: newStatus,
-    additionalInfo: newInfo,
+    metadata: {
+      ...(task.metadata || {}),
+      executionLog: newExecutionLog,
+    },
     ...(tagsUpdate && { tags: tagsUpdate }),
   });
 

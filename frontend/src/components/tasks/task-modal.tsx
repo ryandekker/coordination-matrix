@@ -149,7 +149,6 @@ export function TaskModal({
     title: '',
     summary: '',
     extraPrompt: '',
-    additionalInfo: '',
     status: 'pending',
     urgency: 'normal',
     workflowId: null,
@@ -777,22 +776,6 @@ export function TaskModal({
           </div>
         )}
 
-        {/* Additional Info - hidden for standard tasks in edit mode (moved to sidebar) */}
-        {!(isEditMode && currentTaskType === 'standard') && (
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Additional Info</label>
-            <textarea
-              {...register('additionalInfo')}
-              placeholder="Any other relevant information..."
-              rows={2}
-              className={cn(
-                'flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm',
-                'placeholder:text-muted-foreground resize-none transition-colors',
-                'focus-visible:outline-none focus-visible:border-primary'
-              )}
-            />
-          </div>
-        )}
 
         {/* Status & Urgency - only show in create mode */}
         {!isEditMode && (
