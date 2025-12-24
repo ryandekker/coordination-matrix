@@ -451,6 +451,11 @@ export interface ActivityLogEntry {
   comment?: string;
   timestamp: Date;
   metadata?: Record<string, unknown>;
+  // Populated user info (not stored in DB, resolved at query time)
+  actor?: {
+    displayName: string;
+    email?: string;
+  } | null;
 }
 
 // ============================================================================

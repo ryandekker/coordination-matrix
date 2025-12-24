@@ -62,8 +62,11 @@ function ActivityEntry({ entry, compact, isNew }: { entry: ActivityLogEntry; com
       )}>
         <div className={cn('w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0', colorClass)} />
         <div className="flex-1 min-w-0">
-          <div className="flex items-baseline gap-1.5">
+          <div className="flex items-baseline gap-1.5 flex-wrap">
             <span className="text-xs font-medium">{label}</span>
+            <span className="text-[10px] text-muted-foreground">
+              by {entry.actor?.displayName || entry.actorType}
+            </span>
             <span className="text-[10px] text-muted-foreground">
               {formatDistanceToNow(new Date(entry.timestamp), { addSuffix: true })}
             </span>
@@ -119,8 +122,7 @@ function ActivityEntry({ entry, compact, isNew }: { entry: ActivityLogEntry; com
         )}
 
         <div className="mt-0.5 text-xs text-muted-foreground">
-          by {entry.actorType}
-          {entry.actorId && <span className="ml-1 opacity-70">({entry.actorId.slice(-6)})</span>}
+          by {entry.actor?.displayName || entry.actorType}
         </div>
       </div>
     </div>
