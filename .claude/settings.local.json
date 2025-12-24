@@ -35,7 +35,8 @@
       "Bash(npm run test:workflow:*)",
       "Bash(npm run cli:*)",
       "mcp__playwright__browser_evaluate",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(node scripts/task-daemon.mjs:*)"
     ],
     "deny": [],
     "ask": []
