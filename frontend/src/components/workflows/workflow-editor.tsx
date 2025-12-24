@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useUsers } from '@/hooks/use-tasks'
 import { workflowsApi, Workflow as ApiWorkflow } from '@/lib/api'
+import { getAuthHeader } from '@/lib/auth'
 import {
   Dialog,
   DialogContent,
@@ -995,7 +996,9 @@ export function WorkflowEditor({
                       className="gap-1.5"
                       onClick={async () => {
                         try {
-                          const response = await fetch(`${API_BASE}/workflows/ai-prompt?format=mermaid&includeContext=true`)
+                          const response = await fetch(`${API_BASE}/workflows/ai-prompt?format=mermaid&includeContext=true`, {
+                            headers: getAuthHeader(),
+                          })
                           const data = await response.json()
                           await navigator.clipboard.writeText(data.data.prompt)
                           // Could add a toast notification here
@@ -1014,7 +1017,9 @@ export function WorkflowEditor({
                       className="gap-1.5"
                       onClick={async () => {
                         try {
-                          const response = await fetch(`${API_BASE}/workflows/ai-prompt?format=json&includeContext=true`)
+                          const response = await fetch(`${API_BASE}/workflows/ai-prompt?format=json&includeContext=true`, {
+                            headers: getAuthHeader(),
+                          })
                           const data = await response.json()
                           await navigator.clipboard.writeText(data.data.prompt)
                         } catch (err) {
