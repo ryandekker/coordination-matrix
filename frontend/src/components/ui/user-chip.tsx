@@ -112,7 +112,7 @@ export function UserChip({
     return (
       <span
         className={cn(
-          'inline-flex items-center rounded-full bg-muted text-muted-foreground',
+          'inline-flex items-center rounded-full bg-muted text-muted-foreground whitespace-nowrap',
           styles.chip,
           className
         )}
@@ -133,7 +133,7 @@ export function UserChip({
     return (
       <span
         className={cn(
-          'inline-flex items-center rounded-full',
+          'inline-flex items-center rounded-full whitespace-nowrap',
           styles.chip,
           className
         )}
@@ -154,7 +154,7 @@ export function UserChip({
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-full bg-secondary/50 border border-border/50',
+        'inline-flex items-center rounded-full bg-secondary/50 border border-border/50 whitespace-nowrap',
         styles.chip,
         className
       )}
