@@ -30,6 +30,7 @@ import { Task, FieldConfig, LookupValue, TaskType, WebhookConfig } from '@/lib/a
 import { useCreateTask, useUpdateTask, useUsers, useWorkflows, useTasks } from '@/hooks/use-tasks'
 import { cn } from '@/lib/utils'
 import { TaskActivity } from './task-activity'
+import { TaskFiles } from './task-files'
 import { WebhookTaskConfig } from './webhook-task-config'
 import { JsonViewer } from '@/components/ui/json-viewer'
 import {
@@ -40,7 +41,7 @@ import {
   DEFAULT_TASK_MODAL_TAB,
   type TaskModalTab,
 } from '@/lib/task-type-config'
-import { Settings2, Database, Activity, Workflow, ExternalLink, ArrowUpRight } from 'lucide-react'
+import { Settings2, Database, Activity, Workflow, ExternalLink, ArrowUpRight, Paperclip } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
@@ -1413,6 +1414,13 @@ export function TaskModal({
                   <span className="text-xs">Config</span>
                 </TabsTrigger>
                 <TabsTrigger
+                  value={TASK_MODAL_TABS.FILES}
+                  className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent py-2.5"
+                >
+                  <Paperclip className="h-3.5 w-3.5" />
+                  <span className="text-xs">Files</span>
+                </TabsTrigger>
+                <TabsTrigger
                   value={TASK_MODAL_TABS.METADATA}
                   className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent py-2.5"
                 >
@@ -1430,6 +1438,10 @@ export function TaskModal({
 
               <TabsContent value={TASK_MODAL_TABS.TYPE_CONFIG} className="flex-1 min-h-0 overflow-y-auto mt-0">
                 <TypeConfigContent />
+              </TabsContent>
+
+              <TabsContent value={TASK_MODAL_TABS.FILES} className="flex-1 min-h-0 overflow-y-auto mt-0">
+                <TaskFiles taskId={task._id} className="h-full" compact />
               </TabsContent>
 
               <TabsContent value={TASK_MODAL_TABS.METADATA} className="flex-1 min-h-0 overflow-y-auto mt-0">

@@ -839,4 +839,123 @@ db.batch_items.createIndex({ batchJobId: 1, status: 1 });
 db.batch_items.createIndex({ batchJobId: 1, createdAt: 1 });
 db.batch_items.createIndex({ externalId: 1 });
 
+// ============================================================================
+// FILES - File attachments with S3 storage
+// ============================================================================
+db.createCollection('files', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['filename', 'mimeType', 'size', 'storageKey', 'bucket', 'source', 'attachedTo', 'createdAt'],
+      properties: {
+        // File metadata
+        filename: {
+          bsonType: 'string',
+          description: 'Original filename - required'
+        },
+        mimeType: {
+          bsonType: 'string',
+          description: 'MIME type of the file - required'
+        },
+        size: {
+          bsonType: 'int',
+          minimum: 0,
+          description: 'File size in bytes - required'
+        },
+
+        // S3 storage info
+        storageKey: {
+          bsonType: 'string',
+          description: 'S3 object key - required'
+        },
+        bucket: {
+          bsonType: 'string',
+          description: 'S3 bucket name - required'
+        },
+        permanent: {
+          bsonType: 'bool',
+          description: 'If true, file will not auto-expire (default: false)'
+        },
+
+        // Provenance tracking
+        source: {
+          bsonType: 'string',
+          enum: ['user', 'ai-tool', 'webhook', 'workflow-step'],
+          description: 'Where the file originated from - required'
+        },
+        sourceDetails: {
+          bsonType: 'object',
+          properties: {
+            toolName: {
+              bsonType: 'string',
+              description: 'AI tool name (e.g., dall-e, claude)'
+            },
+            prompt: {
+              bsonType: 'string',
+              description: 'Prompt that generated the file'
+            },
+            stepId: {
+              bsonType: 'string',
+              description: 'Workflow step ID that generated the file'
+            },
+            workflowRunId: {
+              bsonType: 'objectId',
+              description: 'Workflow run that generated the file'
+            },
+            userId: {
+              bsonType: 'objectId',
+              description: 'User who uploaded the file'
+            }
+          },
+          description: 'Additional source details'
+        },
+
+        // Attachment reference
+        attachedTo: {
+          bsonType: 'object',
+          required: ['type', 'id'],
+          properties: {
+            type: {
+              bsonType: 'string',
+              enum: ['task', 'workflow-run'],
+              description: 'Type of entity file is attached to'
+            },
+            id: {
+              bsonType: 'objectId',
+              description: 'ID of the entity file is attached to'
+            }
+          },
+          description: 'What this file is attached to - required'
+        },
+
+        // Ownership
+        createdById: {
+          bsonType: ['objectId', 'null'],
+          description: 'User who created this file record'
+        },
+
+        // Timestamps
+        createdAt: {
+          bsonType: 'date',
+          description: 'When the file was uploaded - required'
+        },
+        expiresAt: {
+          bsonType: ['date', 'null'],
+          description: 'When the file will be deleted (for non-permanent files)'
+        }
+      }
+    }
+  }
+});
+
+// File indexes
+db.files.createIndex({ 'attachedTo.type': 1, 'attachedTo.id': 1 });
+db.files.createIndex({ source: 1 });
+db.files.createIndex({ mimeType: 1 });
+db.files.createIndex({ permanent: 1 });
+db.files.createIndex({ createdAt: -1 });
+db.files.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });  // TTL index for auto-cleanup
+db.files.createIndex({ createdById: 1 });
+db.files.createIndex({ filename: 'text' });
+
 print('Database initialization complete!');

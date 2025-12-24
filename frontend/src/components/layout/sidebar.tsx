@@ -22,6 +22,7 @@ import {
   Palette,
   Webhook,
   ArrowLeftRight,
+  FileBox,
 } from 'lucide-react'
 import { Logo } from '@/components/ui/logo'
 import { View } from '@/lib/api'
@@ -52,6 +53,7 @@ const bottomNavigation: NavItem[] = [
   { name: 'Workflows', href: '/workflows', icon: Workflow, exact: true },
   { name: 'Workflow Runs', href: '/workflow-runs', icon: Play, exact: false },
   { name: 'Requests', href: '/requests', icon: ArrowLeftRight, exact: false },
+  { name: 'Files', href: '/files', icon: FileBox, exact: false },
   { name: 'Users', href: '/users', icon: Users, exact: true },
 ]
 

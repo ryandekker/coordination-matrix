@@ -1181,3 +1181,132 @@ export const webhooksApi = {
     return handleResponse(response)
   },
 }
+
+// File Types
+export type FileSource = 'user' | 'ai-tool' | 'webhook' | 'workflow-step'
+export type FileAttachmentType = 'task' | 'workflow-run'
+
+export interface FileSourceDetails {
+  toolName?: string
+  prompt?: string
+  stepId?: string
+  workflowRunId?: string
+  userId?: string
+}
+
+export interface FileAttachment {
+  type: FileAttachmentType
+  id: string
+}
+
+export interface FileDocument {
+  _id: string
+  filename: string
+  mimeType: string
+  size: number
+  storageKey: string
+  bucket: string
+  permanent: boolean
+  source: FileSource
+  sourceDetails?: FileSourceDetails
+  attachedTo: FileAttachment
+  createdById?: string | null
+  createdAt: string
+  expiresAt?: string | null
+  url: string  // Signed URL included in responses
+}
+
+// Files API
+export const filesApi = {
+  list: async (params?: {
+    attachToType?: FileAttachmentType
+    attachToId?: string
+    source?: FileSource
+    mimeType?: string
+    permanent?: boolean
+    search?: string
+    page?: number
+    limit?: number
+    sortBy?: 'createdAt' | 'filename' | 'size'
+    sortOrder?: 'asc' | 'desc'
+  }): Promise<PaginatedResponse<FileDocument>> => {
+    const searchParams = new URLSearchParams()
+    if (params?.attachToType) searchParams.append('attachToType', params.attachToType)
+    if (params?.attachToId) searchParams.append('attachToId', params.attachToId)
+    if (params?.source) searchParams.append('source', params.source)
+    if (params?.mimeType) searchParams.append('mimeType', params.mimeType)
+    if (params?.permanent !== undefined) searchParams.append('permanent', String(params.permanent))
+    if (params?.search) searchParams.append('search', params.search)
+    if (params?.page) searchParams.append('page', String(params.page))
+    if (params?.limit) searchParams.append('limit', String(params.limit))
+    if (params?.sortBy) searchParams.append('sortBy', params.sortBy)
+    if (params?.sortOrder) searchParams.append('sortOrder', params.sortOrder)
+    const response = await authFetch(`${API_BASE}/files?${searchParams}`)
+    return handleResponse(response)
+  },
+
+  get: async (id: string): Promise<ApiResponse<FileDocument>> => {
+    const response = await authFetch(`${API_BASE}/files/${id}`)
+    return handleResponse(response)
+  },
+
+  getTaskFiles: async (taskId: string): Promise<ApiResponse<FileDocument[]>> => {
+    const response = await authFetch(`${API_BASE}/tasks/${taskId}/files`)
+    return handleResponse(response)
+  },
+
+  upload: async (
+    file: File,
+    options: {
+      attachToType: FileAttachmentType
+      attachToId: string
+      source?: FileSource
+      permanent?: boolean
+      toolName?: string
+      prompt?: string
+      stepId?: string
+      workflowRunId?: string
+    }
+  ): Promise<FileDocument> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('attachToType', options.attachToType)
+    formData.append('attachToId', options.attachToId)
+    if (options.source) formData.append('source', options.source)
+    if (options.permanent !== undefined) formData.append('permanent', String(options.permanent))
+    if (options.toolName) formData.append('toolName', options.toolName)
+    if (options.prompt) formData.append('prompt', options.prompt)
+    if (options.stepId) formData.append('stepId', options.stepId)
+    if (options.workflowRunId) formData.append('workflowRunId', options.workflowRunId)
+
+    const response = await authFetch(`${API_BASE}/files/upload`, {
+      method: 'POST',
+      body: formData,
+      // Don't set Content-Type header - browser will set it with boundary for multipart
+    })
+    return handleResponse(response)
+  },
+
+  update: async (id: string, data: { permanent?: boolean; filename?: string }): Promise<FileDocument> => {
+    const response = await authFetch(`${API_BASE}/files/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  delete: async (id: string): Promise<void> => {
+    const response = await authFetch(`${API_BASE}/files/${id}`, {
+      method: 'DELETE',
+    })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Failed to delete file' }))
+      throw new Error(error.error || error.message || 'Failed to delete file')
+    }
+  },
+
+  getDownloadUrl: (id: string): string => {
+    return `${API_BASE}/files/${id}/download`
+  },
+}

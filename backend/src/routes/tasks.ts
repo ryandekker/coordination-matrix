@@ -3,8 +3,9 @@ import { ObjectId, Filter, Sort, Document, WithId } from 'mongodb';
 import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
 import { ReferenceResolver } from '../services/reference-resolver.js';
-import { Task, TaskWithChildren, PaginatedResponse } from '../types/index.js';
+import { Task, TaskWithChildren, PaginatedResponse, FileDocument, FileWithUrl } from '../types/index.js';
 import { publishTaskEvent, computeChanges, getSpecificEventTypes } from '../services/event-bus.js';
+import { storageService } from '../services/storage-service.js';
 import { activityLogService } from '../services/activity-log.js';
 
 export const tasksRouter = Router();
@@ -537,6 +538,41 @@ tasksRouter.get('/:id/children', async (req: Request, res: Response, next: NextF
     }
 
     res.json({ data: resolvedChildren });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/tasks/:id/files - Get files attached to a task
+tasksRouter.get('/:id/files', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const taskId = toObjectId(req.params.id);
+
+    // Verify task exists
+    const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
+    if (!task) {
+      throw createError('Task not found', 404);
+    }
+
+    // Get files attached to this task
+    const files = await db.collection<FileDocument>('files')
+      .find({
+        'attachedTo.type': 'task',
+        'attachedTo.id': taskId,
+      })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    // Generate signed URLs for each file
+    const filesWithUrls: FileWithUrl[] = await Promise.all(
+      files.map(async (file) => ({
+        ...file,
+        url: await storageService.getSignedUrl(file.storageKey),
+      }))
+    );
+
+    res.json({ data: filesWithUrls });
   } catch (error) {
     next(error);
   }

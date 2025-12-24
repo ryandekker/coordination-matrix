@@ -922,3 +922,69 @@ export interface BatchCallbackPayload {
   result?: Record<string, unknown>;
   error?: string;
 }
+
+// ============================================================================
+// File Types
+// ============================================================================
+
+export type FileSource = 'user' | 'ai-tool' | 'webhook' | 'workflow-step';
+export type FileAttachmentType = 'task' | 'workflow-run';
+
+export interface FileSourceDetails {
+  toolName?: string;           // AI tool name (e.g., dall-e, claude)
+  prompt?: string;             // Prompt that generated the file
+  stepId?: string;             // Workflow step ID
+  workflowRunId?: ObjectId;    // Workflow run ID
+  userId?: ObjectId;           // User who uploaded
+}
+
+export interface FileAttachment {
+  type: FileAttachmentType;
+  id: ObjectId;
+}
+
+export interface FileDocument {
+  _id: ObjectId;
+  filename: string;
+  mimeType: string;
+  size: number;
+
+  // S3 storage
+  storageKey: string;
+  bucket: string;
+  permanent: boolean;
+
+  // Provenance
+  source: FileSource;
+  sourceDetails?: FileSourceDetails;
+
+  // Attachment
+  attachedTo: FileAttachment;
+
+  // Ownership
+  createdById?: ObjectId | null;
+
+  // Timestamps
+  createdAt: Date;
+  expiresAt?: Date | null;
+}
+
+export interface CreateFileInput {
+  filename: string;
+  mimeType: string;
+  size: number;
+  attachToType: FileAttachmentType;
+  attachToId: string;
+  source: FileSource;
+  permanent?: boolean;
+  sourceDetails?: {
+    toolName?: string;
+    prompt?: string;
+    stepId?: string;
+    workflowRunId?: string;
+  };
+}
+
+export interface FileWithUrl extends FileDocument {
+  url: string;
+}
