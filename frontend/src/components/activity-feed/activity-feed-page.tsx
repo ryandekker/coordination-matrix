@@ -353,14 +353,28 @@ export function ActivityFeedPage() {
         {/* Specific user filter - only show when actor type is user or all */}
         {(selectedActorType === 'user' || !selectedActorType) && users.length > 0 && (
           <Select value={selectedActorId || 'all'} onValueChange={handleActorIdChange}>
-            <SelectTrigger className="h-7 w-[140px] text-xs">
-              <SelectValue placeholder="User" />
+            <SelectTrigger className="h-7 w-[160px] text-xs">
+              <SelectValue placeholder="User">
+                {selectedActorId && selectedActorId !== 'all' ? (
+                  <UserChip
+                    user={users.find(u => u._id === selectedActorId) as Parameters<typeof UserChip>[0]['user']}
+                    size="sm"
+                    showUnassigned={false}
+                  />
+                ) : (
+                  'All Users'
+                )}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all" className="text-xs">All Users</SelectItem>
               {users.map((user) => (
                 <SelectItem key={user._id} value={user._id} className="text-xs">
-                  {user.displayName || user.email}
+                  <UserChip
+                    user={user as Parameters<typeof UserChip>[0]['user']}
+                    size="sm"
+                    showUnassigned={false}
+                  />
                 </SelectItem>
               ))}
             </SelectContent>
