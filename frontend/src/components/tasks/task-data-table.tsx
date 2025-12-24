@@ -991,15 +991,37 @@ export function TaskDataTable({
     const resolved = task._resolved?.[fieldConfig.fieldPath as keyof typeof task._resolved]
 
     // Handle lookup fields (status, priority, etc.)
-    if (fieldConfig.lookupType && resolved) {
-      const lookup = resolved as { displayName: string; color?: string }
-      return (
-        <div className="flex justify-center">
-          <Badge color={lookup.color} variant="outline">
-            {lookup.displayName}
-          </Badge>
-        </div>
-      )
+    if (fieldConfig.lookupType) {
+      let lookup = resolved as { displayName: string; color?: string; code?: string } | undefined
+
+      // If no resolved value, fall back to looking up from the lookups prop
+      if (!lookup && value && typeof value === 'string') {
+        const lookupValues = lookups[fieldConfig.lookupType] || []
+        const found = lookupValues.find(lv => lv.code === value)
+        if (found) {
+          lookup = { displayName: found.displayName, color: found.color, code: found.code }
+        }
+      }
+
+      if (lookup) {
+        return (
+          <div className="flex justify-center">
+            <Badge color={lookup.color} variant="outline">
+              {lookup.displayName}
+            </Badge>
+          </div>
+        )
+      }
+      // If still no lookup found, show the raw value in a basic badge
+      if (value && typeof value === 'string') {
+        return (
+          <div className="flex justify-center">
+            <Badge variant="outline">
+              {value}
+            </Badge>
+          </div>
+        )
+      }
     }
 
     // Handle reference fields (user, team)
@@ -1088,7 +1110,7 @@ export function TaskDataTable({
       return <span>{value?.toString()}</span>
     }
     return <div className="text-center">{value?.toString()}</div>
-  }, [])
+  }, [lookups])
 
   if (isLoading) {
     return (
