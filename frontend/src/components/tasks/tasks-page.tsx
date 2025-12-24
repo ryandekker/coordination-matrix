@@ -137,15 +137,15 @@ export function TasksPage() {
   useEventStream()
 
   const rawTasks = tasksData?.data || []
-  // When viewing a flow's children, prepend the parent flow task to show it at the top
+  // When viewing a flow's children, show just the parent with its children attached
   const tasks = useMemo(() => {
     if (parentIdFromUrl && flowParentTask?.data) {
-      // Add children reference to parent so it can be expanded
+      // Return parent with children attached - they'll expand inline
       const parentWithChildren: Task = {
         ...flowParentTask.data,
-        children: rawTasks, // Use actual tasks as children for proper expansion
+        children: rawTasks,
       }
-      return [parentWithChildren, ...rawTasks]
+      return [parentWithChildren]
     }
     return rawTasks
   }, [parentIdFromUrl, flowParentTask?.data, rawTasks])
@@ -442,6 +442,7 @@ export function TasksPage() {
         onPageChange={setPage}
         expandAllEnabled={expandAllEnabled}
         onExpandAllChange={handleExpandAllChange}
+        autoExpandIds={parentIdFromUrl ? [parentIdFromUrl] : undefined}
       />
 
       <TaskModal
