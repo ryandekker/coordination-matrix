@@ -277,7 +277,28 @@ export function TaskModal({
   const buildTaskData = useCallback((data: Record<string, unknown>): Partial<Task> => {
     const taskData: Partial<Task> = {}
 
+    // Process core fields first (header fields like status, urgency, assigneeId)
+    const coreFields = Object.keys(coreDefaultValues)
+    coreFields.forEach((field) => {
+      const value = data[field]
+      if (field === 'tags' && typeof value === 'string') {
+        taskData[field as keyof Task] = value
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean) as never
+      } else if (field === 'dueAt') {
+        taskData[field as keyof Task] = (value ? new Date(value as string).toISOString() : null) as never
+      } else if (field === 'workflowId' || field === 'assigneeId') {
+        taskData[field as keyof Task] = (value || null) as never
+      } else {
+        taskData[field as keyof Task] = value as never
+      }
+    })
+
+    // Then process additional fields from field configs (skip if already handled)
     editableFields.forEach((fc) => {
+      if (coreFields.includes(fc.fieldPath)) return
+
       const value = data[fc.fieldPath]
 
       if (fc.fieldType === 'tags' && typeof value === 'string') {
@@ -580,12 +601,18 @@ export function TaskModal({
           )}
         />
 
-        {/* Urgency - inline select */}
+        {/* Urgency - inline select with immediate save */}
         <Controller
           name="urgency"
           control={control}
           render={({ field }) => (
-            <Select value={field.value as string || ''} onValueChange={field.onChange}>
+            <Select value={field.value as string || ''} onValueChange={(value) => {
+              field.onChange(value)
+              // Immediately save urgency changes - don't wait for debounce
+              if (task) {
+                updateTask.mutate({ id: task._id, data: { urgency: value } })
+              }
+            }}>
               <SelectTrigger
                 className="h-7 w-auto gap-1.5 px-2 text-xs border-0 bg-transparent hover:bg-muted"
                 style={currentUrgencyOption?.color ? {
@@ -616,14 +643,21 @@ export function TaskModal({
           )}
         />
 
-        {/* Assignee - inline select */}
+        {/* Assignee - inline select with immediate save */}
         <Controller
           name="assigneeId"
           control={control}
           render={({ field }) => (
             <Select
               value={field.value as string || '_unassigned'}
-              onValueChange={(val) => field.onChange(val === '_unassigned' ? null : val)}
+              onValueChange={(val) => {
+                const newValue = val === '_unassigned' ? null : val
+                field.onChange(newValue)
+                // Immediately save assignee changes - don't wait for debounce
+                if (task) {
+                  updateTask.mutate({ id: task._id, data: { assigneeId: newValue } })
+                }
+              }}
             >
               <SelectTrigger className="h-7 w-auto gap-1.5 px-2 text-xs border-0 bg-transparent hover:bg-muted">
                 {currentAssignee ? (
