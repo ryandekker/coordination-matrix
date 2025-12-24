@@ -78,6 +78,11 @@ export function TaskModal({
   const savedMetadataValueRef = useRef<string>('') // Track last saved value for reset
   const currentMetadataValueRef = useRef<string>('') // Track current textarea value to restore after re-renders
 
+  // Subtask creation state (at parent level to persist across SubtasksContent re-renders)
+  const subtaskInputRef = useRef<HTMLInputElement>(null)
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
+  const [isCreatingSubtask, setIsCreatingSubtask] = useState(false)
+
   // Right sidebar tab state - persisted to localStorage
   const [activeTab, setActiveTab] = useState<TaskModalTab>(() => {
     if (typeof window !== 'undefined') {
@@ -388,6 +393,9 @@ export function TaskModal({
       }
       setMetadataError(null)
       setIsMetadataEditMode(false)
+      // Reset subtask input
+      setNewSubtaskTitle('')
+      setIsCreatingSubtask(false)
     }
   }, [isOpen, performAutoSave])
 
@@ -1377,38 +1385,32 @@ export function TaskModal({
     </div>
   )
 
+  // Handle creating a new subtask
+  const handleCreateSubtask = useCallback(async () => {
+    if (!newSubtaskTitle.trim() || !task) return
+
+    setIsCreatingSubtask(true)
+    try {
+      await createTask.mutateAsync({
+        title: newSubtaskTitle.trim(),
+        parentId: task._id,
+        status: 'pending',
+        taskType: 'agent',
+      })
+      setNewSubtaskTitle('')
+    } finally {
+      setIsCreatingSubtask(false)
+      // Refocus input after state updates
+      subtaskInputRef.current?.focus()
+    }
+  }, [newSubtaskTitle, task, createTask])
+
   // Subtasks content for sidebar
   const SubtasksContent = () => {
-    const subtaskInputRef = useRef<HTMLInputElement>(null)
-    const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
-    const [isCreatingSubtask, setIsCreatingSubtask] = useState(false)
-
     // Handle clicking a subtask to open its modal
     const handleSubtaskClick = (subtaskId: string) => {
       onClose()
       router.push(`/tasks?taskId=${subtaskId}`)
-    }
-
-    // Handle creating a new subtask
-    const handleCreateSubtask = async () => {
-      if (!newSubtaskTitle.trim() || !task) return
-
-      setIsCreatingSubtask(true)
-      try {
-        await createTask.mutateAsync({
-          title: newSubtaskTitle.trim(),
-          parentId: task._id,
-          status: 'pending',
-          taskType: 'agent',
-        })
-        setNewSubtaskTitle('')
-        // Refocus input for quick multiple creation
-        setTimeout(() => {
-          subtaskInputRef.current?.focus()
-        }, 50)
-      } finally {
-        setIsCreatingSubtask(false)
-      }
     }
 
     // Handle keydown in input
