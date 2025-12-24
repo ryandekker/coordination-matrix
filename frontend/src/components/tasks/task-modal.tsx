@@ -41,6 +41,12 @@ import {
   type TaskModalTab,
 } from '@/lib/task-type-config'
 import { Settings2, Database, Activity, Workflow, ExternalLink, ArrowUpRight, ListTree } from 'lucide-react'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
@@ -1424,26 +1430,42 @@ export function TaskModal({
                     style={{ color: subtaskTypeConfig.hexColor }}
                   />
 
-                  {/* Status dot */}
+                  {/* Status badge */}
                   <span
-                    className="h-2 w-2 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: subtaskStatus?.color || '#888' }}
-                    title={subtaskStatus?.displayName || subtask.status}
-                  />
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0"
+                    style={{
+                      backgroundColor: `${subtaskStatus?.color || '#888'}20`,
+                      color: subtaskStatus?.color || '#888',
+                    }}
+                  >
+                    <span
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ backgroundColor: subtaskStatus?.color || '#888' }}
+                    />
+                    {subtaskStatus?.displayName || subtask.status}
+                  </span>
 
                   {/* Title */}
                   <span className="flex-1 text-sm truncate" title={subtask.title}>
                     {subtask.title}
                   </span>
 
-                  {/* Assignee avatar */}
+                  {/* Assignee avatar with tooltip */}
                   {subtaskAssignee ? (
-                    <span
-                      className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-medium flex-shrink-0"
-                      title={subtaskAssignee.displayName}
-                    >
-                      {subtaskAssignee.displayName.charAt(0).toUpperCase()}
-                    </span>
+                    <TooltipProvider delayDuration={200}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-medium flex-shrink-0 cursor-default"
+                          >
+                            {subtaskAssignee.displayName.charAt(0).toUpperCase()}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="left" className="text-xs">
+                          {subtaskAssignee.displayName}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   ) : (
                     <span className="w-5 h-5 flex-shrink-0" />
                   )}
