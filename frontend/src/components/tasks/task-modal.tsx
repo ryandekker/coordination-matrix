@@ -775,8 +775,8 @@ export function TaskModal({
           />
         </div>
 
-        {/* Extra Prompt - only for agent tasks */}
-        {currentTaskType === 'agent' && (
+        {/* Extra Prompt - only for agent tasks in create mode (edit mode shows in sidebar) */}
+        {!isEditMode && currentTaskType === 'agent' && (
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">Extra Prompt</label>
             <textarea
