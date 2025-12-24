@@ -1,6 +1,9 @@
 import { EventEmitter } from 'events';
 import { ObjectId } from 'mongodb';
-import { Task, TaskEvent, TaskEventType, FieldChange, EventHandler } from '../types/index.js';
+import { Task, TaskEvent, TaskEventType, FieldChange, EventHandler, WorkflowRunEvent, WorkflowRunEventType } from '../types/index.js';
+
+// Type for workflow run event handlers
+export type WorkflowRunEventHandler = (event: WorkflowRunEvent) => void | Promise<void>;
 
 /**
  * Event Bus - Pub/Sub backbone for the event system
@@ -13,11 +16,17 @@ import { Task, TaskEvent, TaskEventType, FieldChange, EventHandler } from '../ty
 class EventBus {
   private emitter: EventEmitter;
   private handlers: Map<string, Set<EventHandler>>;
+  private workflowRunEmitter: EventEmitter;
+  private workflowRunHandlers: Map<string, Set<WorkflowRunEventHandler>>;
 
   constructor() {
     this.emitter = new EventEmitter();
     this.emitter.setMaxListeners(100); // Allow many subscribers
     this.handlers = new Map();
+    // Separate emitter for workflow run events
+    this.workflowRunEmitter = new EventEmitter();
+    this.workflowRunEmitter.setMaxListeners(100);
+    this.workflowRunHandlers = new Map();
   }
 
   /**
@@ -108,6 +117,47 @@ class EventBus {
       this.emitter.removeAllListeners();
       this.handlers.clear();
     }
+  }
+
+  // ============ Workflow Run Events ============
+
+  /**
+   * Publish a workflow run event to all subscribers
+   */
+  async publishWorkflowRunEvent(event: WorkflowRunEvent): Promise<void> {
+    // Emit to all wildcard handlers first
+    this.workflowRunEmitter.emit('*', event);
+
+    // Emit to specific event type handlers
+    this.workflowRunEmitter.emit(event.type, event);
+  }
+
+  /**
+   * Subscribe to workflow run events
+   * @param eventType - Event type to subscribe to, or '*' for all events
+   * @param handler - Function to handle events
+   */
+  subscribeWorkflowRun(eventType: WorkflowRunEventType | '*', handler: WorkflowRunEventHandler): () => void {
+    this.workflowRunEmitter.on(eventType, handler);
+
+    // Track handlers for cleanup
+    if (!this.workflowRunHandlers.has(eventType)) {
+      this.workflowRunHandlers.set(eventType, new Set());
+    }
+    this.workflowRunHandlers.get(eventType)!.add(handler);
+
+    // Return unsubscribe function
+    return () => {
+      this.workflowRunEmitter.off(eventType, handler);
+      this.workflowRunHandlers.get(eventType)?.delete(handler);
+    };
+  }
+
+  /**
+   * Get subscriber count for a workflow run event type
+   */
+  workflowRunListenerCount(eventType: WorkflowRunEventType | '*'): number {
+    return this.workflowRunEmitter.listenerCount(eventType);
   }
 }
 

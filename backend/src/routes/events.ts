@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { eventBus } from '../services/event-bus.js';
-import { TaskEvent } from '../types/index.js';
+import { TaskEvent, WorkflowRunEvent } from '../types/index.js';
 
 const router = Router();
 
@@ -33,8 +33,8 @@ router.get('/stream', (req: Request, res: Response) => {
     }
   }, 30000); // Every 30 seconds
 
-  // Subscribe to all events from the event bus
-  const unsubscribe = eventBus.subscribe('*', async (event: TaskEvent) => {
+  // Subscribe to all task events from the event bus
+  const unsubscribeTask = eventBus.subscribe('*', async (event: TaskEvent) => {
     if (res.writableEnded) return;
 
     try {
@@ -69,14 +69,50 @@ router.get('/stream', (req: Request, res: Response) => {
 
       res.write(`event: ${event.type}\ndata: ${JSON.stringify(eventData)}\n\n`);
     } catch (error) {
-      console.error('[SSE] Error sending event:', error);
+      console.error('[SSE] Error sending task event:', error);
+    }
+  });
+
+  // Subscribe to workflow run events for real-time workflow updates
+  const unsubscribeWorkflowRun = eventBus.subscribeWorkflowRun('*', async (event: WorkflowRunEvent) => {
+    if (res.writableEnded) return;
+
+    try {
+      // Send the workflow run event to the client
+      const eventData = {
+        id: event.id,
+        type: event.type,
+        workflowRunId: event.workflowRunId.toString(),
+        timestamp: event.timestamp,
+        stepId: event.stepId,
+        taskId: event.taskId?.toString(),
+        error: event.error,
+        // Include workflow run data for cache updates
+        workflowRun: event.workflowRun ? {
+          _id: event.workflowRun._id.toString(),
+          workflowId: event.workflowRun.workflowId.toString(),
+          status: event.workflowRun.status,
+          currentStepIds: event.workflowRun.currentStepIds,
+          completedStepIds: event.workflowRun.completedStepIds,
+          failedStepId: event.workflowRun.failedStepId,
+          error: event.workflowRun.error,
+          createdAt: event.workflowRun.createdAt,
+          startedAt: event.workflowRun.startedAt,
+          completedAt: event.workflowRun.completedAt,
+        } : undefined,
+      };
+
+      res.write(`event: ${event.type}\ndata: ${JSON.stringify(eventData)}\n\n`);
+    } catch (error) {
+      console.error('[SSE] Error sending workflow run event:', error);
     }
   });
 
   // Clean up on disconnect
   const cleanup = () => {
     clearInterval(heartbeatInterval);
-    unsubscribe();
+    unsubscribeTask();
+    unsubscribeWorkflowRun();
     activeConnections.delete(res);
     console.log(`[SSE] Client disconnected. Active connections: ${activeConnections.size}`);
   };

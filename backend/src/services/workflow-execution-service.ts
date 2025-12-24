@@ -234,6 +234,7 @@ class WorkflowExecutionService {
   }
 
   private async publish(event: WorkflowRunEvent): Promise<void> {
+    // Publish to internal handlers
     const wildcardHandlers = this.handlers.get('*') || new Set();
     for (const handler of wildcardHandlers) {
       try {
@@ -250,6 +251,13 @@ class WorkflowExecutionService {
       } catch (error) {
         console.error(`[WorkflowExecutionService] Handler error for ${event.type}:`, error);
       }
+    }
+
+    // Also publish to the main event bus for SSE streaming
+    try {
+      await eventBus.publishWorkflowRunEvent(event);
+    } catch (error) {
+      console.error(`[WorkflowExecutionService] Error publishing to event bus:`, error);
     }
   }
 
