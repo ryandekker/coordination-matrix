@@ -379,11 +379,23 @@ const InlineTaskRow = memo(function InlineTaskRow({
   const inputRef = useRef<HTMLInputElement>(null)
   const isSubmittingRef = useRef(false)
 
+  const prevIsCreatingRef = useRef(isCreating)
+
   useEffect(() => {
     if (inputRef.current) {
       inputRef.current.focus({ preventScroll: true })
     }
   }, [])
+
+  // Refocus when isCreating transitions from true to false (creation complete)
+  useEffect(() => {
+    if (prevIsCreatingRef.current && !isCreating) {
+      setTimeout(() => {
+        inputRef.current?.focus({ preventScroll: true })
+      }, 0)
+    }
+    prevIsCreatingRef.current = isCreating
+  }, [isCreating])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && title.trim()) {

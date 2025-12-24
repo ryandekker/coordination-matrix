@@ -533,10 +533,20 @@ export function TaskModal({
       setNewSubtaskTitle('')
     } finally {
       setIsCreatingSubtask(false)
-      // Refocus input after state updates
-      subtaskInputRef.current?.focus()
+      // Refocus input after React finishes re-rendering
+      setTimeout(() => {
+        subtaskInputRef.current?.focus()
+      }, 0)
     }
   }, [newSubtaskTitle, task, createTask])
+
+  // Handle keydown in subtask input
+  const handleSubtaskInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleCreateSubtask()
+    }
+  }, [handleCreateSubtask])
 
   // Editable header with key fields for existing tasks
   const EditableHeader = () => {
