@@ -399,13 +399,13 @@ workflowsRouter.get('/ai-prompt-context', async (_req: Request, res: Response, n
 workflowsRouter.get('/ai-prompt', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { format = 'markdown', includeContext = 'true' } = req.query;
+    const { format = 'mermaid', includeContext = 'true' } = req.query;
 
     // Fetch context data
     const agents = await db
       .collection('users')
       .find({ isAgent: true, isActive: true })
-      .project({ _id: 1, displayName: 1 })
+      .project({ _id: 1, displayName: 1, agentPrompt: 1 })
       .sort({ displayName: 1 })
       .toArray();
 
@@ -419,89 +419,594 @@ workflowsRouter.get('/ai-prompt', async (req: Request, res: Response, next: Next
     const workflows = await db
       .collection<Workflow>('workflows')
       .find({ isActive: true })
-      .project({ _id: 1, name: 1 })
+      .project({ _id: 1, name: 1, description: 1 })
       .sort({ name: 1 })
       .toArray();
 
-    // Build the prompt
-    let prompt = `# Workflow Generation Instructions
+    // Fetch distinct tags from tasks
+    const tagResults = await db.collection('tasks').distinct('tags');
+    const tags = (tagResults as string[]).filter(t => t && typeof t === 'string').sort();
 
-You are generating a workflow for the Coordination Matrix system. Workflows can be defined as JSON or Mermaid diagrams.
+    // Build the comprehensive prompt
+    let prompt = `# Workflow Generation Guide for Coordination Matrix
 
-## Step Types
+You are generating a workflow definition for the Coordination Matrix system. This guide provides complete documentation for all step types, configuration options, and examples.
 
-| Type | Purpose | Mermaid Shape |
-|------|---------|---------------|
-| agent | AI-automated task | \`["text"]\` rectangle |
-| manual | Human task | \`("text")\` rounded |
-| external | API call + callback | \`{{"text"}}\` hexagon |
-| webhook | Fire-and-forget HTTP | \`{{"text"}}\` hexagon |
-| decision | Conditional routing | \`{"text"}\` diamond |
-| foreach | Fan-out loop | \`[["Each: text"]]\` |
-| join | Fan-in aggregation | \`[["Join: text"]]\` |
-| flow | Nested workflow | \`[["Run: text"]]\` |
+## Workflow Structure
 
-## Template Variables
+A workflow consists of:
+- **name**: Display name for the workflow
+- **description**: What this workflow does
+- **steps**: Array of step objects defining the workflow logic
+- **rootTaskTitleTemplate** (optional): Dynamic title template using \`{{input.field}}\` syntax
 
-- \`{{input.path}}\` - Access input payload values
-- \`{{item}}\`, \`{{_index}}\`, \`{{_total}}\` - ForEach loop context
-- \`{{callbackUrl}}\` - System callback URL for external steps
-- \`{{foreachWebhookUrl}}\` - URL to stream items to ForEach
+---
 
-## Important Rules
+## Step Types Reference
 
-1. Every step needs: id, name, stepType
-2. Always quote Mermaid labels with double quotes
-3. Never use inline style statements
-4. Include all classDef definitions in Mermaid
-5. Decision steps require connections with conditions
+### 1. Agent Step (\`agent\`)
+AI-powered automated task executed by the automation daemon.
+
+**Required Fields:**
+- \`id\`: Unique identifier (e.g., "analyze", "review")
+- \`name\`: Display name
+- \`stepType\`: "agent"
+
+**Optional Fields:**
+- \`additionalInstructions\`: Extra context/prompt for the AI agent
+- \`defaultAssigneeId\`: ID of the agent to execute this task
+- \`description\`: Step description
+- \`connections\`: Explicit connections to next steps
+
+**JSON Example:**
+\`\`\`json
+{
+  "id": "analyze-content",
+  "name": "Analyze Content",
+  "stepType": "agent",
+  "additionalInstructions": "Review the submitted content for:\\n1. Grammar and spelling errors\\n2. Factual accuracy\\n3. Tone appropriateness\\n\\nProvide a structured report with findings.",
+  "defaultAssigneeId": "content-reviewer"
+}
+\`\`\`
+
+**Mermaid Shape:** Rectangle \`["text"]\`
+\`\`\`mermaid
+analyze["Analyze Content"]
+class analyze agent
+%% @step(analyze): {"additionalInstructions":"Review for grammar, accuracy, and tone.","defaultAssigneeId":"content-reviewer"}
+\`\`\`
+
+---
+
+### 2. Manual Step (\`manual\`)
+Human-in-the-loop task that waits for a user to complete it via the UI.
+
+**Required Fields:**
+- \`id\`: Unique identifier
+- \`name\`: Display name
+- \`stepType\`: "manual"
+
+**Optional Fields:**
+- \`additionalInstructions\`: Instructions shown to the human user
+- \`defaultAssigneeId\`: User ID to assign the task to
+- \`description\`: Step description
+
+**JSON Example:**
+\`\`\`json
+{
+  "id": "manager-approval",
+  "name": "Manager Approval",
+  "stepType": "manual",
+  "additionalInstructions": "Review the analysis results and either:\\n- Approve to proceed to publication\\n- Reject with feedback for revision\\n\\nCheck the attached documents before deciding.",
+  "defaultAssigneeId": "user-id-here"
+}
+\`\`\`
+
+**Mermaid Shape:** Stadium/Rounded \`("text")\`
+\`\`\`mermaid
+approve("Manager Approval")
+class approve manual
+%% @step(approve): {"additionalInstructions":"Review and approve or reject with feedback."}
+\`\`\`
+
+---
+
+### 3. External Step (\`external\`)
+Calls an external API and **waits for a callback response**. Use this when an external service needs time to process and will call back when done.
+
+**Required Fields:**
+- \`id\`: Unique identifier
+- \`name\`: Display name
+- \`stepType\`: "external"
+
+**Optional Fields (externalConfig object):**
+- \`endpoint\`: URL to call (supports \`{{variable}}\` templates)
+- \`method\`: HTTP method (GET, POST, PUT, PATCH, DELETE)
+- \`headers\`: Key-value headers (supports templates)
+- \`payloadTemplate\`: JSON template for request body
+- \`responseMapping\`: Map response fields to output
+
+**Template Variables Available:**
+- \`{{callbackUrl}}\` - System-generated callback URL for the external service
+- \`{{callbackSecret}}\` - Secret token for callback authentication
+- \`{{input.field}}\` - Values from input payload
+
+**JSON Example:**
+\`\`\`json
+{
+  "id": "process-document",
+  "name": "OCR Processing",
+  "stepType": "external",
+  "externalConfig": {
+    "endpoint": "https://ocr-service.example.com/process",
+    "method": "POST",
+    "headers": {
+      "Authorization": "Bearer {{input.apiKey}}",
+      "Content-Type": "application/json"
+    },
+    "payloadTemplate": "{\\"documentUrl\\": \\"{{input.documentUrl}}\\", \\"callbackUrl\\": \\"{{callbackUrl}}\\", \\"secret\\": \\"{{callbackSecret}}\\"}"
+  }
+}
+\`\`\`
+
+**Mermaid Shape:** Hexagon \`{{"text"}}\`
+\`\`\`mermaid
+ocr{{"OCR Processing"}}
+class ocr external
+%% @step(ocr): {"externalConfig":{"endpoint":"https://ocr.example.com/process","method":"POST"}}
+\`\`\`
+
+**Callback Pattern:**
+The external service should POST to \`{{callbackUrl}}\` with:
+\`\`\`json
+{
+  "success": true,
+  "data": { "extractedText": "...", "confidence": 0.95 }
+}
+\`\`\`
+
+---
+
+### 4. Webhook Step (\`webhook\`)
+Outbound HTTP call that does NOT wait for a callback. Fire-and-forget or immediate response.
+
+**Required Fields:**
+- \`id\`: Unique identifier
+- \`name\`: Display name
+- \`stepType\`: "webhook"
+
+**Optional Fields (webhookConfig object):**
+- \`url\`: URL to call (supports templates)
+- \`method\`: HTTP method (default: POST)
+- \`headers\`: Request headers
+- \`bodyTemplate\`: JSON body template
+- \`maxRetries\`: Max retry attempts (default: 3)
+- \`timeoutMs\`: Request timeout in ms (default: 30000)
+- \`successStatusCodes\`: HTTP codes considered success (default: 200-299)
+
+**JSON Example:**
+\`\`\`json
+{
+  "id": "notify-slack",
+  "name": "Send Slack Notification",
+  "stepType": "webhook",
+  "webhookConfig": {
+    "url": "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXX",
+    "method": "POST",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "bodyTemplate": "{\\"text\\": \\"Workflow completed for {{input.projectName}}\\", \\"channel\\": \\"#notifications\\"}"
+  }
+}
+\`\`\`
+
+**Mermaid Shape:** Hexagon \`{{"text"}}\`
+\`\`\`mermaid
+notify{{"Slack Notification"}}
+class notify external
+%% @step(notify): {"webhookConfig":{"url":"https://hooks.slack.com/xxx","method":"POST"}}
+\`\`\`
+
+---
+
+### 5. Decision Step (\`decision\`)
+Routes workflow to different paths based on conditions evaluated against input data.
+
+**Required Fields:**
+- \`id\`: Unique identifier
+- \`name\`: Display name (usually a question)
+- \`stepType\`: "decision"
+- \`connections\`: Array of conditional routes
+
+**Optional Fields:**
+- \`defaultConnection\`: Target step ID when no conditions match
+
+**Connection Object:**
+- \`targetStepId\`: ID of step to route to
+- \`condition\`: Condition expression (see syntax below)
+- \`label\`: Display label for the branch
+
+**Condition Syntax:**
+- \`field:value\` - Exact match
+- \`field:value1,value2\` - Match any of values
+- \`field:>10\` - Greater than (also <, >=, <=)
+- \`field:!value\` - Not equal
+
+**JSON Example:**
+\`\`\`json
+{
+  "id": "check-priority",
+  "name": "Priority Level?",
+  "stepType": "decision",
+  "connections": [
+    {
+      "targetStepId": "escalate",
+      "condition": "priority:critical,urgent",
+      "label": "High Priority"
+    },
+    {
+      "targetStepId": "standard-queue",
+      "condition": "priority:normal",
+      "label": "Normal"
+    }
+  ],
+  "defaultConnection": "low-priority-queue"
+}
+\`\`\`
+
+**Mermaid Shape:** Diamond \`{"text"}\`
+\`\`\`mermaid
+checkPriority{"Priority Level?"}
+checkPriority -->|"High Priority"| escalate
+checkPriority -->|"Normal"| standardQueue
+checkPriority -->|"Low"| lowQueue
+class checkPriority decision
+\`\`\`
+
+---
+
+### 6. ForEach Step (\`foreach\`)
+Fan-out: Creates parallel child tasks for each item in an array.
+
+**Required Fields:**
+- \`id\`: Unique identifier
+- \`name\`: Display name
+- \`stepType\`: "foreach"
+- \`connections\`: Steps to execute for each item
+
+**Optional Fields:**
+- \`itemsPath\`: JSONPath to array in input (e.g., "recipients", "items.emails")
+- \`itemVariable\`: Variable name for each item (default: "item")
+- \`maxItems\`: Safety limit (default: 100)
+- \`expectedCountPath\`: JSONPath to get expected count from input
+
+**Child Task Variables:**
+Each child task receives:
+- \`{{item}}\` or \`{{variableName}}\` - The current item
+- \`{{_index}}\` - Zero-based index (0, 1, 2...)
+- \`{{_total}}\` - Total number of items
+
+**JSON Example:**
+\`\`\`json
+{
+  "id": "process-recipients",
+  "name": "Process Each Recipient",
+  "stepType": "foreach",
+  "itemsPath": "recipients",
+  "itemVariable": "recipient",
+  "maxItems": 50,
+  "connections": [
+    { "targetStepId": "send-email" }
+  ]
+}
+\`\`\`
+
+**Mermaid Shape:** Subroutine \`[["Each: text"]]\`
+\`\`\`mermaid
+processRecipients[["Each: Process Recipient"]]
+processRecipients --> sendEmail
+class processRecipients foreach
+%% @step(processRecipients): {"itemsPath":"recipients","itemVariable":"recipient","maxItems":50}
+\`\`\`
+
+**Streaming Items Pattern:**
+If \`itemsPath\` is omitted, the ForEach waits for items via callback. External steps can use \`{{foreachWebhookUrl}}\` to stream items:
+\`\`\`json
+{
+  "id": "fetch-items",
+  "stepType": "external",
+  "externalConfig": {
+    "payloadTemplate": "{\\"streamTo\\": \\"{{foreachWebhookUrl}}\\"}"
+  }
+}
+\`\`\`
+
+---
+
+### 7. Join Step (\`join\`)
+Fan-in: Waits for all parallel tasks from a ForEach to complete before continuing.
+
+**Required Fields:**
+- \`id\`: Unique identifier
+- \`name\`: Display name
+- \`stepType\`: "join"
+
+**Optional Fields:**
+- \`awaitStepId\`: ID of the ForEach step to wait for
+- \`awaitTag\`: Alternative: wait for tasks with this tag
+- \`minSuccessPercent\`: Minimum % that must succeed (default: 100)
+- \`expectedCountPath\`: JSONPath to expected count
+- \`joinBoundary\`: Advanced boundary conditions object
+
+**joinBoundary Object:**
+- \`minCount\`: Minimum tasks that must complete
+- \`minPercent\`: Minimum percentage (default: 100)
+- \`maxWaitMs\`: Maximum time to wait
+- \`failOnTimeout\`: Fail or continue with partial results
+
+**Output Available to Next Step:**
+- \`aggregatedResults\`: Array of all child task outputs
+- \`successCount\`: Number of successful children
+- \`failedCount\`: Number of failed children
+
+**JSON Example:**
+\`\`\`json
+{
+  "id": "aggregate-results",
+  "name": "Aggregate Email Results",
+  "stepType": "join",
+  "awaitStepId": "process-recipients",
+  "minSuccessPercent": 90
+}
+\`\`\`
+
+**Mermaid Shape:** Subroutine \`[["Join: text"]]\`
+\`\`\`mermaid
+aggregate[["Join: Aggregate Results"]]
+class aggregate join
+%% @step(aggregate): {"awaitStepId":"process-recipients","minSuccessPercent":90}
+\`\`\`
+
+---
+
+### 8. Flow Step (\`flow\`)
+Delegates execution to another workflow (nested/child workflow).
+
+**Required Fields:**
+- \`id\`: Unique identifier
+- \`name\`: Display name
+- \`stepType\`: "flow"
+
+**Optional Fields:**
+- \`flowId\`: ID of the workflow to run
+- \`inputMapping\`: Map values from current context to child workflow input
+
+**JSON Example:**
+\`\`\`json
+{
+  "id": "run-validation",
+  "name": "Run Validation Workflow",
+  "stepType": "flow",
+  "flowId": "workflow-id-here",
+  "inputMapping": {
+    "document": "{{input.content}}",
+    "validationRules": "{{input.rules}}",
+    "strictMode": "true"
+  }
+}
+\`\`\`
+
+**Mermaid Shape:** Subroutine \`[["Run: text"]]\`
+\`\`\`mermaid
+validate[["Run: Validation Workflow"]]
+class validate flow
+%% @step(validate): {"flowId":"workflow-id","inputMapping":{"document":"{{input.content}}"}}
+\`\`\`
+
+---
+
+## Template Variables Reference
+
+| Variable | Context | Description |
+|----------|---------|-------------|
+| \`{{input.path.to.value}}\` | All steps | Access input payload by dot path |
+| \`{{item}}\` or \`{{_item}}\` | ForEach children | Current item being processed |
+| \`{{_index}}\` | ForEach children | Zero-based index of current item |
+| \`{{_total}}\` | ForEach children | Total number of items |
+| \`{{callbackUrl}}\` | External steps | System callback URL |
+| \`{{callbackSecret}}\` | External steps | Secret for callback auth |
+| \`{{foreachWebhookUrl}}\` | External→ForEach | URL to stream items to ForEach |
+
+---
+
+## Mermaid Syntax Reference
+
+### Required Structure
+\`\`\`mermaid
+flowchart TD
+    %% Node definitions
+    step1["Agent Task"]
+    step2("Manual Task")
+    step3{{"External API"}}
+    step4{"Decision?"}
+    step5[["Each: Process"]]
+    step6[["Join: Aggregate"]]
+    step7[["Run: Subprocess"]]
+
+    %% Connections
+    step1 --> step2
+    step4 -->|"Yes"| step5
+    step4 -->|"No"| step7
+
+    %% Required class definitions
+    classDef agent fill:#3B82F6,color:#fff
+    classDef manual fill:#8B5CF6,color:#fff
+    classDef external fill:#F97316,color:#fff
+    classDef decision fill:#F59E0B,color:#fff
+    classDef foreach fill:#10B981,color:#fff
+    classDef join fill:#6366F1,color:#fff
+    classDef flow fill:#EC4899,color:#fff
+
+    %% Class assignments
+    class step1 agent
+    class step2 manual
+    class step3 external
+    class step4 decision
+    class step5 foreach
+    class step6 join
+    class step7 flow
+
+    %% Step configuration (preserved on import)
+    %% @step(step1): {"additionalInstructions":"..."}
+\`\`\`
+
+### Shape-to-Type Mapping
+| Step Type | Shape | Syntax | Color |
+|-----------|-------|--------|-------|
+| agent | Rectangle | \`["text"]\` | Blue #3B82F6 |
+| manual | Stadium | \`("text")\` | Purple #8B5CF6 |
+| external | Hexagon | \`{{"text"}}\` | Orange #F97316 |
+| webhook | Hexagon | \`{{"text"}}\` | Orange #F97316 |
+| decision | Diamond | \`{"text"}\` | Amber #F59E0B |
+| foreach | Subroutine | \`[["Each: text"]]\` | Green #10B981 |
+| join | Subroutine | \`[["Join: text"]]\` | Indigo #6366F1 |
+| flow | Subroutine | \`[["Run: text"]]\` | Pink #EC4899 |
+
+---
+
+## Common Workflow Patterns
+
+### Pattern 1: Linear Review Pipeline
+\`\`\`json
+{
+  "name": "Content Review Pipeline",
+  "steps": [
+    { "id": "draft", "name": "AI Draft", "stepType": "agent", "additionalInstructions": "Create initial draft from the brief." },
+    { "id": "review", "name": "Editor Review", "stepType": "manual", "additionalInstructions": "Review and provide feedback." },
+    { "id": "revise", "name": "AI Revision", "stepType": "agent", "additionalInstructions": "Apply feedback and revise." },
+    { "id": "approve", "name": "Final Approval", "stepType": "manual" }
+  ]
+}
+\`\`\`
+
+### Pattern 2: Parallel Processing with Aggregation
+\`\`\`json
+{
+  "name": "Batch Email Campaign",
+  "steps": [
+    { "id": "prepare", "name": "Prepare Campaign", "stepType": "agent" },
+    { "id": "foreach", "name": "Process Recipients", "stepType": "foreach", "itemsPath": "recipients", "itemVariable": "recipient", "connections": [{"targetStepId": "send"}] },
+    { "id": "send", "name": "Send Email", "stepType": "webhook", "webhookConfig": {"url": "https://email-api.example.com/send", "bodyTemplate": "{\\"to\\": \\"{{recipient.email}}\\", \\"template\\": \\"{{input.templateId}}\\"}"} },
+    { "id": "join", "name": "Aggregate Results", "stepType": "join", "awaitStepId": "foreach" },
+    { "id": "report", "name": "Generate Report", "stepType": "agent", "additionalInstructions": "Summarize delivery results from aggregatedResults." }
+  ]
+}
+\`\`\`
+
+### Pattern 3: Conditional Routing with Escalation
+\`\`\`json
+{
+  "name": "Support Ticket Triage",
+  "steps": [
+    { "id": "analyze", "name": "Analyze Ticket", "stepType": "agent", "additionalInstructions": "Classify severity and category." },
+    { "id": "route", "name": "Severity Check", "stepType": "decision", "connections": [
+      {"targetStepId": "escalate", "condition": "severity:critical", "label": "Critical"},
+      {"targetStepId": "assign", "condition": "severity:high,normal", "label": "Standard"}
+    ], "defaultConnection": "queue" },
+    { "id": "escalate", "name": "Page On-Call", "stepType": "webhook" },
+    { "id": "assign", "name": "Assign to Team", "stepType": "agent" },
+    { "id": "queue", "name": "Add to Backlog", "stepType": "manual" }
+  ]
+}
+\`\`\`
 `;
 
+    // Add context section if requested
     if (includeContext === 'true') {
       prompt += `
-## Available Context
+---
 
-### Agents (for defaultAssigneeId on agent steps)
-${agents.length > 0 ? agents.map(a => `- ${a.displayName} (${a._id})`).join('\n') : '- No agents configured'}
+## Available Context (Current System)
 
-### Users (for defaultAssigneeId on manual steps)
-${users.length > 0 ? users.map(u => `- ${u.displayName}${u.email ? ` <${u.email}>` : ''} (${u._id})`).join('\n') : '- No users configured'}
+### AI Agents
+Use these IDs for \`defaultAssigneeId\` on agent steps:
+${agents.length > 0 ? agents.map(a => `- **${a.displayName}** (\`${a._id}\`)${a.agentPrompt ? `\n  _${a.agentPrompt.substring(0, 100).replace(/\n/g, ' ')}${a.agentPrompt.length > 100 ? '...' : ''}_` : ''}`).join('\n') : '- _No agents configured_'}
 
-### Existing Workflows (for flowId on flow steps)
-${workflows.length > 0 ? workflows.map(w => `- ${w.name} (${w._id})`).join('\n') : '- No existing workflows'}
+### Users
+Use these IDs for \`defaultAssigneeId\` on manual steps:
+${users.length > 0 ? users.map(u => `- **${u.displayName}**${u.email ? ` <${u.email}>` : ''} (\`${u._id}\`)`).join('\n') : '- _No users configured_'}
+
+### Existing Workflows
+Use these IDs for \`flowId\` on flow steps:
+${workflows.length > 0 ? workflows.map(w => `- **${w.name}** (\`${w._id}\`)${w.description ? `\n  _${w.description}_` : ''}`).join('\n') : '- _No workflows configured_'}
+
+### Available Tags
+Use these in \`taskDefaults.tags\` or for filtering:
+${tags.length > 0 ? tags.map(t => `\`${t}\``).join(', ') : '- _No tags in use yet_'}
 `;
     }
 
+    // Add output format section
     prompt += `
+---
+
 ## Output Format
 
-${format === 'json' ? `
-Provide the workflow as JSON:
+${format === 'json' ? `Provide the workflow as a JSON object:
+
 \`\`\`json
 {
   "name": "Workflow Name",
-  "description": "What this workflow does",
+  "description": "Clear description of what this workflow accomplishes",
+  "rootTaskTitleTemplate": "{{input.projectName}} - Processing",
   "steps": [
-    { "id": "step1", "name": "Step Name", "stepType": "agent" }
+    {
+      "id": "step-id",
+      "name": "Step Display Name",
+      "stepType": "agent|manual|external|webhook|decision|foreach|join|flow",
+      // ... additional fields based on step type
+    }
   ]
 }
-\`\`\`` : `
-Provide the workflow as Mermaid:
+\`\`\`
+
+Ensure all step IDs are unique and connections reference valid step IDs.` : `Provide the workflow as a Mermaid diagram:
+
 \`\`\`mermaid
 flowchart TD
-    step1["Step Name"]
-    step2("Manual Step")
+    step1["First Step"]
+    step2("Human Review")
+    step3{"Decision Point?"}
 
     step1 --> step2
+    step2 --> step3
+    step3 -->|"Yes"| step4
+    step3 -->|"No"| step5
 
     classDef agent fill:#3B82F6,color:#fff
     classDef manual fill:#8B5CF6,color:#fff
+    classDef external fill:#F97316,color:#fff
+    classDef decision fill:#F59E0B,color:#fff
+    classDef foreach fill:#10B981,color:#fff
+    classDef join fill:#6366F1,color:#fff
+    classDef flow fill:#EC4899,color:#fff
 
     class step1 agent
     class step2 manual
+    class step3 decision
 
-    %% @step(step1): {"additionalInstructions":"Instructions here"}
-\`\`\``}
+    %% Step configuration (IMPORTANT - include for all steps that need config)
+    %% @step(step1): {"additionalInstructions":"Your instructions here"}
+    %% @step(step2): {"additionalInstructions":"Instructions for the human reviewer"}
+\`\`\`
+
+**Important Mermaid Rules:**
+1. Always quote labels with double quotes: \`["Label"]\` not \`[Label]\`
+2. Never use inline \`style\` statements
+3. Include ALL classDef declarations
+4. Use \`%% @step(id): {json}\` comments for step configuration
+5. Decision branch labels must be quoted: \`-->|"Label"|\``}
 `;
 
     res.json({
