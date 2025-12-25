@@ -185,12 +185,94 @@ export function useBulkUpdateTasks() {
   return useMutation({
     mutationFn: ({ taskIds, updates }: { taskIds: string[]; updates: Partial<Task> }) =>
       tasksApi.bulkUpdate(taskIds, updates),
-    onSuccess: () => {
-      // Force refetch all task-related queries
+    // Use optimistic updates to prevent table refresh/collapse
+    onMutate: async ({ taskIds, updates }) => {
+      // Cancel outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ['tasks'] })
+      await queryClient.cancelQueries({ queryKey: ['task-tree'] })
+      await queryClient.cancelQueries({ queryKey: ['task-children'] })
+
+      // Snapshot previous values
+      const previousTasks = queryClient.getQueriesData({ queryKey: ['tasks'] })
+      const previousTaskTree = queryClient.getQueriesData({ queryKey: ['task-tree'] })
+      const previousTaskChildren = queryClient.getQueriesData({ queryKey: ['task-children'] })
+
+      const taskIdSet = new Set(taskIds)
+
+      // Optimistically update tasks in lists
+      queryClient.setQueriesData({ queryKey: ['tasks'] }, (old: unknown) => {
+        if (!old) return old
+        const oldData = old as { data: Task[]; pagination: unknown }
+        return {
+          ...oldData,
+          data: oldData.data.map((task: Task) =>
+            taskIdSet.has(task._id) ? { ...task, ...updates } : task
+          )
+        }
+      })
+
+      // Optimistically update task tree
+      queryClient.setQueriesData({ queryKey: ['task-tree'] }, (old: unknown) => {
+        if (!old) return old
+        const oldData = old as { data: Task[] }
+        return {
+          ...oldData,
+          data: updateTasksInTree(oldData.data, taskIdSet, updates)
+        }
+      })
+
+      // Optimistically update task children
+      queryClient.setQueriesData({ queryKey: ['task-children'] }, (old: unknown) => {
+        if (!old) return old
+        const oldData = old as { data: Task[] }
+        return {
+          ...oldData,
+          data: oldData.data.map((task: Task) =>
+            taskIdSet.has(task._id) ? { ...task, ...updates } : task
+          )
+        }
+      })
+
+      return { previousTasks, previousTaskTree, previousTaskChildren }
+    },
+    onError: (_err, _variables, context) => {
+      // Rollback on error
+      if (context?.previousTasks) {
+        context.previousTasks.forEach(([queryKey, data]) => {
+          queryClient.setQueryData(queryKey, data)
+        })
+      }
+      if (context?.previousTaskTree) {
+        context.previousTaskTree.forEach(([queryKey, data]) => {
+          queryClient.setQueryData(queryKey, data)
+        })
+      }
+      if (context?.previousTaskChildren) {
+        context.previousTaskChildren.forEach(([queryKey, data]) => {
+          queryClient.setQueryData(queryKey, data)
+        })
+      }
+    },
+    onSettled: () => {
+      // Refetch to get resolved references and ensure data is in sync
       queryClient.invalidateQueries({ queryKey: ['tasks'], refetchType: 'all' })
       queryClient.invalidateQueries({ queryKey: ['task-tree'], refetchType: 'all' })
       queryClient.invalidateQueries({ queryKey: ['task-children'], refetchType: 'all' })
     },
+  })
+}
+
+// Helper to recursively update multiple tasks in a tree structure
+function updateTasksInTree(tasks: Task[], taskIds: Set<string>, updates: Partial<Task>): Task[] {
+  return tasks.map(task => {
+    const updatedTask = taskIds.has(task._id) ? { ...task, ...updates } : task
+    if (task.children && task.children.length > 0) {
+      return {
+        ...updatedTask,
+        children: updateTasksInTree(task.children, taskIds, updates)
+      }
+    }
+    return updatedTask
   })
 }
 

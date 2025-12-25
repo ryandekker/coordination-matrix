@@ -71,6 +71,12 @@ class WebhookTaskService {
       throw new Error(`Task ${id} is not an external task`);
     }
 
+    // Don't execute webhooks for cancelled tasks
+    if (task.status === 'cancelled') {
+      console.log(`[WebhookTaskService] Skipping execution of cancelled task ${id}`);
+      throw new Error(`Task ${id} has been cancelled`);
+    }
+
     const config = task.webhookConfig;
     const attempts = config.attempts || [];
     const attemptNumber = attempts.length + 1;
