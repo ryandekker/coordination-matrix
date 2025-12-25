@@ -606,7 +606,7 @@ const TaskRow = memo(function TaskRow({
   })
 
   // Use pre-attached children if available, otherwise use fetched children
-  const children = hasPreAttachedChildren ? task.children : (childrenData?.data || [])
+  const children = hasPreAttachedChildren ? (task.children || []) : (childrenData?.data || [])
   const childrenPagination = childrenData?.pagination
   const hasChildren = hasPreAttachedChildren || (isExpanded ? children.length > 0 : task.children && task.children.length > 0)
   const hasMoreChildren = !hasPreAttachedChildren && childrenPagination && childrenPagination.totalPages > 1
