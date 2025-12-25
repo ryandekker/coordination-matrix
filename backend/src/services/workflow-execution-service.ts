@@ -2566,9 +2566,23 @@ class WorkflowExecutionService {
     return this.workflowRuns.findOne({ _id: new ObjectId(runId) });
   }
 
-  async getWorkflowRunWithTasks(runId: string): Promise<{
+  async getWorkflowRunWithTasks(
+    runId: string,
+    options: {
+      limit?: number;
+      beforeCreatedAt?: Date;
+      afterCreatedAt?: Date;
+      includeDetails?: boolean;
+    } = {}
+  ): Promise<{
     run: WorkflowRun & { workflow?: Workflow };
     tasks: Task[];
+    pagination: {
+      limit: number;
+      hasMore: boolean;
+      nextCursor?: string;
+      prevCursor?: string;
+    };
   } | null> {
     const run = await this.getWorkflowRun(runId);
     if (!run) return null;
@@ -2576,14 +2590,69 @@ class WorkflowExecutionService {
     // Fetch workflow definition to include steps for progress display
     const workflow = await this.workflows.findOne({ _id: run.workflowId });
 
-    const tasks = await this.tasks
-      .find({ workflowRunId: run._id })
-      .sort({ createdAt: 1 })
-      .toArray();
+    // Apply pagination limits (default 100, max 500)
+    const DEFAULT_LIMIT = 100;
+    const MAX_LIMIT = 500;
+    const limit = Math.min(options.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
+
+    // Build filter with optional cursor-based pagination
+    const filter: Record<string, unknown> = { workflowRunId: run._id };
+    if (options.beforeCreatedAt) {
+      filter.createdAt = { $lt: options.beforeCreatedAt };
+    } else if (options.afterCreatedAt) {
+      filter.createdAt = { $gt: options.afterCreatedAt };
+    }
+
+    // Projection: exclude large fields unless details requested
+    const projection: Record<string, 0 | 1> = options.includeDetails
+      ? {}  // Include all fields
+      : {
+          // Exclude potentially large fields for listing view
+          'metadata.rawPayload': 0,
+          'metadata.debugLogs': 0,
+          'externalConfig.requestBody': 0,
+          'webhookConfig.requestBody': 0,
+        };
+
+    // Fetch limit + 1 to determine if there are more results
+    const tasks = (await this.tasks
+      .find(filter)
+      .sort({ createdAt: 1, _id: 1 })
+      .limit(limit + 1)
+      .project(projection)
+      .toArray()) as Task[];
+
+    // Determine if there are more results
+    const hasMore = tasks.length > limit;
+    if (hasMore) {
+      tasks.pop(); // Remove the extra result
+    }
+
+    // Build cursor info for next/prev pages
+    const pagination: {
+      limit: number;
+      hasMore: boolean;
+      nextCursor?: string;
+      prevCursor?: string;
+    } = {
+      limit,
+      hasMore,
+    };
+
+    if (hasMore && tasks.length > 0) {
+      const lastTask = tasks[tasks.length - 1];
+      pagination.nextCursor = lastTask.createdAt.toISOString();
+    }
+
+    if (options.afterCreatedAt && tasks.length > 0) {
+      const firstTask = tasks[0];
+      pagination.prevCursor = firstTask.createdAt.toISOString();
+    }
 
     return {
       run: { ...run, workflow: workflow || undefined },
       tasks,
+      pagination,
     };
   }
 
