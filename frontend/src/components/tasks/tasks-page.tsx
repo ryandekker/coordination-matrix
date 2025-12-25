@@ -234,6 +234,32 @@ export function TasksPage() {
     [sortBy, sortOrder]
   )
 
+  // Check if any active filters are present (excluding rootOnly, parentId, includeArchived)
+  const hasActiveFilters = useMemo(() => {
+    // Check for text search
+    if (search && search.trim().length > 0) {
+      return true
+    }
+
+    // Check filters object for active filters
+    for (const [key, value] of Object.entries(filters)) {
+      if (value === undefined || value === null || value === '') {
+        continue
+      }
+      // Skip hierarchy-related filters
+      if (key === 'rootOnly' || key === 'parentId' || key === 'includeArchived') {
+        continue
+      }
+      // Check arrays (multi-select filters)
+      if (Array.isArray(value) && value.length === 0) {
+        continue
+      }
+      return true
+    }
+
+    return false
+  }, [search, filters])
+
   // Memoized effective visible columns
   const effectiveVisibleColumns = useMemo(() => {
     return visibleColumns.length > 0
@@ -446,6 +472,7 @@ export function TasksPage() {
         expandAllEnabled={expandAllEnabled}
         onExpandAllChange={handleExpandAllChange}
         autoExpandIds={parentIdFromUrl ? [parentIdFromUrl] : undefined}
+        hasActiveFilters={hasActiveFilters}
       />
 
       <TaskModal
