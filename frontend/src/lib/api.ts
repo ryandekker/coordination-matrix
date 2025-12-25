@@ -81,8 +81,19 @@ export const tasksApi = {
     return handleResponse(response)
   },
 
-  getChildren: async (id: string): Promise<ApiResponse<Task[]>> => {
-    const response = await authFetch(`${API_BASE}/tasks/${id}/children`)
+  getChildren: async (id: string, params?: {
+    page?: number
+    limit?: number
+    sortBy?: string
+    sortOrder?: 'asc' | 'desc'
+  }): Promise<PaginatedResponse<Task>> => {
+    const searchParams = new URLSearchParams()
+    if (params?.page) searchParams.append('page', params.page.toString())
+    if (params?.limit) searchParams.append('limit', params.limit.toString())
+    if (params?.sortBy) searchParams.append('sortBy', params.sortBy)
+    if (params?.sortOrder) searchParams.append('sortOrder', params.sortOrder)
+    const queryString = searchParams.toString()
+    const response = await authFetch(`${API_BASE}/tasks/${id}/children${queryString ? `?${queryString}` : ''}`)
     return handleResponse(response)
   },
 

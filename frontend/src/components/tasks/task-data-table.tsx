@@ -544,10 +544,26 @@ const TaskRow = memo(function TaskRow({
 }) {
   const isFlowTask = task.taskType === 'flow'
 
+  // Pagination state for children
+  const [childrenPage, setChildrenPage] = useState(1)
+  const CHILDREN_PAGE_SIZE = 20
+
   // Fetch children when expanded (including flow tasks - they now expand inline)
-  const { data: childrenData } = useTaskChildren(isExpanded ? task._id : null)
+  const { data: childrenData } = useTaskChildren(isExpanded ? task._id : null, {
+    page: childrenPage,
+    limit: CHILDREN_PAGE_SIZE,
+  })
   const children = childrenData?.data || []
+  const childrenPagination = childrenData?.pagination
   const hasChildren = isExpanded ? children.length > 0 : task.children && task.children.length > 0
+  const hasMoreChildren = childrenPagination && childrenPagination.totalPages > 1
+
+  // Reset to page 1 when collapsing
+  useEffect(() => {
+    if (!isExpanded) {
+      setChildrenPage(1)
+    }
+  }, [isExpanded])
 
   // Handle expand toggle with pulse animation for flow tasks
   const handleToggleExpand = useCallback(() => {
@@ -724,6 +740,46 @@ const TaskRow = memo(function TaskRow({
             isCreatingTask={isCreatingTask}
           />
         ))}
+      {/* Pagination row for children when there are multiple pages */}
+      {isExpanded && hasMoreChildren && childrenPagination && (
+        <TableRow className="bg-muted/20">
+          <TableCell colSpan={fieldConfigs.length + 3} className="py-1">
+            <div
+              style={{ paddingLeft: (depth + 1) * 16 + 24 }}
+              className="flex items-center gap-2 text-xs text-muted-foreground"
+            >
+              <span>
+                Showing {(childrenPagination.page - 1) * childrenPagination.limit + 1}–
+                {Math.min(childrenPagination.page * childrenPagination.limit, childrenPagination.total)} of{' '}
+                {childrenPagination.total} subtasks
+              </span>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2"
+                  onClick={() => setChildrenPage(p => Math.max(1, p - 1))}
+                  disabled={childrenPagination.page <= 1}
+                >
+                  ← Prev
+                </Button>
+                <span className="px-1">
+                  Page {childrenPagination.page} of {childrenPagination.totalPages}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2"
+                  onClick={() => setChildrenPage(p => Math.min(childrenPagination.totalPages, p + 1))}
+                  disabled={childrenPagination.page >= childrenPagination.totalPages}
+                >
+                  Next →
+                </Button>
+              </div>
+            </div>
+          </TableCell>
+        </TableRow>
+      )}
       {/* Render inline creation row for this task's subtasks */}
       {inlineCreationParentId === task._id && (
         <InlineTaskRow
