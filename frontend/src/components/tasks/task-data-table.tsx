@@ -1074,8 +1074,9 @@ export function TaskDataTable({
       const newExpanded = new Set(prev)
       if (newExpanded.has(taskId)) {
         newExpanded.delete(taskId)
-        // If we're collapsing a row, we're no longer in "expand all" mode
-        onExpandAllChange(false)
+        // Note: Don't call onExpandAllChange(false) here - that would trigger the
+        // useEffect which collapses ALL rows, not just this one. The expand-all
+        // toggle should only be controlled by the toolbar button.
       } else {
         newExpanded.add(taskId)
         // Check if all tasks with children are now expanded
