@@ -27,7 +27,7 @@ import {
   TabsTrigger,
 } from '@/components/ui/tabs'
 import { Task, FieldConfig, LookupValue, TaskType, WebhookConfig } from '@/lib/api'
-import { useCreateTask, useUpdateTask, useUsers, useWorkflows, useTasks, useTaskChildren } from '@/hooks/use-tasks'
+import { useCreateTask, useUpdateTask, useUsers, useWorkflows, useTasks, useTask, useTaskChildren } from '@/hooks/use-tasks'
 import { cn } from '@/lib/utils'
 import { TaskActivity } from './task-activity'
 import { WebhookTaskConfig } from './webhook-task-config'
@@ -112,6 +112,11 @@ export function TaskModal({
 
   const createTask = useCreateTask()
   const updateTask = useUpdateTask()
+
+  // Fetch fresh task data from cache to get updates after metadata changes
+  const { data: taskData } = useTask(isOpen && task ? task._id : null)
+  // Use cached data when available, fall back to prop for initial render
+  const effectiveTask = taskData?.data ?? task
 
   // Only fetch users and workflows when modal is open
   const { data: usersData } = useUsers()
@@ -1312,7 +1317,7 @@ export function TaskModal({
           onClick={() => {
             if (!isMetadataEditMode) {
               // Switching to edit mode - store the initial value
-              const initialValue = JSON.stringify(task?.metadata || {}, null, 2)
+              const initialValue = JSON.stringify(effectiveTask?.metadata || {}, null, 2)
               savedMetadataValueRef.current = initialValue
               currentMetadataValueRef.current = initialValue
               setMetadataError(null)
@@ -1415,7 +1420,7 @@ export function TaskModal({
         // View mode - collapsible tree view
         <div className="px-3 py-2 text-sm bg-muted/50 rounded-md border max-h-[calc(100vh-300px)] overflow-y-auto">
           <JsonViewer
-            data={task?.metadata}
+            data={effectiveTask?.metadata}
             defaultExpanded={true}
             maxInitialDepth={2}
           />
