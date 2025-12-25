@@ -52,7 +52,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { EditableCell } from './editable-cell'
-import { Task, FieldConfig, LookupValue, User } from '@/lib/api'
+import { Task, FieldConfig, LookupValue, User, Workflow } from '@/lib/api'
 import { useTaskChildren, useUpdateTask, useDeleteTask, useBulkUpdateTasks, useBulkDeleteTasks, useLookups, useCreateTask } from '@/hooks/use-tasks'
 import { formatDateTime, cn } from '@/lib/utils'
 import { TASK_TYPE_CONFIG, getTaskTypeConfig } from '@/lib/task-type-config'
@@ -203,6 +203,7 @@ interface TaskDataTableProps {
   fieldConfigs: FieldConfig[]
   lookups: Record<string, LookupValue[]>
   users: User[]
+  workflows: Workflow[]
   visibleColumns: string[]
   sortBy: string
   sortOrder: 'asc' | 'desc'
@@ -526,6 +527,7 @@ const TaskRow = memo(function TaskRow({
   fieldConfigs,
   lookups,
   users,
+  workflows,
   depth,
   isExpanded,
   isSelected,
@@ -558,6 +560,7 @@ const TaskRow = memo(function TaskRow({
   fieldConfigs: FieldConfig[]
   lookups: Record<string, LookupValue[]>
   users: User[]
+  workflows: Workflow[]
   depth: number
   isExpanded: boolean
   isSelected: boolean
@@ -708,6 +711,8 @@ const TaskRow = memo(function TaskRow({
                     fieldConfig={fc}
                     lookups={lookups}
                     users={users}
+                    workflows={workflows}
+                    task={task}
                     onSave={(value) => onCellUpdate(task._id, fc.fieldPath, value)}
                   >
                     {renderCellValue(task, fc)}
@@ -761,6 +766,7 @@ const TaskRow = memo(function TaskRow({
             fieldConfigs={fieldConfigs}
             lookups={lookups}
             users={users}
+            workflows={workflows}
             depth={depth + 1}
             isExpanded={expandedRows.has(child._id)}
             isSelected={selectedRows.has(child._id)}
@@ -851,6 +857,7 @@ export function TaskDataTable({
   fieldConfigs,
   lookups,
   users,
+  workflows,
   visibleColumns,
   sortBy,
   sortOrder,
@@ -1470,6 +1477,7 @@ export function TaskDataTable({
                   fieldConfigs={visibleFieldConfigs}
                   lookups={lookups}
                   users={users}
+                  workflows={workflows}
                   depth={0}
                   isExpanded={expandedRows.has(task._id)}
                   isSelected={selectedRows.has(task._id)}
