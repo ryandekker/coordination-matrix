@@ -256,12 +256,12 @@ function organizeTasksIntoTree(tasks: Task[]): Task[] {
   }
 
   // Attach children to their parents
-  for (const [parentId, children] of childrenByParent) {
+  childrenByParent.forEach((children, parentId) => {
     const parent = taskMap.get(parentId)
     if (parent) {
       parent.children = children
     }
-  }
+  })
 
   return rootTasks
 }
