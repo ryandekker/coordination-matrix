@@ -25,6 +25,52 @@ function resolveUserPlaceholder(value: string, currentUserId?: string): string {
   return value;
 }
 
+// Helper to check if active filters are present (filters that should search across all hierarchy levels)
+function hasActiveFilters(query: Record<string, unknown>): boolean {
+  const { search, filters, status, urgency, assigneeId, tags } = query;
+
+  // Check for text search
+  if (search && typeof search === 'string' && search.trim().length > 0) {
+    return true;
+  }
+
+  // Check for status filter
+  if (status) {
+    return true;
+  }
+
+  // Check for urgency filter
+  if (urgency) {
+    return true;
+  }
+
+  // Check for assignee filter
+  if (assigneeId) {
+    return true;
+  }
+
+  // Check for tags filter
+  if (tags) {
+    return true;
+  }
+
+  // Check for custom filters (from views)
+  if (filters && typeof filters === 'object') {
+    const filterEntries = Object.entries(filters as Record<string, unknown>);
+    for (const [key, value] of filterEntries) {
+      if (value !== undefined && value !== null && value !== '') {
+        // Skip hierarchy-related filters
+        if (key === 'rootOnly' || key === 'parentId' || key === 'includeArchived') {
+          continue;
+        }
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 // Helper to build filter from query params
 function buildFilter(query: Record<string, unknown>, currentUserId?: string): Filter<Task> {
   const filter: Filter<Task> = {};

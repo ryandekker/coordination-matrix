@@ -220,6 +220,49 @@ interface TaskDataTableProps {
   expandAllEnabled: boolean
   onExpandAllChange: (enabled: boolean) => void
   autoExpandIds?: string[]
+  hasActiveFilters?: boolean
+}
+
+// Helper to organize flat filtered results into a tree structure
+// When filtering, both parent and child may match - group children under matching parents
+function organizeTasksIntoTree(tasks: Task[]): Task[] {
+  if (tasks.length === 0) return []
+
+  // Create a map of all task IDs for quick lookup
+  const taskMap = new Map<string, Task>()
+  for (const task of tasks) {
+    taskMap.set(task._id, { ...task, children: [] })
+  }
+
+  // Separate tasks into root-level and those that should be nested under a parent
+  const rootTasks: Task[] = []
+  const childrenByParent = new Map<string, Task[]>()
+
+  for (const task of tasks) {
+    const taskCopy = taskMap.get(task._id)!
+    const parentId = task.parentId?.toString()
+
+    // If this task has a parent that's also in the results, it should be nested
+    if (parentId && taskMap.has(parentId)) {
+      if (!childrenByParent.has(parentId)) {
+        childrenByParent.set(parentId, [])
+      }
+      childrenByParent.get(parentId)!.push(taskCopy)
+    } else {
+      // No parent in results, or no parent at all - show at root level
+      rootTasks.push(taskCopy)
+    }
+  }
+
+  // Attach children to their parents
+  for (const [parentId, children] of childrenByParent) {
+    const parent = taskMap.get(parentId)
+    if (parent) {
+      parent.children = children
+    }
+  }
+
+  return rootTasks
 }
 
 // Memoized Title cell component with special edit behavior
@@ -548,15 +591,21 @@ const TaskRow = memo(function TaskRow({
   const [childrenPage, setChildrenPage] = useState(1)
   const CHILDREN_PAGE_SIZE = 20
 
+  // Check if children are pre-attached (from filtering) - they have _id property
+  const hasPreAttachedChildren = task.children && task.children.length > 0 && task.children[0]._id
+
   // Fetch children when expanded (including flow tasks - they now expand inline)
-  const { data: childrenData } = useTaskChildren(isExpanded ? task._id : null, {
+  // Skip fetching if we already have pre-attached children from filtering
+  const { data: childrenData } = useTaskChildren(isExpanded && !hasPreAttachedChildren ? task._id : null, {
     page: childrenPage,
     limit: CHILDREN_PAGE_SIZE,
   })
-  const children = childrenData?.data || []
+
+  // Use pre-attached children if available, otherwise use fetched children
+  const children = hasPreAttachedChildren ? task.children : (childrenData?.data || [])
   const childrenPagination = childrenData?.pagination
-  const hasChildren = isExpanded ? children.length > 0 : task.children && task.children.length > 0
-  const hasMoreChildren = childrenPagination && childrenPagination.totalPages > 1
+  const hasChildren = hasPreAttachedChildren || (isExpanded ? children.length > 0 : task.children && task.children.length > 0)
+  const hasMoreChildren = !hasPreAttachedChildren && childrenPagination && childrenPagination.totalPages > 1
 
   // Reset to page 1 when collapsing
   useEffect(() => {
@@ -813,6 +862,7 @@ export function TaskDataTable({
   expandAllEnabled,
   onExpandAllChange,
   autoExpandIds,
+  hasActiveFilters = false,
 }: TaskDataTableProps) {
   const router = useRouter()
   const [expandedRows, setExpandedRows] = useState<Set<string>>(() => new Set(autoExpandIds || []))
@@ -823,6 +873,29 @@ export function TaskDataTable({
   const [inlineCreationParentId, setInlineCreationParentId] = useState<string | null>(null)
 
   const createTask = useCreateTask()
+
+  // When filters are active, organize flat results into a tree (children under matching parents)
+  // and default to collapsed state
+  const organizedTasks = useMemo(() => {
+    if (hasActiveFilters) {
+      return organizeTasksIntoTree(tasks)
+    }
+    return tasks
+  }, [tasks, hasActiveFilters])
+
+  // Track previous hasActiveFilters to detect changes
+  const prevHasActiveFilters = useRef(hasActiveFilters)
+
+  // When filters become active, collapse all rows
+  useEffect(() => {
+    const wasFiltering = prevHasActiveFilters.current
+    prevHasActiveFilters.current = hasActiveFilters
+
+    if (hasActiveFilters && !wasFiltering) {
+      // Filters just became active - collapse all rows
+      setExpandedRows(new Set())
+    }
+  }, [hasActiveFilters])
 
   // Highlight a row (clears others, persists until another is clicked)
   // Clear first to restart animation if same row is clicked again
@@ -852,8 +925,8 @@ export function TaskDataTable({
 
   // Get task IDs that have children (for expand all functionality)
   const tasksWithChildren = useMemo(() => {
-    return tasks.filter(t => t.children && t.children.length > 0).map(t => t._id)
-  }, [tasks])
+    return organizedTasks.filter(t => t.children && t.children.length > 0).map(t => t._id)
+  }, [organizedTasks])
 
   // Track previous expandAllEnabled to detect changes
   const prevExpandAllEnabled = useRef(expandAllEnabled)
@@ -1093,13 +1166,13 @@ export function TaskDataTable({
 
   const toggleAllSelection = useCallback(() => {
     setSelectedRows((prev) => {
-      if (prev.size === tasks.length) {
+      if (prev.size === organizedTasks.length) {
         return new Set()
       } else {
-        return new Set(tasks.map((t) => t._id))
+        return new Set(organizedTasks.map((t) => t._id))
       }
     })
-  }, [tasks])
+  }, [organizedTasks])
 
   const handleCellUpdate = useCallback(async (taskId: string, field: string, value: unknown) => {
     await updateTask.mutateAsync({ id: taskId, data: { [field]: value } })
@@ -1315,7 +1388,7 @@ export function TaskDataTable({
               <TableHead className="w-12 pl-3 pr-0">
                 <div className="flex justify-center">
                   <Checkbox
-                    checked={selectedRows.size === tasks.length && tasks.length > 0}
+                    checked={selectedRows.size === organizedTasks.length && organizedTasks.length > 0}
                     onCheckedChange={toggleAllSelection}
                     className="h-5 w-5"
                   />
@@ -1376,7 +1449,7 @@ export function TaskDataTable({
                 isCreating={createTask.isPending}
               />
             )}
-            {tasks.length === 0 && inlineCreationParentId !== '' ? (
+            {organizedTasks.length === 0 && inlineCreationParentId !== '' ? (
               <TableRow>
                 <TableCell
                   colSpan={visibleFieldConfigs.length + 4}
@@ -1386,7 +1459,7 @@ export function TaskDataTable({
                 </TableCell>
               </TableRow>
             ) : (
-              tasks.map((task) => (
+              organizedTasks.map((task) => (
                 <TaskRow
                   key={task._id}
                   task={task}
