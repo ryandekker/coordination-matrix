@@ -860,42 +860,10 @@ export function TaskDataTable({
     setSelectedRows(new Set())
   }, [])
 
-  // Helper: Flatten visible tasks in display order (respecting expanded state)
-  const flattenVisibleTasks = useCallback((taskList: Task[], expanded: Set<string>): string[] => {
-    const result: string[] = []
-    const traverse = (items: Task[]) => {
-      for (const task of items) {
-        result.push(task._id)
-        if (expanded.has(task._id) && task.children && task.children.length > 0) {
-          traverse(task.children)
-        }
-      }
-    }
-    traverse(taskList)
-    return result
-  }, [])
-
-  // Helper: Collect a task ID and all its descendant IDs recursively
-  const collectAllDescendantIds = useCallback((task: Task): string[] => {
-    const result: string[] = [task._id]
-    if (task.children && task.children.length > 0) {
-      for (const child of task.children) {
-        result.push(...collectAllDescendantIds(child))
-      }
-    }
-    return result
-  }, [])
-
-  // Helper: Find a task by ID in the task tree
-  const findTaskById = useCallback((taskList: Task[], taskId: string): Task | null => {
-    for (const task of taskList) {
-      if (task._id === taskId) return task
-      if (task.children && task.children.length > 0) {
-        const found = findTaskById(task.children, taskId)
-        if (found) return found
-      }
-    }
-    return null
+  // Helper: Get visible task IDs in display order by querying the DOM
+  const getVisibleTaskIds = useCallback((): string[] => {
+    const rows = document.querySelectorAll('[data-task-id]')
+    return Array.from(rows).map(row => row.getAttribute('data-task-id')).filter(Boolean) as string[]
   }, [])
 
   const handleBulkStatusChange = useCallback(async (status: string) => {
@@ -985,8 +953,8 @@ export function TaskDataTable({
 
   const toggleRowSelection = useCallback((taskId: string, isShiftKey = false) => {
     if (isShiftKey && lastSelectedId && lastSelectedId !== taskId) {
-      // Shift+click: select range between lastSelectedId and taskId, including children
-      const visibleOrder = flattenVisibleTasks(tasks, expandedRows)
+      // Shift+click: select range between lastSelectedId and taskId
+      const visibleOrder = getVisibleTaskIds()
       const fromIndex = visibleOrder.indexOf(lastSelectedId)
       const toIndex = visibleOrder.indexOf(taskId)
 
@@ -995,25 +963,12 @@ export function TaskDataTable({
           ? [fromIndex, toIndex]
           : [toIndex, fromIndex]
 
-        // Get all task IDs in the range
+        // Select all visible tasks in the range
         const rangeIds = visibleOrder.slice(startIndex, endIndex + 1)
-
-        // For each task in the range, also include all its descendants
-        const allIds = new Set<string>()
-        for (const id of rangeIds) {
-          allIds.add(id)
-          // Find the task and collect all its descendants
-          const task = findTaskById(tasks, id)
-          if (task && task.children && task.children.length > 0) {
-            for (const childId of collectAllDescendantIds(task)) {
-              allIds.add(childId)
-            }
-          }
-        }
 
         setSelectedRows((prev) => {
           const newSelected = new Set(prev)
-          for (const id of allIds) {
+          for (const id of rangeIds) {
             newSelected.add(id)
           }
           return newSelected
@@ -1033,7 +988,7 @@ export function TaskDataTable({
     }
     // Always update last selected ID
     setLastSelectedId(taskId)
-  }, [lastSelectedId, tasks, expandedRows, flattenVisibleTasks, findTaskById, collectAllDescendantIds])
+  }, [lastSelectedId, getVisibleTaskIds])
 
   const toggleAllSelection = useCallback(() => {
     setSelectedRows((prev) => {
