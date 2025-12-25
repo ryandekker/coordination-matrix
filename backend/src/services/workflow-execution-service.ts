@@ -1603,31 +1603,56 @@ class WorkflowExecutionService {
     // Get minSuccessPercent from joinConfig, default to 100
     const minSuccessPercent = joinTask.joinConfig?.minSuccessPercent ?? 100;
 
+    // Get maxWaitMs for timeout (optional - if not set, no timeout)
+    const maxWaitMs = joinTask.joinConfig?.maxWaitMs;
+
     // Calculate the required number of completed tasks based on percentage
     const requiredSuccessCount = Math.ceil((expectedCount * minSuccessPercent) / 100);
 
     // Calculate current success percentage
     const currentSuccessPercent = expectedCount > 0 ? (completedCount / expectedCount) * 100 : 0;
 
-    console.log(`[WorkflowExecutionService] Join check: ${completedCount}/${expectedCount} completed (${currentSuccessPercent.toFixed(1)}%), need ${minSuccessPercent}% (${requiredSuccessCount} tasks)`);
+    // Check for timeout
+    let isTimedOut = false;
+    if (maxWaitMs && joinTask.createdAt) {
+      const waitingMs = Date.now() - new Date(joinTask.createdAt).getTime();
+      isTimedOut = waitingMs >= maxWaitMs;
+      if (isTimedOut) {
+        console.log(`[WorkflowExecutionService] Join timeout: waited ${waitingMs}ms >= ${maxWaitMs}ms`);
+      }
+    }
+
+    console.log(`[WorkflowExecutionService] Join check: ${completedCount}/${expectedCount} completed (${currentSuccessPercent.toFixed(1)}%), need ${minSuccessPercent}% (${requiredSuccessCount} tasks)${isTimedOut ? ' [TIMEOUT]' : ''}`);
 
     // Check if we've met the success threshold
     // We can complete the join if:
     // 1. We've achieved the required success percentage, OR
-    // 2. All tasks are done (even if below threshold - we fail gracefully)
+    // 2. All tasks are done (even if below threshold - we fail gracefully), OR
+    // 3. Timeout reached with minPercent threshold met
     const thresholdMet = completedCount >= requiredSuccessCount;
     const allDone = totalDone >= expectedCount;
+    const timeoutWithMinMet = isTimedOut && thresholdMet;
+    const timeoutWithMinNotMet = isTimedOut && !thresholdMet;
 
-    if (thresholdMet || allDone) {
+    if (thresholdMet || allDone || isTimedOut) {
       // Aggregate results from completed tasks
       const results = children
         .filter(c => c.status === 'completed')
         .map(c => c.metadata);
 
+      // Determine status based on whether threshold was met (even if via timeout)
       const joinStatus: TaskStatus = thresholdMet ? 'completed' : 'failed';
-      const statusReason = thresholdMet
-        ? `Success threshold met: ${currentSuccessPercent.toFixed(1)}% >= ${minSuccessPercent}%`
-        : `Success threshold not met: ${currentSuccessPercent.toFixed(1)}% < ${minSuccessPercent}%`;
+
+      let statusReason: string;
+      if (timeoutWithMinMet) {
+        statusReason = `Timeout with success: ${currentSuccessPercent.toFixed(1)}% >= ${minSuccessPercent}% (waited ${maxWaitMs}ms)`;
+      } else if (timeoutWithMinNotMet) {
+        statusReason = `Timeout without success: ${currentSuccessPercent.toFixed(1)}% < ${minSuccessPercent}% (waited ${maxWaitMs}ms)`;
+      } else if (thresholdMet) {
+        statusReason = `Success threshold met: ${currentSuccessPercent.toFixed(1)}% >= ${minSuccessPercent}%`;
+      } else {
+        statusReason = `Success threshold not met: ${currentSuccessPercent.toFixed(1)}% < ${minSuccessPercent}%`;
+      }
 
       await this.tasks.updateOne(
         { _id: joinTaskId },

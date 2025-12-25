@@ -1300,19 +1300,121 @@ export function TaskModal({
               Join tasks aggregate results from multiple parallel tasks.
             </p>
 
-            {/* Join config info */}
+            {/* Join config - editable for non-completed tasks */}
             {task && (
               <div className="space-y-2 text-xs">
-                <div className="flex justify-between">
+                {/* Min Success % - editable */}
+                <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">Min Success %:</span>
-                  <span>{task.joinConfig?.minSuccessPercent ?? task.metadata?.minSuccessPercent ?? 100}%</span>
+                  {task.status !== 'completed' ? (
+                    <Input
+                      type="number"
+                      min={0}
+                      max={100}
+                      className="w-20 h-7 text-xs text-right"
+                      defaultValue={task.joinConfig?.minSuccessPercent ?? task.metadata?.minSuccessPercent ?? 100}
+                      onBlur={async (e) => {
+                        const value = Math.min(100, Math.max(0, Number(e.target.value) || 0))
+                        if (value === (task.joinConfig?.minSuccessPercent ?? task.metadata?.minSuccessPercent ?? 100)) return
+                        try {
+                          const response = await fetch(`/api/tasks/${task._id}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              joinConfig: {
+                                ...task.joinConfig,
+                                minSuccessPercent: value,
+                              },
+                            }),
+                          })
+                          if (!response.ok) throw new Error('Failed to update join config')
+                          queryClient.invalidateQueries({ queryKey: ['tasks'] })
+                          queryClient.invalidateQueries({ queryKey: ['task', task._id] })
+                        } catch (err) {
+                          console.error('Failed to update minSuccessPercent:', err)
+                        }
+                      }}
+                    />
+                  ) : (
+                    <span>{task.joinConfig?.minSuccessPercent ?? task.metadata?.minSuccessPercent ?? 100}%</span>
+                  )}
                 </div>
-                {(task.joinConfig?.expectedCount || task.metadata?.expectedCount) && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Expected Count:</span>
-                    <span>{task.joinConfig?.expectedCount ?? task.metadata?.expectedCount}</span>
-                  </div>
-                )}
+                {/* Expected Count - editable */}
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Expected Count:</span>
+                  {task.status !== 'completed' ? (
+                    <Input
+                      type="number"
+                      min={1}
+                      className="w-20 h-7 text-xs text-right"
+                      defaultValue={task.joinConfig?.expectedCount ?? task.metadata?.expectedCount ?? ''}
+                      placeholder="auto"
+                      onBlur={async (e) => {
+                        const value = e.target.value ? Math.max(1, Number(e.target.value) || 1) : undefined
+                        const currentValue = task.joinConfig?.expectedCount ?? task.metadata?.expectedCount
+                        if (value === currentValue) return
+                        try {
+                          const response = await fetch(`/api/tasks/${task._id}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              joinConfig: {
+                                ...task.joinConfig,
+                                expectedCount: value,
+                              },
+                            }),
+                          })
+                          if (!response.ok) throw new Error('Failed to update join config')
+                          queryClient.invalidateQueries({ queryKey: ['tasks'] })
+                          queryClient.invalidateQueries({ queryKey: ['task', task._id] })
+                        } catch (err) {
+                          console.error('Failed to update expectedCount:', err)
+                        }
+                      }}
+                    />
+                  ) : (
+                    <span>{task.joinConfig?.expectedCount ?? task.metadata?.expectedCount ?? 'auto'}</span>
+                  )}
+                </div>
+                {/* Max Wait (timeout) - editable */}
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Max Wait (sec):</span>
+                  {task.status !== 'completed' ? (
+                    <Input
+                      type="number"
+                      min={0}
+                      className="w-20 h-7 text-xs text-right"
+                      defaultValue={task.joinConfig?.maxWaitMs ? Math.round(task.joinConfig.maxWaitMs / 1000) : ''}
+                      placeholder="none"
+                      onBlur={async (e) => {
+                        const seconds = e.target.value ? Math.max(0, Number(e.target.value) || 0) : undefined
+                        const value = seconds ? seconds * 1000 : undefined
+                        const currentValue = task.joinConfig?.maxWaitMs
+                        if (value === currentValue) return
+                        try {
+                          const response = await fetch(`/api/tasks/${task._id}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              joinConfig: {
+                                ...task.joinConfig,
+                                maxWaitMs: value,
+                              },
+                            }),
+                          })
+                          if (!response.ok) throw new Error('Failed to update join config')
+                          queryClient.invalidateQueries({ queryKey: ['tasks'] })
+                          queryClient.invalidateQueries({ queryKey: ['task', task._id] })
+                        } catch (err) {
+                          console.error('Failed to update maxWaitMs:', err)
+                        }
+                      }}
+                    />
+                  ) : (
+                    <span>{task.joinConfig?.maxWaitMs ? `${Math.round(task.joinConfig.maxWaitMs / 1000)}s` : 'none'}</span>
+                  )}
+                </div>
+                {/* Read-only stats */}
                 {task.metadata?.successCount !== undefined && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Completed:</span>

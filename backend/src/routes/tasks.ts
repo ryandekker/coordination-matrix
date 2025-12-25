@@ -875,6 +875,20 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
       }
     }
 
+    // Handle joinConfig merge: shallow merge new joinConfig keys with existing
+    if (updates.joinConfig !== undefined) {
+      if (updates.joinConfig === null) {
+        // Allow explicit null to clear joinConfig
+        updates.joinConfig = {};
+      } else {
+        // Merge with existing joinConfig (new keys override existing)
+        updates.joinConfig = {
+          ...(originalTask.joinConfig || {}),
+          ...updates.joinConfig,
+        };
+      }
+    }
+
     updates.updatedAt = new Date();
 
     const result = await db.collection<Task>('tasks').findOneAndUpdate(
