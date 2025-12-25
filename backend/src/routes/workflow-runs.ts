@@ -118,7 +118,22 @@ router.get('/:id', requireAuth, async (req: Request, res: Response): Promise<voi
     }
 
     if (includeTasks) {
-      const result = await workflowExecutionService.getWorkflowRunWithTasks(id);
+      // Parse pagination parameters
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+      const beforeCreatedAt = req.query.beforeCreatedAt
+        ? new Date(req.query.beforeCreatedAt as string)
+        : undefined;
+      const afterCreatedAt = req.query.afterCreatedAt
+        ? new Date(req.query.afterCreatedAt as string)
+        : undefined;
+      const includeDetails = req.query.includeDetails === 'true';
+
+      const result = await workflowExecutionService.getWorkflowRunWithTasks(id, {
+        limit,
+        beforeCreatedAt,
+        afterCreatedAt,
+        includeDetails,
+      });
       if (!result) {
         res.status(404).json({ error: 'Workflow run not found' });
         return;

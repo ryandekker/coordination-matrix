@@ -157,6 +157,16 @@ db.tasks.createIndex({ tags: 1 });
 db.tasks.createIndex({ externalId: 1 });
 db.tasks.createIndex({ title: 'text', summary: 'text' });
 
+// Compound indexes for workflow task queries (prevents blocking in-memory sorts)
+// Critical for GET /api/workflow-runs/:id?includeTasks=true with large task sets
+db.tasks.createIndex({ workflowRunId: 1, createdAt: 1 });
+// For queries filtering by workflowRunId and status (e.g., completeWorkflow)
+db.tasks.createIndex({ workflowRunId: 1, status: 1 });
+// Compound indexes for subtask queries (filter by parent + sort)
+db.tasks.createIndex({ parentId: 1, createdAt: 1 });
+// For filtered subtask queries (parent + status + sort)
+db.tasks.createIndex({ parentId: 1, status: 1, createdAt: 1 });
+
 // ============================================================================
 // FIELD CONFIGURATIONS - Dynamic field definitions
 // ============================================================================

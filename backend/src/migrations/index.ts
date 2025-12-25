@@ -19,6 +19,7 @@ import { migration as addMissingTaskIndexes } from './2025-12-19-004-add-missing
 import { migration as removeAdditionalInfo } from './2024-12-24-001-remove-additional-info.js';
 import { migration as addWaitingStatusLookup } from './2024-12-24-002-add-waiting-status-lookup.js';
 import { migration as addUnassignedView } from './2024-12-24-003-add-unassigned-view.js';
+import { migration as addTaskSortIndexes } from './2025-12-25-001-add-task-sort-indexes.js';
 
 // Register all migrations in order
 export const migrations: Migration[] = [
@@ -33,4 +34,5 @@ export const migrations: Migration[] = [
   removeAdditionalInfo,
   addWaitingStatusLookup,
   addUnassignedView,
+  addTaskSortIndexes,
 ];
