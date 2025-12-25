@@ -354,7 +354,7 @@ Examples:
   }
 
   // Build config from file + CLI overrides
-  let viewId, apiKey, apiUrl, interval, execCmd;
+  let viewId, apiKey, apiUrl, interval, execCmd, maxPayloadSize;
 
   if (configData && values.job) {
     // Load from config file with job name
@@ -381,6 +381,7 @@ Examples:
     apiUrl = values['api-url'] || job.apiUrl || defaults.apiUrl || process.env.MATRIX_API_URL || 'http://localhost:3001/api';
     interval = parseInt(values.interval || job.interval || defaults.interval || '5000', 10);
     execCmd = values.exec || job.exec || defaults.exec || process.env.MATRIX_EXEC_CMD || 'claude';
+    maxPayloadSize = parseInt(values['max-payload-size'] || job.maxPayloadSize || defaults.maxPayloadSize || '50000', 10);
   } else if (values.view) {
     // Use CLI args / env vars only (explicit --view provided)
     viewId = values.view;
@@ -388,6 +389,7 @@ Examples:
     apiUrl = values['api-url'] || process.env.MATRIX_API_URL || 'http://localhost:3001/api';
     interval = parseInt(values.interval || '5000', 10);
     execCmd = values.exec || process.env.MATRIX_EXEC_CMD || 'claude';
+    maxPayloadSize = parseInt(values['max-payload-size'] || '50000', 10);
   } else if (configData && !values.job) {
     // No job or view specified - start all enabled jobs as background processes
     return {
@@ -419,6 +421,7 @@ Examples:
     exec: execCmd,
     dryRun: values['dry-run'] || false,
     noUpdate: values['no-update'] || false,
+    maxPayloadSize,
   };
 }
 
@@ -679,10 +682,19 @@ function executeCommand(cmd, prompt) {
   const tmpFile = join(tmpdir(), `task-daemon-${Date.now()}.txt`);
   writeFileSync(tmpFile, prompt);
 
-  // For claude, use: claude --print "$(cat tmpfile)"
-  const fullCmd = cmd === 'claude'
-    ? `claude --print "$(cat '${tmpFile}')"`
-    : `${cmd} "$(cat '${tmpFile}')"`;
+  // For claude, insert --print after the claude binary (handles paths like /path/to/claude --model haiku)
+  // Match "claude" at start or after a path separator, followed by space or end
+  const claudeMatch = cmd.match(/^(.*\/)?claude(\s|$)/);
+  let fullCmd;
+  if (claudeMatch) {
+    // Insert --print right after "claude"
+    const claudeEndIdx = claudeMatch[0].length;
+    const beforeArgs = cmd.substring(0, claudeEndIdx).trimEnd();
+    const afterArgs = cmd.substring(claudeEndIdx);
+    fullCmd = `${beforeArgs} --print ${afterArgs}`.trim() + ` "$(cat '${tmpFile}')"`;
+  } else {
+    fullCmd = `${cmd} "$(cat '${tmpFile}')"`;
+  }
 
   console.log(`[DEBUG] Running (this may take a while)...`);
 
@@ -819,6 +831,41 @@ async function processTask(config, task) {
     }
   }
 
+  // Check payload size before proceeding
+  const inputPayload = task.metadata?.inputPayload;
+  if (inputPayload && config.maxPayloadSize) {
+    const payloadSize = JSON.stringify(inputPayload).length;
+    if (payloadSize > config.maxPayloadSize) {
+      const errorMsg = `PAYLOAD_SIZE_EXCEEDED: Task inputPayload is ${Math.round(payloadSize / 1024)}KB, which exceeds the maxPayloadSize limit of ${Math.round(config.maxPayloadSize / 1024)}KB. ` +
+        `Configure your workflow to send a smaller payload, or increase maxPayloadSize in daemon config.`;
+      console.error(`\n[ERROR] ${errorMsg}\n`);
+
+      // Update task with clear error message
+      const timestamp = new Date().toISOString();
+      await updateTask(config, task._id, {
+        status: 'on_hold',
+        assignee: null,
+        metadata: {
+          ...(task.metadata || {}),
+          output: {
+            timestamp,
+            status: 'FAILED',
+            action: 'HOLD',
+            error: {
+              code: 'PAYLOAD_SIZE_EXCEEDED',
+              payloadSize,
+              maxPayloadSize: config.maxPayloadSize,
+              message: errorMsg,
+            },
+          },
+        },
+      });
+      await addTaskComment(config, task._id, `Daemon rejected task: payload size (${Math.round(payloadSize / 1024)}KB) exceeds limit (${Math.round(config.maxPayloadSize / 1024)}KB). Reduce workflow payload or increase maxPayloadSize.`);
+      return;
+    }
+    console.log(`[DEBUG] Payload size: ${Math.round(payloadSize / 1024)}KB (limit: ${Math.round(config.maxPayloadSize / 1024)}KB)`);
+  }
+
   // Assemble the prompt
   const prompt = assemblePrompt(task, agent, workflowStep);
 
@@ -849,6 +896,11 @@ async function processTask(config, task) {
 
   console.log('-'.repeat(40));
   console.log(`\nCommand completed in ${duration}s with exit code: ${result.exitCode}`);
+
+  // Log stderr if present (useful for debugging failures)
+  if (result.stderr) {
+    console.log(`[STDERR] ${result.stderr.substring(0, 1000)}${result.stderr.length > 1000 ? '...(truncated)' : ''}`);
+  }
 
   const timestamp = new Date().toISOString();
 
