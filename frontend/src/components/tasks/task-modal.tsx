@@ -1295,9 +1295,77 @@ export function TaskModal({
 
         {/* Join task */}
         {currentTaskType === 'join' && (
-          <p className="text-xs text-muted-foreground italic">
-            Join tasks aggregate results from multiple parallel tasks.
-          </p>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground italic">
+              Join tasks aggregate results from multiple parallel tasks.
+            </p>
+
+            {/* Join config info */}
+            {task && (
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Min Success %:</span>
+                  <span>{task.joinConfig?.minSuccessPercent ?? task.metadata?.minSuccessPercent ?? 100}%</span>
+                </div>
+                {(task.joinConfig?.expectedCount || task.metadata?.expectedCount) && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Expected Count:</span>
+                    <span>{task.joinConfig?.expectedCount ?? task.metadata?.expectedCount}</span>
+                  </div>
+                )}
+                {task.metadata?.successCount !== undefined && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Completed:</span>
+                    <span>{task.metadata.successCount} / {task.metadata.expectedCount ?? '?'}</span>
+                  </div>
+                )}
+                {task.metadata?.failedCount !== undefined && task.metadata.failedCount > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Failed:</span>
+                    <span className="text-red-500">{task.metadata.failedCount}</span>
+                  </div>
+                )}
+                {task.metadata?.statusReason && (
+                  <div className="pt-1 border-t">
+                    <span className="text-muted-foreground">{task.metadata.statusReason}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Force Complete button - only show for non-completed join tasks */}
+            {task && task.status !== 'completed' && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full mt-2"
+                onClick={async () => {
+                  if (!task._id) return
+                  if (!confirm('Force complete this join with available results? This cannot be undone.')) return
+
+                  try {
+                    const response = await fetch(`/api/tasks/${task._id}/force-complete-join`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                    })
+                    if (!response.ok) {
+                      const error = await response.json()
+                      throw new Error(error.message || 'Failed to force complete join')
+                    }
+                    // Refetch tasks to get updated data
+                    queryClient.invalidateQueries({ queryKey: ['tasks'] })
+                    queryClient.invalidateQueries({ queryKey: ['task', task._id] })
+                  } catch (err) {
+                    console.error('Force complete join error:', err)
+                    alert(err instanceof Error ? err.message : 'Failed to force complete join')
+                  }
+                }}
+              >
+                Force Complete Join
+              </Button>
+            )}
+          </div>
         )}
 
         {/* Flow task (nested workflow) */}

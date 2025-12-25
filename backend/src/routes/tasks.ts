@@ -1118,6 +1118,118 @@ tasksRouter.delete('/:id', async (req: Request, res: Response, next: NextFunctio
   }
 });
 
+// POST /api/tasks/:id/force-complete-join - Force complete a join task with available results
+tasksRouter.post('/:id/force-complete-join', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const taskId = toObjectId(req.params.id);
+
+    // Get the join task
+    const joinTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
+    if (!joinTask) {
+      throw createError('Task not found', 404);
+    }
+
+    if (joinTask.taskType !== 'join') {
+      throw createError('Task is not a join task', 400);
+    }
+
+    if (joinTask.status === 'completed') {
+      throw createError('Join task is already completed', 400);
+    }
+
+    // Find the associated foreach task
+    const foreachTaskId = joinTask.metadata?.awaitingForeachTask ||
+      (joinTask.joinConfig?.awaitTaskId ? joinTask.joinConfig.awaitTaskId.toString() : null);
+
+    if (!foreachTaskId) {
+      throw createError('Cannot find associated foreach task for this join', 400);
+    }
+
+    const foreachTask = await db.collection<Task>('tasks').findOne({
+      _id: toObjectId(foreachTaskId),
+    });
+
+    if (!foreachTask) {
+      throw createError('Foreach task not found', 404);
+    }
+
+    // Get all children of the foreach task
+    const children = await db.collection<Task>('tasks').find({
+      parentId: foreachTask._id,
+    }).toArray();
+
+    const completedCount = children.filter(c => c.status === 'completed').length;
+    const failedCount = children.filter(c => c.status === 'failed').length;
+    const totalDone = completedCount + failedCount;
+    const expectedCount = joinTask.joinConfig?.expectedCount ?? foreachTask.batchCounters?.expectedCount ?? children.length;
+    const currentSuccessPercent = expectedCount > 0 ? (completedCount / expectedCount) * 100 : 0;
+
+    // Aggregate results from completed tasks
+    const results = children
+      .filter(c => c.status === 'completed')
+      .map(c => c.metadata);
+
+    const now = new Date();
+    const statusReason = `Force-completed: ${completedCount}/${expectedCount} tasks succeeded (${currentSuccessPercent.toFixed(1)}%)`;
+
+    // Update the join task
+    await db.collection('tasks').updateOne(
+      { _id: taskId },
+      {
+        $set: {
+          status: 'completed',
+          updatedAt: now,
+          'metadata.aggregatedResults': results,
+          'metadata.successCount': completedCount,
+          'metadata.failedCount': failedCount,
+          'metadata.expectedCount': expectedCount,
+          'metadata.successPercent': currentSuccessPercent,
+          'metadata.statusReason': statusReason,
+          'metadata.forceCompleted': true,
+          'metadata.forceCompletedAt': now,
+        },
+      }
+    );
+
+    // Update foreach batchCounters
+    await db.collection('tasks').updateOne(
+      { _id: foreachTask._id },
+      {
+        $set: {
+          status: 'completed',
+          updatedAt: now,
+          'batchCounters.processedCount': completedCount,
+          'batchCounters.failedCount': failedCount,
+        },
+      }
+    );
+
+    // Get the updated join task
+    const updatedJoinTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
+
+    // Publish event
+    await publishTaskEvent('task.updated', updatedJoinTask!, {
+      actorId: (req as Request & { userId?: string }).userId,
+      actorType: 'user',
+      changes: { status: { from: joinTask.status, to: 'completed' } },
+    });
+
+    // Note: Workflow advancement happens automatically via the event bus
+    // The publishTaskEvent call above triggers workflow-execution-service's
+    // subscription to task.updated events, which handles advancing the workflow
+
+    res.json({
+      success: true,
+      message: statusReason,
+      task: updatedJoinTask,
+      aggregatedResults: results.length,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // POST /api/tasks/bulk - Bulk operations
 tasksRouter.post('/bulk', async (req: Request, res: Response, next: NextFunction) => {
   try {
