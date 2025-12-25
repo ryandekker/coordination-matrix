@@ -459,7 +459,7 @@ export function useEventStream(options?: {
 
           // Update individual task cache
           queryClient.setQueryData(['task', event.taskId], (old: unknown) => {
-            if (!old) return old
+            if (!old || !event.task) return old
             const oldData = old as { data: Task }
             // Preserve existing children array if present (don't overwrite with empty)
             const preservedChildren = oldData.data.children || []
