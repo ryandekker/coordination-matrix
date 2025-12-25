@@ -237,7 +237,14 @@ export function TasksPage() {
   )
 
   // Check if any active filters are present (excluding rootOnly, parentId, includeArchived)
+  // Only applies to root-level view - when viewing a specific parent's children, filtering is simpler
   const hasActiveFilters = useMemo(() => {
+    // When viewing a specific parent's children, don't use hierarchy-aware filtering mode
+    // The backend already returns only that parent's children, and we just filter those normally
+    if (parentIdFromUrl) {
+      return false
+    }
+
     // Check for text search
     if (search && search.trim().length > 0) {
       return true
@@ -260,7 +267,7 @@ export function TasksPage() {
     }
 
     return false
-  }, [search, filters])
+  }, [search, filters, parentIdFromUrl])
 
   // Memoized effective visible columns
   const effectiveVisibleColumns = useMemo(() => {
