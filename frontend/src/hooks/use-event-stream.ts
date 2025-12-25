@@ -471,15 +471,16 @@ export function useEventStream(options?: {
 
           // Update task in list caches - use a targeted approach
           queryClient.setQueriesData({ queryKey: ['tasks'] }, (old: unknown) => {
-            if (!old) return old
+            if (!old || !event.task) return old
             const oldData = old as { data: Task[]; pagination: unknown }
+            const eventTask = event.task
             return {
               ...oldData,
               data: oldData.data.map((task: Task) => {
                 if (task._id === event.taskId) {
                   // Preserve existing children array
                   const preservedChildren = task.children || []
-                  return { ...task, ...event.task, children: event.task.children?.length ? event.task.children : preservedChildren }
+                  return { ...task, ...eventTask, children: eventTask.children?.length ? eventTask.children : preservedChildren }
                 }
                 return task
               })
