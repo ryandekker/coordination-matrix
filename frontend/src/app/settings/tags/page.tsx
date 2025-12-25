@@ -7,6 +7,8 @@ import {
   Pencil,
   Trash2,
   Search,
+  Wand2,
+  Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -93,6 +95,27 @@ async function deleteTag(id: string): Promise<void> {
   if (!response.ok) throw new Error('Failed to delete tag')
 }
 
+interface DiscoverResult {
+  success: boolean
+  message: string
+  data: {
+    created: Tag[]
+    existingCount: number
+    totalDiscovered: number
+  }
+}
+
+async function discoverTags(): Promise<DiscoverResult> {
+  const response = await authFetch(`${API_BASE}/tags/discover`, {
+    method: 'POST',
+  })
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.message || 'Failed to discover tags')
+  }
+  return response.json()
+}
+
 interface TagFormData {
   name: string
   displayName: string
@@ -148,6 +171,20 @@ export default function TagsSettingsPage() {
     mutationFn: deleteTag,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tags'] })
+    },
+  })
+
+  const [discoverResult, setDiscoverResult] = useState<string | null>(null)
+  const discoverMutation = useMutation({
+    mutationFn: discoverTags,
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['tags'] })
+      setDiscoverResult(result.message)
+      setTimeout(() => setDiscoverResult(null), 5000)
+    },
+    onError: (error: Error) => {
+      setDiscoverResult(`Error: ${error.message}`)
+      setTimeout(() => setDiscoverResult(null), 5000)
     },
   })
 
@@ -222,11 +259,37 @@ export default function TagsSettingsPage() {
             Create and manage tags for task categorization. Tags are available to all users, daemons, and agents.
           </p>
         </div>
-        <Button onClick={openCreateModal}>
-          <Plus className="mr-2 h-4 w-4" />
-          Create Tag
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => discoverMutation.mutate()}
+            disabled={discoverMutation.isPending}
+          >
+            {discoverMutation.isPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Wand2 className="mr-2 h-4 w-4" />
+            )}
+            Discover Tags
+          </Button>
+          <Button onClick={openCreateModal}>
+            <Plus className="mr-2 h-4 w-4" />
+            Create Tag
+          </Button>
+        </div>
       </div>
+
+      {/* Discover result message */}
+      {discoverResult && (
+        <div className={cn(
+          'rounded-md p-3 text-sm',
+          discoverResult.startsWith('Error')
+            ? 'bg-destructive/10 border border-destructive/30 text-destructive'
+            : 'bg-green-500/10 border border-green-500/30 text-green-600 dark:text-green-400'
+        )}>
+          {discoverResult}
+        </div>
+      )}
 
       {/* Search */}
       <div className="relative max-w-md">

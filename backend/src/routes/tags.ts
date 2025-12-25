@@ -177,6 +177,69 @@ tagsRouter.delete('/:id', async (req: Request, res: Response, next: NextFunction
   }
 });
 
+// POST /api/tags/discover - Discover and import tags from existing tasks
+// Scans all tasks for unique tags and creates entries for any that don't exist
+tagsRouter.post('/discover', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const now = new Date();
+
+    // Get all unique tags from tasks using aggregation
+    const taskTags = await db.collection('tasks').aggregate([
+      { $match: { tags: { $exists: true, $ne: [] } } },
+      { $unwind: '$tags' },
+      { $group: { _id: '$tags' } },
+      { $sort: { _id: 1 } }
+    ]).toArray();
+
+    const uniqueTagNames = taskTags.map(t => t._id).filter(Boolean);
+
+    const created: Tag[] = [];
+    const existing: string[] = [];
+
+    for (const tagName of uniqueTagNames) {
+      const normalizedName = tagName.toLowerCase().trim().replace(/\s+/g, '-');
+
+      // Check if tag already exists
+      const existingTag = await db.collection<Tag>('tags').findOne({ name: normalizedName });
+
+      if (existingTag) {
+        existing.push(normalizedName);
+      } else {
+        // Create new tag with default color
+        const newTag: Omit<Tag, '_id'> = {
+          name: normalizedName,
+          displayName: tagName,
+          color: '#6B7280', // Default gray
+          description: null,
+          isActive: true,
+          createdById: req.user?.userId ? new ObjectId(req.user.userId) : null,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        const result = await db.collection<Tag>('tags').insertOne(newTag as Tag);
+        const inserted = await db.collection<Tag>('tags').findOne({ _id: result.insertedId });
+        if (inserted) {
+          created.push(inserted);
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Discovered ${uniqueTagNames.length} unique tags. Created ${created.length} new tags, ${existing.length} already existed.`,
+      data: {
+        created,
+        existingCount: existing.length,
+        totalDiscovered: uniqueTagNames.length
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // POST /api/tags/ensure - Ensure tags exist (create if they don't)
 // Useful for bulk operations and migrations
 tagsRouter.post('/ensure', async (req: Request, res: Response, next: NextFunction) => {

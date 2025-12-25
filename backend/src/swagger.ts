@@ -1497,6 +1497,37 @@ All responses follow this structure:
           },
         },
       },
+      '/api/tags/discover': {
+        post: {
+          tags: ['Tags'],
+          summary: 'Discover tags from existing tasks',
+          description: 'Scans all tasks in the database and creates tag entries for any unique tags that do not already exist in the tags collection. Useful for importing tags from tasks that were created before the structured tag system.',
+          responses: {
+            200: {
+              description: 'Tags discovered and created',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean' },
+                      message: { type: 'string' },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          created: { type: 'array', items: { $ref: '#/components/schemas/Tag' } },
+                          existingCount: { type: 'integer' },
+                          totalDiscovered: { type: 'integer' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
       '/api/tags/ensure': {
         post: {
           tags: ['Tags'],
