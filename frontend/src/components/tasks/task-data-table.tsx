@@ -1137,22 +1137,22 @@ export function TaskDataTable({
 
         // For each task in the range, also include all its descendants
         const allIds = new Set<string>()
-        for (const id of rangeIds) {
+        rangeIds.forEach((id) => {
           allIds.add(id)
           // Find the task and collect all its descendants
           const task = findTaskById(tasks, id)
           if (task && task.children && task.children.length > 0) {
-            for (const childId of collectAllDescendantIds(task)) {
+            collectAllDescendantIds(task).forEach((childId) => {
               allIds.add(childId)
-            }
+            })
           }
-        }
+        })
 
         setSelectedRows((prev) => {
           const newSelected = new Set(prev)
-          for (const id of allIds) {
+          allIds.forEach((id) => {
             newSelected.add(id)
-          }
+          })
           return newSelected
         })
       }
