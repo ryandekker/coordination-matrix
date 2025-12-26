@@ -546,6 +546,12 @@ export interface Task {
     completedCount?: number
     failedCount?: number
   }
+  joinConfig?: {
+    minSuccessPercent?: number
+    expectedCount?: number
+    timeoutMs?: number
+    maxWaitMs?: number
+  }
   _resolved?: {
     assignee?: { _id: string; displayName: string }
     createdBy?: { _id: string; displayName: string }

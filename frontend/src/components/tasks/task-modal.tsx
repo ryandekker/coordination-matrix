@@ -1317,10 +1317,10 @@ export function TaskModal({
                       min={0}
                       max={100}
                       className="w-20 h-7 text-xs text-right"
-                      defaultValue={task.joinConfig?.minSuccessPercent ?? task.metadata?.minSuccessPercent ?? 100}
+                      defaultValue={task.joinConfig?.minSuccessPercent ?? (task.metadata?.minSuccessPercent as number | undefined) ?? 100}
                       onBlur={async (e) => {
                         const value = Math.min(100, Math.max(0, Number(e.target.value) || 0))
-                        if (value === (task.joinConfig?.minSuccessPercent ?? task.metadata?.minSuccessPercent ?? 100)) return
+                        if (value === (task.joinConfig?.minSuccessPercent ?? (task.metadata?.minSuccessPercent as number | undefined) ?? 100)) return
                         try {
                           const response = await fetch(`/api/tasks/${task._id}`, {
                             method: 'PATCH',
@@ -1341,7 +1341,7 @@ export function TaskModal({
                       }}
                     />
                   ) : (
-                    <span>{task.joinConfig?.minSuccessPercent ?? task.metadata?.minSuccessPercent ?? 100}%</span>
+                    <span>{task.joinConfig?.minSuccessPercent ?? (task.metadata?.minSuccessPercent as number | undefined) ?? 100}%</span>
                   )}
                 </div>
                 {/* Expected Count - editable */}
@@ -1352,11 +1352,11 @@ export function TaskModal({
                       type="number"
                       min={1}
                       className="w-20 h-7 text-xs text-right"
-                      defaultValue={task.joinConfig?.expectedCount ?? task.metadata?.expectedCount ?? ''}
+                      defaultValue={task.joinConfig?.expectedCount ?? (task.metadata?.expectedCount as number | undefined) ?? ''}
                       placeholder="auto"
                       onBlur={async (e) => {
                         const value = e.target.value ? Math.max(1, Number(e.target.value) || 1) : undefined
-                        const currentValue = task.joinConfig?.expectedCount ?? task.metadata?.expectedCount
+                        const currentValue = task.joinConfig?.expectedCount ?? (task.metadata?.expectedCount as number | undefined)
                         if (value === currentValue) return
                         try {
                           const response = await fetch(`/api/tasks/${task._id}`, {
@@ -1378,7 +1378,7 @@ export function TaskModal({
                       }}
                     />
                   ) : (
-                    <span>{task.joinConfig?.expectedCount ?? task.metadata?.expectedCount ?? 'auto'}</span>
+                    <span>{task.joinConfig?.expectedCount ?? (task.metadata?.expectedCount as number | undefined) ?? 'auto'}</span>
                   )}
                 </div>
                 {/* Max Wait (timeout) - editable */}
@@ -1420,21 +1420,21 @@ export function TaskModal({
                   )}
                 </div>
                 {/* Read-only stats */}
-                {task.metadata?.successCount !== undefined && (
+                {(task.metadata?.successCount as number | undefined) !== undefined && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Completed:</span>
-                    <span>{task.metadata.successCount} / {task.metadata.expectedCount ?? '?'}</span>
+                    <span>{task.metadata?.successCount as number} / {(task.metadata?.expectedCount as number | undefined) ?? '?'}</span>
                   </div>
                 )}
-                {task.metadata?.failedCount !== undefined && task.metadata.failedCount > 0 && (
+                {(task.metadata?.failedCount as number | undefined) !== undefined && (task.metadata?.failedCount as number) > 0 && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Failed:</span>
-                    <span className="text-red-500">{task.metadata.failedCount}</span>
+                    <span className="text-red-500">{task.metadata?.failedCount as number}</span>
                   </div>
                 )}
-                {task.metadata?.statusReason && (
+                {(task.metadata?.statusReason as string | undefined) && (
                   <div className="pt-1 border-t">
-                    <span className="text-muted-foreground">{task.metadata.statusReason}</span>
+                    <span className="text-muted-foreground">{task.metadata?.statusReason as string}</span>
                   </div>
                 )}
               </div>
