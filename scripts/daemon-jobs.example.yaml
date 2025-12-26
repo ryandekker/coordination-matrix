@@ -1,6 +1,18 @@
 # Task Daemon Jobs Configuration
 # Copy this file to daemon-jobs.yaml and configure for your environment
 #
+# Configurable Options:
+#   Option          Level           Default                      Description
+#   --------------- --------------- ---------------------------- ----------------------------------
+#   apiUrl          defaults/job    http://localhost:3001/api    API endpoint URL
+#   apiKey          defaults/job    env MATRIX_API_KEY           Authentication key
+#   interval        defaults/job    5000                         Polling interval (ms)
+#   exec            defaults/job    claude                       Command to execute
+#   maxPayloadSize  defaults/job    200000                       Max input payload bytes (~200KB)
+#   enabled         job only        true                         Whether job runs
+#   description     job only        -                            Job description
+#   viewId          job only        -                            View/saved search ID
+#
 # Usage:
 #   node scripts/task-daemon.mjs --config scripts/daemon-jobs.yaml --list
 #   node scripts/task-daemon.mjs --config scripts/daemon-jobs.yaml --job <name>
@@ -14,11 +26,15 @@ defaults:
   # API key for authentication (or use MATRIX_API_KEY env var)
   # apiKey: cm_ak_live_xxxxxxxxxxxxx
 
-  # Default polling interval (ms)
+  # Default polling interval in milliseconds
   interval: 5000
 
-  # Default command to execute
+  # Default command to execute (receives task prompt via stdin)
   exec: claude
+
+  # Maximum payload size in bytes (default: 200000 = ~200KB)
+  # Tasks with inputPayload larger than this will be held with an error
+  maxPayloadSize: 200000
 
 # Define your processing jobs
 jobs:
@@ -42,6 +58,13 @@ jobs:
     viewId: YOUR_CODE_VIEW_ID
     exec: "claude --model claude-sonnet-4-20250514 --allowedTools Edit,Read,Bash"
     interval: 15000
+
+  # Example: Job with large payload support
+  data-processing:
+    description: Process large data tasks
+    viewId: YOUR_DATA_VIEW_ID
+    exec: "claude --model claude-sonnet-4-20250514"
+    maxPayloadSize: 200000  # 200KB - override default for this job
 
   # Example: Disabled job (won't run)
   legacy-processor:

@@ -381,7 +381,7 @@ Examples:
     apiUrl = values['api-url'] || job.apiUrl || defaults.apiUrl || process.env.MATRIX_API_URL || 'http://localhost:3001/api';
     interval = parseInt(values.interval || job.interval || defaults.interval || '5000', 10);
     execCmd = values.exec || job.exec || defaults.exec || process.env.MATRIX_EXEC_CMD || 'claude';
-    maxPayloadSize = parseInt(values['max-payload-size'] || job.maxPayloadSize || defaults.maxPayloadSize || '50000', 10);
+    maxPayloadSize = parseInt(values['max-payload-size'] || job.maxPayloadSize || defaults.maxPayloadSize || '200000', 10);
   } else if (values.view) {
     // Use CLI args / env vars only (explicit --view provided)
     viewId = values.view;
@@ -389,7 +389,7 @@ Examples:
     apiUrl = values['api-url'] || process.env.MATRIX_API_URL || 'http://localhost:3001/api';
     interval = parseInt(values.interval || '5000', 10);
     execCmd = values.exec || process.env.MATRIX_EXEC_CMD || 'claude';
-    maxPayloadSize = parseInt(values['max-payload-size'] || '50000', 10);
+    maxPayloadSize = parseInt(values['max-payload-size'] || '200000', 10);
   } else if (configData && !values.job) {
     // No job or view specified - start all enabled jobs as background processes
     return {
