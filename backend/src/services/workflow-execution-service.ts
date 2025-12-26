@@ -2236,6 +2236,12 @@ class WorkflowExecutionService {
       throw new Error(`Workflow run ${runId} not found`);
     }
 
+    // Check if workflow run is cancelled - reject callbacks for cancelled workflows
+    if (run.status === 'cancelled') {
+      console.log(`[WorkflowExecutionService] Rejecting callback for cancelled workflow run ${runId}`);
+      throw new Error(`Workflow run ${runId} has been cancelled`);
+    }
+
     // Find any task for this step (for logging purposes - even completed ones)
     const anyTaskForStep = await this.tasks.findOne({
       workflowRunId: run._id,
@@ -2728,8 +2734,9 @@ class WorkflowExecutionService {
     const now = new Date();
     const _id = new ObjectId(runId);
 
+    // Allow cancelling both running and pending workflow runs
     const result = await this.workflowRuns.findOneAndUpdate(
-      { _id, status: 'running' },
+      { _id, status: { $in: ['running', 'pending'] } },
       {
         $set: {
           status: 'cancelled' as WorkflowRunStatus,
@@ -2740,14 +2747,23 @@ class WorkflowExecutionService {
     );
 
     if (!result) {
-      throw new Error(`Workflow run ${runId} not found or not running`);
+      throw new Error(`Workflow run ${runId} not found or not in a cancellable state`);
     }
 
-    // Cancel all pending/waiting tasks
-    await this.tasks.updateMany(
+    // Cancel all pending/waiting/in_progress tasks and clear scheduled webhook retries
+    const cancelResult = await this.tasks.updateMany(
       { workflowRunId: _id, status: { $in: ['pending', 'waiting', 'in_progress'] } },
-      { $set: { status: 'cancelled' as TaskStatus, updatedAt: now } }
+      {
+        $set: {
+          status: 'cancelled' as TaskStatus,
+          updatedAt: now,
+          // Clear any scheduled webhook retries so they don't run
+          'webhookConfig.nextRetryAt': null,
+        }
+      }
     );
+
+    console.log(`[WorkflowExecutionService] Cancelled workflow run ${runId}: ${cancelResult.modifiedCount} tasks marked as cancelled`);
 
     await this.publish({
       id: this.generateEventId(),
