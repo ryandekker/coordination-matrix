@@ -2604,6 +2604,7 @@ class WorkflowExecutionService {
       beforeCreatedAt?: Date;
       afterCreatedAt?: Date;
       includeDetails?: boolean;
+      includeDescendantCounts?: boolean;
     } = {}
   ): Promise<{
     run: WorkflowRun & { workflow?: Workflow };
@@ -2646,7 +2647,7 @@ class WorkflowExecutionService {
         };
 
     // Fetch limit + 1 to determine if there are more results
-    const tasks = (await this.tasks
+    let tasks = (await this.tasks
       .find(filter)
       .sort({ createdAt: 1, _id: 1 })
       .limit(limit + 1)
@@ -2657,6 +2658,20 @@ class WorkflowExecutionService {
     const hasMore = tasks.length > limit;
     if (hasMore) {
       tasks.pop(); // Remove the extra result
+    }
+
+    // Optionally include descendant counts for each task (for showing "X children" badges)
+    if (options.includeDescendantCounts && tasks.length > 0) {
+      const taskIds = tasks.map(t => t._id);
+      const childCounts = await this.tasks.aggregate([
+        { $match: { workflowRunId: run._id, parentId: { $in: taskIds } } },
+        { $group: { _id: '$parentId', count: { $sum: 1 } } }
+      ]).toArray();
+
+      const countMap = new Map(childCounts.map(c => [c._id.toString(), c.count]));
+      tasks.forEach(task => {
+        (task as unknown as { childCount: number }).childCount = countMap.get(task._id.toString()) || 0;
+      });
     }
 
     // Build cursor info for next/prev pages
@@ -2685,6 +2700,35 @@ class WorkflowExecutionService {
       tasks,
       pagination,
     };
+  }
+
+  /**
+   * Get child tasks for a specific parent task (for lazy loading)
+   */
+  async getChildTasks(
+    runId: string,
+    parentId: string,
+    options: { limit?: number; offset?: number } = {}
+  ): Promise<{ tasks: Task[]; hasMore: boolean }> {
+    const limit = options.limit || 50;
+    const offset = options.offset || 0;
+
+    const tasks = await this.tasks
+      .find({
+        workflowRunId: new ObjectId(runId),
+        parentId: new ObjectId(parentId)
+      })
+      .sort({ createdAt: 1 })
+      .skip(offset)
+      .limit(limit + 1)  // Fetch one extra to check if there's more
+      .toArray();
+
+    const hasMore = tasks.length > limit;
+    if (hasMore) {
+      tasks.pop();  // Remove the extra item
+    }
+
+    return { tasks, hasMore };
   }
 
   async listWorkflowRuns(options: {

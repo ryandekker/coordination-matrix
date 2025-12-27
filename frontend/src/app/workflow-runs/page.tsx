@@ -126,19 +126,44 @@ function formatDuration(start: string | null | undefined, end: string | null | u
   return `${Math.round(durationMs / 3600000)}h`
 }
 
+// Build parent-child index once for O(1) lookups
+type ChildrenMap = Map<string, Task[]>
+
+function buildChildrenMap(tasks: Task[]): ChildrenMap {
+  const map = new Map<string, Task[]>()
+  for (const task of tasks) {
+    if (task.parentId) {
+      const parentId = typeof task.parentId === 'string' ? task.parentId : task.parentId.toString()
+      if (!map.has(parentId)) {
+        map.set(parentId, [])
+      }
+      map.get(parentId)!.push(task)
+    }
+  }
+  return map
+}
+
 // Task tree node component - shows task details in modal
 interface TaskNodeProps {
   task: Task
   depth: number
-  allTasks: Task[]
+  childrenMap: ChildrenMap  // Pre-computed children index for O(1) lookups
   onTaskClick: (task: Task) => void
   stepType?: TaskType  // Override type from workflow step
+  maxInitialChildren?: number  // Limit children shown initially (for large lists)
 }
 
-function TaskNode({ task, depth, allTasks, onTaskClick, stepType }: TaskNodeProps) {
-  const [isExpanded, setIsExpanded] = useState(true)
-  const children = allTasks.filter(t => t.parentId === task._id)
-  const hasChildren = children.length > 0
+function TaskNode({ task, depth, childrenMap, onTaskClick, stepType, maxInitialChildren = 20 }: TaskNodeProps) {
+  const [isExpanded, setIsExpanded] = useState(depth === 0)  // Only expand root level by default
+  const [showAll, setShowAll] = useState(false)
+
+  const allChildren = childrenMap.get(task._id) || []
+  const childCount = (task as any).childCount ?? allChildren.length
+  const hasChildren = childCount > 0
+
+  // Show limited children initially for performance
+  const displayedChildren = showAll ? allChildren : allChildren.slice(0, maxInitialChildren)
+  const hasMoreChildren = allChildren.length > maxInitialChildren && !showAll
 
   // Use stepType override if provided, otherwise fall back to task.taskType
   const taskType = stepType || ((task as any).taskType || 'agent') as TaskType
@@ -179,7 +204,7 @@ function TaskNode({ task, depth, allTasks, onTaskClick, stepType }: TaskNodeProp
 
           {hasChildren && (
             <span className="text-xs text-muted-foreground flex-shrink-0">
-              {children.length} {children.length === 1 ? 'child' : 'children'}
+              {childCount} {childCount === 1 ? 'child' : 'children'}
             </span>
           )}
 
@@ -211,16 +236,29 @@ function TaskNode({ task, depth, allTasks, onTaskClick, stepType }: TaskNodeProp
         {hasChildren && (
           <CollapsibleContent>
             <div className="mt-1">
-              {children.map(child => (
+              {displayedChildren.map(child => (
                 <TaskNode
                   key={child._id}
                   task={child}
                   depth={depth + 1}
-                  allTasks={allTasks}
+                  childrenMap={childrenMap}
                   onTaskClick={onTaskClick}
                   stepType={stepType}
+                  maxInitialChildren={maxInitialChildren}
                 />
               ))}
+              {hasMoreChildren && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setShowAll(true)
+                  }}
+                  className="ml-6 mt-1 text-xs text-primary hover:underline"
+                  style={{ marginLeft: `${(depth + 1) * 24}px` }}
+                >
+                  Show {allChildren.length - maxInitialChildren} more...
+                </button>
+              )}
             </div>
           </CollapsibleContent>
         )}
@@ -265,7 +303,10 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['workflow-run', runId],
-    queryFn: () => workflowRunsApi.get(runId, true),
+    queryFn: () => workflowRunsApi.get(runId, {
+      includeTasks: true,
+      includeChildCounts: true,
+    }),
     refetchInterval: (query) => {
       const apiData = query.state.data as { run?: WorkflowRun } | undefined
       if (apiData?.run && (apiData.run.status === 'running' || apiData.run.status === 'pending')) {
@@ -287,13 +328,16 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
     },
   })
 
-  const apiResponse = data as { run?: WorkflowRun & { workflow?: WorkflowType }; tasks?: Task[] } | undefined
+  const apiResponse = data as { run?: WorkflowRun & { workflow?: WorkflowType }; tasks?: Task[]; totalTasks?: number } | undefined
   const run = apiResponse?.run
   const tasks = apiResponse?.tasks || []
   const workflow = run?.workflow
 
-  const taskIdsInRun = new Set(tasks.map(t => t._id))
-  const rootTasks = tasks.filter(t => !t.parentId || !taskIdsInRun.has(t.parentId))
+  // Build children index once for O(1) lookups instead of O(n²) filtering
+  const childrenMap = useMemo(() => buildChildrenMap(tasks), [tasks])
+
+  const taskIdsInRun = useMemo(() => new Set(tasks.map(t => t._id)), [tasks])
+  const rootTasks = useMemo(() => tasks.filter(t => !t.parentId || !taskIdsInRun.has(t.parentId)), [tasks, taskIdsInRun])
 
   if (isLoading) {
     return (
@@ -586,10 +630,7 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
                             key={task._id}
                             task={task}
                             depth={0}
-                            allTasks={tasks.filter(t =>
-                              // Include children without their own stepId
-                              !((t as any).workflowStepId && (t as any).workflowStepId !== step.id)
-                            )}
+                            childrenMap={childrenMap}
                             onTaskClick={setSelectedTask}
                             stepType={stepType}
                           />
@@ -626,7 +667,7 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
                       key={task._id}
                       task={task}
                       depth={0}
-                      allTasks={getChildrenWithoutStep(task._id)}
+                      childrenMap={childrenMap}
                       onTaskClick={setSelectedTask}
                     />
                   ))}
