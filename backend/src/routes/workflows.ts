@@ -115,6 +115,7 @@ interface Workflow {
   isActive: boolean;
   steps: WorkflowStep[];
   mermaidDiagram?: string;
+  rootTaskTitleTemplate?: string;
   createdAt: Date;
   updatedAt: Date;
   createdById?: ObjectId | null;
@@ -1209,6 +1210,276 @@ workflowsRouter.post('/generate-mermaid', async (req: Request, res: Response, ne
     const mermaidDiagram = generateMermaidFromSteps(steps, name);
 
     res.json({ data: { mermaidDiagram } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/workflows/export-multi - Export all workflows as multi-workflow Mermaid
+workflowsRouter.get('/export-multi', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { ids } = req.query;
+
+    // Build query - optionally filter by IDs
+    const query: Record<string, unknown> = {};
+    if (ids && typeof ids === 'string') {
+      const idList = ids.split(',').map(id => new ObjectId(id.trim()));
+      query._id = { $in: idList };
+    }
+
+    const workflows = await db
+      .collection<Workflow>('workflows')
+      .find(query)
+      .sort({ name: 1 })
+      .toArray();
+
+    if (workflows.length === 0) {
+      res.json({ data: { mermaid: '', workflows: [] } });
+      return;
+    }
+
+    // Generate multi-workflow Mermaid document
+    const sections: string[] = [];
+    const workflowSummaries: Array<{ id: string; name: string; isNew: boolean }> = [];
+
+    for (const workflow of workflows) {
+      const lines: string[] = [];
+
+      // Workflow metadata header
+      lines.push(`%% @workflow: "${workflow.name}"`);
+      lines.push(`%% @id: ${workflow._id.toString()}`);
+      if (workflow.description) {
+        lines.push(`%% @description: ${workflow.description}`);
+      }
+      if (workflow.isActive !== undefined) {
+        lines.push(`%% @isActive: ${workflow.isActive}`);
+      }
+      if (workflow.rootTaskTitleTemplate) {
+        lines.push(`%% @rootTaskTitleTemplate: ${workflow.rootTaskTitleTemplate}`);
+      }
+
+      // Generate the flowchart
+      const diagram = generateMermaidFromSteps(workflow.steps || [], workflow.name);
+      lines.push(diagram);
+
+      sections.push(lines.join('\n'));
+      workflowSummaries.push({
+        id: workflow._id.toString(),
+        name: workflow.name,
+        isNew: false,
+      });
+    }
+
+    const mermaid = sections.join('\n\n---\n\n');
+
+    res.json({
+      data: {
+        mermaid,
+        workflows: workflowSummaries,
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/workflows/import-multi - Import multiple workflows from multi-workflow Mermaid
+workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { mermaid, dryRun = false } = req.body;
+
+    if (!mermaid || typeof mermaid !== 'string') {
+      throw createError('mermaid is required', 400);
+    }
+
+    // Split by --- separator
+    const sections = mermaid.split(/\n---\n/).map(s => s.trim()).filter(Boolean);
+
+    if (sections.length === 0) {
+      throw createError('No workflow sections found', 400);
+    }
+
+    const results: Array<{
+      name: string;
+      id?: string;
+      action: 'create' | 'update' | 'skip';
+      stepCount: number;
+      error?: string;
+    }> = [];
+
+    for (const section of sections) {
+      try {
+        // Parse workflow metadata from comments
+        const lines = section.split('\n');
+        let workflowName = '';
+        let workflowId: string | null = null;
+        let description = '';
+        let isActive = true;
+        let rootTaskTitleTemplate = '';
+        let mermaidStart = 0;
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
+
+          const nameMatch = line.match(/^%% @workflow:\s*"?([^"]+)"?$/);
+          if (nameMatch) {
+            workflowName = nameMatch[1].trim();
+            continue;
+          }
+
+          const idMatch = line.match(/^%% @id:\s*(\S+)$/);
+          if (idMatch && idMatch[1] !== '(new)') {
+            workflowId = idMatch[1].trim();
+            continue;
+          }
+
+          const descMatch = line.match(/^%% @description:\s*(.+)$/);
+          if (descMatch) {
+            description = descMatch[1].trim();
+            continue;
+          }
+
+          const activeMatch = line.match(/^%% @isActive:\s*(true|false)$/);
+          if (activeMatch) {
+            isActive = activeMatch[1] === 'true';
+            continue;
+          }
+
+          const templateMatch = line.match(/^%% @rootTaskTitleTemplate:\s*(.+)$/);
+          if (templateMatch) {
+            rootTaskTitleTemplate = templateMatch[1].trim();
+            continue;
+          }
+
+          // If we hit the flowchart declaration, that's where the diagram starts
+          if (line.startsWith('flowchart') || line.startsWith('graph')) {
+            mermaidStart = i;
+            break;
+          }
+        }
+
+        if (!workflowName) {
+          results.push({
+            name: '(unknown)',
+            action: 'skip',
+            stepCount: 0,
+            error: 'Missing @workflow metadata',
+          });
+          continue;
+        }
+
+        // Extract the mermaid diagram portion
+        const mermaidDiagram = lines.slice(mermaidStart).join('\n');
+
+        // Parse steps from the diagram
+        const steps = parseMermaidToSteps(mermaidDiagram);
+
+        if (dryRun) {
+          // Just report what would happen
+          results.push({
+            name: workflowName,
+            id: workflowId || undefined,
+            action: workflowId ? 'update' : 'create',
+            stepCount: steps.length,
+          });
+        } else {
+          // Actually create or update
+          if (workflowId) {
+            // Update existing workflow
+            const updateResult = await db.collection<Workflow>('workflows').findOneAndUpdate(
+              { _id: new ObjectId(workflowId) },
+              {
+                $set: {
+                  name: workflowName,
+                  description,
+                  isActive,
+                  rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
+                  steps: ensureStepIds(steps),
+                  mermaidDiagram,
+                  updatedAt: new Date(),
+                },
+              },
+              { returnDocument: 'after' }
+            );
+
+            if (updateResult) {
+              results.push({
+                name: workflowName,
+                id: workflowId,
+                action: 'update',
+                stepCount: steps.length,
+              });
+            } else {
+              // ID not found, create new instead
+              const now = new Date();
+              const newWorkflow: Omit<Workflow, '_id'> = {
+                name: workflowName,
+                description,
+                isActive,
+                rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
+                steps: ensureStepIds(steps),
+                mermaidDiagram,
+                createdAt: now,
+                updatedAt: now,
+                createdById: null,
+              };
+
+              const insertResult = await db.collection<Workflow>('workflows').insertOne(newWorkflow as Workflow);
+              results.push({
+                name: workflowName,
+                id: insertResult.insertedId.toString(),
+                action: 'create',
+                stepCount: steps.length,
+              });
+            }
+          } else {
+            // Create new workflow
+            const now = new Date();
+            const newWorkflow: Omit<Workflow, '_id'> = {
+              name: workflowName,
+              description,
+              isActive,
+              rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
+              steps: ensureStepIds(steps),
+              mermaidDiagram,
+              createdAt: now,
+              updatedAt: now,
+              createdById: null,
+            };
+
+            const insertResult = await db.collection<Workflow>('workflows').insertOne(newWorkflow as Workflow);
+            results.push({
+              name: workflowName,
+              id: insertResult.insertedId.toString(),
+              action: 'create',
+              stepCount: steps.length,
+            });
+          }
+        }
+      } catch (sectionError) {
+        results.push({
+          name: '(parse error)',
+          action: 'skip',
+          stepCount: 0,
+          error: sectionError instanceof Error ? sectionError.message : 'Unknown error',
+        });
+      }
+    }
+
+    res.json({
+      data: {
+        results,
+        summary: {
+          total: results.length,
+          created: results.filter(r => r.action === 'create').length,
+          updated: results.filter(r => r.action === 'update').length,
+          skipped: results.filter(r => r.action === 'skip').length,
+        },
+        dryRun,
+      },
+    });
   } catch (error) {
     next(error);
   }

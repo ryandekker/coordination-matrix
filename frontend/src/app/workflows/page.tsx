@@ -2,6 +2,7 @@
 
 import { useState, Fragment, useMemo, useCallback, memo } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -901,10 +902,18 @@ export default function WorkflowsPage() {
             Define and manage AI workflow pipelines with automated and manual steps
           </p>
         </div>
-        <Button onClick={openCreateEditor}>
-          <Plus className="mr-2 h-4 w-4" />
-          Create Workflow
-        </Button>
+        <div className="flex items-center gap-2">
+          <Link href="/workflows/multi-edit">
+            <Button variant="outline">
+              <FileText className="mr-2 h-4 w-4" />
+              Multi-Edit
+            </Button>
+          </Link>
+          <Button onClick={openCreateEditor}>
+            <Plus className="mr-2 h-4 w-4" />
+            Create Workflow
+          </Button>
+        </div>
       </div>
 
       {/* Filters and bulk actions */}
