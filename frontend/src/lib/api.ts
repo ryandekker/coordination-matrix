@@ -151,6 +151,16 @@ export const tasksApi = {
     return handleResponse(response)
   },
 
+  // Rerun a task (reset to pending)
+  rerun: async (id: string, options?: { clearMetadata?: boolean; preserveInput?: boolean }): Promise<ApiResponse<Task>> => {
+    const response = await authFetch(`${API_BASE}/tasks/${id}/rerun`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(options || {}),
+    })
+    return handleResponse(response)
+  },
+
   // Webhook task operations
   executeWebhook: async (id: string): Promise<ApiResponse<WebhookAttempt>> => {
     const response = await authFetch(`${API_BASE}/tasks/${id}/webhook/execute`, {

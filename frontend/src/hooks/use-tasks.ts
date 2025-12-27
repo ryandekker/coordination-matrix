@@ -188,6 +188,21 @@ export function useDeleteTask() {
   })
 }
 
+export function useRerunTask() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, options }: { id: string; options?: { clearMetadata?: boolean; preserveInput?: boolean } }) =>
+      tasksApi.rerun(id, options),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task-tree'] })
+      queryClient.invalidateQueries({ queryKey: ['task-children'] })
+      queryClient.invalidateQueries({ queryKey: ['activity-logs'] })
+    },
+  })
+}
+
 export function useBulkUpdateTasks() {
   const queryClient = useQueryClient()
 

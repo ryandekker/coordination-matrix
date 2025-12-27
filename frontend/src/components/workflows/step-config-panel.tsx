@@ -52,6 +52,13 @@ interface ExternalConfig {
   payloadTemplate?: string
 }
 
+interface JoinBoundary {
+  minCount?: number
+  minPercent?: number
+  maxWaitMs?: number
+  failOnTimeout?: boolean
+}
+
 interface WorkflowStep {
   id: string
   name: string
@@ -68,7 +75,8 @@ interface WorkflowStep {
   maxItems?: number
   inputSource?: string
   inputPath?: string
-  awaitTag?: string
+  awaitStepId?: string
+  joinBoundary?: JoinBoundary
   minSuccessPercent?: number
   expectedCountPath?: string
   flowId?: string
@@ -650,8 +658,12 @@ export function StepConfigPanel({
                   type="number"
                   min="0"
                   max="100"
-                  value={step.minSuccessPercent ?? ''}
+                  value={step.joinBoundary?.minPercent ?? step.minSuccessPercent ?? ''}
                   onChange={(e) => onUpdate({
+                    joinBoundary: {
+                      ...step.joinBoundary,
+                      minPercent: e.target.value ? parseInt(e.target.value) : undefined
+                    },
                     minSuccessPercent: e.target.value ? parseInt(e.target.value) : undefined
                   })}
                   placeholder="100"
@@ -659,33 +671,102 @@ export function StepConfigPanel({
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-sm font-medium">Expected Count Path</label>
-                <div className="flex gap-1">
-                  <Input
-                    value={step.expectedCountPath || ''}
-                    onChange={(e) => onUpdate({ expectedCountPath: e.target.value })}
-                    placeholder="response.totalItems"
-                    className="font-mono text-sm"
-                  />
-                  <TokenBrowser
-                    workflowId={workflowId}
-                    previousSteps={previousSteps}
-                    currentStepIndex={stepIndex}
-                    onSelectToken={(token) => onUpdate({ expectedCountPath: token })}
-                    wrapInBraces={false}
-                  />
-                </div>
+                <label className="text-sm font-medium">Min Count</label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={step.joinBoundary?.minCount ?? ''}
+                  onChange={(e) => onUpdate({
+                    joinBoundary: {
+                      ...step.joinBoundary,
+                      minCount: e.target.value ? parseInt(e.target.value) : undefined
+                    }
+                  })}
+                  placeholder="All tasks"
+                  className="font-mono text-sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Max Wait (ms)</label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={step.joinBoundary?.maxWaitMs ?? ''}
+                  onChange={(e) => onUpdate({
+                    joinBoundary: {
+                      ...step.joinBoundary,
+                      maxWaitMs: e.target.value ? parseInt(e.target.value) : undefined
+                    }
+                  })}
+                  placeholder="No timeout"
+                  className="font-mono text-sm"
+                />
               </div>
             </div>
 
             <div className="space-y-1">
-              <label className="text-sm font-medium">Await Tag Pattern</label>
-              <Input
-                value={step.awaitTag || ''}
-                onChange={(e) => onUpdate({ awaitTag: e.target.value })}
-                placeholder="Auto-detects from ForEach"
-                className="font-mono text-sm"
-              />
+              <label className="text-sm font-medium">Expected Count Path</label>
+              <div className="flex gap-1">
+                <Input
+                  value={step.expectedCountPath || ''}
+                  onChange={(e) => onUpdate({ expectedCountPath: e.target.value })}
+                  placeholder="response.totalItems"
+                  className="font-mono text-sm"
+                />
+                <TokenBrowser
+                  workflowId={workflowId}
+                  previousSteps={previousSteps}
+                  currentStepIndex={stepIndex}
+                  onSelectToken={(token) => onUpdate({ expectedCountPath: token })}
+                  wrapInBraces={false}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Input Path</label>
+              <div className="flex gap-1">
+                <Input
+                  value={step.inputPath || ''}
+                  onChange={(e) => onUpdate({ inputPath: e.target.value })}
+                  placeholder="e.g., output.analysis"
+                  className="font-mono text-sm"
+                />
+                <TokenBrowser
+                  workflowId={workflowId}
+                  previousSteps={previousSteps}
+                  currentStepIndex={stepIndex}
+                  loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
+                  onSelectToken={(token) => onUpdate({ inputPath: token })}
+                  wrapInBraces={false}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                JSONPath to extract from each completed task.
+              </p>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Await Step</label>
+              <Select
+                value={step.awaitStepId || '_auto'}
+                onValueChange={(val) => onUpdate({ awaitStepId: val === '_auto' ? undefined : val })}
+              >
+                <SelectTrigger className="font-mono text-sm">
+                  <SelectValue placeholder="Auto-detect" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_auto">Auto-detect (most recent ForEach)</SelectItem>
+                  {allSteps.slice(0, stepIndex).filter(s => s.stepType === 'foreach').map((s, i) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      Step {i + 1}: {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Which ForEach step's tasks to wait for.
+              </p>
             </div>
           </div>
         )}

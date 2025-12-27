@@ -27,7 +27,7 @@ import {
   TabsTrigger,
 } from '@/components/ui/tabs'
 import { Task, FieldConfig, LookupValue, TaskType, WebhookConfig } from '@/lib/api'
-import { useCreateTask, useUpdateTask, useUsers, useWorkflows, useTasks, useTask, useTaskChildren } from '@/hooks/use-tasks'
+import { useCreateTask, useUpdateTask, useRerunTask, useUsers, useWorkflows, useTasks, useTask, useTaskChildren } from '@/hooks/use-tasks'
 import { cn } from '@/lib/utils'
 import { TaskActivity } from './task-activity'
 import { WebhookTaskConfig } from './webhook-task-config'
@@ -40,7 +40,7 @@ import {
   DEFAULT_TASK_MODAL_TAB,
   type TaskModalTab,
 } from '@/lib/task-type-config'
-import { Settings2, Database, Activity, Workflow, ExternalLink, ArrowUpRight, ListTree, Plus, Loader2 } from 'lucide-react'
+import { Settings2, Database, Activity, Workflow, ExternalLink, ArrowUpRight, ListTree, Plus, Loader2, RotateCcw } from 'lucide-react'
 import {
   Tooltip,
   TooltipContent,
@@ -113,6 +113,7 @@ export function TaskModal({
 
   const createTask = useCreateTask()
   const updateTask = useUpdateTask()
+  const rerunTask = useRerunTask()
 
   // Fetch fresh task data from cache to get updates after metadata changes
   const { data: taskData } = useTask(isOpen && task ? task._id : null)
@@ -1156,8 +1157,40 @@ export function TaskModal({
     const typeConfig = getTaskTypeConfig(currentTaskType)
     const TypeIcon = typeConfig.icon
 
+    // Can rerun if task has completed, failed, or is part of a workflow run
+    const canRerun = task && (
+      task.status === 'completed' ||
+      task.status === 'failed' ||
+      task.status === 'cancelled' ||
+      task.workflowRunId
+    )
+
+    const handleRerun = async () => {
+      if (!task) return
+      try {
+        await rerunTask.mutateAsync({ id: task._id })
+      } catch (error) {
+        console.error('Failed to rerun task:', error)
+      }
+    }
+
     return (
       <div className="p-4 space-y-4">
+        {/* Rerun button - show for tasks that can be rerun */}
+        {canRerun && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-full gap-2"
+            onClick={handleRerun}
+            disabled={rerunTask.isPending || task?.status === 'pending'}
+          >
+            <RotateCcw className={cn("h-4 w-4", rerunTask.isPending && "animate-spin")} />
+            {rerunTask.isPending ? 'Rerunning...' : 'Rerun Task'}
+          </Button>
+        )}
+
         {/* Task type display (selector is in header) */}
         <div className="space-y-2">
           <label className="text-xs font-medium text-muted-foreground">Task Type</label>
@@ -1298,150 +1331,149 @@ export function TaskModal({
           </p>
         )}
 
-        {/* Join task */}
-        {currentTaskType === 'join' && (
-          <div className="space-y-3">
-            <p className="text-xs text-muted-foreground italic">
-              Join tasks aggregate results from multiple parallel tasks.
+        {/* Join task configuration */}
+        {currentTaskType === 'join' && task && (
+          <div className="space-y-3 p-3 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-lg">
+            <label className="text-xs font-medium text-indigo-800 dark:text-indigo-200">Join Configuration</label>
+            <p className="text-[10px] text-muted-foreground">
+              Aggregates results from multiple parallel tasks.
             </p>
 
-            {/* Join config - editable for non-completed tasks */}
-            {task && (
-              <div className="space-y-2 text-xs">
-                {/* Min Success % - editable */}
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">Min Success %:</span>
-                  {task.status !== 'completed' ? (
-                    <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      className="w-20 h-7 text-xs text-right"
-                      defaultValue={task.joinConfig?.minSuccessPercent ?? (task.metadata?.minSuccessPercent as number | undefined) ?? 100}
-                      onBlur={async (e) => {
-                        const value = Math.min(100, Math.max(0, Number(e.target.value) || 0))
-                        if (value === (task.joinConfig?.minSuccessPercent ?? (task.metadata?.minSuccessPercent as number | undefined) ?? 100)) return
-                        try {
-                          const response = await fetch(`/api/tasks/${task._id}`, {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              joinConfig: {
-                                ...task.joinConfig,
-                                minSuccessPercent: value,
-                              },
-                            }),
-                          })
-                          if (!response.ok) throw new Error('Failed to update join config')
-                          queryClient.invalidateQueries({ queryKey: ['tasks'] })
-                          queryClient.invalidateQueries({ queryKey: ['task', task._id] })
-                        } catch (err) {
-                          console.error('Failed to update minSuccessPercent:', err)
-                        }
-                      }}
-                    />
-                  ) : (
-                    <span>{task.joinConfig?.minSuccessPercent ?? (task.metadata?.minSuccessPercent as number | undefined) ?? 100}%</span>
-                  )}
-                </div>
-                {/* Expected Count - editable */}
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">Expected Count:</span>
-                  {task.status !== 'completed' ? (
-                    <Input
-                      type="number"
-                      min={1}
-                      className="w-20 h-7 text-xs text-right"
-                      defaultValue={task.joinConfig?.expectedCount ?? (task.metadata?.expectedCount as number | undefined) ?? ''}
-                      placeholder="auto"
-                      onBlur={async (e) => {
-                        const value = e.target.value ? Math.max(1, Number(e.target.value) || 1) : undefined
-                        const currentValue = task.joinConfig?.expectedCount ?? (task.metadata?.expectedCount as number | undefined)
-                        if (value === currentValue) return
-                        try {
-                          const response = await fetch(`/api/tasks/${task._id}`, {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              joinConfig: {
-                                ...task.joinConfig,
-                                expectedCount: value,
-                              },
-                            }),
-                          })
-                          if (!response.ok) throw new Error('Failed to update join config')
-                          queryClient.invalidateQueries({ queryKey: ['tasks'] })
-                          queryClient.invalidateQueries({ queryKey: ['task', task._id] })
-                        } catch (err) {
-                          console.error('Failed to update expectedCount:', err)
-                        }
-                      }}
-                    />
-                  ) : (
-                    <span>{task.joinConfig?.expectedCount ?? (task.metadata?.expectedCount as number | undefined) ?? 'auto'}</span>
-                  )}
-                </div>
-                {/* Max Wait (timeout) - editable */}
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">Max Wait (sec):</span>
-                  {task.status !== 'completed' ? (
-                    <Input
-                      type="number"
-                      min={0}
-                      className="w-20 h-7 text-xs text-right"
-                      defaultValue={task.joinConfig?.maxWaitMs ? Math.round(task.joinConfig.maxWaitMs / 1000) : ''}
-                      placeholder="none"
-                      onBlur={async (e) => {
-                        const seconds = e.target.value ? Math.max(0, Number(e.target.value) || 0) : undefined
-                        const value = seconds ? seconds * 1000 : undefined
-                        const currentValue = task.joinConfig?.maxWaitMs
-                        if (value === currentValue) return
-                        try {
-                          const response = await fetch(`/api/tasks/${task._id}`, {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              joinConfig: {
-                                ...task.joinConfig,
-                                maxWaitMs: value,
-                              },
-                            }),
-                          })
-                          if (!response.ok) throw new Error('Failed to update join config')
-                          queryClient.invalidateQueries({ queryKey: ['tasks'] })
-                          queryClient.invalidateQueries({ queryKey: ['task', task._id] })
-                        } catch (err) {
-                          console.error('Failed to update maxWaitMs:', err)
-                        }
-                      }}
-                    />
-                  ) : (
-                    <span>{task.joinConfig?.maxWaitMs ? `${Math.round(task.joinConfig.maxWaitMs / 1000)}s` : 'none'}</span>
-                  )}
-                </div>
-                {/* Read-only stats */}
-                {(task.metadata?.successCount as number | undefined) !== undefined && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Completed:</span>
-                    <span>{task.metadata?.successCount as number} / {(task.metadata?.expectedCount as number | undefined) ?? '?'}</span>
+            {/* Join progress display */}
+            {task.metadata && (
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground">Success Count</label>
+                  <div className="h-7 px-3 py-1 text-sm bg-muted rounded-md border flex items-center">
+                    {(task.metadata as any).successCount ?? '-'} / {(task.metadata as any).expectedCount ?? '?'}
                   </div>
-                )}
-                {(task.metadata?.failedCount as number | undefined) !== undefined && (task.metadata?.failedCount as number) > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Failed:</span>
-                    <span className="text-red-500">{task.metadata?.failedCount as number}</span>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground">Success %</label>
+                  <div className={cn(
+                    "h-7 px-3 py-1 text-sm rounded-md border flex items-center",
+                    ((task.metadata as any).successPercent ?? 100) >= ((task.metadata as any).requiredPercent ?? 100)
+                      ? "bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400"
+                      : "bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400"
+                  )}>
+                    {((task.metadata as any).successPercent ?? 0).toFixed(1)}% / {(task.metadata as any).requiredPercent ?? 100}%
                   </div>
-                )}
-                {(task.metadata?.statusReason as string | undefined) && (
-                  <div className="pt-1 border-t">
-                    <span className="text-muted-foreground">{task.metadata?.statusReason as string}</span>
-                  </div>
-                )}
+                </div>
               </div>
             )}
 
+            {/* Editable join configuration */}
+            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-indigo-200 dark:border-indigo-700">
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">Expected Count</label>
+                <Input
+                  type="number"
+                  min="0"
+                  className="h-7 text-sm"
+                  defaultValue={(task as any).joinConfig?.expectedCount ?? ''}
+                  placeholder="Auto"
+                  onBlur={(e) => {
+                    const newValue = e.target.value ? parseInt(e.target.value, 10) : undefined
+                    const currentConfig = (task as any).joinConfig || {}
+                    updateTask.mutateAsync({
+                      id: task._id,
+                      data: {
+                        joinConfig: {
+                          ...currentConfig,
+                          expectedCount: newValue,
+                        },
+                      },
+                    })
+                  }}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">Min Success %</label>
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  className="h-7 text-sm"
+                  defaultValue={(task as any).joinConfig?.minSuccessPercent ?? (task as any).joinConfig?.boundary?.minPercent ?? ''}
+                  placeholder="100"
+                  onBlur={(e) => {
+                    const newValue = e.target.value ? parseInt(e.target.value, 10) : undefined
+                    const currentConfig = (task as any).joinConfig || {}
+                    updateTask.mutateAsync({
+                      id: task._id,
+                      data: {
+                        joinConfig: {
+                          ...currentConfig,
+                          minSuccessPercent: newValue,
+                          boundary: {
+                            ...currentConfig.boundary,
+                            minPercent: newValue,
+                          },
+                        },
+                      },
+                    })
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">Min Count</label>
+                <Input
+                  type="number"
+                  min="0"
+                  className="h-7 text-sm"
+                  defaultValue={(task as any).joinConfig?.boundary?.minCount ?? ''}
+                  placeholder="All"
+                  onBlur={(e) => {
+                    const newValue = e.target.value ? parseInt(e.target.value, 10) : undefined
+                    const currentConfig = (task as any).joinConfig || {}
+                    updateTask.mutateAsync({
+                      id: task._id,
+                      data: {
+                        joinConfig: {
+                          ...currentConfig,
+                          boundary: {
+                            ...currentConfig.boundary,
+                            minCount: newValue,
+                          },
+                        },
+                      },
+                    })
+                  }}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">Max Wait (ms)</label>
+                <Input
+                  type="number"
+                  min="0"
+                  className="h-7 text-sm"
+                  defaultValue={(task as any).joinConfig?.boundary?.maxWaitMs ?? ''}
+                  placeholder="No timeout"
+                  onBlur={(e) => {
+                    const newValue = e.target.value ? parseInt(e.target.value, 10) : undefined
+                    const currentConfig = (task as any).joinConfig || {}
+                    updateTask.mutateAsync({
+                      id: task._id,
+                      data: {
+                        joinConfig: {
+                          ...currentConfig,
+                          boundary: {
+                            ...currentConfig.boundary,
+                            maxWaitMs: newValue,
+                          },
+                        },
+                      },
+                    })
+                  }}
+                />
+              </div>
+            </div>
+
             {/* Force Complete button - only show for non-completed join tasks */}
-            {task && task.status !== 'completed' && (
+            {task.status !== 'completed' && (
               <Button
                 type="button"
                 variant="outline"
@@ -1460,7 +1492,6 @@ export function TaskModal({
                       const error = await response.json()
                       throw new Error(error.message || 'Failed to force complete join')
                     }
-                    // Refetch tasks to get updated data
                     queryClient.invalidateQueries({ queryKey: ['tasks'] })
                     queryClient.invalidateQueries({ queryKey: ['task', task._id] })
                   } catch (err) {
@@ -1475,10 +1506,10 @@ export function TaskModal({
           </div>
         )}
 
-        {/* Flow task (nested workflow) */}
-        {currentTaskType === 'flow' && (
+        {/* Join task simple display (when not a join task but task doesn't exist) */}
+        {currentTaskType === 'join' && !task && (
           <p className="text-xs text-muted-foreground italic">
-            Flow tasks delegate to another workflow.
+            Join tasks aggregate results from multiple parallel tasks.
           </p>
         )}
       </div>

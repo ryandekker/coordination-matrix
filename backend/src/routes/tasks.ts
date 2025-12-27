@@ -1068,6 +1068,102 @@ tasksRouter.delete('/:id/webhook/retry', async (req: Request, res: Response, nex
   }
 });
 
+// POST /api/tasks/:id/rerun - Rerun a task (reset to pending and clear output)
+tasksRouter.post('/:id/rerun', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const taskId = toObjectId(req.params.id);
+    const { clearMetadata = false, preserveInput = true } = req.body;
+
+    const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
+    if (!task) {
+      throw createError('Task not found', 404);
+    }
+
+    const now = new Date();
+
+    // Build the update object
+    const updateFields: Record<string, unknown> = {
+      status: 'pending',
+      updatedAt: now,
+    };
+
+    // Clear webhook attempts if task has webhook config
+    if (task.webhookConfig) {
+      updateFields['webhookConfig.attempts'] = [];
+      updateFields['webhookConfig.lastAttemptAt'] = null;
+      updateFields['webhookConfig.nextRetryAt'] = null;
+    }
+
+    // Clear batch counters for foreach/join tasks
+    if (task.taskType === 'foreach' && task.batchCounters) {
+      updateFields['batchCounters.processedCount'] = 0;
+      updateFields['batchCounters.failedCount'] = 0;
+      updateFields['batchCounters.receivedCount'] = 0;
+    }
+
+    // Clear or preserve metadata based on options
+    if (clearMetadata) {
+      // Clear all metadata except input-related fields if preserveInput is true
+      if (preserveInput && task.metadata) {
+        const inputFields = ['input', 'inputPayload', 'triggerPayload'];
+        const preservedMetadata: Record<string, unknown> = {};
+        for (const field of inputFields) {
+          if (task.metadata[field] !== undefined) {
+            preservedMetadata[field] = task.metadata[field];
+          }
+        }
+        updateFields.metadata = preservedMetadata;
+      } else {
+        updateFields.metadata = {};
+      }
+    } else {
+      // Clear only output-related metadata fields
+      const outputFields = [
+        'output', 'result', 'error', 'aggregatedResults',
+        'successCount', 'failedCount', 'successPercent',
+        'statusReason', 'completedAt'
+      ];
+      const $unset: Record<string, string> = {};
+      for (const field of outputFields) {
+        if (task.metadata?.[field] !== undefined) {
+          $unset[`metadata.${field}`] = '';
+        }
+      }
+      if (Object.keys($unset).length > 0) {
+        await db.collection('tasks').updateOne(
+          { _id: taskId },
+          { $unset }
+        );
+      }
+    }
+
+    const result = await db.collection<Task>('tasks').findOneAndUpdate(
+      { _id: taskId },
+      { $set: updateFields },
+      { returnDocument: 'after' }
+    );
+
+    if (!result) {
+      throw createError('Task not found', 404);
+    }
+
+    // Get actor from request
+    const actorId = req.user?.userId ? toObjectId(req.user.userId) : null;
+
+    // Publish task.status.changed event
+    await publishTaskEvent('task.status.changed', result, {
+      changes: [{ field: 'status', oldValue: task.status, newValue: 'pending' }],
+      actorId,
+      actorType: 'user',
+    });
+
+    res.json({ data: result, message: 'Task reset to pending' });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // DELETE /api/tasks/:id - Delete a task
 tasksRouter.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
