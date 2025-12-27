@@ -1019,33 +1019,46 @@ tasksRouter.post('/:id/rerun', async (req: Request, res: Response, next: NextFun
           : null;
 
         if (workflow?.steps) {
-          const currentStepIndex = workflow.steps.findIndex((s: { id: string }) => s.id === task.workflowStepId);
-          if (currentStepIndex > 0) {
-            const prevStep = workflow.steps[currentStepIndex - 1];
+          // Find steps that connect TO the current step (these are the "previous" steps)
+          const currentStepId = task.workflowStepId;
+          const previousSteps = workflow.steps.filter((s: { connections?: Array<{ targetStepId: string }> }) =>
+            s.connections?.some(conn => conn.targetStepId === currentStepId)
+          );
 
-            // Find the previous step's completed task
-            const prevTask = await db.collection<Task>('tasks').findOne({
+          // Find the most recent completed task from any of the previous steps
+          let prevTask: Task | null = null;
+          for (const prevStep of previousSteps) {
+            const stepTask = await db.collection<Task>('tasks').findOne({
               workflowRunId: task.workflowRunId,
               workflowStepId: prevStep.id,
               status: 'completed'
-            });
+            }, { sort: { updatedAt: -1 } });
 
-            if (prevTask?.metadata) {
-              // Build input payload from previous step's output
-              // For join tasks, use aggregatedResults; for others, use output or metadata
-              const prevOutput = prevTask.metadata.aggregatedResults
-                || prevTask.metadata.output
-                || prevTask.metadata;
-
-              refreshedInput = {
-                ...task.metadata?.inputPayload as Record<string, unknown>,
-                output: prevOutput,
-                _refreshedFrom: prevTask._id.toString(),
-                _refreshedAt: now.toISOString(),
-              };
-
-              console.log(`[Tasks] Rerun: refreshed input for task ${taskId} from previous step ${prevStep.id}`);
+            if (stepTask) {
+              // Prefer join tasks as they have aggregated results
+              if (stepTask.taskType === 'join' || !prevTask) {
+                prevTask = stepTask;
+              }
             }
+          }
+
+          if (prevTask?.metadata) {
+            // Build input payload from previous step's output
+            // For join tasks, use aggregatedResults; for others, use output or metadata
+            const prevOutput = prevTask.metadata.aggregatedResults
+              || prevTask.metadata.output
+              || prevTask.metadata;
+
+            refreshedInput = {
+              ...task.metadata?.inputPayload as Record<string, unknown>,
+              output: prevOutput,
+              _refreshedFrom: prevTask._id.toString(),
+              _refreshedAt: now.toISOString(),
+            };
+
+            console.log(`[Tasks] Rerun: refreshed input for task ${taskId} from previous step ${prevTask.workflowStepId} (${prevTask.taskType})`);
+          } else {
+            console.log(`[Tasks] Rerun: no completed previous step found for task ${taskId}. Previous steps: ${previousSteps.map((s: { id: string }) => s.id).join(', ')}`);
           }
         }
       } catch (err) {
