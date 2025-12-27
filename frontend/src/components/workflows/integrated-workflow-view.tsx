@@ -9,6 +9,7 @@ import {
   Plus,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Bot,
   User,
   Globe,
@@ -218,6 +219,7 @@ export function IntegratedWorkflowView({
     steps.length > 0 ? steps[0].id : null
   )
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false)
+  const [isQuickSelectExpanded, setIsQuickSelectExpanded] = useState(false)
 
   // Generate Mermaid diagram from steps
   const mermaidCode = useMemo(() => generateMermaidFromSteps(steps), [steps])
@@ -452,32 +454,45 @@ export function IntegratedWorkflowView({
 
           {/* Step list for quick navigation */}
           {steps.length > 0 && (
-            <div className="border-t p-2 bg-muted/20 flex-shrink-0">
-              <div className="text-xs text-muted-foreground mb-1.5 px-1">Quick select:</div>
-              <ScrollArea className="max-h-[120px]">
-                <div className="space-y-0.5">
-                  {steps.map((step, index) => {
-                    const typeInfo = STEP_TYPES.find(t => t.type === step.stepType) || STEP_TYPES[0]
-                    const Icon = typeInfo.icon
-                    return (
-                      <button
-                        key={step.id}
-                        onClick={() => setSelectedStepId(step.id)}
-                        className={cn(
-                          'w-full flex items-center gap-2 px-2 py-1 rounded text-left text-sm transition-colors',
-                          selectedStepId === step.id
-                            ? 'bg-primary/10 text-primary'
-                            : 'hover:bg-muted'
-                        )}
-                      >
-                        <span className="text-xs text-muted-foreground w-4">{index + 1}.</span>
-                        <Icon className={cn('h-3 w-3 flex-shrink-0', typeInfo.color)} />
-                        <span className="truncate">{step.name}</span>
-                      </button>
-                    )
-                  })}
+            <div className="border-t bg-muted/20 flex-shrink-0">
+              <button
+                onClick={() => setIsQuickSelectExpanded(!isQuickSelectExpanded)}
+                className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/40 transition-colors"
+              >
+                <span>Quick select ({steps.length} steps)</span>
+                <ChevronDown className={cn(
+                  'h-3 w-3 transition-transform',
+                  isQuickSelectExpanded && 'rotate-180'
+                )} />
+              </button>
+              {isQuickSelectExpanded && (
+                <div className="px-2 pb-2">
+                  <ScrollArea className="max-h-[120px]">
+                    <div className="space-y-0.5">
+                      {steps.map((step, index) => {
+                        const typeInfo = STEP_TYPES.find(t => t.type === step.stepType) || STEP_TYPES[0]
+                        const Icon = typeInfo.icon
+                        return (
+                          <button
+                            key={step.id}
+                            onClick={() => setSelectedStepId(step.id)}
+                            className={cn(
+                              'w-full flex items-center gap-2 px-2 py-1 rounded text-left text-sm transition-colors',
+                              selectedStepId === step.id
+                                ? 'bg-primary/10 text-primary'
+                                : 'hover:bg-muted'
+                            )}
+                          >
+                            <span className="text-xs text-muted-foreground w-4">{index + 1}.</span>
+                            <Icon className={cn('h-3 w-3 flex-shrink-0', typeInfo.color)} />
+                            <span className="truncate">{step.name}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </ScrollArea>
                 </div>
-              </ScrollArea>
+              )}
             </div>
           )}
         </div>
