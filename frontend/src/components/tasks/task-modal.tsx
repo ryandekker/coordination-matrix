@@ -27,7 +27,7 @@ import {
   TabsTrigger,
 } from '@/components/ui/tabs'
 import { Task, FieldConfig, LookupValue, TaskType, WebhookConfig } from '@/lib/api'
-import { useCreateTask, useUpdateTask, useUsers, useWorkflows, useTasks, useTaskChildren } from '@/hooks/use-tasks'
+import { useCreateTask, useUpdateTask, useRerunTask, useUsers, useWorkflows, useTasks, useTaskChildren } from '@/hooks/use-tasks'
 import { cn } from '@/lib/utils'
 import { TaskActivity } from './task-activity'
 import { WebhookTaskConfig } from './webhook-task-config'
@@ -40,7 +40,7 @@ import {
   DEFAULT_TASK_MODAL_TAB,
   type TaskModalTab,
 } from '@/lib/task-type-config'
-import { Settings2, Database, Activity, Workflow, ExternalLink, ArrowUpRight, ListTree, Plus, Loader2 } from 'lucide-react'
+import { Settings2, Database, Activity, Workflow, ExternalLink, ArrowUpRight, ListTree, Plus, Loader2, RotateCcw } from 'lucide-react'
 import {
   Tooltip,
   TooltipContent,
@@ -112,6 +112,7 @@ export function TaskModal({
 
   const createTask = useCreateTask()
   const updateTask = useUpdateTask()
+  const rerunTask = useRerunTask()
 
   // Only fetch users and workflows when modal is open
   const { data: usersData } = useUsers()
@@ -1147,8 +1148,40 @@ export function TaskModal({
     const typeConfig = getTaskTypeConfig(currentTaskType)
     const TypeIcon = typeConfig.icon
 
+    // Can rerun if task has completed, failed, or is part of a workflow run
+    const canRerun = task && (
+      task.status === 'completed' ||
+      task.status === 'failed' ||
+      task.status === 'cancelled' ||
+      task.workflowRunId
+    )
+
+    const handleRerun = async () => {
+      if (!task) return
+      try {
+        await rerunTask.mutateAsync({ id: task._id })
+      } catch (error) {
+        console.error('Failed to rerun task:', error)
+      }
+    }
+
     return (
       <div className="p-4 space-y-4">
+        {/* Rerun button - show for tasks that can be rerun */}
+        {canRerun && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-full gap-2"
+            onClick={handleRerun}
+            disabled={rerunTask.isPending || task?.status === 'pending'}
+          >
+            <RotateCcw className={cn("h-4 w-4", rerunTask.isPending && "animate-spin")} />
+            {rerunTask.isPending ? 'Rerunning...' : 'Rerun Task'}
+          </Button>
+        )}
+
         {/* Task type display (selector is in header) */}
         <div className="space-y-2">
           <label className="text-xs font-medium text-muted-foreground">Task Type</label>
@@ -1282,17 +1315,153 @@ export function TaskModal({
           </p>
         )}
 
-        {/* Join task */}
-        {currentTaskType === 'join' && (
-          <p className="text-xs text-muted-foreground italic">
-            Join tasks aggregate results from multiple parallel tasks.
-          </p>
+        {/* Join task configuration */}
+        {currentTaskType === 'join' && task && (
+          <div className="space-y-3 p-3 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-lg">
+            <label className="text-xs font-medium text-indigo-800 dark:text-indigo-200">Join Configuration</label>
+            <p className="text-[10px] text-muted-foreground">
+              Aggregates results from multiple parallel tasks.
+            </p>
+
+            {/* Join progress display */}
+            {task.metadata && (
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground">Success Count</label>
+                  <div className="h-7 px-3 py-1 text-sm bg-muted rounded-md border flex items-center">
+                    {(task.metadata as any).successCount ?? '-'} / {(task.metadata as any).expectedCount ?? '?'}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground">Success %</label>
+                  <div className={cn(
+                    "h-7 px-3 py-1 text-sm rounded-md border flex items-center",
+                    ((task.metadata as any).successPercent ?? 100) >= ((task.metadata as any).requiredPercent ?? 100)
+                      ? "bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400"
+                      : "bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400"
+                  )}>
+                    {((task.metadata as any).successPercent ?? 0).toFixed(1)}% / {(task.metadata as any).requiredPercent ?? 100}%
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Editable join configuration */}
+            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-indigo-200 dark:border-indigo-700">
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">Expected Count</label>
+                <Input
+                  type="number"
+                  min="0"
+                  className="h-7 text-sm"
+                  defaultValue={(task as any).joinConfig?.expectedCount ?? ''}
+                  placeholder="Auto"
+                  onBlur={(e) => {
+                    const newValue = e.target.value ? parseInt(e.target.value, 10) : undefined
+                    const currentConfig = (task as any).joinConfig || {}
+                    updateTask.mutateAsync({
+                      id: task._id,
+                      data: {
+                        joinConfig: {
+                          ...currentConfig,
+                          expectedCount: newValue,
+                        },
+                      },
+                    })
+                  }}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">Min Success %</label>
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  className="h-7 text-sm"
+                  defaultValue={(task as any).joinConfig?.minSuccessPercent ?? (task as any).joinConfig?.boundary?.minPercent ?? ''}
+                  placeholder="100"
+                  onBlur={(e) => {
+                    const newValue = e.target.value ? parseInt(e.target.value, 10) : undefined
+                    const currentConfig = (task as any).joinConfig || {}
+                    updateTask.mutateAsync({
+                      id: task._id,
+                      data: {
+                        joinConfig: {
+                          ...currentConfig,
+                          minSuccessPercent: newValue,
+                          boundary: {
+                            ...currentConfig.boundary,
+                            minPercent: newValue,
+                          },
+                        },
+                      },
+                    })
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">Max Weight</label>
+                <Input
+                  type="number"
+                  min="0"
+                  className="h-7 text-sm"
+                  defaultValue={(task as any).joinConfig?.boundary?.maxWeight ?? ''}
+                  placeholder="No limit"
+                  onBlur={(e) => {
+                    const newValue = e.target.value ? parseInt(e.target.value, 10) : undefined
+                    const currentConfig = (task as any).joinConfig || {}
+                    updateTask.mutateAsync({
+                      id: task._id,
+                      data: {
+                        joinConfig: {
+                          ...currentConfig,
+                          boundary: {
+                            ...currentConfig.boundary,
+                            maxWeight: newValue,
+                          },
+                        },
+                      },
+                    })
+                  }}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">Max Wait (ms)</label>
+                <Input
+                  type="number"
+                  min="0"
+                  className="h-7 text-sm"
+                  defaultValue={(task as any).joinConfig?.boundary?.maxWaitMs ?? ''}
+                  placeholder="No timeout"
+                  onBlur={(e) => {
+                    const newValue = e.target.value ? parseInt(e.target.value, 10) : undefined
+                    const currentConfig = (task as any).joinConfig || {}
+                    updateTask.mutateAsync({
+                      id: task._id,
+                      data: {
+                        joinConfig: {
+                          ...currentConfig,
+                          boundary: {
+                            ...currentConfig.boundary,
+                            maxWaitMs: newValue,
+                          },
+                        },
+                      },
+                    })
+                  }}
+                />
+              </div>
+            </div>
+          </div>
         )}
 
-        {/* Flow task (nested workflow) */}
-        {currentTaskType === 'flow' && (
+        {/* Join task simple display (when not a join task but task doesn't exist) */}
+        {currentTaskType === 'join' && !task && (
           <p className="text-xs text-muted-foreground italic">
-            Flow tasks delegate to another workflow.
+            Join tasks aggregate results from multiple parallel tasks.
           </p>
         )}
       </div>
