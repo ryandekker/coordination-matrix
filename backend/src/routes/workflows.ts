@@ -734,39 +734,62 @@ workflowsRouter.get('/export-multi', async (req: Request, res: Response, next: N
       return;
     }
 
-    // Generate multi-workflow Mermaid document
-    const sections: string[] = [];
+    // Generate multi-workflow Mermaid document using subgraphs
+    const lines: string[] = ['flowchart TD'];
     const workflowSummaries: Array<{ id: string; name: string; isNew: boolean }> = [];
 
     for (const workflow of workflows) {
-      const lines: string[] = [];
+      const workflowId = workflow._id.toString();
+      const safeName = workflow.name.replace(/"/g, "'");
 
-      // Workflow metadata header
-      lines.push(`%% @workflow: "${workflow.name}"`);
-      lines.push(`%% @id: ${workflow._id.toString()}`);
+      // Add blank line before each workflow section
+      lines.push('');
+
+      // Workflow metadata as comments
+      lines.push(`    %% @workflow: "${workflow.name}"`);
+      lines.push(`    %% @id: ${workflowId}`);
       if (workflow.description) {
-        lines.push(`%% @description: ${workflow.description}`);
+        lines.push(`    %% @description: ${workflow.description}`);
       }
       if (workflow.isActive !== undefined) {
-        lines.push(`%% @isActive: ${workflow.isActive}`);
+        lines.push(`    %% @isActive: ${workflow.isActive}`);
       }
       if (workflow.rootTaskTitleTemplate) {
-        lines.push(`%% @rootTaskTitleTemplate: ${workflow.rootTaskTitleTemplate}`);
+        lines.push(`    %% @rootTaskTitleTemplate: ${workflow.rootTaskTitleTemplate}`);
       }
 
-      // Generate the flowchart
-      const diagram = generateMermaidFromSteps(workflow.steps || [], workflow.name);
-      lines.push(diagram);
+      // Start subgraph
+      lines.push(`    subgraph ${workflowId}["${safeName}"]`);
+      lines.push('        direction TB');
 
-      sections.push(lines.join('\n'));
+      // Generate nodes and connections for this workflow
+      const subgraphContent = generateMermaidSubgraphContent(workflow.steps || [], workflowId);
+      if (subgraphContent) {
+        lines.push(subgraphContent);
+      }
+
+      // End subgraph
+      lines.push('    end');
+
       workflowSummaries.push({
-        id: workflow._id.toString(),
+        id: workflowId,
         name: workflow.name,
         isNew: false,
       });
     }
 
-    const mermaid = sections.join('\n\n%% ========================================================\n\n');
+    // Add styling at the end
+    lines.push('');
+    lines.push('    %% Styling');
+    lines.push('    classDef agent fill:#3B82F6,color:#fff');
+    lines.push('    classDef external fill:#F97316,color:#fff');
+    lines.push('    classDef manual fill:#8B5CF6,color:#fff');
+    lines.push('    classDef decision fill:#F59E0B,color:#fff');
+    lines.push('    classDef foreach fill:#10B981,color:#fff');
+    lines.push('    classDef join fill:#6366F1,color:#fff');
+    lines.push('    classDef flow fill:#EC4899,color:#fff');
+
+    const mermaid = lines.join('\n');
 
     res.json({
       data: {
@@ -779,6 +802,122 @@ workflowsRouter.get('/export-multi', async (req: Request, res: Response, next: N
   }
 });
 
+// Helper to generate subgraph content (nodes and connections only, no flowchart declaration)
+function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId: string): string {
+  if (steps.length === 0) return '';
+
+  const lines: string[] = [];
+  const metadataComments: string[] = [];
+  const connectedFrom = new Set<string>();
+
+  // Generate node definitions based on step type
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    const nodeId = step.id || `${workflowId}_step${i}`;
+    const nodeName = step.name.replace(/"/g, "'");
+
+    // Collect step metadata
+    const metadata: Record<string, unknown> = {};
+    if (step.description) metadata.description = step.description;
+    if (step.defaultAssigneeId) metadata.defaultAssigneeId = step.defaultAssigneeId;
+    if (step.inputPath) metadata.inputPath = step.inputPath;
+    if (step.additionalInstructions) metadata.additionalInstructions = step.additionalInstructions;
+    if (step.externalConfig) metadata.externalConfig = step.externalConfig;
+    if (step.webhookConfig) metadata.webhookConfig = step.webhookConfig;
+    if (step.defaultConnection) metadata.defaultConnection = step.defaultConnection;
+    if (step.itemsPath) metadata.itemsPath = step.itemsPath;
+    if (step.itemVariable) metadata.itemVariable = step.itemVariable;
+    if (step.maxItems) metadata.maxItems = step.maxItems;
+    if (step.awaitStepId) metadata.awaitStepId = step.awaitStepId;
+    if (step.awaitTag) metadata.awaitTag = step.awaitTag;
+    if (step.joinBoundary) metadata.joinBoundary = step.joinBoundary;
+    if (step.minSuccessPercent) metadata.minSuccessPercent = step.minSuccessPercent;
+    if (step.flowId) metadata.flowId = step.flowId;
+    if (step.inputMapping) metadata.inputMapping = step.inputMapping;
+
+    if (Object.keys(metadata).length > 0) {
+      metadataComments.push(`        %% @step(${nodeId}): ${JSON.stringify(metadata)}`);
+    }
+
+    // Generate node shape based on step type
+    let nodeShape: string;
+    let nodeClass: string;
+
+    switch (step.stepType) {
+      case 'agent':
+        nodeShape = `${nodeId}["${nodeName}"]`;
+        nodeClass = 'agent';
+        break;
+      case 'external':
+      case 'webhook':
+        nodeShape = `${nodeId}{{"${nodeName}"}}`;
+        nodeClass = 'external';
+        break;
+      case 'manual':
+        nodeShape = `${nodeId}("${nodeName}")`;
+        nodeClass = 'manual';
+        break;
+      case 'decision':
+        nodeShape = `${nodeId}{"${nodeName}"}`;
+        nodeClass = 'decision';
+        break;
+      case 'foreach':
+        nodeShape = `${nodeId}[["Each: ${nodeName}"]]`;
+        nodeClass = 'foreach';
+        break;
+      case 'join':
+        nodeShape = `${nodeId}[["Join: ${nodeName}"]]`;
+        nodeClass = 'join';
+        break;
+      case 'flow':
+        nodeShape = `${nodeId}[["Run: ${nodeName}"]]`;
+        nodeClass = 'flow';
+        break;
+      default:
+        nodeShape = `${nodeId}["${nodeName}"]`;
+        nodeClass = 'agent';
+    }
+
+    lines.push(`        ${nodeShape}:::${nodeClass}`);
+  }
+
+  // Generate connections
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    const nodeId = step.id || `${workflowId}_step${i}`;
+
+    if (step.connections && step.connections.length > 0) {
+      for (const conn of step.connections) {
+        if (conn.condition || conn.label) {
+          lines.push(`        ${nodeId} -->|"${conn.label || conn.condition}"| ${conn.targetStepId}`);
+        } else {
+          lines.push(`        ${nodeId} --> ${conn.targetStepId}`);
+        }
+      }
+      connectedFrom.add(nodeId);
+    }
+  }
+
+  // Add linear connections for nodes without explicit connections
+  for (let i = 0; i < steps.length - 1; i++) {
+    const step = steps[i];
+    const nodeId = step.id || `${workflowId}_step${i}`;
+
+    if (!connectedFrom.has(nodeId)) {
+      const nextNodeId = steps[i + 1].id || `${workflowId}_step${i + 1}`;
+      lines.push(`        ${nodeId} --> ${nextNodeId}`);
+    }
+  }
+
+  // Add metadata comments at the end
+  if (metadataComments.length > 0) {
+    lines.push('');
+    lines.push(...metadataComments);
+  }
+
+  return lines.join('\n');
+}
+
 // POST /api/workflows/import-multi - Import multiple workflows from multi-workflow Mermaid
 workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -789,11 +928,11 @@ workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: 
       throw createError('mermaid is required', 400);
     }
 
-    // Split by %% ======== separator (at least 8 equals signs)
-    const sections = mermaid.split(/\n%%\s*={8,}\s*\n/).map(s => s.trim()).filter(Boolean);
+    // Parse workflows from subgraphs
+    const workflowSections = parseMultiWorkflowMermaid(mermaid);
 
-    if (sections.length === 0) {
-      throw createError('No workflow sections found', 400);
+    if (workflowSections.length === 0) {
+      throw createError('No workflow subgraphs found. Use subgraph blocks with @workflow metadata.', 400);
     }
 
     const results: Array<{
@@ -804,56 +943,9 @@ workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: 
       error?: string;
     }> = [];
 
-    for (const section of sections) {
+    for (const section of workflowSections) {
       try {
-        // Parse workflow metadata from comments
-        const lines = section.split('\n');
-        let workflowName = '';
-        let workflowId: string | null = null;
-        let description = '';
-        let isActive = true;
-        let rootTaskTitleTemplate = '';
-        let mermaidStart = 0;
-
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i].trim();
-
-          const nameMatch = line.match(/^%% @workflow:\s*"?([^"]+)"?$/);
-          if (nameMatch) {
-            workflowName = nameMatch[1].trim();
-            continue;
-          }
-
-          const idMatch = line.match(/^%% @id:\s*(\S+)$/);
-          if (idMatch && idMatch[1] !== '(new)') {
-            workflowId = idMatch[1].trim();
-            continue;
-          }
-
-          const descMatch = line.match(/^%% @description:\s*(.+)$/);
-          if (descMatch) {
-            description = descMatch[1].trim();
-            continue;
-          }
-
-          const activeMatch = line.match(/^%% @isActive:\s*(true|false)$/);
-          if (activeMatch) {
-            isActive = activeMatch[1] === 'true';
-            continue;
-          }
-
-          const templateMatch = line.match(/^%% @rootTaskTitleTemplate:\s*(.+)$/);
-          if (templateMatch) {
-            rootTaskTitleTemplate = templateMatch[1].trim();
-            continue;
-          }
-
-          // If we hit the flowchart declaration, that's where the diagram starts
-          if (line.startsWith('flowchart') || line.startsWith('graph')) {
-            mermaidStart = i;
-            break;
-          }
-        }
+        const { name: workflowName, id: workflowId, description, isActive, rootTaskTitleTemplate, mermaidContent } = section;
 
         if (!workflowName) {
           results.push({
@@ -865,10 +957,10 @@ workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: 
           continue;
         }
 
-        // Extract the mermaid diagram portion
-        const mermaidDiagram = lines.slice(mermaidStart).join('\n');
+        // Create a fake flowchart for parsing
+        const mermaidDiagram = `flowchart TD\n${mermaidContent}`;
 
-        // Parse steps from the diagram
+        // Parse steps from the subgraph content
         const steps = parseMermaidToSteps(mermaidDiagram);
 
         if (dryRun) {
@@ -892,7 +984,7 @@ workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: 
                   isActive,
                   rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
                   steps: ensureStepIds(steps),
-                  mermaidDiagram,
+                  mermaidDiagram: generateMermaidFromSteps(steps, workflowName),
                   updatedAt: new Date(),
                 },
               },
@@ -915,7 +1007,7 @@ workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: 
                 isActive,
                 rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
                 steps: ensureStepIds(steps),
-                mermaidDiagram,
+                mermaidDiagram: generateMermaidFromSteps(steps, workflowName),
                 createdAt: now,
                 updatedAt: now,
                 createdById: null,
@@ -938,7 +1030,7 @@ workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: 
               isActive,
               rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
               steps: ensureStepIds(steps),
-              mermaidDiagram,
+              mermaidDiagram: generateMermaidFromSteps(steps, workflowName),
               createdAt: now,
               updatedAt: now,
               createdById: null,
@@ -979,6 +1071,108 @@ workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: 
     next(error);
   }
 });
+
+// Parse multi-workflow Mermaid document with subgraphs
+interface ParsedWorkflowSection {
+  name: string;
+  id: string | null;
+  description: string;
+  isActive: boolean;
+  rootTaskTitleTemplate: string;
+  mermaidContent: string;
+}
+
+function parseMultiWorkflowMermaid(mermaid: string): ParsedWorkflowSection[] {
+  const lines = mermaid.split('\n');
+  const workflows: ParsedWorkflowSection[] = [];
+
+  let currentWorkflow: Partial<ParsedWorkflowSection> = {};
+  let currentContent: string[] = [];
+  let inSubgraph = false;
+  let subgraphDepth = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmedLine = line.trim();
+
+    // Parse workflow metadata from comments (before subgraph)
+    if (!inSubgraph) {
+      const nameMatch = trimmedLine.match(/^%% @workflow:\s*"?([^"]+)"?$/);
+      if (nameMatch) {
+        currentWorkflow.name = nameMatch[1].trim();
+        continue;
+      }
+
+      const idMatch = trimmedLine.match(/^%% @id:\s*(\S+)$/);
+      if (idMatch && idMatch[1] !== '(new)') {
+        currentWorkflow.id = idMatch[1].trim();
+        continue;
+      }
+
+      const descMatch = trimmedLine.match(/^%% @description:\s*(.+)$/);
+      if (descMatch) {
+        currentWorkflow.description = descMatch[1].trim();
+        continue;
+      }
+
+      const activeMatch = trimmedLine.match(/^%% @isActive:\s*(true|false)$/);
+      if (activeMatch) {
+        currentWorkflow.isActive = activeMatch[1] === 'true';
+        continue;
+      }
+
+      const templateMatch = trimmedLine.match(/^%% @rootTaskTitleTemplate:\s*(.+)$/);
+      if (templateMatch) {
+        currentWorkflow.rootTaskTitleTemplate = templateMatch[1].trim();
+        continue;
+      }
+    }
+
+    // Detect subgraph start
+    const subgraphMatch = trimmedLine.match(/^subgraph\s+(\S+)/);
+    if (subgraphMatch) {
+      if (subgraphDepth === 0) {
+        // This is the main workflow subgraph
+        inSubgraph = true;
+        currentContent = [];
+      }
+      subgraphDepth++;
+      continue;
+    }
+
+    // Detect end of subgraph
+    if (trimmedLine === 'end') {
+      subgraphDepth--;
+      if (subgraphDepth === 0 && inSubgraph) {
+        // End of workflow subgraph - save it
+        workflows.push({
+          name: currentWorkflow.name || '',
+          id: currentWorkflow.id || null,
+          description: currentWorkflow.description || '',
+          isActive: currentWorkflow.isActive !== undefined ? currentWorkflow.isActive : true,
+          rootTaskTitleTemplate: currentWorkflow.rootTaskTitleTemplate || '',
+          mermaidContent: currentContent.join('\n'),
+        });
+
+        // Reset for next workflow
+        currentWorkflow = {};
+        currentContent = [];
+        inSubgraph = false;
+      }
+      continue;
+    }
+
+    // Collect content inside subgraph
+    if (inSubgraph && subgraphDepth === 1) {
+      // Skip direction declaration
+      if (!trimmedLine.startsWith('direction ')) {
+        currentContent.push(line);
+      }
+    }
+  }
+
+  return workflows;
+}
 
 // Helper function to parse Mermaid flowchart to workflow steps
 function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
