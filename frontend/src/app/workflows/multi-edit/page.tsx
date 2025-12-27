@@ -40,40 +40,36 @@ interface ImportSummary {
   skipped: number
 }
 
-const MULTI_WORKFLOW_TEMPLATE = `%% ============================================================
-%% Multi-Workflow Mermaid Document
-%% Separate workflows with: %% ======== (at least 8 equals signs)
-%% ============================================================
+const MULTI_WORKFLOW_TEMPLATE = `flowchart TD
 
-%% @workflow: "My New Workflow"
-%% @description: Description of this workflow
-flowchart TD
-    step1["First Step"]
-    step2("Manual Review")
-    step3{{"API Call"}}
-    step1 --> step2 --> step3
+    %% @workflow: "My New Workflow"
+    %% @description: Description of this workflow
+    subgraph workflow1["My New Workflow"]
+        direction TB
+        step1["First Step"]:::agent
+        step2("Manual Review"):::manual
+        step3{{"API Call"}}:::external
+        step1 --> step2 --> step3
+    end
 
+    %% @workflow: "Another Workflow"
+    %% @description: A second workflow that calls the first
+    subgraph workflow2["Another Workflow"]
+        direction TB
+        start["Begin Process"]:::agent
+        nested[["Run: My New Workflow"]]:::flow
+        finish["Complete"]:::agent
+        start --> nested --> finish
+    end
+
+    %% Styling
     classDef agent fill:#3B82F6,color:#fff
     classDef manual fill:#8B5CF6,color:#fff
     classDef external fill:#F97316,color:#fff
-    class step1 agent
-    class step2 manual
-    class step3 external
-
-%% ========================================================
-
-%% @workflow: "Another Workflow"
-%% @description: A second workflow in the same document
-flowchart TD
-    start["Begin Process"]
-    nested[["Run: My New Workflow"]]
-    finish["Complete"]
-    start --> nested --> finish
-
-    classDef agent fill:#3B82F6,color:#fff
+    classDef decision fill:#F59E0B,color:#fff
+    classDef foreach fill:#10B981,color:#fff
+    classDef join fill:#6366F1,color:#fff
     classDef flow fill:#EC4899,color:#fff
-    class start,finish agent
-    class nested flow
 `
 
 export default function MultiWorkflowEditPage() {
@@ -318,12 +314,6 @@ export default function MultiWorkflowEditPage() {
           />
         </div>
 
-        {mermaidError && (
-          <div className="mt-2 text-sm text-amber-600 dark:text-amber-400 flex-shrink-0">
-            Note: Preview shows first workflow only. Use separators: %% ======== (8+ equals)
-          </div>
-        )}
-
         {/* Results panel - collapsible at bottom */}
         {importResults && (
           <div className="mt-4 border rounded-lg bg-muted/20 flex-shrink-0">
@@ -400,7 +390,7 @@ export default function MultiWorkflowEditPage() {
           <div className="flex items-center gap-4">
             <span><code className="bg-muted px-1 rounded">%% @workflow: &quot;Name&quot;</code></span>
             <span><code className="bg-muted px-1 rounded">%% @id: abc123</code> for updates</span>
-            <span><code className="bg-muted px-1 rounded">%% ========</code> separator</span>
+            <span><code className="bg-muted px-1 rounded">subgraph id[&quot;Name&quot;]...end</code></span>
           </div>
         </div>
       </div>
