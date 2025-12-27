@@ -1604,7 +1604,7 @@ class WorkflowExecutionService {
     const minSuccessPercent = joinTask.joinConfig?.minSuccessPercent ?? 100;
 
     // Get maxWaitMs for timeout (optional - if not set, no timeout)
-    const maxWaitMs = joinTask.joinConfig?.maxWaitMs;
+    const maxWaitMs = joinTask.joinConfig?.boundary?.maxWaitMs;
 
     // Calculate the required number of completed tasks based on percentage
     const requiredSuccessCount = Math.ceil((expectedCount * minSuccessPercent) / 100);

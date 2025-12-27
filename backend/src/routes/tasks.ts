@@ -1268,15 +1268,15 @@ tasksRouter.post('/:id/force-complete-join', async (req: Request, res: Response,
     }
 
     // Find the associated foreach task
-    const foreachTaskId = joinTask.metadata?.awaitingForeachTask ||
+    const foreachTaskIdRaw = joinTask.metadata?.awaitingForeachTask ||
       (joinTask.joinConfig?.awaitTaskId ? joinTask.joinConfig.awaitTaskId.toString() : null);
 
-    if (!foreachTaskId) {
+    if (!foreachTaskIdRaw || typeof foreachTaskIdRaw !== 'string') {
       throw createError('Cannot find associated foreach task for this join', 400);
     }
 
     const foreachTask = await db.collection<Task>('tasks').findOne({
-      _id: toObjectId(foreachTaskId),
+      _id: toObjectId(foreachTaskIdRaw),
     });
 
     if (!foreachTask) {
@@ -1290,7 +1290,6 @@ tasksRouter.post('/:id/force-complete-join', async (req: Request, res: Response,
 
     const completedCount = children.filter(c => c.status === 'completed').length;
     const failedCount = children.filter(c => c.status === 'failed').length;
-    const totalDone = completedCount + failedCount;
     const expectedCount = joinTask.joinConfig?.expectedCount ?? foreachTask.batchCounters?.expectedCount ?? children.length;
     const currentSuccessPercent = expectedCount > 0 ? (completedCount / expectedCount) * 100 : 0;
 
@@ -1338,10 +1337,11 @@ tasksRouter.post('/:id/force-complete-join', async (req: Request, res: Response,
     const updatedJoinTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
 
     // Publish event
+    const userId = (req as Request & { userId?: string }).userId;
     await publishTaskEvent('task.updated', updatedJoinTask!, {
-      actorId: (req as Request & { userId?: string }).userId,
+      actorId: userId ? toObjectId(userId) : null,
       actorType: 'user',
-      changes: { status: { from: joinTask.status, to: 'completed' } },
+      changes: [{ field: 'status', oldValue: joinTask.status, newValue: 'completed' }],
     });
 
     // Note: Workflow advancement happens automatically via the event bus

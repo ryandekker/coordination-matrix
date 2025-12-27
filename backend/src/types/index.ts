@@ -64,6 +64,9 @@ export interface JoinConfig {
   // Boundary conditions for when the join fires
   boundary?: JoinBoundary;
 
+  // Data extraction
+  inputPath?: string;           // JSONPath to extract specific data from child task metadata
+
   // Legacy fields (maintained for backward compatibility)
   minSuccessPercent?: number;   // Use boundary.minPercent instead
   expectedCountPath?: string;   // JSONPath to get expected count from previous step output
