@@ -38,7 +38,7 @@
 
 import { parseArgs } from 'node:util';
 import { execSync, spawn } from 'node:child_process';
-import { writeFileSync, unlinkSync, readFileSync, existsSync, mkdirSync, createWriteStream, readdirSync } from 'node:fs';
+import { writeFileSync, unlinkSync, readFileSync, existsSync, mkdirSync, createWriteStream, readdirSync, statSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,6 +49,106 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const DEFAULT_CONFIG_PATH = join(__dirname, 'daemon-jobs.yaml');
 const PID_DIR = join(homedir(), '.matrix-daemon');
+
+// ============================================================================
+// Logger - Structured logging with levels and colors
+// ============================================================================
+
+const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
+
+const COLORS = {
+  reset: '\x1b[0m',
+  dim: '\x1b[2m',
+  bold: '\x1b[1m',
+  red: '\x1b[31m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  blue: '\x1b[34m',
+  cyan: '\x1b[36m',
+  gray: '\x1b[90m',
+};
+
+class Logger {
+  constructor(options = {}) {
+    this.level = LOG_LEVELS[options.level || 'info'];
+    this.prefix = options.prefix || '';
+    this.useColors = options.colors !== false && process.stdout.isTTY;
+  }
+
+  _color(color, text) {
+    return this.useColors ? `${COLORS[color]}${text}${COLORS.reset}` : text;
+  }
+
+  _timestamp() {
+    return new Date().toISOString();
+  }
+
+  _format(level, msg, data) {
+    const ts = this._color('dim', this._timestamp());
+    const prefix = this.prefix ? this._color('cyan', `[${this.prefix}]`) : '';
+    let levelStr;
+    switch (level) {
+      case 'debug': levelStr = this._color('gray', 'DBG'); break;
+      case 'info': levelStr = this._color('blue', 'INF'); break;
+      case 'warn': levelStr = this._color('yellow', 'WRN'); break;
+      case 'error': levelStr = this._color('red', 'ERR'); break;
+      default: levelStr = level.toUpperCase();
+    }
+    const parts = [ts, levelStr];
+    if (prefix) parts.push(prefix);
+    parts.push(msg);
+    if (data !== undefined) {
+      if (typeof data === 'object') {
+        parts.push(this._color('dim', JSON.stringify(data)));
+      } else {
+        parts.push(this._color('dim', String(data)));
+      }
+    }
+    return parts.join(' ');
+  }
+
+  debug(msg, data) {
+    if (this.level <= LOG_LEVELS.debug) console.log(this._format('debug', msg, data));
+  }
+
+  info(msg, data) {
+    if (this.level <= LOG_LEVELS.info) console.log(this._format('info', msg, data));
+  }
+
+  warn(msg, data) {
+    if (this.level <= LOG_LEVELS.warn) console.warn(this._format('warn', msg, data));
+  }
+
+  error(msg, data) {
+    if (this.level <= LOG_LEVELS.error) console.error(this._format('error', msg, data));
+  }
+
+  // Special logging for task processing
+  task(taskId, title, msg) {
+    const taskStr = this._color('cyan', `[${taskId.slice(-8)}]`);
+    const titleStr = this._color('bold', title.slice(0, 40));
+    console.log(`${this._color('dim', this._timestamp())} ${taskStr} ${titleStr} ${msg}`);
+  }
+
+  // Separator for visual clarity
+  separator(char = '─', length = 60) {
+    console.log(this._color('dim', char.repeat(length)));
+  }
+
+  // Header box
+  header(lines) {
+    const width = 60;
+    console.log(this._color('cyan', '╔' + '═'.repeat(width - 2) + '╗'));
+    for (const line of lines) {
+      const padding = Math.max(0, width - 4 - line.length);
+      console.log(this._color('cyan', '║ ') + line + ' '.repeat(padding) + this._color('cyan', ' ║'));
+    }
+    console.log(this._color('cyan', '╚' + '═'.repeat(width - 2) + '╝'));
+  }
+}
+
+// Global logger instance (will be configured based on CLI args)
+let log = new Logger({ level: 'info' });
 
 // ============================================================================
 // Base Daemon Prompt - Ensures JSON responses
@@ -94,9 +194,53 @@ function getLogFile(jobName) {
   return join(PID_DIR, `${jobName}.log`);
 }
 
+function getStatusFile(jobName) {
+  return join(PID_DIR, `${jobName}.status.json`);
+}
+
 function savePid(jobName, pid) {
   ensurePidDir();
   writeFileSync(getPidFile(jobName), String(pid));
+}
+
+// Runtime stats for daemon status
+const stats = {
+  startedAt: null,
+  tasksProcessed: 0,
+  tasksSucceeded: 0,
+  tasksFailed: 0,
+  lastTaskAt: null,
+  lastTaskId: null,
+  lastTaskTitle: null,
+  lastError: null,
+  currentTask: null,
+};
+
+function saveStatus(jobName, extraData = {}) {
+  ensurePidDir();
+  const status = {
+    ...stats,
+    ...extraData,
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    writeFileSync(getStatusFile(jobName), JSON.stringify(status, null, 2));
+  } catch {}
+}
+
+function readStatus(jobName) {
+  const statusFile = getStatusFile(jobName);
+  if (!existsSync(statusFile)) return null;
+  try {
+    return JSON.parse(readFileSync(statusFile, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function removeStatus(jobName) {
+  const statusFile = getStatusFile(jobName);
+  try { unlinkSync(statusFile); } catch {}
 }
 
 function readPid(jobName) {
@@ -144,38 +288,172 @@ function getRunningJobs() {
   return jobs;
 }
 
-function stopAllJobs() {
+function stopAllJobs(jobFilter = null) {
   const running = getRunningJobs();
-  if (running.length === 0) {
-    console.log('No daemon jobs are running.');
+  const toStop = jobFilter
+    ? running.filter(j => j.name === jobFilter)
+    : running;
+
+  if (toStop.length === 0) {
+    if (jobFilter) {
+      console.log(`Job "${jobFilter}" is not running.`);
+    } else {
+      console.log('No daemon jobs are running.');
+    }
     return;
   }
 
-  console.log(`Stopping ${running.length} daemon job(s)...`);
-  for (const { name, pid } of running) {
+  console.log(`Stopping ${toStop.length} daemon job(s)...`);
+  for (const { name, pid } of toStop) {
     try {
       process.kill(pid, 'SIGTERM');
       console.log(`  ✓ Stopped ${name} (PID ${pid})`);
       removePid(name);
+      removeStatus(name);
     } catch (e) {
       console.log(`  ✗ Failed to stop ${name} (PID ${pid}): ${e.message}`);
     }
   }
 }
 
-function showStatus() {
+function formatDuration(ms) {
+  if (!ms) return 'N/A';
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (days > 0) return `${days}d ${hours % 24}h`;
+  if (hours > 0) return `${hours}h ${minutes % 60}m`;
+  if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+  return `${seconds}s`;
+}
+
+function formatTimeAgo(isoString) {
+  if (!isoString) return 'never';
+  const ms = Date.now() - new Date(isoString).getTime();
+  return formatDuration(ms) + ' ago';
+}
+
+function showStatus(verbose = false) {
   const running = getRunningJobs();
-  console.log('\nDaemon Job Status:');
-  console.log('─'.repeat(50));
+
+  console.log('\n' + COLORS.cyan + '╔' + '═'.repeat(68) + '╗' + COLORS.reset);
+  console.log(COLORS.cyan + '║' + COLORS.reset + '  Daemon Job Status' + ' '.repeat(49) + COLORS.cyan + '║' + COLORS.reset);
+  console.log(COLORS.cyan + '╚' + '═'.repeat(68) + '╝' + COLORS.reset);
 
   if (running.length === 0) {
-    console.log('  No daemon jobs are running.');
-  } else {
-    for (const { name, pid } of running) {
-      console.log(`  ✓ ${name} (PID ${pid})`);
+    console.log('\n  No daemon jobs are running.\n');
+    console.log(`  ${COLORS.dim}Start jobs:     node scripts/task-daemon.mjs${COLORS.reset}`);
+    console.log(`  ${COLORS.dim}Start one job:  node scripts/task-daemon.mjs --job <name>${COLORS.reset}`);
+    console.log(`  ${COLORS.dim}Logs directory: ${PID_DIR}${COLORS.reset}\n`);
+    return;
+  }
+
+  // Show PID summary table first
+  console.log('');
+  console.log(`  ${COLORS.bold}Running Jobs (${running.length})${COLORS.reset}`);
+  console.log(`  ${'─'.repeat(50)}`);
+  for (const { name, pid } of running) {
+    const status = readStatus(name);
+    const indicator = status?.currentTask ? COLORS.yellow + '⟳' : COLORS.green + '●';
+    console.log(`  ${indicator}${COLORS.reset}  ${COLORS.bold}PID ${String(pid).padEnd(6)}${COLORS.reset}  ${name}`);
+  }
+  console.log(`  ${'─'.repeat(50)}`);
+
+  // Show detailed info for each job
+  for (const { name, pid } of running) {
+    const status = readStatus(name);
+    const logFile = getLogFile(name);
+    const logExists = existsSync(logFile);
+    const logSize = logExists ? statSync(logFile).size : 0;
+
+    console.log('');
+    console.log(`  ${COLORS.cyan}▸${COLORS.reset} ${COLORS.bold}${name}${COLORS.reset}  ${COLORS.yellow}PID ${pid}${COLORS.reset}`);
+
+    if (status) {
+      const uptime = status.startedAt ? Date.now() - new Date(status.startedAt).getTime() : 0;
+      const successRate = status.tasksProcessed > 0
+        ? ((status.tasksSucceeded / status.tasksProcessed) * 100).toFixed(0) + '%'
+        : 'N/A';
+
+      console.log(`    Uptime:     ${formatDuration(uptime)}`);
+      console.log(`    Tasks:      ${status.tasksProcessed} processed (${COLORS.green}${status.tasksSucceeded} ok${COLORS.reset}, ${COLORS.red}${status.tasksFailed} failed${COLORS.reset}) - ${successRate}`);
+      console.log(`    Last task:  ${status.lastTaskAt ? formatTimeAgo(status.lastTaskAt) : 'never'}`);
+
+      if (status.currentTask) {
+        console.log(`    ${COLORS.yellow}Processing:${COLORS.reset} ${status.currentTask.slice(0, 40)}...`);
+      }
+
+      if (status.lastError && verbose) {
+        console.log(`    ${COLORS.red}Last error:${COLORS.reset} ${status.lastError.slice(0, 60)}...`);
+      }
+    } else {
+      console.log(`    ${COLORS.dim}(no status data available)${COLORS.reset}`);
+    }
+
+    if (logExists) {
+      const sizeStr = logSize > 1024*1024
+        ? `${(logSize / (1024*1024)).toFixed(1)}MB`
+        : `${(logSize / 1024).toFixed(0)}KB`;
+      console.log(`    Log:        ${logFile} (${sizeStr})`);
     }
   }
+
   console.log('');
+  console.log(`  ${COLORS.bold}Quick Commands${COLORS.reset}`);
+  console.log(`    kill <PID>               Kill a specific job by PID`);
+  console.log(`    --logs <job>             Tail logs for a job`);
+  console.log(`    --stop                   Stop all jobs`);
+  console.log(`    --stop --job <name>      Stop a specific job`);
+  console.log(`    --restart                Restart all jobs`);
+  console.log('');
+}
+
+function tailLogs(jobName, lines = 50) {
+  const logFile = getLogFile(jobName);
+
+  if (!existsSync(logFile)) {
+    console.error(`No log file found for job "${jobName}"`);
+    console.error(`Expected: ${logFile}`);
+    return;
+  }
+
+  console.log(`${COLORS.dim}Tailing ${logFile}...${COLORS.reset}\n`);
+
+  // Use tail -f to follow the log
+  const tail = spawn('tail', ['-f', '-n', String(lines), logFile], {
+    stdio: 'inherit'
+  });
+
+  process.on('SIGINT', () => {
+    tail.kill();
+    process.exit(0);
+  });
+}
+
+function restartJob(jobName, configPath) {
+  // Stop the job first
+  stopAllJobs(jobName);
+
+  // Wait a moment then restart
+  console.log(`\nRestarting ${jobName || 'all jobs'}...`);
+
+  setTimeout(() => {
+    const args = ['--config', configPath];
+    if (jobName) {
+      args.push('--job', jobName);
+    }
+
+    const child = spawn('node', [__filename, ...args], {
+      stdio: 'inherit',
+      detached: false,
+    });
+
+    child.on('exit', (code) => {
+      process.exit(code || 0);
+    });
+  }, 1000);
 }
 
 // ============================================================================
@@ -234,66 +512,95 @@ function parseConfig() {
       exec: { type: 'string', short: 'e' },
       'dry-run': { type: 'boolean', short: 'd' },
       'no-update': { type: 'boolean', short: 'n' },
+      foreground: { type: 'boolean', short: 'f' },
       stop: { type: 'boolean' },
       status: { type: 'boolean' },
+      verbose: { type: 'boolean', short: 'V' },
+      logs: { type: 'string' },
+      restart: { type: 'boolean' },
+      'log-level': { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
     strict: true,
   });
 
+  // Configure logger based on verbosity
+  const logLevel = values['log-level'] || (values.verbose ? 'debug' : 'info');
+  log = new Logger({ level: logLevel });
+
+  // Handle --logs command
+  if (values.logs) {
+    tailLogs(values.logs);
+    return { mode: 'exit' };
+  }
+
   // Handle --stop command
   if (values.stop) {
-    stopAllJobs();
+    stopAllJobs(values.job || null);
     process.exit(0);
+  }
+
+  // Handle --restart command
+  if (values.restart) {
+    const configPath = values.config || DEFAULT_CONFIG_PATH;
+    restartJob(values.job || null, configPath);
+    return { mode: 'exit' };
   }
 
   // Handle --status command
   if (values.status) {
-    showStatus();
+    showStatus(values.verbose);
     process.exit(0);
   }
 
   if (values.help) {
     console.log(`
-Task Retrieval Daemon
+${COLORS.cyan}╔════════════════════════════════════════════════════════════════════╗
+║  Task Daemon - AI-powered task processor                           ║
+╚════════════════════════════════════════════════════════════════════╝${COLORS.reset}
 
-Polls saved views (task queues), retrieves tasks, and executes them with Claude.
-Assembles prompts from: base + agent + workflow step + task context.
-Parses JSON responses and handles workflow stage transitions.
+${COLORS.bold}QUICK REFERENCE${COLORS.reset}
+  ${COLORS.green}Start all jobs:${COLORS.reset}    npm run daemon
+  ${COLORS.green}Start one job:${COLORS.reset}     npm run daemon -- --job <name>
+  ${COLORS.green}Check status:${COLORS.reset}      npm run daemon:status
+  ${COLORS.green}View logs:${COLORS.reset}         npm run daemon -- --logs <job>
+  ${COLORS.green}Stop all:${COLORS.reset}          npm run daemon:stop
+  ${COLORS.green}List jobs:${COLORS.reset}         npm run daemon -- --list
 
-Usage:
-  node scripts/task-daemon.mjs                   # Start all enabled jobs as background processes
-  node scripts/task-daemon.mjs --job <name>      # Start a specific job in foreground
-  node scripts/task-daemon.mjs --view <viewId>   # Start with a specific view (no config)
-  node scripts/task-daemon.mjs --stop            # Stop all running daemon jobs
-  node scripts/task-daemon.mjs --status          # Show status of running jobs
-  node scripts/task-daemon.mjs --list            # List available jobs from config
+${COLORS.bold}STARTING JOBS${COLORS.reset}
+  (no args)                      Start all enabled jobs from config (background)
+  --job, -j <name>               Start a specific job (background by default)
+  --job <name> --foreground, -f  Start a job in foreground (attached)
+  --view, -v <id>                Start with view ID only (foreground, no config)
+  --once, -o                     Run once and exit (don't poll continuously)
+  --dry-run, -d                  Show prompts without executing
 
-Options:
-  --config, -c <file>   Config file (default: scripts/daemon-jobs.yaml)
-  --job, -j <name>      Run a specific job from the config file (foreground)
-  --list, -l            List available jobs from config file
-  --view, -v <id>       The saved search/view ID to poll (no config needed)
-  --api-key, -k <key>   API key for authentication (or MATRIX_API_KEY env)
-  --api-url, -u <url>   API base URL (default: http://localhost:3001/api)
-  --interval, -i <ms>   Polling interval in ms (default: 5000)
-  --once, -o            Run once and exit (don't poll)
-  --exec, -e <cmd>      Command to execute (default: "claude")
-  --dry-run, -d         Don't execute, just show what would be done
-  --no-update, -n       Don't update task status after execution
-  --stop                Stop all running daemon jobs
-  --status              Show status of running daemon jobs
-  --help, -h            Show this help message
+${COLORS.bold}MANAGING JOBS${COLORS.reset}
+  --status                       Show all running jobs with PIDs and stats
+  --status --verbose, -V         Show verbose status with error details
+  --logs <job>                   Tail logs for a job (Ctrl+C to exit)
+  --stop                         Stop all running daemon jobs
+  --stop --job <name>            Stop a specific job
+  --restart                      Restart all running jobs
+  --restart --job <name>         Restart a specific job
+  --list, -l                     List available jobs from config file
 
-Config File Format (YAML):
-  # Default settings for all jobs
+${COLORS.bold}CONFIGURATION${COLORS.reset}
+  --config, -c <file>            Config file (default: scripts/daemon-jobs.yaml)
+  --api-key, -k <key>            API key (or MATRIX_API_KEY env)
+  --api-url, -u <url>            API URL (default: http://localhost:3001/api)
+  --interval, -i <ms>            Polling interval (default: 5000)
+  --exec, -e <cmd>               Command to run (default: "claude")
+  --no-update, -n                Don't update task status after execution
+  --log-level <level>            Log level: debug, info, warn, error
+
+${COLORS.bold}CONFIG FILE FORMAT${COLORS.reset} (YAML)
   defaults:
     apiUrl: https://api.example.com/api
     apiKey: cm_ak_live_xxxxx
     interval: 5000
     exec: claude
 
-  # Define multiple jobs
   jobs:
     content-review:
       description: Review content tasks
@@ -301,40 +608,24 @@ Config File Format (YAML):
       exec: "claude --model claude-sonnet-4-20250514"
 
     triage:
-      description: Auto-triage incoming tasks
+      enabled: false  # disable a job
       viewId: xyz789
-      exec: "custom-triage-command"
 
-Prompt Assembly (layered):
-  1. Base daemon prompt (ensures JSON response)
-  2. Agent prompt (from assignee user if isAgent=true)
-  3. Workflow step prompt (from workflow step if task has workflowStage)
-  4. Task prompt (extraPrompt + task context)
+${COLORS.bold}HOW IT WORKS${COLORS.reset}
+  1. Daemon polls a saved view for pending tasks
+  2. Assembles prompt: base + agent + workflow step + task context
+  3. Executes command (claude by default) with assembled prompt
+  4. Parses JSON response and updates task status:
+     - COMPLETE → completed    - ESCALATE → on_hold
+     - CONTINUE → completed + follow-up task
+  5. Stores output in task metadata
 
-Response Handling:
-  - Parses JSON response from AI
-  - Updates task status based on nextAction:
-    - COMPLETE: status -> "completed"
-    - CONTINUE: status -> "completed", creates follow-up task
-    - ESCALATE: status -> "on_hold"
-    - HOLD: status -> "on_hold"
-  - Stores response output in metadata.executionLog
-
-Examples:
-  # Process tasks using CLI args
-  node scripts/task-daemon.mjs --view <viewId>
-
-  # List jobs from config file
-  node scripts/task-daemon.mjs --config daemon-jobs.yaml --list
-
-  # Run a specific job from config
-  node scripts/task-daemon.mjs --config daemon-jobs.yaml --job content-review
-
-  # Run job once (override config)
-  node scripts/task-daemon.mjs --config daemon-jobs.yaml --job triage --once
-
-  # Dry run to see assembled prompts
-  node scripts/task-daemon.mjs --config daemon-jobs.yaml --job triage --dry-run
+${COLORS.bold}EXAMPLES${COLORS.reset}
+  npm run daemon                              # Start all jobs
+  npm run daemon -- --job content-review      # Start one job
+  npm run daemon -- --job triage --once       # Run once and exit
+  npm run daemon -- --view abc123 --dry-run   # Test without executing
+  npm run daemon -- --logs content-review     # Tail job logs
 `);
     process.exit(0);
   }
@@ -371,6 +662,17 @@ Examples:
     if (job.enabled === false) {
       console.error(`Error: Job "${values.job}" is disabled`);
       process.exit(1);
+    }
+
+    // If not foreground mode, start job in background
+    if (!values.foreground && !values['dry-run'] && !values.once) {
+      return {
+        mode: 'start-job',
+        jobName: values.job,
+        configData,
+        configPath,
+        once: values.once || false,
+      };
     }
 
     const defaults = configData.defaults || {};
@@ -439,26 +741,26 @@ function getHeaders(config) {
 
 async function fetchNextTask(config) {
   const url = `${config.apiUrl}/views/${config.viewId}/tasks?limit=1&resolveReferences=true`;
-  console.log(`[DEBUG] Fetching next task from: ${url}`);
+  log.debug(`Fetching next task from view`);
 
   try {
     const response = await fetch(url, { headers: getHeaders(config) });
     if (!response.ok) {
       const error = await response.text();
-      console.error(`API Error (${response.status}): ${error}`);
+      log.error(`API Error (${response.status}): ${error}`);
       return null;
     }
 
     const result = await response.json();
     if (result.data && result.data.length > 0) {
-      console.log(`[DEBUG] Next task: "${result.data[0].title}" (${result.data[0]._id})`);
+      log.debug(`Found task: "${result.data[0].title}" (${result.data[0]._id})`);
       return result.data[0];
     }
 
-    console.log(`[DEBUG] No tasks in queue`);
+    log.debug(`No tasks in queue`);
     return null;
   } catch (error) {
-    console.error('Fetch error:', error.message || error);
+    log.error('Fetch error:', error.message || error);
     return null;
   }
 }
@@ -804,18 +1106,20 @@ async function handleStageTransition(config, task, workflow, parsedResponse) {
 // ============================================================================
 
 async function processTask(config, task) {
-  console.log(`\n${'='.repeat(60)}`);
-  console.log(`Processing task: ${task.title}`);
-  console.log(`  ID: ${task._id}`);
-  console.log(`  Status: ${task.status}`);
-  console.log(`  Workflow: ${task.workflowId || 'none'}`);
-  console.log(`  Stage: ${task.workflowStage || 'none'}`);
-  console.log(`${'='.repeat(60)}\n`);
+  // Update stats for status tracking
+  stats.currentTask = task.title;
+  stats.lastTaskId = task._id;
+  stats.lastTaskTitle = task.title;
+  if (config.jobName) saveStatus(config.jobName);
+
+  log.separator('═');
+  log.info(`Processing: ${task.title}`);
+  log.debug(`Task ID: ${task._id}`, { status: task.status, workflow: task.workflowId || 'none', stage: task.workflowStage || 'none' });
 
   // Fetch agent (assignee) if exists
   const agent = await fetchUser(config, task.assigneeId);
   if (agent?.isAgent) {
-    console.log(`[DEBUG] Using agent: ${agent.displayName}`);
+    log.debug(`Using agent: ${agent.displayName}`);
   }
 
   // Fetch workflow and step if exists
@@ -826,7 +1130,7 @@ async function processTask(config, task) {
     if (workflow && task.workflowStage) {
       workflowStep = workflow.steps?.find(s => s.id === task.workflowStage);
       if (workflowStep) {
-        console.log(`[DEBUG] Using workflow step: ${workflowStep.name}`);
+        log.debug(`Using workflow step: ${workflowStep.name}`);
       }
     }
   }
@@ -1050,34 +1354,61 @@ async function processTask(config, task) {
 // ============================================================================
 
 async function runDaemon(config) {
-  console.log(`\n${'═'.repeat(60)}`);
-  console.log(`  Task Daemon${config.jobName ? ` - Job: ${config.jobName}` : ''}`);
-  console.log(`${'═'.repeat(60)}`);
-  console.log(`  View ID:      ${config.viewId}`);
-  console.log(`  API URL:      ${config.apiUrl}`);
-  console.log(`  Command:      ${config.exec}`);
-  console.log(`  Mode:         ${config.once ? 'once' : 'continuous'}`);
-  console.log(`  Interval:     ${config.interval}ms`);
-  console.log(`  Dry Run:      ${config.dryRun}`);
-  console.log(`  Update Tasks: ${!config.noUpdate}`);
-  console.log(`${'═'.repeat(60)}\n`);
+  // Initialize stats
+  stats.startedAt = new Date().toISOString();
+  if (config.jobName) {
+    log = new Logger({ level: log.level <= 0 ? 'debug' : 'info', prefix: config.jobName });
+    saveStatus(config.jobName);
+  }
+
+  log.header([
+    `Task Daemon${config.jobName ? ` - ${config.jobName}` : ''}`,
+    `View: ${config.viewId}`,
+    `Mode: ${config.once ? 'once' : 'continuous'} | Interval: ${config.interval}ms`,
+  ]);
+
+  log.debug('Configuration', {
+    apiUrl: config.apiUrl,
+    exec: config.exec,
+    dryRun: config.dryRun,
+    noUpdate: config.noUpdate,
+  });
 
   // Handle graceful shutdown
   let shuttingDown = false;
-  process.on('SIGINT', () => {
-    console.log('\nShutting down after current task...');
+  const handleShutdown = () => {
+    log.warn('Shutting down after current task...');
     shuttingDown = true;
-  });
-  process.on('SIGTERM', () => {
-    console.log('\nShutting down after current task...');
-    shuttingDown = true;
-  });
+    if (config.jobName) {
+      stats.currentTask = null;
+      saveStatus(config.jobName);
+    }
+  };
+  process.on('SIGINT', handleShutdown);
+  process.on('SIGTERM', handleShutdown);
 
   const processNextTask = async () => {
     const task = await fetchNextTask(config);
 
     if (task) {
-      await processTask(config, task);
+      try {
+        await processTask(config, task);
+        // Update stats on success
+        stats.tasksProcessed++;
+        stats.tasksSucceeded++;
+        stats.lastTaskAt = new Date().toISOString();
+        stats.currentTask = null;
+        if (config.jobName) saveStatus(config.jobName);
+      } catch (err) {
+        // Update stats on failure
+        stats.tasksProcessed++;
+        stats.tasksFailed++;
+        stats.lastTaskAt = new Date().toISOString();
+        stats.lastError = err.message || String(err);
+        stats.currentTask = null;
+        if (config.jobName) saveStatus(config.jobName);
+        log.error(`Task processing error: ${err.message}`);
+      }
       return true;
     }
     return false;
@@ -1086,19 +1417,63 @@ async function runDaemon(config) {
   if (config.once) {
     const hadTask = await processNextTask();
     if (!hadTask) {
-      console.log('No tasks found in queue.');
+      log.info('No tasks found in queue.');
     }
   } else {
     while (!shuttingDown) {
       const hadTask = await processNextTask();
 
       if (!hadTask) {
-        console.log(`[${new Date().toISOString()}] No tasks available, waiting ${config.interval}ms...`);
+        log.debug(`No tasks available, waiting ${config.interval}ms...`);
         await new Promise((resolve) => setTimeout(resolve, config.interval));
       }
     }
-    console.log('Shutdown complete.');
+    log.info('Shutdown complete.');
   }
+}
+
+// ============================================================================
+// Start Single Job in Background
+// ============================================================================
+
+function startSingleJob(config) {
+  const { jobName, configPath } = config;
+
+  // Check if already running
+  const pid = readPid(jobName);
+  if (pid && isProcessRunning(pid)) {
+    console.log(`Job "${jobName}" is already running (PID ${pid})`);
+    console.log(`\nUse --stop --job ${jobName} to stop it first`);
+    console.log(`Use --logs ${jobName} to tail the log`);
+    process.exit(1);
+  }
+
+  // Spawn background process
+  const logFile = getLogFile(jobName);
+  const args = ['--config', configPath, '--job', jobName, '--foreground'];
+  if (config.once) args.push('--once');
+
+  const child = spawn('node', [__filename, ...args], {
+    detached: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  // Save PID
+  savePid(jobName, child.pid);
+
+  // Pipe output to log file
+  const logStream = createWriteStream(logFile, { flags: 'a' });
+  logStream.write(`\n--- Started at ${new Date().toISOString()} ---\n`);
+  child.stdout.pipe(logStream);
+  child.stderr.pipe(logStream);
+
+  child.unref();
+
+  console.log(`\n  ✓ Started ${jobName} (PID ${child.pid})`);
+  console.log(`\n  Log: ${logFile}`);
+  console.log(`\n  Use --status to check status`);
+  console.log(`  Use --logs ${jobName} to tail the log`);
+  console.log(`  Use --stop --job ${jobName} to stop\n`);
 }
 
 // ============================================================================
@@ -1142,7 +1517,7 @@ function startAllJobs(config) {
 
     // Spawn background process for this job
     const logFile = getLogFile(job.name);
-    const args = ['--job', job.name];
+    const args = ['--job', job.name, '--foreground'];
     if (config.once) args.push('--once');
 
     const child = spawn('node', [__filename, '--config', configPath, ...args], {
@@ -1175,7 +1550,12 @@ function startAllJobs(config) {
 // Main entry point
 const config = parseConfig();
 
-if (config.mode === 'start-all') {
+if (config.mode === 'exit') {
+  // Already handled in parseConfig (--logs, --restart)
+  // Just wait - tail -f runs until SIGINT, restart spawns new process
+} else if (config.mode === 'start-job') {
+  startSingleJob(config);
+} else if (config.mode === 'start-all') {
   startAllJobs(config);
 } else {
   runDaemon(config);
