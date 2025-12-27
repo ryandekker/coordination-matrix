@@ -8,7 +8,8 @@ interface MermaidProps {
   onError?: (error: string) => void
 }
 
-let mermaidInitialized = false
+// Track initialization per theme to allow re-init on theme change
+let currentMermaidTheme: string | null = null
 
 export function Mermaid({ chart, className = '', onError }: MermaidProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -16,6 +17,12 @@ export function Mermaid({ chart, className = '', onError }: MermaidProps) {
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const renderIdRef = useRef(0)
+
+  // Detect dark mode
+  const getTheme = useCallback(() => {
+    if (typeof window === 'undefined') return 'default'
+    return document.documentElement.classList.contains('dark') ? 'dark' : 'default'
+  }, [])
 
   const renderChart = useCallback(async (chartCode: string, renderId: number) => {
     if (!chartCode) {
@@ -28,11 +35,13 @@ export function Mermaid({ chart, className = '', onError }: MermaidProps) {
       // Dynamically import mermaid only on client side
       const mermaid = (await import('mermaid')).default
 
-      // Initialize mermaid only once
-      if (!mermaidInitialized) {
+      const theme = getTheme()
+
+      // Re-initialize if theme changed
+      if (currentMermaidTheme !== theme) {
         mermaid.initialize({
           startOnLoad: false,
-          theme: 'default',
+          theme: theme,
           securityLevel: 'loose',
           flowchart: {
             useMaxWidth: true,
@@ -40,7 +49,7 @@ export function Mermaid({ chart, className = '', onError }: MermaidProps) {
             curve: 'basis',
           },
         })
-        mermaidInitialized = true
+        currentMermaidTheme = theme
       }
 
       // Generate a unique ID for this render
@@ -65,7 +74,7 @@ export function Mermaid({ chart, className = '', onError }: MermaidProps) {
         setIsLoading(false)
       }
     }
-  }, [onError])
+  }, [onError, getTheme])
 
   useEffect(() => {
     // Increment render ID to cancel any pending renders
@@ -85,11 +94,28 @@ export function Mermaid({ chart, className = '', onError }: MermaidProps) {
     }
   }, [chart, renderChart])
 
+  // Listen for theme changes
+  useEffect(() => {
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.attributeName === 'class') {
+          // Theme changed, force re-render
+          renderIdRef.current += 1
+          renderChart(chart, renderIdRef.current)
+        }
+      })
+    })
+
+    observer.observe(document.documentElement, { attributes: true })
+
+    return () => observer.disconnect()
+  }, [chart, renderChart])
+
   if (error) {
     return (
-      <div className={`p-4 bg-red-50 border border-red-200 rounded-lg ${className}`}>
-        <p className="text-sm text-red-600 font-medium">Diagram Error</p>
-        <p className="text-xs text-red-500 mt-1 font-mono whitespace-pre-wrap">{error}</p>
+      <div className={`p-4 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg ${className}`}>
+        <p className="text-sm text-red-600 dark:text-red-400 font-medium">Diagram Error</p>
+        <p className="text-xs text-red-500 dark:text-red-400 mt-1 font-mono whitespace-pre-wrap">{error}</p>
       </div>
     )
   }
