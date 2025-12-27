@@ -1159,9 +1159,16 @@ export function TaskModal({
     const handleRerun = async () => {
       if (!task) return
       try {
-        await rerunTask.mutateAsync({ id: task._id })
+        const result = await rerunTask.mutateAsync({ id: task._id })
+        // Show result message to user
+        if (result.error) {
+          alert(`Rerun issue: ${result.error}`)
+        } else if (result.message) {
+          console.log('Rerun result:', result.message)
+        }
       } catch (error) {
         console.error('Failed to rerun task:', error)
+        alert(`Failed to rerun task: ${error instanceof Error ? error.message : 'Unknown error'}`)
       }
     }
 
