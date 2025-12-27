@@ -278,6 +278,7 @@ const TitleCell = memo(function TitleCell({
   renderCellValue,
   onNavigateToFlow,
   onAddSubtask,
+  hasChildren: hasChildrenProp,
 }: {
   task: Task
   fieldConfig: FieldConfig
@@ -289,6 +290,7 @@ const TitleCell = memo(function TitleCell({
   renderCellValue: (task: Task, fc: FieldConfig) => React.ReactNode
   onNavigateToFlow?: (taskId: string) => void
   onAddSubtask?: () => void
+  hasChildren?: boolean
 }) {
   const [isInlineEditing, setIsInlineEditing] = useState(false)
   const [editValue, setEditValue] = useState(task.title || '')
@@ -296,7 +298,8 @@ const TitleCell = memo(function TitleCell({
 
   // Check if this is a flow task (nested workflow) - should not be expandable inline
   const isFlowTask = task.taskType === 'flow'
-  const hasChildren = task.children && task.children.length > 0
+  // Use the prop if provided (from parent that knows about fetched children), otherwise check task.children
+  const hasChildren = hasChildrenProp !== undefined ? hasChildrenProp : Boolean(task.children && task.children.length > 0)
 
   useEffect(() => {
     if (isInlineEditing && inputRef.current) {
@@ -591,12 +594,15 @@ const TaskRow = memo(function TaskRow({
 }) {
   const isFlowTask = task.taskType === 'flow'
 
+  // Track which children have been auto-expanded to prevent re-expanding manually collapsed ones
+  const autoExpandedChildrenRef = useRef<Set<string>>(new Set())
+
   // Pagination state for children
   const [childrenPage, setChildrenPage] = useState(1)
   const CHILDREN_PAGE_SIZE = 20
 
   // Check if children are pre-attached (from filtering) - they have _id property
-  const hasPreAttachedChildren = task.children && task.children.length > 0 && task.children[0]._id
+  const hasPreAttachedChildren = Boolean(task.children && task.children.length > 0 && task.children[0]._id)
 
   // Fetch children when expanded (including flow tasks - they now expand inline)
   // Skip fetching if we already have pre-attached children from filtering
@@ -608,7 +614,7 @@ const TaskRow = memo(function TaskRow({
   // Use pre-attached children if available, otherwise use fetched children
   const children = hasPreAttachedChildren ? (task.children || []) : (childrenData?.data || [])
   const childrenPagination = childrenData?.pagination
-  const hasChildren = hasPreAttachedChildren || (isExpanded ? children.length > 0 : task.children && task.children.length > 0)
+  const hasChildren = hasPreAttachedChildren || (isExpanded ? children.length > 0 : Boolean(task.children && task.children.length > 0))
   const hasMoreChildren = !hasPreAttachedChildren && childrenPagination && childrenPagination.totalPages > 1
 
   // Reset to page 1 when collapsing
@@ -628,11 +634,28 @@ const TaskRow = memo(function TaskRow({
   }, [onToggleExpand, isFlowTask, isExpanded, onTriggerPulse, task._id])
 
   // Auto-expand children that have grandchildren when expandAllEnabled is true
+  // Uses a Set to track which children have been processed, so manually collapsed ones aren't re-expanded
   useEffect(() => {
-    if (expandAllEnabled && isExpanded && children.length > 0) {
+    // Clear the set when expandAllEnabled is disabled
+    if (!expandAllEnabled) {
+      autoExpandedChildrenRef.current.clear()
+      return
+    }
+
+    // Auto-expand children with grandchildren that haven't been processed yet
+    if (isExpanded && children.length > 0) {
       children.forEach(child => {
-        if (child.children && child.children.length > 0 && !expandedRows.has(child._id)) {
-          toggleRowExpansion(child._id)
+        if (
+          child.children &&
+          child.children.length > 0 &&
+          !autoExpandedChildrenRef.current.has(child._id)
+        ) {
+          // Mark as processed first to prevent re-expansion
+          autoExpandedChildrenRef.current.add(child._id)
+          // Expand if not already expanded
+          if (!expandedRows.has(child._id)) {
+            toggleRowExpansion(child._id)
+          }
         }
       })
     }
@@ -702,6 +725,7 @@ const TaskRow = memo(function TaskRow({
                 renderCellValue={renderCellValue}
                 onNavigateToFlow={onNavigateToFlow}
                 onAddSubtask={() => onStartInlineCreation(task._id)}
+                hasChildren={hasChildren}
               />
             ) : (
               <>
