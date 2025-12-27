@@ -1399,8 +1399,8 @@ export function TaskModal({
               </div>
             </div>
 
-            {/* Min thresholds only shown when expected count is set */}
-            {(task as any).joinConfig?.expectedCount != null && (
+            {/* Min thresholds only shown when expected count AND max wait are set */}
+            {(task as any).joinConfig?.expectedCount != null && (task as any).joinConfig?.boundary?.maxWaitMs != null && (
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
                   <label className="text-[10px] text-muted-foreground">Min Success %</label>
