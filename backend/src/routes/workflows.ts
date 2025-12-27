@@ -86,7 +86,6 @@ interface WorkflowStep {
 
   // Join configuration - explicit reference to which step's tasks to await
   awaitStepId?: string;             // Step ID whose tasks we're waiting for (can be earlier in flow)
-  awaitTag?: string;                // Alternative: await tasks with this tag
   joinBoundary?: JoinBoundary;      // Boundary conditions for when the join fires
   minSuccessPercent?: number;       // Legacy: percentage of tasks that must succeed
   expectedCountPath?: string;       // JSONPath to get expected count from previous step
@@ -1044,7 +1043,6 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
 
     // Join step fields
     if (step.awaitStepId) metadata.awaitStepId = step.awaitStepId;
-    if (step.awaitTag) metadata.awaitTag = step.awaitTag;
     if (step.joinBoundary) metadata.joinBoundary = step.joinBoundary;
     if (step.minSuccessPercent) metadata.minSuccessPercent = step.minSuccessPercent;
     if (step.stepType === 'join' && step.expectedCountPath) metadata.expectedCountPath = step.expectedCountPath;

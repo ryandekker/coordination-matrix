@@ -621,7 +621,6 @@ export interface WorkflowStep {
 
   // Join step config - explicit reference to which step's tasks to await
   awaitStepId?: string;                 // Step ID whose tasks we're waiting for (can reference earlier steps)
-  awaitTag?: string;                    // Alternative: await tasks with this tag
   joinBoundary?: JoinBoundary;          // Boundary conditions for when the join fires
   minSuccessPercent?: number;           // Legacy: percentage of tasks that must succeed (default: 100)
 

@@ -75,7 +75,6 @@ interface WorkflowStep {
   maxItems?: number
   inputSource?: string
   inputPath?: string
-  awaitTag?: string
   awaitStepId?: string
   joinBoundary?: JoinBoundary
   minSuccessPercent?: number
@@ -772,35 +771,27 @@ export function StepConfigPanel({
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Await Step ID</label>
-                <Select
-                  value={step.awaitStepId || '_auto'}
-                  onValueChange={(val) => onUpdate({ awaitStepId: val === '_auto' ? undefined : val })}
-                >
-                  <SelectTrigger className="font-mono text-sm">
-                    <SelectValue placeholder="Auto-detect" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="_auto">Auto-detect</SelectItem>
-                    {allSteps.slice(0, stepIndex).filter(s => s.stepType === 'foreach').map((s, i) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        Step {i + 1}: {s.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Await Tag Pattern</label>
-                <Input
-                  value={step.awaitTag || ''}
-                  onChange={(e) => onUpdate({ awaitTag: e.target.value })}
-                  placeholder="Auto-detects from ForEach"
-                  className="font-mono text-sm"
-                />
-              </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Await Step</label>
+              <Select
+                value={step.awaitStepId || '_auto'}
+                onValueChange={(val) => onUpdate({ awaitStepId: val === '_auto' ? undefined : val })}
+              >
+                <SelectTrigger className="font-mono text-sm">
+                  <SelectValue placeholder="Auto-detect" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_auto">Auto-detect (most recent ForEach)</SelectItem>
+                  {allSteps.slice(0, stepIndex).filter(s => s.stepType === 'foreach').map((s, i) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      Step {i + 1}: {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Which ForEach step's tasks to wait for.
+              </p>
             </div>
           </div>
         )}
