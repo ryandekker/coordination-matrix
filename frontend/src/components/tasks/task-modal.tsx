@@ -1362,6 +1362,7 @@ export function TaskModal({
                     updateTask.mutateAsync({
                       id: task._id,
                       data: {
+                        taskType: 'join',
                         joinConfig: {
                           ...currentConfig,
                           expectedCount: newValue,
@@ -1385,6 +1386,7 @@ export function TaskModal({
                     updateTask.mutateAsync({
                       id: task._id,
                       data: {
+                        taskType: 'join',
                         joinConfig: {
                           ...currentConfig,
                           boundary: {
@@ -1397,6 +1399,33 @@ export function TaskModal({
                   }}
                 />
               </div>
+            </div>
+
+            {/* Input Path for aggregation */}
+            <div className="space-y-1">
+              <label className="text-[10px] text-muted-foreground">Input Path</label>
+              <Input
+                className="h-7 text-sm font-mono"
+                defaultValue={(task as any).joinConfig?.inputPath ?? ''}
+                placeholder="e.g., output.analysis"
+                onBlur={(e) => {
+                  const newValue = e.target.value || undefined
+                  const currentConfig = (task as any).joinConfig || {}
+                  updateTask.mutateAsync({
+                    id: task._id,
+                    data: {
+                      taskType: 'join',
+                      joinConfig: {
+                        ...currentConfig,
+                        inputPath: newValue,
+                      },
+                    },
+                  })
+                }}
+              />
+              <p className="text-[10px] text-muted-foreground">
+                JSONPath to extract from each completed task's output.
+              </p>
             </div>
 
             {/* Min thresholds only shown when expected count AND max wait are set */}
@@ -1417,6 +1446,7 @@ export function TaskModal({
                       updateTask.mutateAsync({
                         id: task._id,
                         data: {
+                          taskType: 'join',
                           joinConfig: {
                             ...currentConfig,
                             minSuccessPercent: newValue,
@@ -1444,6 +1474,7 @@ export function TaskModal({
                       updateTask.mutateAsync({
                         id: task._id,
                         data: {
+                          taskType: 'join',
                           joinConfig: {
                             ...currentConfig,
                             boundary: {
