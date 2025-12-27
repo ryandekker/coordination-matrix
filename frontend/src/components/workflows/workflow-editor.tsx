@@ -64,6 +64,7 @@ import {
   Lightbulb,
   RefreshCw,
   ArrowRight,
+  ArrowRightFromLine,
   ArrowDown,
   Globe,
   Link2,
@@ -698,7 +699,7 @@ export function WorkflowEditor({
     try {
       const response = await fetch(`${API_BASE}/workflows/parse-mermaid`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
         body: JSON.stringify({ mermaidDiagram: mermaidCode }),
       })
 
@@ -2137,6 +2138,40 @@ The agent will receive task context automatically.`}
 
             {/* Mermaid Editor with Live Preview */}
             <TabsContent value="code" className="flex-1 flex flex-col overflow-hidden mt-0">
+              {/* Convert to Steps toolbar */}
+              <div className="flex items-center justify-between mb-2 px-1">
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="sm"
+                    onClick={syncMermaidToSteps}
+                    disabled={isSyncing || !mermaidCode.trim()}
+                    className="gap-1.5"
+                  >
+                    {isSyncing ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                        Converting...
+                      </>
+                    ) : (
+                      <>
+                        <ArrowRightFromLine className="h-4 w-4" />
+                        Convert to Steps
+                      </>
+                    )}
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    Parse Mermaid diagram and create workflow steps
+                  </span>
+                </div>
+                {syncError && (
+                  <span className="text-xs text-destructive flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" />
+                    {syncError}
+                  </span>
+                )}
+              </div>
               <MermaidLiveEditor
                 value={mermaidCode}
                 onChange={setMermaidCode}
