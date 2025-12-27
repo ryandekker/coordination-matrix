@@ -128,7 +128,8 @@ function buildChildrenMap(tasks: Task[]): ChildrenMap {
   const map = new Map<string, Task[]>()
   for (const task of tasks) {
     if (task.parentId) {
-      const parentId = task.parentId
+      // Ensure parentId is a string for consistent lookup with task._id
+      const parentId = typeof task.parentId === 'string' ? task.parentId : String(task.parentId)
       if (!map.has(parentId)) {
         map.set(parentId, [])
       }
@@ -635,7 +636,8 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
                     {/* Show actual tasks if they exist */}
                     {hasTasks ? (
                       <div className="space-y-1 ml-7">
-                        {stepTasks.map(task => (
+                        {/* Only render root-level tasks - children will be rendered via childrenMap */}
+                        {stepTasks.filter(t => !t.parentId || !taskIdsInRun.has(typeof t.parentId === 'string' ? t.parentId : String(t.parentId))).map(task => (
                           <TaskNode
                             key={task._id}
                             task={task}
