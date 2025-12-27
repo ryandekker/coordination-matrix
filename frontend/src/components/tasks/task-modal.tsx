@@ -1169,21 +1169,6 @@ export function TaskModal({
 
     return (
       <div className="p-4 space-y-4">
-        {/* Rerun button - show for tasks that can be rerun */}
-        {canRerun && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="w-full gap-2"
-            onClick={handleRerun}
-            disabled={rerunTask.isPending || task?.status === 'pending'}
-          >
-            <RotateCcw className={cn("h-4 w-4", rerunTask.isPending && "animate-spin")} />
-            {rerunTask.isPending ? 'Rerunning...' : 'Rerun Task'}
-          </Button>
-        )}
-
         {/* Task type display (selector is in header) */}
         <div className="space-y-2">
           <label className="text-xs font-medium text-muted-foreground">Task Type</label>
@@ -1499,6 +1484,23 @@ export function TaskModal({
           <p className="text-xs text-muted-foreground italic">
             Join tasks aggregate results from multiple parallel tasks.
           </p>
+        )}
+
+        {/* Rerun button - show for tasks that can be rerun, placed at bottom */}
+        {canRerun && (
+          <div className="pt-4 mt-auto border-t border-border">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-full gap-2"
+              onClick={handleRerun}
+              disabled={rerunTask.isPending || task?.status === 'pending'}
+            >
+              <RotateCcw className={cn("h-4 w-4", rerunTask.isPending && "animate-spin")} />
+              {rerunTask.isPending ? 'Rerunning...' : 'Rerun Task'}
+            </Button>
+          </div>
         )}
       </div>
     )
