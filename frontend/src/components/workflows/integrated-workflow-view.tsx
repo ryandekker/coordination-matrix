@@ -454,16 +454,10 @@ export function IntegratedWorkflowView({
 
           {/* Step list for quick navigation */}
           {steps.length > 0 && (
-            <div
-              className="border-t bg-muted/20 flex-shrink-0"
-              onClick={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
+            <div className="border-t bg-muted/20 flex-shrink-0">
               <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setIsQuickSelectExpanded(!isQuickSelectExpanded)
-                }}
+                type="button"
+                onClick={() => setIsQuickSelectExpanded(!isQuickSelectExpanded)}
                 className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/40 transition-colors"
               >
                 <span>Quick select ({steps.length} steps)</span>
@@ -474,18 +468,16 @@ export function IntegratedWorkflowView({
               </button>
               {isQuickSelectExpanded && (
                 <div className="px-2 pb-2">
-                  <ScrollArea className="max-h-[120px]">
+                  <ScrollArea className="max-h-[224px]">
                     <div className="space-y-0.5">
                       {steps.map((step, index) => {
                         const typeInfo = STEP_TYPES.find(t => t.type === step.stepType) || STEP_TYPES[0]
                         const Icon = typeInfo.icon
                         return (
                           <button
+                            type="button"
                             key={step.id}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setSelectedStepId(step.id)
-                            }}
+                            onClick={() => setSelectedStepId(step.id)}
                             className={cn(
                               'w-full flex items-center gap-2 px-2 py-1 rounded text-left text-sm transition-colors',
                               selectedStepId === step.id
