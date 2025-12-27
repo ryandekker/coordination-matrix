@@ -6,6 +6,7 @@ import { ReferenceResolver } from '../services/reference-resolver.js';
 import { Task, TaskWithChildren, PaginatedResponse } from '../types/index.js';
 import { publishTaskEvent, computeChanges, getSpecificEventTypes } from '../services/event-bus.js';
 import { activityLogService } from '../services/activity-log.js';
+import { workflowExecutionService } from '../services/workflow-execution-service.js';
 
 export const tasksRouter = Router();
 
@@ -758,12 +759,15 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     }
 
     // Convert ID fields
-    const idFields = ['parentId', 'assigneeId', 'createdById', 'workflowId', 'workflowRunId'];
+    const idFields = ['parentId', 'assigneeId', 'createdById', 'workflowId', 'workflowRunId', 'triggerWorkflowId'];
     for (const field of idFields) {
       if (updates[field] !== undefined) {
         updates[field] = updates[field] ? toObjectId(updates[field]) : null;
       }
     }
+
+    // Capture triggerWorkflowId before the update (it will be cleared after triggering)
+    const triggerWorkflowId = updates.triggerWorkflowId as ObjectId | null | undefined;
 
     // Convert date fields
     const dateFields = ['dueAt', 'externalHoldDate'];
@@ -836,6 +840,46 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
             });
           }
         }
+      }
+    }
+
+    // Handle workflow trigger: if triggerWorkflowId was set, start that workflow
+    if (triggerWorkflowId && result) {
+      try {
+        console.log(`[Tasks] Triggering workflow ${triggerWorkflowId} from task ${taskId}`);
+
+        // Build trigger context from task metadata and title
+        const triggerContext: Record<string, unknown> = {
+          taskTitle: result.title,
+          taskSummary: result.summary,
+          ...(result.metadata || {}),
+        };
+
+        // Start the workflow with this task as the trigger
+        const { run } = await workflowExecutionService.startWorkflow(
+          {
+            workflowId: triggerWorkflowId.toString(),
+            triggerTaskId: taskId.toString(),
+            triggerContext,
+            inputPayload: result.metadata || {},
+          },
+          actorId
+        );
+
+        console.log(`[Tasks] Started workflow run ${run._id} from task ${taskId}`);
+
+        // Clear the triggerWorkflowId field (it's a one-time trigger)
+        await db.collection<Task>('tasks').updateOne(
+          { _id: taskId },
+          { $unset: { triggerWorkflowId: '' } }
+        );
+
+        // Update the result to reflect the cleared field and spawned workflow
+        result.triggerWorkflowId = null;
+      } catch (workflowError) {
+        console.error(`[Tasks] Failed to trigger workflow ${triggerWorkflowId} from task ${taskId}:`, workflowError);
+        // Don't fail the task update, just log the error
+        // The spawnedWorkflowRunId won't be set, indicating the trigger failed
       }
     }
 

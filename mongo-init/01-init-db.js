@@ -146,6 +146,11 @@ db.createCollection('tasks', {
         workflowResult: {
           bsonType: 'object',
           description: 'Result information from spawned workflow (status, outputPayload, error)'
+        },
+        // Trigger field: when set, system auto-starts this workflow with task as trigger
+        triggerWorkflowId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Workflow ID to trigger - when set, system starts this workflow with task as trigger'
         }
       }
     }

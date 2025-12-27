@@ -31,6 +31,7 @@ import { useCreateTask, useUpdateTask, useUsers, useWorkflows, useTasks, useTask
 import { cn } from '@/lib/utils'
 import { TaskActivity } from './task-activity'
 import { WebhookTaskConfig } from './webhook-task-config'
+import { WorkflowTrigger } from './workflow-trigger'
 import { JsonViewer } from '@/components/ui/json-viewer'
 import {
   TASK_TYPE_CONFIG,
@@ -1294,6 +1295,11 @@ export function TaskModal({
           <p className="text-xs text-muted-foreground italic">
             Flow tasks delegate to another workflow.
           </p>
+        )}
+
+        {/* Workflow Trigger - available for all existing tasks */}
+        {task && (
+          <WorkflowTrigger task={task} />
         )}
       </div>
     )

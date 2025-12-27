@@ -180,6 +180,9 @@ export interface Task {
     completedAt?: Date;
   };
 
+  // Trigger field: when set, system auto-starts this workflow with task as trigger
+  triggerWorkflowId?: ObjectId | null;
+
   // External tracking
   externalId?: string;
   externalHoldDate?: Date | null;
