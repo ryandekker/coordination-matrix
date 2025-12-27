@@ -2532,9 +2532,19 @@ class WorkflowExecutionService {
     return this.workflowRuns.findOne({ _id: new ObjectId(runId) });
   }
 
-  async getWorkflowRunWithTasks(runId: string): Promise<{
+  async getWorkflowRunWithTasks(
+    runId: string,
+    options: {
+      limit?: number;
+      offset?: number;
+      parentId?: string | null;  // Filter by parent - null for root tasks only
+      includeDescendantCounts?: boolean;  // Include counts of descendants
+    } = {}
+  ): Promise<{
     run: WorkflowRun & { workflow?: Workflow };
     tasks: Task[];
+    totalTasks: number;
+    hasMore: boolean;
   } | null> {
     const run = await this.getWorkflowRun(runId);
     if (!run) return null;
@@ -2542,15 +2552,89 @@ class WorkflowExecutionService {
     // Fetch workflow definition to include steps for progress display
     const workflow = await this.workflows.findOne({ _id: run.workflowId });
 
-    const tasks = await this.tasks
-      .find({ workflowRunId: run._id })
-      .sort({ createdAt: 1 })
-      .toArray();
+    // Build task query filter
+    const taskFilter: Record<string, unknown> = { workflowRunId: run._id };
+
+    // If parentId is explicitly set (including null for root tasks), filter by it
+    if (options.parentId !== undefined) {
+      if (options.parentId === null) {
+        // Root tasks: either no parentId or parentId not in this workflow run's tasks
+        taskFilter.$or = [
+          { parentId: { $exists: false } },
+          { parentId: null }
+        ];
+      } else {
+        taskFilter.parentId = new ObjectId(options.parentId);
+      }
+    }
+
+    // Get total count for pagination info
+    const totalTasks = await this.tasks.countDocuments({ workflowRunId: run._id });
+
+    // Apply pagination
+    const limit = options.limit || 50;  // Default to 50 tasks
+    const offset = options.offset || 0;
+
+    let tasksQuery = this.tasks
+      .find(taskFilter)
+      .sort({ createdAt: 1 });
+
+    // Only apply skip/limit when we're not fetching all (for initial load optimization)
+    if (options.limit !== undefined) {
+      tasksQuery = tasksQuery.skip(offset).limit(limit);
+    }
+
+    const tasks = await tasksQuery.toArray();
+
+    // Optionally include descendant counts for each task (for showing "X children" badges)
+    if (options.includeDescendantCounts && tasks.length > 0) {
+      const taskIds = tasks.map(t => t._id);
+      const childCounts = await this.tasks.aggregate([
+        { $match: { workflowRunId: run._id, parentId: { $in: taskIds } } },
+        { $group: { _id: '$parentId', count: { $sum: 1 } } }
+      ]).toArray();
+
+      const countMap = new Map(childCounts.map(c => [c._id.toString(), c.count]));
+      tasks.forEach(task => {
+        (task as any).childCount = countMap.get(task._id.toString()) || 0;
+      });
+    }
 
     return {
       run: { ...run, workflow: workflow || undefined },
       tasks,
+      totalTasks,
+      hasMore: options.limit !== undefined && tasks.length === limit,
     };
+  }
+
+  /**
+   * Get child tasks for a specific parent task (for lazy loading)
+   */
+  async getChildTasks(
+    runId: string,
+    parentId: string,
+    options: { limit?: number; offset?: number } = {}
+  ): Promise<{ tasks: Task[]; hasMore: boolean }> {
+    const limit = options.limit || 50;
+    const offset = options.offset || 0;
+
+    const tasks = await this.tasks
+      .find({
+        workflowRunId: new ObjectId(runId),
+        parentId: new ObjectId(parentId)
+      })
+      .sort({ createdAt: 1 })
+      .skip(offset)
+      .limit(limit + 1)  // Fetch one extra to check if there's more
+      .toArray();
+
+    const hasMore = tasks.length > limit;
+    if (hasMore) {
+      tasks.pop();  // Remove the extra item
+    }
+
+    return { tasks, hasMore };
   }
 
   async listWorkflowRuns(options: {

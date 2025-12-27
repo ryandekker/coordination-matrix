@@ -111,6 +111,9 @@ router.get('/:id', requireAuth, async (req: Request, res: Response): Promise<voi
   try {
     const { id } = req.params;
     const includeTasks = req.query.includeTasks === 'true';
+    const taskLimit = req.query.taskLimit ? parseInt(req.query.taskLimit as string, 10) : undefined;
+    const taskOffset = req.query.taskOffset ? parseInt(req.query.taskOffset as string, 10) : undefined;
+    const includeChildCounts = req.query.includeChildCounts === 'true';
 
     if (!ObjectId.isValid(id)) {
       res.status(400).json({ error: 'Invalid workflow run ID' });
@@ -118,7 +121,11 @@ router.get('/:id', requireAuth, async (req: Request, res: Response): Promise<voi
     }
 
     if (includeTasks) {
-      const result = await workflowExecutionService.getWorkflowRunWithTasks(id);
+      const result = await workflowExecutionService.getWorkflowRunWithTasks(id, {
+        limit: taskLimit,
+        offset: taskOffset,
+        includeDescendantCounts: includeChildCounts,
+      });
       if (!result) {
         res.status(404).json({ error: 'Workflow run not found' });
         return;
@@ -135,6 +142,29 @@ router.get('/:id', requireAuth, async (req: Request, res: Response): Promise<voi
   } catch (error) {
     console.error('[WorkflowRuns] Get error:', error);
     res.status(500).json({ error: 'Failed to get workflow run' });
+  }
+});
+
+// ============================================================================
+// Get Child Tasks for a Workflow Run Task (lazy loading)
+// GET /api/workflow-runs/:id/tasks/:taskId/children
+// ============================================================================
+router.get('/:id/tasks/:taskId/children', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id, taskId } = req.params;
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
+    const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : 0;
+
+    if (!ObjectId.isValid(id) || !ObjectId.isValid(taskId)) {
+      res.status(400).json({ error: 'Invalid ID' });
+      return;
+    }
+
+    const result = await workflowExecutionService.getChildTasks(id, taskId, { limit, offset });
+    res.json(result);
+  } catch (error) {
+    console.error('[WorkflowRuns] Get child tasks error:', error);
+    res.status(500).json({ error: 'Failed to get child tasks' });
   }
 });
 

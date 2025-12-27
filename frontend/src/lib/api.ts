@@ -766,9 +766,42 @@ export const workflowRunsApi = {
     return handleResponse(response)
   },
 
-  get: async (id: string, includeTasks = false): Promise<ApiResponse<WorkflowRun | WorkflowRunWithTasks>> => {
-    const params = includeTasks ? '?includeTasks=true' : ''
-    const response = await authFetch(`${API_BASE}/workflow-runs/${id}${params}`)
+  get: async (
+    id: string,
+    options: {
+      includeTasks?: boolean
+      taskLimit?: number
+      taskOffset?: number
+      includeChildCounts?: boolean
+    } | boolean = false
+  ): Promise<ApiResponse<WorkflowRun | WorkflowRunWithTasks & { totalTasks?: number; hasMore?: boolean }>> => {
+    // Support legacy boolean signature
+    const opts = typeof options === 'boolean' ? { includeTasks: options } : options
+
+    const searchParams = new URLSearchParams()
+    if (opts.includeTasks) searchParams.append('includeTasks', 'true')
+    if (opts.taskLimit !== undefined) searchParams.append('taskLimit', String(opts.taskLimit))
+    if (opts.taskOffset !== undefined) searchParams.append('taskOffset', String(opts.taskOffset))
+    if (opts.includeChildCounts) searchParams.append('includeChildCounts', 'true')
+
+    const queryString = searchParams.toString()
+    const url = `${API_BASE}/workflow-runs/${id}${queryString ? `?${queryString}` : ''}`
+    const response = await authFetch(url)
+    return handleResponse(response)
+  },
+
+  getChildTasks: async (
+    runId: string,
+    taskId: string,
+    options: { limit?: number; offset?: number } = {}
+  ): Promise<ApiResponse<{ tasks: Task[]; hasMore: boolean }>> => {
+    const searchParams = new URLSearchParams()
+    if (options.limit !== undefined) searchParams.append('limit', String(options.limit))
+    if (options.offset !== undefined) searchParams.append('offset', String(options.offset))
+
+    const queryString = searchParams.toString()
+    const url = `${API_BASE}/workflow-runs/${runId}/tasks/${taskId}/children${queryString ? `?${queryString}` : ''}`
+    const response = await authFetch(url)
     return handleResponse(response)
   },
 
