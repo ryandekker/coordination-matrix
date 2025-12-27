@@ -1603,13 +1603,18 @@ class WorkflowExecutionService {
         .map(c => {
           if (inputPath && c.metadata) {
             // Extract specific path from metadata
+            // Don't fall back to full metadata - if path doesn't resolve, return undefined
             const extracted = getValueByPathStatic(c.metadata, inputPath);
-            return extracted !== undefined ? extracted : c.metadata;
+            if (extracted === undefined) {
+              console.log(`[WorkflowExecutionService] Join aggregation: path "${inputPath}" not found in task ${c._id}, metadata keys: ${Object.keys(c.metadata).join(', ')}`);
+            }
+            return extracted;
           }
           return c.metadata;
-        });
+        })
+        .filter(r => r !== undefined); // Remove undefined results
 
-      console.log(`[WorkflowExecutionService] Join aggregation: inputPath=${inputPath || '(full metadata)'}, collected ${results.length} results`);
+      console.log(`[WorkflowExecutionService] Join aggregation: inputPath=${inputPath || '(full metadata)'}, collected ${results.length} results from ${children.filter(c => c.status === 'completed').length} completed tasks`);
 
       const joinStatus: TaskStatus = thresholdMet ? 'completed' : 'failed';
       const statusReason = thresholdMet
