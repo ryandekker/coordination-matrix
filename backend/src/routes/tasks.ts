@@ -1093,14 +1093,16 @@ tasksRouter.post('/:id/rerun', async (req: Request, res: Response, next: NextFun
           res.json({
             data: updatedTask,
             message: `Re-aggregation failed: ${rerunResult.error}`,
-            error: rerunResult.error
+            error: rerunResult.error,
+            debug: rerunResult.debug
           });
         } else {
           res.json({
             data: updatedTask,
             message: rerunResult.success
               ? 'Join task re-aggregated successfully'
-              : 'Join task is waiting for child tasks to complete'
+              : 'Join task is waiting for child tasks to complete',
+            debug: rerunResult.debug
           });
         }
         return;

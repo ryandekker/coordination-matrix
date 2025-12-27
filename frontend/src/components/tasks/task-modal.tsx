@@ -1168,12 +1168,18 @@ export function TaskModal({
     const handleRerun = async () => {
       if (!task) return
       try {
-        const result = await rerunTask.mutateAsync({ id: task._id })
-        // Show result message to user
+        const result = await rerunTask.mutateAsync({ id: task._id }) as { message?: string; error?: string; debug?: Record<string, unknown> }
+        // Show result message to user with debug info
+        const debugStr = result.debug ? `\n\nDebug:\n${JSON.stringify(result.debug, null, 2)}` : ''
         if (result.error) {
-          alert(`Rerun issue: ${result.error}`)
+          alert(`Rerun issue: ${result.error}${debugStr}`)
         } else if (result.message) {
-          console.log('Rerun result:', result.message)
+          // Always show debug for join tasks that didn't succeed
+          if (result.debug && !result.message.includes('successfully')) {
+            alert(`${result.message}${debugStr}`)
+          } else {
+            console.log('Rerun result:', result.message, result.debug)
+          }
         }
       } catch (error) {
         console.error('Failed to rerun task:', error)
