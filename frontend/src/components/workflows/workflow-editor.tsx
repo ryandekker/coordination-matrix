@@ -1364,41 +1364,6 @@ The agent will receive task context automatically.`}
                                     </div>
                                   </div>
 
-                                  <div className="space-y-1">
-                                    <label className="text-sm font-medium flex items-center gap-2">
-                                      <Download className="h-4 w-4 text-muted-foreground" />
-                                      Input Path
-                                      <span className="text-xs text-muted-foreground">(optional)</span>
-                                    </label>
-                                    <div className="flex gap-1">
-                                      <Input
-                                        value={step.inputPath || ''}
-                                        onChange={(e) => updateStep(index, { inputPath: e.target.value })}
-                                        placeholder="e.g., output.analysis or aggregatedResults"
-                                        className="font-mono text-sm"
-                                      />
-                                      <TokenBrowser
-                                        workflowId={workflow?._id}
-                                        previousSteps={steps.slice(0, index).map(s => ({
-                                          id: s.id,
-                                          name: s.name,
-                                          stepType: s.stepType,
-                                          itemVariable: s.itemVariable,
-                                        }))}
-                                        currentStepIndex={index}
-                                        loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
-                                        onSelectToken={(token) => {
-                                          // Remove braces for path fields
-                                          const path = token.replace(/^\{\{|\}\}$/g, '')
-                                          updateStep(index, { inputPath: path })
-                                        }}
-                                        wrapInBraces={false}
-                                      />
-                                    </div>
-                                    <p className="text-xs text-muted-foreground">
-                                      JSONPath to extract from the previous step&apos;s output. The extracted data is passed to the agent.
-                                    </p>
-                                  </div>
                                 </div>
                               )}
 
@@ -1807,37 +1772,6 @@ The agent will receive task context automatically.`}
                                         JSONPath to expected count from external step response
                                       </p>
                                     </div>
-                                  </div>
-
-                                  <div className="space-y-1">
-                                    <label className="text-sm font-medium flex items-center gap-1">
-                                      Input Path
-                                      <span className="text-xs text-muted-foreground">(optional)</span>
-                                    </label>
-                                    <div className="flex gap-1">
-                                      <Input
-                                        value={step.inputPath || ''}
-                                        onChange={(e) => updateStep(index, { inputPath: e.target.value })}
-                                        placeholder="e.g., output.analysis or result.data"
-                                        className="font-mono text-sm"
-                                      />
-                                      <TokenBrowser
-                                        workflowId={workflow?._id}
-                                        previousSteps={steps.slice(0, index).map(s => ({
-                                          id: s.id,
-                                          name: s.name,
-                                          stepType: s.stepType,
-                                          itemVariable: s.itemVariable,
-                                        }))}
-                                        currentStepIndex={index}
-                                        loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
-                                        onSelectToken={(token) => updateStep(index, { inputPath: token })}
-                                        wrapInBraces={false}
-                                      />
-                                    </div>
-                                    <p className="text-xs text-muted-foreground">
-                                      JSONPath to extract from each completed task. Results are aggregated into an array.
-                                    </p>
                                   </div>
 
                                   <div className="space-y-1">

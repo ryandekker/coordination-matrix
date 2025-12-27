@@ -331,31 +331,6 @@ export function StepConfigPanel({
               />
             </div>
 
-            <div className="space-y-1">
-              <label className="text-sm font-medium flex items-center gap-2">
-                <Download className="h-4 w-4 text-muted-foreground" />
-                Input Path
-              </label>
-              <div className="flex gap-1">
-                <Input
-                  value={step.inputPath || ''}
-                  onChange={(e) => onUpdate({ inputPath: e.target.value })}
-                  placeholder="e.g., output.analysis"
-                  className="font-mono text-sm"
-                />
-                <TokenBrowser
-                  workflowId={workflowId}
-                  previousSteps={previousSteps}
-                  currentStepIndex={stepIndex}
-                  loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
-                  onSelectToken={(token) => {
-                    const path = token.replace(/^\{\{|\}\}$/g, '')
-                    onUpdate({ inputPath: path })
-                  }}
-                  wrapInBraces={false}
-                />
-              </div>
-            </div>
           </div>
         )}
 
@@ -701,29 +676,6 @@ export function StepConfigPanel({
                   />
                 </div>
               </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-sm font-medium">Input Path</label>
-              <div className="flex gap-1">
-                <Input
-                  value={step.inputPath || ''}
-                  onChange={(e) => onUpdate({ inputPath: e.target.value })}
-                  placeholder="e.g., output.analysis"
-                  className="font-mono text-sm"
-                />
-                <TokenBrowser
-                  workflowId={workflowId}
-                  previousSteps={previousSteps}
-                  currentStepIndex={stepIndex}
-                  loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
-                  onSelectToken={(token) => onUpdate({ inputPath: token })}
-                  wrapInBraces={false}
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                JSONPath to extract from each completed task.
-              </p>
             </div>
 
             <div className="space-y-1">
