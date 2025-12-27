@@ -456,7 +456,10 @@ export function IntegratedWorkflowView({
           {steps.length > 0 && (
             <div className="border-t bg-muted/20 flex-shrink-0">
               <button
-                onClick={() => setIsQuickSelectExpanded(!isQuickSelectExpanded)}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setIsQuickSelectExpanded(!isQuickSelectExpanded)
+                }}
                 className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/40 transition-colors"
               >
                 <span>Quick select ({steps.length} steps)</span>
@@ -475,7 +478,10 @@ export function IntegratedWorkflowView({
                         return (
                           <button
                             key={step.id}
-                            onClick={() => setSelectedStepId(step.id)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setSelectedStepId(step.id)
+                            }}
                             className={cn(
                               'w-full flex items-center gap-2 px-2 py-1 rounded text-left text-sm transition-colors',
                               selectedStepId === step.id
