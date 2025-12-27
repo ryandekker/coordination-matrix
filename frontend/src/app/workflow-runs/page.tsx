@@ -58,10 +58,6 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import {
-  Collapsible,
-  CollapsibleContent,
-} from '@/components/ui/collapsible'
 import { Textarea } from '@/components/ui/textarea'
 import { JsonViewer } from '@/components/ui/json-viewer'
 import { Input } from '@/components/ui/input'
@@ -172,114 +168,111 @@ function TaskNode({ task, depth, childrenMap, onTaskClick, stepType, maxInitialC
 
   return (
     <div className="space-y-1">
-      <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
-        <div
-          className={cn(
-            'flex items-center gap-2 p-2 rounded-lg border transition-colors cursor-pointer',
-            statusConfig.bgColor,
-            'hover:bg-muted/50'
-          )}
-          style={{ marginLeft: `${depth * 24}px` }}
-          onClick={() => onTaskClick(task)}
-        >
-          {/* Collapse/expand toggle for tasks with children */}
-          {hasChildren ? (
-            <button
-              className="p-0.5 hover:bg-muted rounded flex-shrink-0"
-              onClick={(e) => {
-                e.stopPropagation()
-                setIsExpanded(!isExpanded)
-              }}
-            >
-              {isExpanded ? (
-                <ChevronDown className="h-4 w-4 text-muted-foreground" />
-              ) : (
-                <ChevronRight className="h-4 w-4 text-muted-foreground" />
-              )}
-            </button>
-          ) : (
-            <span className="w-5 flex-shrink-0" />
-          )}
-          <TypeIcon className={cn('h-4 w-4 flex-shrink-0', typeConfig.color)} />
-
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="font-medium truncate hover:underline">
-                {task.title}
-              </span>
-              <Badge variant="outline" className={cn('text-xs flex-shrink-0', statusConfig.color)}>
-                {task.status.replace('_', ' ')}
-              </Badge>
-              <Badge variant="outline" className="text-xs flex-shrink-0">
-                {typeConfig.label}
-              </Badge>
-            </div>
-            {task.summary && (
-              <p className="text-sm text-muted-foreground truncate">{task.summary}</p>
+      <div
+        className={cn(
+          'flex items-center gap-2 p-2 rounded-lg border transition-colors cursor-pointer',
+          statusConfig.bgColor,
+          'hover:bg-muted/50'
+        )}
+        style={{ marginLeft: `${depth * 24}px` }}
+        onClick={() => onTaskClick(task)}
+      >
+        {/* Collapse/expand toggle for tasks with children */}
+        {hasChildren ? (
+          <button
+            className="p-0.5 hover:bg-muted rounded flex-shrink-0"
+            onClick={(e) => {
+              e.stopPropagation()
+              setIsExpanded(prev => !prev)
+            }}
+          >
+            {isExpanded ? (
+              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
             )}
+          </button>
+        ) : (
+          <span className="w-5 flex-shrink-0" />
+        )}
+        <TypeIcon className={cn('h-4 w-4 flex-shrink-0', typeConfig.color)} />
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-medium truncate hover:underline">
+              {task.title}
+            </span>
+            <Badge variant="outline" className={cn('text-xs flex-shrink-0', statusConfig.color)}>
+              {task.status.replace('_', ' ')}
+            </Badge>
+            <Badge variant="outline" className="text-xs flex-shrink-0">
+              {typeConfig.label}
+            </Badge>
           </div>
-
-          {hasChildren && (
-            <span className="text-xs text-muted-foreground flex-shrink-0">
-              {childCount} {childCount === 1 ? 'child' : 'children'}
-            </span>
-          )}
-
-          {/* ForEach batch progress */}
-          {taskType === 'foreach' && (task as any).batchCounters && (
-            <span className="text-xs text-muted-foreground flex-shrink-0 font-mono">
-              {(task as any).batchCounters.processedCount || 0}/{(task as any).batchCounters.expectedCount || '?'}
-              {(task as any).batchCounters.failedCount > 0 && (
-                <span className="text-destructive ml-1">({(task as any).batchCounters.failedCount} failed)</span>
-              )}
-            </span>
-          )}
-
-          {/* Waiting indicator with reason */}
-          {task.status === 'waiting' && (task as any).metadata?.waitingReason && (
-            <span className="text-xs text-amber-600 dark:text-amber-400 flex-shrink-0 max-w-[200px] truncate" title={(task as any).metadata.waitingReason}>
-              {(task as any).metadata.waitingReason}
-            </span>
-          )}
-
-          {task.status === 'in_progress' && (
-            <span className="relative flex h-2 w-2 flex-shrink-0">
-              <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-blue-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
-            </span>
+          {task.summary && (
+            <p className="text-sm text-muted-foreground truncate">{task.summary}</p>
           )}
         </div>
 
         {hasChildren && (
-          <CollapsibleContent>
-            <div className="mt-1">
-              {displayedChildren.map(child => (
-                <TaskNode
-                  key={child._id}
-                  task={child}
-                  depth={depth + 1}
-                  childrenMap={childrenMap}
-                  onTaskClick={onTaskClick}
-                  stepType={stepType}
-                  maxInitialChildren={maxInitialChildren}
-                />
-              ))}
-              {hasMoreChildren && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setShowAll(true)
-                  }}
-                  className="ml-6 mt-1 text-xs text-primary hover:underline"
-                  style={{ marginLeft: `${(depth + 1) * 24}px` }}
-                >
-                  Show {allChildren.length - maxInitialChildren} more...
-                </button>
-              )}
-            </div>
-          </CollapsibleContent>
+          <span className="text-xs text-muted-foreground flex-shrink-0">
+            {childCount} {childCount === 1 ? 'child' : 'children'}
+          </span>
         )}
-      </Collapsible>
+
+        {/* ForEach batch progress */}
+        {taskType === 'foreach' && (task as any).batchCounters && (
+          <span className="text-xs text-muted-foreground flex-shrink-0 font-mono">
+            {(task as any).batchCounters.processedCount || 0}/{(task as any).batchCounters.expectedCount || '?'}
+            {(task as any).batchCounters.failedCount > 0 && (
+              <span className="text-destructive ml-1">({(task as any).batchCounters.failedCount} failed)</span>
+            )}
+          </span>
+        )}
+
+        {/* Waiting indicator with reason */}
+        {task.status === 'waiting' && (task as any).metadata?.waitingReason && (
+          <span className="text-xs text-amber-600 dark:text-amber-400 flex-shrink-0 max-w-[200px] truncate" title={(task as any).metadata.waitingReason}>
+            {(task as any).metadata.waitingReason}
+          </span>
+        )}
+
+        {task.status === 'in_progress' && (
+          <span className="relative flex h-2 w-2 flex-shrink-0">
+            <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-blue-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+          </span>
+        )}
+      </div>
+
+      {/* Children - simple conditional render instead of Collapsible */}
+      {hasChildren && isExpanded && (
+        <div className="mt-1">
+          {displayedChildren.map(child => (
+            <TaskNode
+              key={child._id}
+              task={child}
+              depth={depth + 1}
+              childrenMap={childrenMap}
+              onTaskClick={onTaskClick}
+              stepType={stepType}
+              maxInitialChildren={maxInitialChildren}
+            />
+          ))}
+          {hasMoreChildren && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setShowAll(true)
+              }}
+              className="ml-6 mt-1 text-xs text-primary hover:underline"
+              style={{ marginLeft: `${(depth + 1) * 24}px` }}
+            >
+              Show {allChildren.length - maxInitialChildren} more...
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
