@@ -132,3 +132,101 @@ See `./scripts/matrix-cli.mjs --help` for all commands.
 1. Update `mongo-init/01-init-db.js` for schema validation
 2. Update seed data in `mongo-init/02-seed-data.js` if needed
 3. Run `npm run db:reset` to apply
+
+## Task Daemon
+
+The Task Daemon is a polling-based agent that processes tasks from saved views (queues). It works with remote APIs using API key authentication and executes Claude CLI to process tasks.
+
+### Key Files
+
+- `scripts/task-daemon.mjs` - Main production daemon script
+- `scripts/daemon-jobs.yaml` - Job configuration file
+- `docs/task-daemon.md` - Full documentation
+
+### Quick Commands
+
+```bash
+# List available jobs
+node scripts/task-daemon.mjs --config scripts/daemon-jobs.yaml --list
+
+# Run a specific job continuously
+node scripts/task-daemon.mjs --config scripts/daemon-jobs.yaml --job claude-haiku
+
+# Run once and exit (good for testing)
+node scripts/task-daemon.mjs --config scripts/daemon-jobs.yaml --job claude-haiku --once
+
+# Dry run to see the assembled prompt
+node scripts/task-daemon.mjs --view <viewId> --api-key <key> --once --dry-run
+
+# Run against a specific view (without config file)
+node scripts/task-daemon.mjs --view <viewId> --api-key <key> --once
+```
+
+### How It Works
+
+1. **Poll View**: Fetches next task from a saved view (filtered by status, assignee, tags)
+2. **Assemble Prompt**: Layers base daemon prompt + agent prompt + workflow step + task context
+3. **Execute**: Runs Claude CLI with the assembled prompt
+4. **Parse Response**: Expects structured JSON with status, summary, output, nextAction
+5. **Update Task**: Sets status based on nextAction (COMPLETE, CONTINUE, ESCALATE, HOLD)
+6. **Workflow Transition**: Creates next step task if part of a workflow
+
+### Response Schema
+
+The daemon expects Claude to return JSON:
+
+```json
+{
+  "status": "SUCCESS | PARTIAL | BLOCKED | FAILED",
+  "summary": "1-2 sentence summary",
+  "output": { /* structured result */ },
+  "nextAction": "COMPLETE | CONTINUE | ESCALATE | HOLD",
+  "nextActionReason": "optional reason",
+  "metadata": {
+    "confidence": 0.0-1.0,
+    "suggestedTags": [],
+    "suggestedNextStage": null
+  }
+}
+```
+
+### NextAction Values
+
+| Action | Task Status | Behavior |
+|--------|-------------|----------|
+| `COMPLETE` | `completed` | Task done, create next workflow step if applicable |
+| `CONTINUE` | `completed` | Task done, create follow-up task with reason |
+| `ESCALATE` | `on_hold` | Needs human intervention, unassign task |
+| `HOLD` | `on_hold` | Paused, unassign task |
+
+### Configuration (daemon-jobs.yaml)
+
+```yaml
+defaults:
+  apiUrl: https://cm.hcizero.com/api
+  apiKey: cm_ak_xxxxx  # or use MATRIX_API_KEY env var
+  interval: 5000
+  exec: claude
+  maxPayloadSize: 200000
+
+jobs:
+  claude-haiku:
+    description: Fast triage tasks
+    viewId: <saved-view-id>
+    exec: "claude --model haiku"
+
+  claude-opus:
+    description: Complex reasoning tasks
+    viewId: <saved-view-id>
+    exec: "claude --model opus"
+```
+
+### Two Daemon Types
+
+| Feature | Task Daemon (task-daemon.mjs) | Automation Daemon |
+|---------|-------------------------------|-------------------|
+| Architecture | Polling via API | Event-based (EventEmitter) |
+| Remote Support | Yes (API + auth) | No (same process only) |
+| Status | **Production-ready** | Limited (needs event bus upgrade) |
+
+For production/remote deployments, always use `task-daemon.mjs`.
