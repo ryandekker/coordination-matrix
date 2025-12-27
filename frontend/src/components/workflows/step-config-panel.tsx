@@ -651,59 +651,6 @@ export function StepConfigPanel({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Min Success %</label>
-                <Input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={step.joinBoundary?.minPercent ?? step.minSuccessPercent ?? ''}
-                  onChange={(e) => onUpdate({
-                    joinBoundary: {
-                      ...step.joinBoundary,
-                      minPercent: e.target.value ? parseInt(e.target.value) : undefined
-                    },
-                    minSuccessPercent: e.target.value ? parseInt(e.target.value) : undefined
-                  })}
-                  placeholder="100"
-                  className="font-mono text-sm"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Min Count</label>
-                <Input
-                  type="number"
-                  min="0"
-                  value={step.joinBoundary?.minCount ?? ''}
-                  onChange={(e) => onUpdate({
-                    joinBoundary: {
-                      ...step.joinBoundary,
-                      minCount: e.target.value ? parseInt(e.target.value) : undefined
-                    }
-                  })}
-                  placeholder="All tasks"
-                  className="font-mono text-sm"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Max Wait (ms)</label>
-                <Input
-                  type="number"
-                  min="0"
-                  value={step.joinBoundary?.maxWaitMs ?? ''}
-                  onChange={(e) => onUpdate({
-                    joinBoundary: {
-                      ...step.joinBoundary,
-                      maxWaitMs: e.target.value ? parseInt(e.target.value) : undefined
-                    }
-                  })}
-                  placeholder="No timeout"
-                  className="font-mono text-sm"
-                />
-              </div>
-            </div>
-
             <div className="space-y-1">
               <label className="text-sm font-medium">Expected Count Path</label>
               <div className="flex gap-1">
@@ -721,6 +668,65 @@ export function StepConfigPanel({
                   wrapInBraces={false}
                 />
               </div>
+              <p className="text-xs text-muted-foreground">
+                Path to the expected number of tasks. Required for min % / count thresholds.
+              </p>
+            </div>
+
+            {step.expectedCountPath && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Min Success %</label>
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={step.joinBoundary?.minPercent ?? step.minSuccessPercent ?? ''}
+                    onChange={(e) => onUpdate({
+                      joinBoundary: {
+                        ...step.joinBoundary,
+                        minPercent: e.target.value ? parseInt(e.target.value) : undefined
+                      },
+                      minSuccessPercent: e.target.value ? parseInt(e.target.value) : undefined
+                    })}
+                    placeholder="100"
+                    className="font-mono text-sm"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Min Count</label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={step.joinBoundary?.minCount ?? ''}
+                    onChange={(e) => onUpdate({
+                      joinBoundary: {
+                        ...step.joinBoundary,
+                        minCount: e.target.value ? parseInt(e.target.value) : undefined
+                      }
+                    })}
+                    placeholder="All tasks"
+                    className="font-mono text-sm"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Max Wait (ms)</label>
+              <Input
+                type="number"
+                min="0"
+                value={step.joinBoundary?.maxWaitMs ?? ''}
+                onChange={(e) => onUpdate({
+                  joinBoundary: {
+                    ...step.joinBoundary,
+                    maxWaitMs: e.target.value ? parseInt(e.target.value) : undefined
+                  }
+                })}
+                placeholder="No timeout"
+                className="font-mono text-sm"
+              />
             </div>
 
             <div className="space-y-1">

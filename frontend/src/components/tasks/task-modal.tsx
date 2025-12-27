@@ -1388,63 +1388,6 @@ export function TaskModal({
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] text-muted-foreground">Min Success %</label>
-                <Input
-                  type="number"
-                  min="0"
-                  max="100"
-                  className="h-7 text-sm"
-                  defaultValue={(task as any).joinConfig?.minSuccessPercent ?? (task as any).joinConfig?.boundary?.minPercent ?? ''}
-                  placeholder="100"
-                  onBlur={(e) => {
-                    const newValue = e.target.value ? parseInt(e.target.value, 10) : undefined
-                    const currentConfig = (task as any).joinConfig || {}
-                    updateTask.mutateAsync({
-                      id: task._id,
-                      data: {
-                        joinConfig: {
-                          ...currentConfig,
-                          minSuccessPercent: newValue,
-                          boundary: {
-                            ...currentConfig.boundary,
-                            minPercent: newValue,
-                          },
-                        },
-                      },
-                    })
-                  }}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <label className="text-[10px] text-muted-foreground">Min Count</label>
-                <Input
-                  type="number"
-                  min="0"
-                  className="h-7 text-sm"
-                  defaultValue={(task as any).joinConfig?.boundary?.minCount ?? ''}
-                  placeholder="All"
-                  onBlur={(e) => {
-                    const newValue = e.target.value ? parseInt(e.target.value, 10) : undefined
-                    const currentConfig = (task as any).joinConfig || {}
-                    updateTask.mutateAsync({
-                      id: task._id,
-                      data: {
-                        joinConfig: {
-                          ...currentConfig,
-                          boundary: {
-                            ...currentConfig.boundary,
-                            minCount: newValue,
-                          },
-                        },
-                      },
-                    })
-                  }}
-                />
-              </div>
-              <div className="space-y-1">
                 <label className="text-[10px] text-muted-foreground">Max Wait (ms)</label>
                 <Input
                   type="number"
@@ -1471,6 +1414,66 @@ export function TaskModal({
                 />
               </div>
             </div>
+
+            {/* Min thresholds only shown when expected count is set */}
+            {(task as any).joinConfig?.expectedCount != null && (
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground">Min Success %</label>
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
+                    className="h-7 text-sm"
+                    defaultValue={(task as any).joinConfig?.minSuccessPercent ?? (task as any).joinConfig?.boundary?.minPercent ?? ''}
+                    placeholder="100"
+                    onBlur={(e) => {
+                      const newValue = e.target.value ? parseInt(e.target.value, 10) : undefined
+                      const currentConfig = (task as any).joinConfig || {}
+                      updateTask.mutateAsync({
+                        id: task._id,
+                        data: {
+                          joinConfig: {
+                            ...currentConfig,
+                            minSuccessPercent: newValue,
+                            boundary: {
+                              ...currentConfig.boundary,
+                              minPercent: newValue,
+                            },
+                          },
+                        },
+                      })
+                    }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground">Min Count</label>
+                  <Input
+                    type="number"
+                    min="0"
+                    className="h-7 text-sm"
+                    defaultValue={(task as any).joinConfig?.boundary?.minCount ?? ''}
+                    placeholder="All"
+                    onBlur={(e) => {
+                      const newValue = e.target.value ? parseInt(e.target.value, 10) : undefined
+                      const currentConfig = (task as any).joinConfig || {}
+                      updateTask.mutateAsync({
+                        id: task._id,
+                        data: {
+                          joinConfig: {
+                            ...currentConfig,
+                            boundary: {
+                              ...currentConfig.boundary,
+                              minCount: newValue,
+                            },
+                          },
+                        },
+                      })
+                    }}
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Force Complete button - only show for non-completed join tasks */}
             {task.status !== 'completed' && (
