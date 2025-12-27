@@ -314,13 +314,13 @@ export default function MultiWorkflowEditPage() {
             onError={setMermaidError}
             className="h-full"
             minHeight="100%"
-            initialLayout="split"
+            initialLayout="code"
           />
         </div>
 
         {mermaidError && (
-          <div className="mt-2 text-sm text-amber-600 dark:text-amber-400 flex-shrink-0">
-            Note: Preview shows first workflow only. Use separators: %% ======== (8+ equals)
+          <div className="mt-2 text-sm text-muted-foreground flex-shrink-0">
+            Multi-workflow documents can&apos;t be previewed. Edit individual workflows for preview.
           </div>
         )}
 
