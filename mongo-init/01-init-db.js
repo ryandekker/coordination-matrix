@@ -137,6 +137,15 @@ db.createCollection('tasks', {
         decisionResult: {
           bsonType: 'string',
           description: 'Result of a decision task (selected step ID)'
+        },
+        // Task-to-workflow routing fields
+        spawnedWorkflowRunId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Workflow run spawned FROM this task (for routing/decision tasks)'
+        },
+        workflowResult: {
+          bsonType: 'object',
+          description: 'Result information from spawned workflow (status, outputPayload, error)'
         }
       }
     }
@@ -155,6 +164,7 @@ db.tasks.createIndex({ taskType: 1 });  // For filtering by task type
 db.tasks.createIndex({ createdAt: -1 });
 db.tasks.createIndex({ tags: 1 });
 db.tasks.createIndex({ externalId: 1 });
+db.tasks.createIndex({ spawnedWorkflowRunId: 1 });  // For finding tasks that spawned workflows
 db.tasks.createIndex({ title: 'text', summary: 'text' });
 
 // ============================================================================
@@ -240,6 +250,15 @@ db.createCollection('workflow_runs', {
         rootTaskId: {
           bsonType: ['objectId', 'null'],
           description: 'Root task created for this run'
+        },
+        // Task-to-workflow routing: the task that triggered/spawned this workflow
+        triggerTaskId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Task that triggered/spawned this workflow run (for routing patterns)'
+        },
+        triggerContext: {
+          bsonType: 'object',
+          description: 'Context passed from the trigger task (metadata, routing decision, etc.)'
         },
         currentStepIds: {
           bsonType: 'array',
@@ -327,6 +346,7 @@ db.createCollection('workflow_runs', {
 db.workflow_runs.createIndex({ workflowId: 1, createdAt: -1 });
 db.workflow_runs.createIndex({ status: 1 });
 db.workflow_runs.createIndex({ rootTaskId: 1 });
+db.workflow_runs.createIndex({ triggerTaskId: 1 });  // For finding workflows spawned by a task
 db.workflow_runs.createIndex({ createdAt: -1 });
 db.workflow_runs.createIndex({ createdById: 1 });
 

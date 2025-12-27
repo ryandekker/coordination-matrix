@@ -334,6 +334,9 @@ class WorkflowExecutionService {
       dueOffsetHours: input.taskDefaults.dueOffsetHours,
     } : undefined;
 
+    // Parse trigger task ID if provided
+    const triggerTaskId = input.triggerTaskId ? new ObjectId(input.triggerTaskId) : null;
+
     // Create workflow run
     // Only include optional fields when they have values to avoid MongoDB validation issues
     // (schema expects null for ObjectId fields, not undefined)
@@ -351,6 +354,8 @@ class WorkflowExecutionService {
       ...(input.executionOptions && { executionOptions: input.executionOptions }),
       ...(input.externalId && { externalId: input.externalId }),
       ...(input.source && { source: input.source }),
+      ...(triggerTaskId && { triggerTaskId }),
+      ...(input.triggerContext && { triggerContext: input.triggerContext }),
     };
 
     const runResult = await this.workflowRuns.insertOne(run as WorkflowRun);
@@ -365,6 +370,20 @@ class WorkflowExecutionService {
       { $set: { rootTaskId: rootTask._id } }
     );
     createdRun.rootTaskId = rootTask._id;
+
+    // If this workflow was triggered by a task, update that task with the spawned workflow run ID
+    if (triggerTaskId) {
+      await this.tasks.updateOne(
+        { _id: triggerTaskId },
+        {
+          $set: {
+            spawnedWorkflowRunId: createdRun._id,
+            updatedAt: now,
+          }
+        }
+      );
+      console.log(`[WorkflowExecutionService] Linked trigger task ${triggerTaskId} to workflow run ${createdRun._id}`);
+    }
 
     // Publish event
     await this.publish({
@@ -2062,6 +2081,25 @@ class WorkflowExecutionService {
       );
     }
 
+    // Propagate failure result back to the trigger task if this workflow was spawned from a task
+    if (run.triggerTaskId) {
+      const workflowResult = {
+        status: 'failed' as WorkflowRunStatus,
+        error: `Step "${failedTask.title}" failed`,
+        completedAt: now,
+      };
+      await this.tasks.updateOne(
+        { _id: run.triggerTaskId },
+        {
+          $set: {
+            workflowResult,
+            updatedAt: now,
+          }
+        }
+      );
+      console.log(`[WorkflowExecutionService] Propagated failure result to trigger task ${run.triggerTaskId}`);
+    }
+
     const updatedRun = await this.workflowRuns.findOne({ _id: run._id });
     if (updatedRun) {
       await this.publish({
@@ -2117,6 +2155,25 @@ class WorkflowExecutionService {
           },
         }
       );
+    }
+
+    // Propagate success result back to the trigger task if this workflow was spawned from a task
+    if (run.triggerTaskId) {
+      const workflowResult = {
+        status: 'completed' as WorkflowRunStatus,
+        outputPayload,
+        completedAt: now,
+      };
+      await this.tasks.updateOne(
+        { _id: run.triggerTaskId },
+        {
+          $set: {
+            workflowResult,
+            updatedAt: now,
+          }
+        }
+      );
+      console.log(`[WorkflowExecutionService] Propagated success result to trigger task ${run.triggerTaskId}`);
     }
 
     const updatedRun = await this.workflowRuns.findOne({ _id: run._id });
