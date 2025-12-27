@@ -1575,13 +1575,21 @@ class WorkflowExecutionService {
 
   private async checkJoinCondition(joinTaskId: ObjectId, foreachTaskId: ObjectId): Promise<boolean> {
     const foreachTask = await this.tasks.findOne({ _id: foreachTaskId });
-    if (!foreachTask || !foreachTask.batchCounters) return false;
+    if (!foreachTask) {
+      console.log(`[WorkflowExecutionService] checkJoinCondition: foreach task ${foreachTaskId} not found`);
+      return false;
+    }
 
     // Get the join task to read its config
     const joinTask = await this.tasks.findOne({ _id: joinTaskId });
-    if (!joinTask) return false;
+    if (!joinTask) {
+      console.log(`[WorkflowExecutionService] checkJoinCondition: join task ${joinTaskId} not found`);
+      return false;
+    }
 
     const children = await this.tasks.find({ parentId: foreachTaskId }).toArray();
+    console.log(`[WorkflowExecutionService] checkJoinCondition: found ${children.length} children of foreach ${foreachTaskId}`);
+
     const completedCount = children.filter(c => c.status === 'completed').length;
     const failedCount = children.filter(c => c.status === 'failed').length;
     const totalDone = completedCount + failedCount;
@@ -1597,8 +1605,10 @@ class WorkflowExecutionService {
       }
     );
 
-    // Determine expected count - prefer joinConfig.expectedCount if set, else use batchCounters
-    const expectedCount = joinTask.joinConfig?.expectedCount ?? foreachTask.batchCounters.expectedCount;
+    // Determine expected count - prefer joinConfig.expectedCount, then batchCounters, then children count
+    const expectedCount = joinTask.joinConfig?.expectedCount
+      ?? foreachTask.batchCounters?.expectedCount
+      ?? children.length;
 
     // Get minSuccessPercent from joinConfig, default to 100
     const minSuccessPercent = joinTask.joinConfig?.minSuccessPercent ?? 100;
@@ -2615,27 +2625,36 @@ class WorkflowExecutionService {
       return { success: false, error: 'Task not found or not a join task' };
     }
 
-    // Try to find the foreach task ID from joinConfig or parent
-    let foreachTaskId = joinTask.joinConfig?.awaitTaskId;
+    // Try to find the foreach task ID from multiple sources
+    let foreachTaskId: ObjectId | undefined = joinTask.joinConfig?.awaitTaskId;
 
-    // If no awaitTaskId, try to find foreach parent
+    // Check metadata.awaitingForeachTask (set by workflow system)
+    if (!foreachTaskId && joinTask.metadata?.awaitingForeachTask) {
+      const awaitingId = joinTask.metadata.awaitingForeachTask;
+      foreachTaskId = typeof awaitingId === 'string' ? new ObjectId(awaitingId) : awaitingId as ObjectId;
+      console.log(`[WorkflowExecutionService] rerunJoinTask: using metadata.awaitingForeachTask ${foreachTaskId}`);
+    }
+
+    // If still no ID, try to find foreach parent
     if (!foreachTaskId && joinTask.parentId) {
       const parentTask = await this.tasks.findOne({ _id: joinTask.parentId });
       if (parentTask?.taskType === 'foreach') {
         foreachTaskId = parentTask._id;
         console.log(`[WorkflowExecutionService] rerunJoinTask: using parent as foreach task ${foreachTaskId}`);
-
-        // Update joinConfig with the discovered awaitTaskId
-        await this.tasks.updateOne(
-          { _id: joinTaskId },
-          { $set: { 'joinConfig.awaitTaskId': foreachTaskId } }
-        );
       }
     }
 
+    // Update joinConfig with the discovered awaitTaskId for future runs
+    if (foreachTaskId && !joinTask.joinConfig?.awaitTaskId) {
+      await this.tasks.updateOne(
+        { _id: joinTaskId },
+        { $set: { 'joinConfig.awaitTaskId': foreachTaskId } }
+      );
+    }
+
     if (!foreachTaskId) {
-      console.log(`[WorkflowExecutionService] rerunJoinTask: join task ${joinTaskId} has no awaitTaskId and no foreach parent`);
-      return { success: false, error: 'No foreach task found to aggregate from. Set the parent to a foreach task or configure awaitTaskId.' };
+      console.log(`[WorkflowExecutionService] rerunJoinTask: join task ${joinTaskId} has no awaitTaskId, metadata.awaitingForeachTask, or foreach parent`);
+      return { success: false, error: 'No foreach task found to aggregate from.' };
     }
 
     console.log(`[WorkflowExecutionService] rerunJoinTask: re-aggregating join ${joinTaskId} from foreach ${foreachTaskId}`);
