@@ -454,7 +454,7 @@ export function IntegratedWorkflowView({
 
           {/* Step list for quick navigation */}
           {steps.length > 0 && (
-            <div className="border-t bg-muted/20 flex-shrink-0">
+            <div className="border-t bg-muted/20 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
               <button
                 onClick={(e) => {
                   e.stopPropagation()
