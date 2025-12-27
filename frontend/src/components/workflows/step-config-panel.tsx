@@ -669,11 +669,11 @@ export function StepConfigPanel({
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                Path to the expected number of tasks. Required for min % / count thresholds.
+                Path to the expected number of tasks. Set this and Max Wait to enable min thresholds.
               </p>
             </div>
 
-            {step.expectedCountPath && (
+            {step.expectedCountPath && step.joinBoundary?.maxWaitMs && (
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-sm font-medium">Min Success %</label>
