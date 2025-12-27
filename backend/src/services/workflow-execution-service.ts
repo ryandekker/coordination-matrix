@@ -1556,6 +1556,7 @@ class WorkflowExecutionService {
           'joinConfig.scope': scope,
           'joinConfig.minSuccessPercent': minSuccessPercent,
           'joinConfig.expectedCount': expectedCount,
+          'joinConfig.inputPath': step.inputPath,
           'joinConfig.boundary': step.joinBoundary ? {
             minCount: step.joinBoundary.minCount,
             minPercent: step.joinBoundary.minPercent ?? minSuccessPercent,
@@ -1646,8 +1647,22 @@ class WorkflowExecutionService {
 
     if (thresholdMet || allDone || isTimedOut) {
       // Aggregate results from completed tasks
-      // Use inputPath from joinConfig if specified, otherwise take full metadata
-      const inputPath = joinTask.joinConfig?.inputPath;
+      // Use inputPath from joinConfig if specified, otherwise look up from workflow step definition
+      let inputPath = joinTask.joinConfig?.inputPath;
+
+      // Fallback: look up inputPath from workflow step definition if not in joinConfig
+      // This handles tasks created before inputPath was stored in joinConfig
+      if (!inputPath && joinTask.workflowStepId && joinTask.workflowRunId) {
+        const run = await this.workflowRuns.findOne({ _id: joinTask.workflowRunId });
+        if (run) {
+          const workflow = await this.workflows.findOne({ _id: run.workflowId });
+          const step = workflow?.steps.find(s => s.id === joinTask.workflowStepId);
+          if (step?.inputPath) {
+            inputPath = step.inputPath;
+            console.log(`[WorkflowExecutionService] Join aggregation: using inputPath from workflow step definition: ${inputPath}`);
+          }
+        }
+      }
       const results = children
         .filter(c => c.status === 'completed')
         .map(c => {
