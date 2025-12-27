@@ -1271,7 +1271,7 @@ workflowsRouter.get('/export-multi', async (req: Request, res: Response, next: N
       });
     }
 
-    const mermaid = sections.join('\n\n---\n\n');
+    const mermaid = sections.join('\n\n%% ========================================================\n\n');
 
     res.json({
       data: {
@@ -1294,8 +1294,8 @@ workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: 
       throw createError('mermaid is required', 400);
     }
 
-    // Split by --- separator
-    const sections = mermaid.split(/\n---\n/).map(s => s.trim()).filter(Boolean);
+    // Split by %% ======== separator (at least 8 equals signs)
+    const sections = mermaid.split(/\n%%\s*={8,}\s*\n/).map(s => s.trim()).filter(Boolean);
 
     if (sections.length === 0) {
       throw createError('No workflow sections found', 400);

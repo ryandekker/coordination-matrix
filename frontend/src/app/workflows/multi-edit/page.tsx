@@ -18,6 +18,8 @@ import {
   Pencil,
   SkipForward,
   Eye,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -38,9 +40,10 @@ interface ImportSummary {
   skipped: number
 }
 
-const MULTI_WORKFLOW_TEMPLATE = `%% Multi-Workflow Mermaid Document
-%% Separate workflows with --- on its own line
-%% Use @workflow, @id, @description metadata comments
+const MULTI_WORKFLOW_TEMPLATE = `%% ============================================================
+%% Multi-Workflow Mermaid Document
+%% Separate workflows with: %% ======== (at least 8 equals signs)
+%% ============================================================
 
 %% @workflow: "My New Workflow"
 %% @description: Description of this workflow
@@ -57,7 +60,7 @@ flowchart TD
     class step2 manual
     class step3 external
 
----
+%% ========================================================
 
 %% @workflow: "Another Workflow"
 %% @description: A second workflow in the same document
@@ -82,6 +85,7 @@ export default function MultiWorkflowEditPage() {
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null)
   const [isDryRun, setIsDryRun] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [resultsExpanded, setResultsExpanded] = useState(true)
 
   // Export all workflows
   const handleExport = useCallback(async () => {
@@ -123,6 +127,7 @@ export default function MultiWorkflowEditPage() {
     setIsImporting(true)
     setError(null)
     setIsDryRun(dryRun)
+    setResultsExpanded(true)
 
     try {
       const response = await fetch(`${API_BASE}/workflows/import-multi`, {
@@ -181,9 +186,9 @@ export default function MultiWorkflowEditPage() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
-      <div className="border-b bg-muted/30">
+      <div className="border-b bg-muted/30 flex-shrink-0">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -230,221 +235,172 @@ export default function MultiWorkflowEditPage() {
         </div>
       </div>
 
-      {/* Main content */}
-      <div className="container mx-auto px-4 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Editor - takes 2/3 of the space */}
-          <div className="lg:col-span-2 flex flex-col">
-            {/* Editor toolbar */}
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <label>
-                  <Button variant="outline" size="sm" className="gap-2 cursor-pointer" asChild>
-                    <span>
-                      <FileUp className="h-4 w-4" />
-                      Upload File
-                    </span>
-                  </Button>
-                  <input
-                    type="file"
-                    accept=".mmd,.txt"
-                    className="hidden"
-                    onChange={handleUpload}
-                  />
-                </label>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleDownload}
-                  disabled={!mermaidCode}
-                  className="gap-2"
-                >
-                  <Download className="h-4 w-4" />
-                  Download
-                </Button>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleImport(true)}
-                  disabled={isImporting || !mermaidCode.trim()}
-                  className="gap-2"
-                >
-                  {isImporting && isDryRun ? (
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
-                  Preview Changes
-                </Button>
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={() => handleImport(false)}
-                  disabled={isImporting || !mermaidCode.trim()}
-                  className="gap-2"
-                >
-                  {isImporting && !isDryRun ? (
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Upload className="h-4 w-4" />
-                  )}
-                  Import Workflows
-                </Button>
-              </div>
-            </div>
-
-            {/* Error display */}
-            {error && (
-              <div className="mb-4 px-4 py-3 bg-destructive/10 text-destructive rounded-lg flex items-center gap-2">
-                <AlertCircle className="h-4 w-4" />
-                {error}
-              </div>
-            )}
-
-            {/* Mermaid editor */}
-            <MermaidLiveEditor
-              value={mermaidCode}
-              onChange={setMermaidCode}
-              onError={setMermaidError}
-              className="flex-1"
-              minHeight="600px"
-              initialLayout="split"
-            />
-
-            {mermaidError && (
-              <div className="mt-2 text-sm text-destructive">
-                Mermaid syntax error: {mermaidError}
-              </div>
-            )}
+      {/* Main content - flex grow */}
+      <div className="flex-1 flex flex-col min-h-0 container mx-auto px-4 py-4">
+        {/* Editor toolbar */}
+        <div className="flex items-center justify-between mb-3 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <label>
+              <Button variant="outline" size="sm" className="gap-2 cursor-pointer" asChild>
+                <span>
+                  <FileUp className="h-4 w-4" />
+                  Upload File
+                </span>
+              </Button>
+              <input
+                type="file"
+                accept=".mmd,.txt"
+                className="hidden"
+                onChange={handleUpload}
+              />
+            </label>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownload}
+              disabled={!mermaidCode}
+              className="gap-2"
+            >
+              <Download className="h-4 w-4" />
+              Download
+            </Button>
           </div>
 
-          {/* Results panel - takes 1/3 of the space */}
-          <div className="flex flex-col">
-            <h2 className="text-lg font-medium mb-4">Import Results</h2>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleImport(true)}
+              disabled={isImporting || !mermaidCode.trim()}
+              className="gap-2"
+            >
+              {isImporting && isDryRun ? (
+                <RefreshCw className="h-4 w-4 animate-spin" />
+              ) : (
+                <Eye className="h-4 w-4" />
+              )}
+              Preview Changes
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => handleImport(false)}
+              disabled={isImporting || !mermaidCode.trim()}
+              className="gap-2"
+            >
+              {isImporting && !isDryRun ? (
+                <RefreshCw className="h-4 w-4 animate-spin" />
+              ) : (
+                <Upload className="h-4 w-4" />
+              )}
+              Import Workflows
+            </Button>
+          </div>
+        </div>
 
-            {!importResults ? (
-              <div className="flex-1 flex items-center justify-center text-center text-muted-foreground p-8 border rounded-lg bg-muted/20">
-                <div>
-                  <Upload className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p className="text-sm">
-                    Click &quot;Preview Changes&quot; to see what will happen, or &quot;Import
-                    Workflows&quot; to apply changes.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {/* Summary */}
+        {/* Error display */}
+        {error && (
+          <div className="mb-3 px-4 py-3 bg-destructive/10 text-destructive rounded-lg flex items-center gap-2 flex-shrink-0">
+            <AlertCircle className="h-4 w-4" />
+            {error}
+          </div>
+        )}
+
+        {/* Mermaid editor - takes remaining space */}
+        <div className="flex-1 min-h-0">
+          <MermaidLiveEditor
+            value={mermaidCode}
+            onChange={setMermaidCode}
+            onError={setMermaidError}
+            className="h-full"
+            minHeight="100%"
+            initialLayout="split"
+          />
+        </div>
+
+        {mermaidError && (
+          <div className="mt-2 text-sm text-amber-600 dark:text-amber-400 flex-shrink-0">
+            Note: Preview shows first workflow only. Use separators: %% ======== (8+ equals)
+          </div>
+        )}
+
+        {/* Results panel - collapsible at bottom */}
+        {importResults && (
+          <div className="mt-4 border rounded-lg bg-muted/20 flex-shrink-0">
+            {/* Results header - clickable to collapse */}
+            <button
+              onClick={() => setResultsExpanded(!resultsExpanded)}
+              className="w-full flex items-center justify-between p-3 hover:bg-muted/30 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                {isDryRun ? (
+                  <Eye className="h-4 w-4 text-blue-500" />
+                ) : (
+                  <Check className="h-4 w-4 text-green-500" />
+                )}
+                <span className="font-medium">
+                  {isDryRun ? 'Preview Results' : 'Import Complete'}
+                </span>
                 {importSummary && (
-                  <div className="p-4 border rounded-lg bg-muted/20">
-                    <div className="flex items-center gap-2 mb-3">
-                      {isDryRun ? (
-                        <Eye className="h-4 w-4 text-blue-500" />
-                      ) : (
-                        <Check className="h-4 w-4 text-green-500" />
-                      )}
-                      <span className="font-medium">
-                        {isDryRun ? 'Preview' : 'Imported'}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 text-center">
-                      <div>
-                        <div className="text-2xl font-bold text-green-600">
-                          {importSummary.created}
-                        </div>
-                        <div className="text-xs text-muted-foreground">Created</div>
-                      </div>
-                      <div>
-                        <div className="text-2xl font-bold text-blue-600">
-                          {importSummary.updated}
-                        </div>
-                        <div className="text-xs text-muted-foreground">Updated</div>
-                      </div>
-                      <div>
-                        <div className="text-2xl font-bold text-amber-600">
-                          {importSummary.skipped}
-                        </div>
-                        <div className="text-xs text-muted-foreground">Skipped</div>
-                      </div>
-                    </div>
+                  <div className="flex items-center gap-3 text-sm">
+                    <span className="text-green-600">{importSummary.created} created</span>
+                    <span className="text-blue-600">{importSummary.updated} updated</span>
+                    {importSummary.skipped > 0 && (
+                      <span className="text-amber-600">{importSummary.skipped} skipped</span>
+                    )}
                   </div>
                 )}
+              </div>
+              {resultsExpanded ? (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+              )}
+            </button>
 
-                {/* Individual results */}
-                <div className="space-y-2 max-h-[500px] overflow-auto">
+            {/* Collapsible results content */}
+            {resultsExpanded && (
+              <div className="border-t p-3">
+                <div className="flex flex-wrap gap-2 max-h-40 overflow-auto">
                   {importResults.map((result, index) => (
                     <div
                       key={index}
                       className={cn(
-                        'p-3 border rounded-lg',
+                        'px-3 py-2 border rounded-lg flex items-center gap-2',
                         result.action === 'create' && 'border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/30',
                         result.action === 'update' && 'border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/30',
                         result.action === 'skip' && 'border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30'
                       )}
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          {result.action === 'create' && (
-                            <Plus className="h-4 w-4 text-green-600" />
-                          )}
-                          {result.action === 'update' && (
-                            <Pencil className="h-4 w-4 text-blue-600" />
-                          )}
-                          {result.action === 'skip' && (
-                            <SkipForward className="h-4 w-4 text-amber-600" />
-                          )}
-                          <span className="font-medium">{result.name}</span>
-                        </div>
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            result.action === 'create' && 'border-green-500 text-green-700',
-                            result.action === 'update' && 'border-blue-500 text-blue-700',
-                            result.action === 'skip' && 'border-amber-500 text-amber-700'
-                          )}
-                        >
-                          {result.action}
-                        </Badge>
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
+                      {result.action === 'create' && <Plus className="h-3 w-3 text-green-600" />}
+                      {result.action === 'update' && <Pencil className="h-3 w-3 text-blue-600" />}
+                      {result.action === 'skip' && <SkipForward className="h-3 w-3 text-amber-600" />}
+                      <span className="font-medium text-sm">{result.name}</span>
+                      <span className="text-xs text-muted-foreground">
                         {result.stepCount} steps
-                        {result.id && (
-                          <span className="ml-2 font-mono">{result.id.slice(0, 8)}...</span>
-                        )}
-                      </div>
+                      </span>
                       {result.error && (
-                        <div className="mt-2 text-xs text-destructive flex items-center gap-1">
-                          <AlertCircle className="h-3 w-3" />
-                          {result.error}
-                        </div>
+                        <span className="text-xs text-destructive">({result.error})</span>
                       )}
                     </div>
                   ))}
                 </div>
-
-                {/* Action hint */}
-                {isDryRun && importResults.length > 0 && (
-                  <div className="text-sm text-muted-foreground text-center p-2">
+                {isDryRun && (
+                  <p className="text-xs text-muted-foreground mt-2">
                     This is a preview. Click &quot;Import Workflows&quot; to apply these changes.
-                  </div>
+                  </p>
                 )}
               </div>
             )}
+          </div>
+        )}
 
-            {/* Format reference */}
-            <div className="mt-6 p-4 border rounded-lg bg-muted/20">
-              <h3 className="text-sm font-medium mb-2">Format Reference</h3>
-              <div className="text-xs space-y-1.5 font-mono text-muted-foreground">
-                <p>%% @workflow: &quot;Name&quot;</p>
-                <p>%% @id: abc123 <span className="text-muted-foreground/60">(for updates)</span></p>
-                <p>%% @description: text</p>
-                <p>%% @isActive: true|false</p>
-                <p className="pt-1">--- <span className="text-muted-foreground/60">(separator)</span></p>
-              </div>
-            </div>
+        {/* Format reference - small footer */}
+        <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground flex-shrink-0">
+          <div className="flex items-center gap-4">
+            <span><code className="bg-muted px-1 rounded">%% @workflow: &quot;Name&quot;</code></span>
+            <span><code className="bg-muted px-1 rounded">%% @id: abc123</code> for updates</span>
+            <span><code className="bg-muted px-1 rounded">%% ========</code> separator</span>
           </div>
         </div>
       </div>
