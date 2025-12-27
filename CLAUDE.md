@@ -230,3 +230,58 @@ jobs:
 | Status | **Production-ready** | Limited (needs event bus upgrade) |
 
 For production/remote deployments, always use `task-daemon.mjs`.
+
+## Production API Debugging
+
+For debugging production (cm.hcizero.com), use the API key from `daemon-jobs.yaml` with `X-API-Key` header.
+
+### Quick Commands
+
+```bash
+# Get API key from daemon config
+API_KEY=$(grep 'apiKey:' scripts/daemon-jobs.yaml | head -1 | awk '{print $2}')
+
+# Query a workflow run
+curl -s "https://cm.hcizero.com/api/workflow-runs/<workflowRunId>" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY"
+
+# Get workflow definition
+curl -s "https://cm.hcizero.com/api/workflows/<workflowId>" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY"
+
+# List tasks for a workflow run
+curl -s "https://cm.hcizero.com/api/tasks?workflowRunId=<workflowRunId>" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY"
+
+# Update a task
+curl -s -X PATCH "https://cm.hcizero.com/api/tasks/<taskId>" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
+  -d '{"status": "pending"}'
+```
+
+### Workflow Run Structure
+
+```json
+{
+  "_id": "workflowRunId",
+  "workflowId": "workflowDefinitionId",
+  "status": "running | completed | failed",
+  "currentStepIds": ["step-xxx"],      // Steps waiting for tasks
+  "completedStepIds": ["step-yyy"],    // Steps that finished
+  "callbackSecret": "wfsec_xxx",       // For external webhooks
+  "rootTaskId": "taskId"               // First task in workflow
+}
+```
+
+### Common Issues
+
+**Stuck workflow (task deleted):** If a task for a step is deleted while workflow expects it:
+1. Workflow shows step in `currentStepIds` but no matching task exists
+2. Fix: Create a replacement task with matching `workflowRunId` and `workflowStage`
+3. Or: Cancel the workflow run and start fresh
+
+**Auth header format:** Use `X-API-Key` header (NOT `Authorization: Bearer`)
