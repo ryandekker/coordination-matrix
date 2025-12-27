@@ -61,7 +61,6 @@ import {
 import {
   Collapsible,
   CollapsibleContent,
-  CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { Textarea } from '@/components/ui/textarea'
 import { JsonViewer } from '@/components/ui/json-viewer'
@@ -185,18 +184,19 @@ function TaskNode({ task, depth, childrenMap, onTaskClick, stepType, maxInitialC
         >
           {/* Collapse/expand toggle for tasks with children */}
           {hasChildren ? (
-            <CollapsibleTrigger asChild>
-              <button
-                className="p-0.5 hover:bg-muted rounded flex-shrink-0"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {isExpanded ? (
-                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                ) : (
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                )}
-              </button>
-            </CollapsibleTrigger>
+            <button
+              className="p-0.5 hover:bg-muted rounded flex-shrink-0"
+              onClick={(e) => {
+                e.stopPropagation()
+                setIsExpanded(!isExpanded)
+              }}
+            >
+              {isExpanded ? (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              )}
+            </button>
           ) : (
             <span className="w-5 flex-shrink-0" />
           )}
