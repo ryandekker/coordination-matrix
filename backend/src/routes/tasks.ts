@@ -1081,6 +1081,32 @@ tasksRouter.post('/:id/rerun', async (req: Request, res: Response, next: NextFun
       throw createError('Task not found', 404);
     }
 
+    // Special handling for join tasks: just re-aggregate, don't reset
+    if (task.taskType === 'join') {
+      console.log(`[Tasks] Rerun: re-aggregating join task ${taskId}`);
+      const rerunResult = await workflowExecutionService.rerunJoinTask(taskId);
+
+      // Fetch the updated task after re-aggregation
+      const updatedTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
+      if (updatedTask) {
+        if (rerunResult.error) {
+          res.json({
+            data: updatedTask,
+            message: `Re-aggregation failed: ${rerunResult.error}`,
+            error: rerunResult.error
+          });
+        } else {
+          res.json({
+            data: updatedTask,
+            message: rerunResult.success
+              ? 'Join task re-aggregated successfully'
+              : 'Join task is waiting for child tasks to complete'
+          });
+        }
+        return;
+      }
+    }
+
     const now = new Date();
 
     // Build the update object
@@ -1096,7 +1122,7 @@ tasksRouter.post('/:id/rerun', async (req: Request, res: Response, next: NextFun
       updateFields['webhookConfig.nextRetryAt'] = null;
     }
 
-    // Clear batch counters for foreach/join tasks
+    // Clear batch counters for foreach tasks
     if (task.taskType === 'foreach' && task.batchCounters) {
       updateFields['batchCounters.processedCount'] = 0;
       updateFields['batchCounters.failedCount'] = 0;
@@ -1158,33 +1184,6 @@ tasksRouter.post('/:id/rerun', async (req: Request, res: Response, next: NextFun
       actorId,
       actorType: 'user',
     });
-
-    // Special handling for join tasks: immediately re-aggregate
-    if (task.taskType === 'join') {
-      console.log(`[Tasks] Rerun: triggering re-aggregation for join task ${taskId}`);
-      const rerunResult = await workflowExecutionService.rerunJoinTask(taskId);
-
-      // Fetch the updated task after re-aggregation
-      const updatedTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
-      if (updatedTask) {
-        if (rerunResult.error) {
-          // Return the error but with 200 status since the task was still reset
-          res.json({
-            data: updatedTask,
-            message: `Join task reset but re-aggregation failed: ${rerunResult.error}`,
-            error: rerunResult.error
-          });
-        } else {
-          res.json({
-            data: updatedTask,
-            message: rerunResult.success
-              ? 'Join task re-aggregated successfully'
-              : 'Join task reset - waiting for child tasks'
-          });
-        }
-        return;
-      }
-    }
 
     res.json({ data: result, message: 'Task reset to pending' });
   } catch (error) {
