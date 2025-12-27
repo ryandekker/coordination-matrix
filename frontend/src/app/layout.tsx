@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 import { Providers } from './providers'
 import { AuthenticatedLayout } from '@/components/layout/authenticated-layout'
+import { Toaster } from 'sonner'
 
 export const metadata: Metadata = {
   title: 'Coordination Matrix',
@@ -20,6 +21,7 @@ export default function RootLayout({
           <AuthenticatedLayout>
             {children}
           </AuthenticatedLayout>
+          <Toaster position="bottom-right" richColors />
         </Providers>
       </body>
     </html>

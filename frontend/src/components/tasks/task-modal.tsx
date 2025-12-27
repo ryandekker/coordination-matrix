@@ -27,6 +27,7 @@ import {
   TabsTrigger,
 } from '@/components/ui/tabs'
 import { Task, FieldConfig, LookupValue, TaskType, WebhookConfig } from '@/lib/api'
+import { toast } from 'sonner'
 import { useCreateTask, useUpdateTask, useRerunTask, useUsers, useWorkflows, useTasks, useTask, useTaskChildren } from '@/hooks/use-tasks'
 import { cn } from '@/lib/utils'
 import { TaskActivity } from './task-activity'
@@ -62,7 +63,7 @@ interface TaskModalProps {
 }
 
 export function TaskModal({
-  task,
+  task: taskProp,
   isOpen,
   fieldConfigs,
   lookups,
@@ -115,10 +116,10 @@ export function TaskModal({
   const updateTask = useUpdateTask()
   const rerunTask = useRerunTask()
 
-  // Fetch fresh task data from cache to get updates after metadata changes
-  const { data: taskData } = useTask(isOpen && task ? task._id : null)
-  // Use cached data when available, fall back to prop for initial render
-  const effectiveTask = taskData?.data ?? task
+  // Fetch fresh task data when modal is open - this ensures data updates after rerun
+  const { data: freshTaskData } = useTask(isOpen && taskProp ? taskProp._id : null)
+  // Use fresh data from query if available, otherwise fall back to prop
+  const task = freshTaskData?.data || taskProp
 
   // Only fetch users and workflows when modal is open
   const { data: usersData } = useUsers()
@@ -1169,30 +1170,27 @@ export function TaskModal({
       if (!task) return
       try {
         const result = await rerunTask.mutateAsync({ id: task._id }) as { message?: string; error?: string; debug?: Record<string, unknown> }
-        // Log result with debug info
+
+        // Show toast notification
+        if (result.error) {
+          toast.error('Rerun Failed', { description: result.error })
+        } else if (result.message) {
+          toast.success('Task Rerun', { description: result.message })
+        }
+
+        // Invalidate task-specific queries to trigger refetch
+        queryClient.invalidateQueries({ queryKey: ['task', task._id] })
+        queryClient.invalidateQueries({ queryKey: ['tasks'] })
+
         console.log('Rerun result:', result.message || result.error, result.debug)
       } catch (error) {
         console.error('Failed to rerun task:', error)
+        toast.error('Rerun Failed', { description: error instanceof Error ? error.message : 'Unknown error' })
       }
     }
 
     return (
       <div className="p-4 space-y-4">
-        {/* Rerun button - show for tasks that can be rerun */}
-        {canRerun && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="w-full gap-2"
-            onClick={handleRerun}
-            disabled={rerunTask.isPending || task?.status === 'pending'}
-          >
-            <RotateCcw className={cn("h-4 w-4", rerunTask.isPending && "animate-spin")} />
-            {rerunTask.isPending ? 'Rerunning...' : 'Rerun Task'}
-          </Button>
-        )}
-
         {/* Task type display (selector is in header) */}
         <div className="space-y-2">
           <label className="text-xs font-medium text-muted-foreground">Task Type</label>
@@ -1548,6 +1546,23 @@ export function TaskModal({
             Join tasks aggregate results from multiple parallel tasks.
           </p>
         )}
+
+        {/* Rerun button - show for tasks that can be rerun, placed at bottom */}
+        {canRerun && (
+          <div className="pt-4 mt-auto border-t border-border">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-full gap-2"
+              onClick={handleRerun}
+              disabled={rerunTask.isPending || task?.status === 'pending'}
+            >
+              <RotateCcw className={cn("h-4 w-4", rerunTask.isPending && "animate-spin")} />
+              {rerunTask.isPending ? 'Rerunning...' : 'Rerun Task'}
+            </Button>
+          </div>
+        )}
       </div>
     )
   }
@@ -1565,7 +1580,7 @@ export function TaskModal({
           onClick={() => {
             if (!isMetadataEditMode) {
               // Switching to edit mode - store the initial value
-              const initialValue = JSON.stringify(effectiveTask?.metadata || {}, null, 2)
+              const initialValue = JSON.stringify(task?.metadata || {}, null, 2)
               savedMetadataValueRef.current = initialValue
               currentMetadataValueRef.current = initialValue
               setMetadataError(null)
@@ -1668,7 +1683,7 @@ export function TaskModal({
         // View mode - collapsible tree view
         <div className="px-3 py-2 text-sm bg-muted/50 rounded-md border max-h-[calc(100vh-300px)] overflow-y-auto">
           <JsonViewer
-            data={effectiveTask?.metadata}
+            data={task?.metadata}
             defaultExpanded={true}
             maxInitialDepth={2}
           />

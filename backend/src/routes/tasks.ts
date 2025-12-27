@@ -1111,6 +1111,50 @@ tasksRouter.post('/:id/rerun', async (req: Request, res: Response, next: NextFun
 
     const now = new Date();
 
+    // For workflow tasks, refresh inputPayload from the previous step
+    let refreshedInput: Record<string, unknown> | undefined;
+    if (task.workflowRunId && task.workflowStepId) {
+      try {
+        // Get the workflow to find the previous step
+        const workflow = task.workflowId
+          ? await db.collection('workflows').findOne({ _id: task.workflowId })
+          : null;
+
+        if (workflow?.steps) {
+          const currentStepIndex = workflow.steps.findIndex((s: { id: string }) => s.id === task.workflowStepId);
+          if (currentStepIndex > 0) {
+            const prevStep = workflow.steps[currentStepIndex - 1];
+
+            // Find the previous step's completed task
+            const prevTask = await db.collection<Task>('tasks').findOne({
+              workflowRunId: task.workflowRunId,
+              workflowStepId: prevStep.id,
+              status: 'completed'
+            });
+
+            if (prevTask?.metadata) {
+              // Build input payload from previous step's output
+              // For join tasks, use aggregatedResults; for others, use output or metadata
+              const prevOutput = prevTask.metadata.aggregatedResults
+                || prevTask.metadata.output
+                || prevTask.metadata;
+
+              refreshedInput = {
+                ...task.metadata?.inputPayload as Record<string, unknown>,
+                output: prevOutput,
+                _refreshedFrom: prevTask._id.toString(),
+                _refreshedAt: now.toISOString(),
+              };
+
+              console.log(`[Tasks] Rerun: refreshed input for task ${taskId} from previous step ${prevStep.id}`);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[Tasks] Rerun: failed to refresh input from previous step:', err);
+      }
+    }
+
     // Build the update object
     const updateFields: Record<string, unknown> = {
       status: 'pending',
@@ -1167,6 +1211,11 @@ tasksRouter.post('/:id/rerun', async (req: Request, res: Response, next: NextFun
       }
     }
 
+    // Apply refreshed input from previous step if available
+    if (refreshedInput) {
+      updateFields['metadata.inputPayload'] = refreshedInput;
+    }
+
     const result = await db.collection<Task>('tasks').findOneAndUpdate(
       { _id: taskId },
       { $set: updateFields },
@@ -1187,7 +1236,10 @@ tasksRouter.post('/:id/rerun', async (req: Request, res: Response, next: NextFun
       actorType: 'user',
     });
 
-    res.json({ data: result, message: 'Task reset to pending' });
+    const message = refreshedInput
+      ? 'Task reset to pending with refreshed input from previous step'
+      : 'Task reset to pending';
+    res.json({ data: result, message });
   } catch (error) {
     next(error);
   }

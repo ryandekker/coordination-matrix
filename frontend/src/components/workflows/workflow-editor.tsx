@@ -1780,6 +1780,38 @@ The agent will receive task context automatically.`}
 
                                   <div className="space-y-1">
                                     <label className="text-sm font-medium flex items-center gap-1">
+                                      Input Path
+                                      <span className="text-xs text-muted-foreground">(optional)</span>
+                                    </label>
+                                    <div className="flex gap-1">
+                                      <Input
+                                        value={step.inputPath || ''}
+                                        onChange={(e) => updateStep(index, { inputPath: e.target.value })}
+                                        placeholder="e.g., output.analysis or result.data"
+                                        className="font-mono text-sm"
+                                      />
+                                      <TokenBrowser
+                                        workflowId={workflow?._id}
+                                        previousSteps={steps.slice(0, index).map(s => ({
+                                          id: s.id,
+                                          name: s.name,
+                                          stepType: s.stepType,
+                                          itemVariable: s.itemVariable,
+                                        }))}
+                                        currentStepIndex={index}
+                                        loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
+                                        onSelectToken={(token) => updateStep(index, { inputPath: token })}
+                                        wrapInBraces={false}
+                                        forJoinInputPath={true}
+                                      />
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">
+                                      JSONPath to extract from each completed task. Results are aggregated into an array.
+                                    </p>
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-sm font-medium flex items-center gap-1">
                                       Await Tag Pattern
                                       <span className="text-xs text-muted-foreground">(usually auto-detected)</span>
                                     </label>
