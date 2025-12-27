@@ -2561,8 +2561,15 @@ class WorkflowExecutionService {
     }
 
     // Try to find the foreach task ID from multiple sources
-    let foreachTaskId: ObjectId | undefined = joinTask.joinConfig?.awaitTaskId;
-    let foreachSource = 'joinConfig.awaitTaskId';
+    // Note: awaitTaskId may be stored as a string in the database, so convert if needed
+    let foreachTaskId: ObjectId | undefined;
+    let foreachSource = '';
+
+    if (joinTask.joinConfig?.awaitTaskId) {
+      const awaitId = joinTask.joinConfig.awaitTaskId;
+      foreachTaskId = typeof awaitId === 'string' ? new ObjectId(awaitId) : awaitId as ObjectId;
+      foreachSource = 'joinConfig.awaitTaskId';
+    }
 
     // Check metadata.awaitingForeachTask (set by workflow system)
     if (!foreachTaskId && joinTask.metadata?.awaitingForeachTask) {
