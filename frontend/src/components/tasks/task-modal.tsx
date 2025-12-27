@@ -32,6 +32,7 @@ import { useCreateTask, useUpdateTask, useRerunTask, useUsers, useWorkflows, use
 import { cn } from '@/lib/utils'
 import { TaskActivity } from './task-activity'
 import { WebhookTaskConfig } from './webhook-task-config'
+import { WorkflowTrigger } from './workflow-trigger'
 import { JsonViewer } from '@/components/ui/json-viewer'
 import {
   TASK_TYPE_CONFIG,
@@ -1562,6 +1563,11 @@ export function TaskModal({
               {rerunTask.isPending ? 'Rerunning...' : 'Rerun Task'}
             </Button>
           </div>
+        )}
+
+        {/* Workflow Trigger - available for all existing tasks */}
+        {task && (
+          <WorkflowTrigger task={task} />
         )}
       </div>
     )

@@ -180,6 +180,18 @@ export interface Task {
   // Decision result (which branch was taken)
   decisionResult?: string;
 
+  // Task-to-workflow routing: workflow spawned FROM this task
+  spawnedWorkflowRunId?: ObjectId | null;
+  workflowResult?: {
+    status: WorkflowRunStatus;
+    outputPayload?: Record<string, unknown>;
+    error?: string;
+    completedAt?: Date;
+  };
+
+  // Trigger field: when set, system auto-starts this workflow with task as trigger
+  triggerWorkflowId?: ObjectId | null;
+
   // External tracking
   externalId?: string;
   externalHoldDate?: Date | null;
@@ -670,6 +682,10 @@ export interface WorkflowRun {
   currentStepIds: string[];
   completedStepIds: string[];
 
+  // Task-to-workflow routing: the task that triggered/spawned this workflow
+  triggerTaskId?: ObjectId | null;
+  triggerContext?: Record<string, unknown>;
+
   // Input/Output
   inputPayload?: Record<string, unknown>;
   outputPayload?: Record<string, unknown>;
@@ -765,6 +781,10 @@ export interface StartWorkflowInput {
   // External correlation
   externalId?: string;               // ID from external system for correlation
   source?: string;                   // Where this run was triggered from
+
+  // Task-to-workflow routing: link back to the task that spawned this workflow
+  triggerTaskId?: string;            // Task that triggered this workflow (for routing patterns)
+  triggerContext?: Record<string, unknown>;  // Context passed from the trigger task
 }
 
 // ============================================================================
