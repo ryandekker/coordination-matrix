@@ -1289,18 +1289,23 @@ export function TaskDataTable({
       return <div className="text-center">{formatted}</div>
     }
 
-    // Handle tags
+    // Handle tags - limit to 2 tags visible to prevent multi-line overflow
     if (fieldConfig.fieldType === 'tags' && Array.isArray(value)) {
+      const tags = value as string[]
+      const maxVisible = 2
+      const visibleTags = tags.slice(0, maxVisible)
+      const hiddenCount = tags.length - maxVisible
+
       return (
-        <div className="flex justify-center flex-wrap gap-1">
-          {(value as string[]).slice(0, 3).map((tag) => (
-            <Badge key={tag} variant="secondary" className="text-xs">
+        <div className="flex justify-center gap-1 max-w-full overflow-hidden">
+          {visibleTags.map((tag) => (
+            <Badge key={tag} variant="secondary" className="text-xs truncate max-w-[80px]">
               {tag}
             </Badge>
           ))}
-          {(value as string[]).length > 3 && (
-            <Badge variant="secondary" className="text-xs">
-              +{(value as string[]).length - 3}
+          {hiddenCount > 0 && (
+            <Badge variant="secondary" className="text-xs flex-shrink-0">
+              +{hiddenCount}
             </Badge>
           )}
         </div>
