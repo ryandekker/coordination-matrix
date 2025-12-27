@@ -6,6 +6,7 @@ import { ReferenceResolver } from '../services/reference-resolver.js';
 import { Task, TaskWithChildren, PaginatedResponse } from '../types/index.js';
 import { publishTaskEvent, computeChanges, getSpecificEventTypes } from '../services/event-bus.js';
 import { activityLogService } from '../services/activity-log.js';
+import { workflowExecutionService } from '../services/workflow-execution-service.js';
 
 export const tasksRouter = Router();
 
@@ -1157,6 +1158,24 @@ tasksRouter.post('/:id/rerun', async (req: Request, res: Response, next: NextFun
       actorId,
       actorType: 'user',
     });
+
+    // Special handling for join tasks: immediately re-aggregate
+    if (task.taskType === 'join' && task.joinConfig?.awaitTaskId) {
+      console.log(`[Tasks] Rerun: triggering re-aggregation for join task ${taskId}`);
+      const success = await workflowExecutionService.rerunJoinTask(taskId);
+
+      // Fetch the updated task after re-aggregation
+      const updatedTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
+      if (updatedTask) {
+        res.json({
+          data: updatedTask,
+          message: success
+            ? 'Join task re-aggregated successfully'
+            : 'Join task reset - re-aggregation may be pending'
+        });
+        return;
+      }
+    }
 
     res.json({ data: result, message: 'Task reset to pending' });
   } catch (error) {

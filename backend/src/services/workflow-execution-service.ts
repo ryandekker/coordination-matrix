@@ -1636,9 +1636,20 @@ class WorkflowExecutionService {
 
     if (thresholdMet || allDone || isTimedOut) {
       // Aggregate results from completed tasks
+      // Use inputPath from joinConfig if specified, otherwise take full metadata
+      const inputPath = joinTask.joinConfig?.inputPath;
       const results = children
         .filter(c => c.status === 'completed')
-        .map(c => c.metadata);
+        .map(c => {
+          if (inputPath && c.metadata) {
+            // Extract specific path from metadata
+            const extracted = getValueByPathStatic(c.metadata, inputPath);
+            return extracted !== undefined ? extracted : c.metadata;
+          }
+          return c.metadata;
+        });
+
+      console.log(`[WorkflowExecutionService] Join aggregation: inputPath=${inputPath || '(full metadata)'}, collected ${results.length} results`);
 
       // Determine status based on whether threshold was met (even if via timeout)
       const joinStatus: TaskStatus = thresholdMet ? 'completed' : 'failed';
@@ -2587,6 +2598,39 @@ class WorkflowExecutionService {
         await this.executeDecision(run, workflow, step, task, inputPayload);
         break;
     }
+  }
+
+  // ============================================================================
+  // Public Methods for Task Management
+  // ============================================================================
+
+  /**
+   * Re-aggregate a join task using its current configuration.
+   * Called when a join task is rerun to re-collect results from completed children.
+   */
+  async rerunJoinTask(joinTaskId: ObjectId): Promise<boolean> {
+    const joinTask = await this.tasks.findOne({ _id: joinTaskId });
+    if (!joinTask || joinTask.taskType !== 'join') {
+      console.log(`[WorkflowExecutionService] rerunJoinTask: task ${joinTaskId} not found or not a join task`);
+      return false;
+    }
+
+    const foreachTaskId = joinTask.joinConfig?.awaitTaskId;
+    if (!foreachTaskId) {
+      console.log(`[WorkflowExecutionService] rerunJoinTask: join task ${joinTaskId} has no awaitTaskId`);
+      return false;
+    }
+
+    console.log(`[WorkflowExecutionService] rerunJoinTask: re-aggregating join ${joinTaskId} from foreach ${foreachTaskId}`);
+
+    // First set the join task to 'waiting' status so checkJoinCondition can complete it
+    await this.tasks.updateOne(
+      { _id: joinTaskId },
+      { $set: { status: 'waiting' as TaskStatus } }
+    );
+
+    // Now run the join check which will aggregate and complete/fail the task
+    return this.checkJoinCondition(joinTaskId, foreachTaskId);
   }
 
   // ============================================================================
