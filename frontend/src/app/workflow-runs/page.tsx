@@ -183,6 +183,23 @@ function TaskNode({ task, depth, childrenMap, onTaskClick, stepType, maxInitialC
           style={{ marginLeft: `${depth * 24}px` }}
           onClick={() => onTaskClick(task)}
         >
+          {/* Collapse/expand toggle for tasks with children */}
+          {hasChildren ? (
+            <CollapsibleTrigger asChild>
+              <button
+                className="p-0.5 hover:bg-muted rounded flex-shrink-0"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {isExpanded ? (
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                )}
+              </button>
+            </CollapsibleTrigger>
+          ) : (
+            <span className="w-5 flex-shrink-0" />
+          )}
           <TypeIcon className={cn('h-4 w-4 flex-shrink-0', typeConfig.color)} />
 
           <div className="flex-1 min-w-0">
