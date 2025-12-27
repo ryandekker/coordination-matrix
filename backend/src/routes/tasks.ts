@@ -1160,19 +1160,28 @@ tasksRouter.post('/:id/rerun', async (req: Request, res: Response, next: NextFun
     });
 
     // Special handling for join tasks: immediately re-aggregate
-    if (task.taskType === 'join' && task.joinConfig?.awaitTaskId) {
+    if (task.taskType === 'join') {
       console.log(`[Tasks] Rerun: triggering re-aggregation for join task ${taskId}`);
-      const success = await workflowExecutionService.rerunJoinTask(taskId);
+      const rerunResult = await workflowExecutionService.rerunJoinTask(taskId);
 
       // Fetch the updated task after re-aggregation
       const updatedTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
       if (updatedTask) {
-        res.json({
-          data: updatedTask,
-          message: success
-            ? 'Join task re-aggregated successfully'
-            : 'Join task reset - re-aggregation may be pending'
-        });
+        if (rerunResult.error) {
+          // Return the error but with 200 status since the task was still reset
+          res.json({
+            data: updatedTask,
+            message: `Join task reset but re-aggregation failed: ${rerunResult.error}`,
+            error: rerunResult.error
+          });
+        } else {
+          res.json({
+            data: updatedTask,
+            message: rerunResult.success
+              ? 'Join task re-aggregated successfully'
+              : 'Join task reset - waiting for child tasks'
+          });
+        }
         return;
       }
     }
