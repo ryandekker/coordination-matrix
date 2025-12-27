@@ -133,7 +133,7 @@ function buildChildrenMap(tasks: Task[]): ChildrenMap {
   const map = new Map<string, Task[]>()
   for (const task of tasks) {
     if (task.parentId) {
-      const parentId = typeof task.parentId === 'string' ? task.parentId : task.parentId.toString()
+      const parentId = task.parentId
       if (!map.has(parentId)) {
         map.set(parentId, [])
       }
