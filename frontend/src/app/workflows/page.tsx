@@ -40,6 +40,7 @@ import {
   Search,
   X,
   Check,
+  Book,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -98,6 +99,12 @@ const WorkflowEditor = dynamic(
     ),
     ssr: false, // Mermaid doesn't work with SSR
   }
+)
+
+// Lazy-load API docs dialog
+const WorkflowApiDocs = dynamic(
+  () => import('@/components/workflows/workflow-api-docs').then(mod => ({ default: mod.WorkflowApiDocs })),
+  { ssr: false }
 )
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
@@ -404,6 +411,7 @@ export default function WorkflowsPage() {
   const [editingWorkflow, setEditingWorkflow] = useState<WorkflowData | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<WorkflowData | null>(null)
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false)
+  const [isApiDocsOpen, setIsApiDocsOpen] = useState(false)
   const [runDialog, setRunDialog] = useState<{ open: boolean; workflow: WorkflowData | null }>({
     open: false,
     workflow: null,
@@ -909,6 +917,10 @@ export default function WorkflowsPage() {
               Multi-Edit
             </Button>
           </Link>
+          <Button variant="outline" onClick={() => setIsApiDocsOpen(true)}>
+            <Book className="mr-2 h-4 w-4" />
+            API Docs
+          </Button>
           <Button onClick={openCreateEditor}>
             <Plus className="mr-2 h-4 w-4" />
             Create Workflow
@@ -1273,6 +1285,13 @@ export default function WorkflowsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* API Documentation Dialog */}
+      <WorkflowApiDocs
+        isOpen={isApiDocsOpen}
+        onClose={() => setIsApiDocsOpen(false)}
+        workflows={workflows.map(w => ({ _id: w._id, name: w.name }))}
+      />
     </div>
   )
 }
