@@ -185,8 +185,10 @@ export function useRerunTask() {
   return useMutation({
     mutationFn: ({ id, options }: { id: string; options?: { clearMetadata?: boolean; preserveInput?: boolean } }) =>
       tasksApi.rerun(id, options),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
+      // Invalidate all task-related queries to ensure fresh data
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task', variables.id] })
       queryClient.invalidateQueries({ queryKey: ['task-tree'] })
       queryClient.invalidateQueries({ queryKey: ['task-children'] })
       queryClient.invalidateQueries({ queryKey: ['activity-logs'] })

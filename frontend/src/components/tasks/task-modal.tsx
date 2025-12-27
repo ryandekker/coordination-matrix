@@ -27,7 +27,8 @@ import {
   TabsTrigger,
 } from '@/components/ui/tabs'
 import { Task, FieldConfig, LookupValue, TaskType, WebhookConfig } from '@/lib/api'
-import { useCreateTask, useUpdateTask, useRerunTask, useUsers, useWorkflows, useTasks, useTaskChildren } from '@/hooks/use-tasks'
+import { toast } from 'sonner'
+import { useCreateTask, useUpdateTask, useRerunTask, useUsers, useWorkflows, useTasks, useTaskChildren, useTask } from '@/hooks/use-tasks'
 import { cn } from '@/lib/utils'
 import { TaskActivity } from './task-activity'
 import { WebhookTaskConfig } from './webhook-task-config'
@@ -62,7 +63,7 @@ interface TaskModalProps {
 }
 
 export function TaskModal({
-  task,
+  task: taskProp,
   isOpen,
   fieldConfigs,
   lookups,
@@ -113,6 +114,11 @@ export function TaskModal({
   const createTask = useCreateTask()
   const updateTask = useUpdateTask()
   const rerunTask = useRerunTask()
+
+  // Fetch fresh task data when modal is open - this ensures data updates after rerun
+  const { data: freshTaskData } = useTask(isOpen && taskProp ? taskProp._id : null)
+  // Use fresh data from query if available, otherwise fall back to prop
+  const task = freshTaskData?.data || taskProp
 
   // Only fetch users and workflows when modal is open
   const { data: usersData } = useUsers()
@@ -1160,10 +1166,22 @@ export function TaskModal({
       if (!task) return
       try {
         const result = await rerunTask.mutateAsync({ id: task._id }) as { message?: string; error?: string; debug?: Record<string, unknown> }
-        // Log result with debug info
+
+        // Show toast notification
+        if (result.error) {
+          toast.error('Rerun Failed', { description: result.error })
+        } else if (result.message) {
+          toast.success('Task Rerun', { description: result.message })
+        }
+
+        // Invalidate task-specific queries to trigger refetch
+        queryClient.invalidateQueries({ queryKey: ['task', task._id] })
+        queryClient.invalidateQueries({ queryKey: ['tasks'] })
+
         console.log('Rerun result:', result.message || result.error, result.debug)
       } catch (error) {
         console.error('Failed to rerun task:', error)
+        toast.error('Rerun Failed', { description: error instanceof Error ? error.message : 'Unknown error' })
       }
     }
 
