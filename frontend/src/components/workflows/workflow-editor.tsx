@@ -1833,6 +1833,7 @@ The agent will receive task context automatically.`}
                                         loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
                                         onSelectToken={(token) => updateStep(index, { inputPath: token })}
                                         wrapInBraces={false}
+                                        forJoinInputPath={true}
                                       />
                                     </div>
                                     <p className="text-xs text-muted-foreground">

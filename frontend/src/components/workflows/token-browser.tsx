@@ -62,6 +62,8 @@ interface TokenBrowserProps {
   variant?: 'icon' | 'text'
   // Custom trigger content
   children?: React.ReactNode
+  // For join inputPath: paths are relative to child task metadata (no output prefix)
+  forJoinInputPath?: boolean
 }
 
 interface SampleData {
@@ -79,6 +81,7 @@ export function TokenBrowser({
   wrapInBraces = true,
   variant = 'icon',
   children,
+  forJoinInputPath = false,
 }: TokenBrowserProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -239,59 +242,74 @@ export function TokenBrowser({
     let stepTokens: Token[] = []
 
     if (stepSample) {
-      // Build tokens that mirror the actual runtime payload structure
-      // Backend constructs: { ...metadata, output: metadata.response || metadata }
-      // So paths like "response.count" access the spread metadata,
-      // and paths like "output.count" access metadata.response (or metadata if no response)
       const metadata = stepSample.output as Record<string, unknown> | null
       const responseData = metadata?.response as Record<string, unknown> | undefined
 
-      // Add paths for the "output" key (which equals metadata.response at runtime)
-      const outputSource = responseData || metadata
-      if (outputSource) {
-        stepTokens = extractPaths(outputSource, 'output')
-      }
+      if (forJoinInputPath) {
+        // For join inputPath: paths are relative to child task metadata directly
+        // No "output" prefix - extract paths from the raw metadata structure
+        if (metadata) {
+          stepTokens = extractPaths(metadata, '')
+        }
+      } else {
+        // Build tokens that mirror the actual runtime payload structure
+        // Backend constructs: { ...metadata, output: metadata.response || metadata }
+        // So paths like "response.count" access the spread metadata,
+        // and paths like "output.count" access metadata.response (or metadata if no response)
+        const outputSource = responseData || metadata
+        if (outputSource) {
+          stepTokens = extractPaths(outputSource, 'output')
+        }
 
-      // Also add direct paths to response (spread at root level)
-      if (responseData) {
-        stepTokens.push(...extractPaths(responseData, 'response'))
+        // Also add direct paths to response (spread at root level)
+        if (responseData) {
+          stepTokens.push(...extractPaths(responseData, 'response'))
+        }
       }
 
       if (stepTokens.length === 0) {
-        stepTokens.push({ path: 'output', description: 'Step output', fromRun: true })
+        stepTokens.push({ path: forJoinInputPath ? 'output' : 'output', description: 'Step output', fromRun: true })
       }
     } else {
-      // Fallback to type-based suggestions - all use "output" prefix
-      switch (prevStep.stepType) {
-        case 'external':
-          stepTokens = [
-            { path: 'output', description: 'Full response from external call' },
-            { path: 'output.data', description: 'Response data field' },
-            { path: 'output.items', description: 'Items array (if returned)' },
-          ]
-          break
-        case 'foreach':
-          if (prevStep.itemVariable) {
+      // Fallback to type-based suggestions
+      if (forJoinInputPath) {
+        // For join inputPath: suggest paths relative to child task metadata
+        stepTokens = [
+          { path: 'output', description: 'Task output data' },
+          { path: 'output.data', description: 'Nested data field (if present)' },
+        ]
+      } else {
+        switch (prevStep.stepType) {
+          case 'external':
             stepTokens = [
-              { path: prevStep.itemVariable, description: `Current loop item` },
+              { path: 'output', description: 'Full response from external call' },
+              { path: 'output.data', description: 'Response data field' },
+              { path: 'output.items', description: 'Items array (if returned)' },
             ]
-          }
-          break
-        case 'join':
-          stepTokens = [
-            { path: 'output.aggregatedResults', description: 'Array of all completed results' },
-            { path: 'output.aggregatedResults[0]', description: 'First result' },
-            { path: 'output.completedCount', description: 'Number of completed tasks' },
-            { path: 'output.expectedCount', description: 'Total expected tasks' },
-          ]
-          break
-        case 'agent':
-        case 'manual':
-        default:
-          stepTokens = [
-            { path: 'output', description: 'Task output' },
-            { path: 'output.data', description: 'Output data (if structured)' },
-          ]
+            break
+          case 'foreach':
+            if (prevStep.itemVariable) {
+              stepTokens = [
+                { path: prevStep.itemVariable, description: `Current loop item` },
+              ]
+            }
+            break
+          case 'join':
+            stepTokens = [
+              { path: 'output.aggregatedResults', description: 'Array of all completed results' },
+              { path: 'output.aggregatedResults[0]', description: 'First result' },
+              { path: 'output.completedCount', description: 'Number of completed tasks' },
+              { path: 'output.expectedCount', description: 'Total expected tasks' },
+            ]
+            break
+          case 'agent':
+          case 'manual':
+          default:
+            stepTokens = [
+              { path: 'output', description: 'Task output' },
+              { path: 'output.data', description: 'Output data (if structured)' },
+            ]
+        }
       }
     }
 
