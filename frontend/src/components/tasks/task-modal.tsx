@@ -1403,13 +1403,13 @@ export function TaskModal({
 
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
-                <label className="text-[10px] text-muted-foreground">Max Weight</label>
+                <label className="text-[10px] text-muted-foreground">Min Count</label>
                 <Input
                   type="number"
                   min="0"
                   className="h-7 text-sm"
-                  defaultValue={(task as any).joinConfig?.boundary?.maxWeight ?? ''}
-                  placeholder="No limit"
+                  defaultValue={(task as any).joinConfig?.boundary?.minCount ?? ''}
+                  placeholder="All"
                   onBlur={(e) => {
                     const newValue = e.target.value ? parseInt(e.target.value, 10) : undefined
                     const currentConfig = (task as any).joinConfig || {}
@@ -1420,7 +1420,7 @@ export function TaskModal({
                           ...currentConfig,
                           boundary: {
                             ...currentConfig.boundary,
-                            maxWeight: newValue,
+                            minCount: newValue,
                           },
                         },
                       },

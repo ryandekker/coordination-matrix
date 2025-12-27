@@ -50,7 +50,6 @@ export interface ForeachConfig {
 export interface JoinBoundary {
   minCount?: number;           // Minimum tasks that must complete
   minPercent?: number;         // Minimum percentage of expected that must complete (default: 100)
-  maxWeight?: number;          // Maximum total weight to accumulate before firing (for weighted items)
   maxWaitMs?: number;          // Maximum time to wait before firing (soft deadline)
   failOnTimeout?: boolean;     // If true, fail when maxWait exceeded; if false, continue with partial results
 }

@@ -55,7 +55,6 @@ interface ExternalConfig {
 interface JoinBoundary {
   minCount?: number
   minPercent?: number
-  maxWeight?: number
   maxWaitMs?: number
   failOnTimeout?: boolean
 }
@@ -697,28 +696,6 @@ export function StepConfigPanel({
                   className="font-mono text-sm"
                 />
               </div>
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Max Weight</label>
-                <Input
-                  type="number"
-                  min="0"
-                  value={step.joinBoundary?.maxWeight ?? ''}
-                  onChange={(e) => onUpdate({
-                    joinBoundary: {
-                      ...step.joinBoundary,
-                      maxWeight: e.target.value ? parseInt(e.target.value) : undefined
-                    }
-                  })}
-                  placeholder="No limit"
-                  className="font-mono text-sm"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Max total weight before join fires.
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <label className="text-sm font-medium">Min Count</label>
                 <Input
