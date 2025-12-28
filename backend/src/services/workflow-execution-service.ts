@@ -3080,6 +3080,105 @@ class WorkflowExecutionService {
 
     return result;
   }
+
+  // ============================================================================
+  // Manual Step Execution (for stuck workflows)
+  // ============================================================================
+
+  /**
+   * Manually execute a step that's stuck in currentStepIds but has no task.
+   * This is useful for recovering workflows where the step tracking advanced
+   * but the task creation failed.
+   */
+  async manuallyExecuteStep(
+    workflowRunId: string,
+    stepId: string,
+    inputPayload?: Record<string, unknown>
+  ): Promise<{ success: boolean; taskId?: string; error?: string }> {
+    console.log(`[WorkflowExecutionService] Manually executing step ${stepId} for run ${workflowRunId}`);
+
+    // Get the workflow run
+    const run = await this.workflowRuns.findOne({ _id: new ObjectId(workflowRunId) });
+    if (!run) {
+      return { success: false, error: 'Workflow run not found' };
+    }
+
+    // Verify the step is in currentStepIds
+    if (!run.currentStepIds.includes(stepId)) {
+      return { success: false, error: `Step ${stepId} is not in currentStepIds. Current steps: ${run.currentStepIds.join(', ')}` };
+    }
+
+    // Get the workflow
+    const workflow = await this.workflows.findOne({ _id: run.workflowId });
+    if (!workflow) {
+      return { success: false, error: 'Workflow not found' };
+    }
+
+    // Find the step in the workflow
+    const step = workflow.steps.find(s => s.id === stepId);
+    if (!step) {
+      return { success: false, error: `Step ${stepId} not found in workflow` };
+    }
+
+    // Check if a task already exists for this step
+    const existingTask = await this.tasks.findOne({
+      workflowRunId: run._id,
+      'metadata.stepId': stepId,
+    });
+    if (existingTask) {
+      return { success: false, error: `Task already exists for step ${stepId}: ${existingTask._id}` };
+    }
+
+    // Get the root task (parent for the new task)
+    const rootTask = await this.tasks.findOne({ _id: run.rootTaskId });
+    if (!rootTask) {
+      return { success: false, error: 'Root task not found' };
+    }
+
+    // If no input payload provided, try to get it from the previous step
+    let finalInputPayload = inputPayload;
+    if (!finalInputPayload) {
+      // Find the previous step in the workflow
+      const stepIndex = workflow.steps.findIndex(s => s.id === stepId);
+      if (stepIndex > 0) {
+        const prevStep = workflow.steps[stepIndex - 1];
+        // Find the task for the previous step
+        const prevTask = await this.tasks.findOne({
+          workflowRunId: run._id,
+          'metadata.stepId': prevStep.id,
+        });
+        if (prevTask) {
+          // Use the previous task's output as input
+          // If the step has an inputPath, extract that from the metadata
+          if (step.inputPath && prevTask.metadata) {
+            const pathParts = step.inputPath.split('.');
+            let value: unknown = prevTask.metadata;
+            for (const part of pathParts) {
+              if (value && typeof value === 'object' && part in value) {
+                value = (value as Record<string, unknown>)[part];
+              } else {
+                value = undefined;
+                break;
+              }
+            }
+            if (value) {
+              finalInputPayload = { [pathParts[pathParts.length - 1] || 'input']: value };
+            }
+          }
+        }
+      }
+    }
+
+    try {
+      // Execute the step
+      const task = await this.executeStep(run, workflow, step, rootTask, finalInputPayload);
+      console.log(`[WorkflowExecutionService] Successfully created task ${task._id} for step ${stepId}`);
+      return { success: true, taskId: task._id.toString() };
+    } catch (error) {
+      console.error(`[WorkflowExecutionService] Failed to execute step ${stepId}:`, error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
 }
 
 // Singleton instance

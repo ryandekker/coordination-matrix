@@ -364,4 +364,37 @@ router.post('/:id/foreach/:stepId/item', async (req: Request, res: Response): Pr
   }
 });
 
+// ============================================================================
+// Manually Execute Stuck Step
+// POST /api/workflow-runs/:id/execute-step/:stepId
+// Requires authentication (JWT or API key)
+// Used to recover stuck workflows where step tracking advanced but task wasn't created
+// ============================================================================
+router.post('/:id/execute-step/:stepId', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id, stepId } = req.params;
+    const { inputPayload } = req.body;
+
+    if (!ObjectId.isValid(id)) {
+      res.status(400).json({ error: 'Invalid workflow run ID' });
+      return;
+    }
+
+    const result = await workflowExecutionService.manuallyExecuteStep(id, stepId, inputPayload);
+
+    if (result.success) {
+      res.json({
+        message: 'Step executed successfully',
+        taskId: result.taskId,
+      });
+    } else {
+      res.status(400).json({ error: result.error });
+    }
+  } catch (error: unknown) {
+    console.error('[WorkflowRuns] Execute step error:', error);
+    const message = error instanceof Error ? error.message : 'Failed to execute step';
+    res.status(500).json({ error: message });
+  }
+});
+
 export default router;
