@@ -295,6 +295,50 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
   const taskIdsInRun = new Set(tasks.map(t => t._id))
   const rootTasks = tasks.filter(t => !t.parentId || !taskIdsInRun.has(t.parentId))
 
+  // Compute step statistics from actual task statuses (single source of truth)
+  const stepStats = useMemo(() => {
+    const steps = workflow?.steps || []
+
+    // Build step-to-tasks map
+    const stepToTasks = new Map<string, Task[]>()
+    tasks.forEach(task => {
+      const stepId = (task as any).workflowStepId
+      if (stepId) {
+        const existing = stepToTasks.get(stepId) || []
+        existing.push(task)
+        stepToTasks.set(stepId, existing)
+      }
+    })
+
+    // Calculate derived statuses for each step
+    const stepStatuses = steps.map(step => {
+      const stepTasks = stepToTasks.get(step.id) || []
+      const hasTasks = stepTasks.length > 0
+
+      // Derive status from tasks if available, otherwise use run's tracking
+      const tasksDerivedCompleted = hasTasks && stepTasks.every(t => t.status === 'completed')
+      const tasksDerivedInProgress = hasTasks && stepTasks.some(t => t.status === 'in_progress' || t.status === 'waiting')
+      const tasksDerivedFailed = hasTasks && stepTasks.some(t => t.status === 'failed')
+
+      const isCompleted = tasksDerivedCompleted || (!hasTasks && (run?.completedStepIds || []).includes(step.id))
+      const isCurrent = !isCompleted && (tasksDerivedInProgress || (!hasTasks && (run?.currentStepIds || []).includes(step.id)))
+      const isFailed = tasksDerivedFailed || run?.failedStepId === step.id
+      const isPending = !isCompleted && !isCurrent && !isFailed
+
+      return { step, stepTasks, isCompleted, isCurrent, isFailed, isPending }
+    })
+
+    return {
+      stepStatuses,
+      stepToTasks,
+      completedCount: stepStatuses.filter(s => s.isCompleted).length,
+      inProgressCount: stepStatuses.filter(s => s.isCurrent).length,
+      failedCount: stepStatuses.filter(s => s.isFailed).length,
+      pendingCount: stepStatuses.filter(s => s.isPending).length,
+      totalSteps: steps.length,
+    }
+  }, [workflow?.steps, tasks, run?.completedStepIds, run?.currentStepIds, run?.failedStepId])
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center p-8">
@@ -387,8 +431,8 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
         <div className="rounded-lg border bg-card p-4">
           <p className="text-sm text-muted-foreground">Steps</p>
           <p className="font-medium">
-            <span className="text-green-600">{run.completedStepIds.length}</span>
-            <span className="text-muted-foreground"> / {workflow?.steps?.length || 0}</span>
+            <span className="text-green-600">{stepStats.completedCount}</span>
+            <span className="text-muted-foreground"> / {stepStats.totalSteps}</span>
           </p>
         </div>
       </div>
@@ -410,148 +454,78 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
 
       <div className="rounded-lg border bg-card p-4">
         <h2 className="font-semibold mb-3">Step Progress</h2>
-        {(() => {
-          // Build step-to-tasks map for deriving status from actual tasks
-          const stepToTasks = new Map<string, Task[]>()
-          tasks.forEach(task => {
-            const stepId = (task as any).workflowStepId
-            if (stepId) {
-              const existing = stepToTasks.get(stepId) || []
-              existing.push(task)
-              stepToTasks.set(stepId, existing)
-            }
-          })
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-2">
+            <CheckCircle className="h-4 w-4 text-green-500" />
+            <span className="text-sm">{stepStats.completedCount} steps completed</span>
+          </div>
+          {stepStats.inProgressCount > 0 && (
+            <div className="flex items-center gap-2">
+              <Play className="h-4 w-4 text-blue-500" />
+              <span className="text-sm">{stepStats.inProgressCount} steps in progress</span>
+            </div>
+          )}
+          {stepStats.failedCount > 0 && (
+            <div className="flex items-center gap-2">
+              <XCircle className="h-4 w-4 text-red-500" />
+              <span className="text-sm">{stepStats.failedCount} steps failed</span>
+            </div>
+          )}
+          {stepStats.pendingCount > 0 && (
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-gray-400" />
+              <span className="text-sm text-muted-foreground">{stepStats.pendingCount} steps pending</span>
+            </div>
+          )}
+        </div>
 
-          const steps = workflow?.steps || []
-
-          // Calculate derived statuses for each step
-          const stepStatuses = steps.map(step => {
-            const stepTasks = stepToTasks.get(step.id) || []
-            const hasTasks = stepTasks.length > 0
-
-            // Derive status from tasks if available, otherwise use run's tracking
-            const tasksDerivedCompleted = hasTasks && stepTasks.every(t => t.status === 'completed')
-            const tasksDerivedInProgress = hasTasks && stepTasks.some(t => t.status === 'in_progress' || t.status === 'waiting')
-            const tasksDerivedFailed = hasTasks && stepTasks.some(t => t.status === 'failed')
-
-            const isCompleted = tasksDerivedCompleted || (!hasTasks && run.completedStepIds.includes(step.id))
-            const isCurrent = !isCompleted && (tasksDerivedInProgress || (!hasTasks && run.currentStepIds.includes(step.id)))
-            const isFailed = tasksDerivedFailed || run.failedStepId === step.id
-            const isPending = !isCompleted && !isCurrent && !isFailed
-
-            return { step, isCompleted, isCurrent, isFailed, isPending }
-          })
-
-          const completedCount = stepStatuses.filter(s => s.isCompleted).length
-          const inProgressCount = stepStatuses.filter(s => s.isCurrent).length
-          const failedCount = stepStatuses.filter(s => s.isFailed).length
-          const pendingCount = stepStatuses.filter(s => s.isPending).length
-
-          return (
-            <>
-              <div className="flex items-center gap-4 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                  <span className="text-sm">{completedCount} steps completed</span>
-                </div>
-                {inProgressCount > 0 && (
-                  <div className="flex items-center gap-2">
-                    <Play className="h-4 w-4 text-blue-500" />
-                    <span className="text-sm">{inProgressCount} steps in progress</span>
-                  </div>
-                )}
-                {failedCount > 0 && (
-                  <div className="flex items-center gap-2">
-                    <XCircle className="h-4 w-4 text-red-500" />
-                    <span className="text-sm">{failedCount} steps failed</span>
-                  </div>
-                )}
-                {pendingCount > 0 && (
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-gray-400" />
-                    <span className="text-sm text-muted-foreground">{pendingCount} steps pending</span>
-                  </div>
-                )}
-              </div>
-
-              {steps.length > 0 && (
-                <div className="mt-4">
-                  <div className="flex flex-wrap gap-2">
-                    {stepStatuses.map(({ step, isCompleted, isCurrent, isFailed, isPending }) => (
-                      <Badge
-                        key={step.id}
-                        variant="outline"
-                        className={cn(
-                          'text-xs',
-                          isCompleted && 'bg-green-50 text-green-700 border-green-300 dark:bg-green-950/50 dark:text-green-400 dark:border-green-700',
-                          isCurrent && 'bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-700',
-                          isFailed && 'bg-red-50 text-red-700 border-red-300 dark:bg-red-950/50 dark:text-red-400 dark:border-red-700',
-                          isPending && 'bg-gray-100 text-gray-400 border-gray-200 dark:bg-gray-800/50 dark:text-gray-500 dark:border-gray-700'
-                        )}
-                        title={isPending ? 'Not started yet' : undefined}
-                      >
-                        {isPending && <Clock className="h-3 w-3 mr-1 inline" />}
-                        {step.name}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </>
-          )
-        })()}
+        {stepStats.totalSteps > 0 && (
+          <div className="mt-4">
+            <div className="flex flex-wrap gap-2">
+              {stepStats.stepStatuses.map(({ step, isCompleted, isCurrent, isFailed, isPending }) => (
+                <Badge
+                  key={step.id}
+                  variant="outline"
+                  className={cn(
+                    'text-xs',
+                    isCompleted && 'bg-green-50 text-green-700 border-green-300 dark:bg-green-950/50 dark:text-green-400 dark:border-green-700',
+                    isCurrent && 'bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-700',
+                    isFailed && 'bg-red-50 text-red-700 border-red-300 dark:bg-red-950/50 dark:text-red-400 dark:border-red-700',
+                    isPending && 'bg-gray-100 text-gray-400 border-gray-200 dark:bg-gray-800/50 dark:text-gray-500 dark:border-gray-700'
+                  )}
+                  title={isPending ? 'Not started yet' : undefined}
+                >
+                  {isPending && <Clock className="h-3 w-3 mr-1 inline" />}
+                  {step.name}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="rounded-lg border bg-card p-4">
         <h2 className="font-semibold mb-4">Tasks by Stage</h2>
         {(() => {
-          // Build a map from step ID to tasks (check ALL tasks, not just root tasks)
-          const stepToTasks = new Map<string, Task[]>()
-          const workflowRootTasks: Task[] = [] // Tasks that represent the whole workflow
-          const orphanTasks: Task[] = [] // Tasks without step mapping
+          // Identify workflow root tasks (tasks without a stepId and without a parent)
+          const workflowRootTasks = tasks.filter(task =>
+            !(task as any).workflowStepId && !task.parentId
+          )
 
-          // First pass: categorize all tasks
-          tasks.forEach(task => {
-            const stepId = (task as any).workflowStepId
-            if (stepId) {
-              const existing = stepToTasks.get(stepId) || []
-              existing.push(task)
-              stepToTasks.set(stepId, existing)
-            } else if (!task.parentId) {
-              // Root task without a step ID - likely the workflow container task
-              workflowRootTasks.push(task)
-            }
-            // Non-root tasks without stepId are children and will be shown via their parent
-          })
-
-          const steps = workflow?.steps || []
-
-          if (steps.length === 0 && tasks.length === 0) {
-            return <p className="text-sm text-muted-foreground">No tasks created yet.</p>
-          }
-
-          // Helper to get children that don't have their own stepId (those with stepId are shown in their step section)
+          // Helper to get children that don't have their own stepId
           const getChildrenWithoutStep = (parentId: string) => {
             return tasks.filter(t => t.parentId === parentId && !(t as any).workflowStepId)
           }
 
+          if (stepStats.totalSteps === 0 && tasks.length === 0) {
+            return <p className="text-sm text-muted-foreground">No tasks created yet.</p>
+          }
+
           return (
             <div className="space-y-3">
-              {/* Show all workflow steps */}
-              {steps.map((step, index) => {
-                const stepTasks = stepToTasks.get(step.id) || []
+              {/* Show all workflow steps using pre-computed stepStats */}
+              {stepStats.stepStatuses.map(({ step, stepTasks, isCompleted, isCurrent, isFailed, isPending }, index) => {
                 const hasTasks = stepTasks.length > 0
-
-                // Derive step status from tasks if available, otherwise use run's tracking
-                const tasksDerivedCompleted = hasTasks && stepTasks.every(t => t.status === 'completed')
-                const tasksDerivedInProgress = hasTasks && stepTasks.some(t => t.status === 'in_progress' || t.status === 'waiting')
-                const tasksDerivedFailed = hasTasks && stepTasks.some(t => t.status === 'failed')
-
-                const isCompleted = tasksDerivedCompleted || run.completedStepIds.includes(step.id)
-                const isCurrent = !isCompleted && (tasksDerivedInProgress || run.currentStepIds.includes(step.id))
-                const isFailed = tasksDerivedFailed || run.failedStepId === step.id
-                const isPending = !isCompleted && !isCurrent && !isFailed
-
                 const stepType = getStepType(step)
                 const typeConfig = TASK_TYPE_CONFIG[stepType] || TASK_TYPE_CONFIG.agent
                 const TypeIcon = typeConfig.icon
