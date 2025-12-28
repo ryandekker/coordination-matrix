@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import Link from 'next/link'
 import { MermaidLiveEditor } from '@/components/ui/mermaid-live-editor'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import { getAuthHeader } from '@/lib/auth'
 import {
   ArrowLeft,
@@ -20,10 +21,19 @@ import {
   Eye,
   ChevronDown,
   ChevronUp,
+  Sparkles,
+  Filter,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
+
+interface WorkflowInfo {
+  _id: string
+  name: string
+  description?: string
+  stepCount: number
+}
 
 interface ImportResult {
   name: string
@@ -42,24 +52,41 @@ interface ImportSummary {
 
 const MULTI_WORKFLOW_TEMPLATE = `flowchart TD
 
-    %% @workflow: "My New Workflow"
-    %% @description: Description of this workflow
-    subgraph workflow1["My New Workflow"]
+    %% @workflow: "Document Validation"
+    %% @description: Validates a single document format and content
+    subgraph docValidation["Document Validation"]
         direction TB
-        step1["First Step"]:::agent
-        step2("Manual Review"):::manual
-        step3{{"API Call"}}:::external
-        step1 --> step2 --> step3
+        receive["Receive Document"]:::agent
+        checkFormat{{"Check Format"}}:::external
+        formatOk{"Format Valid?"}:::decision
+        reject["Reject Document"]:::agent
+        validate["Validate Content"]:::agent
+        receive --> checkFormat --> formatOk
+        formatOk -->|"yes"| validate
+        formatOk -->|"no"| reject
     end
 
-    %% @workflow: "Another Workflow"
-    %% @description: A second workflow that calls the first
-    subgraph workflow2["Another Workflow"]
+    %% @workflow: "Review Pipeline"
+    %% @description: Human review process that uses Document Validation
+    subgraph reviewPipeline["Review Pipeline"]
         direction TB
-        start["Begin Process"]:::agent
-        nested[["Run: My New Workflow"]]:::flow
-        finish["Complete"]:::agent
-        start --> nested --> finish
+        prep["Prepare for Review"]:::agent
+        runValidation[["Run: Document Validation"]]:::flow
+        humanReview("Manager Review"):::manual
+        approve["Mark Approved"]:::agent
+        prep --> runValidation --> humanReview --> approve
+    end
+
+    %% @workflow: "Batch Processing"
+    %% @description: Processes multiple documents using the Review Pipeline
+    subgraph batchProcessing["Batch Processing"]
+        direction TB
+        initBatch["Initialize Batch"]:::agent
+        eachDoc[["Each: Document"]]:::foreach
+        processOne[["Run: Review Pipeline"]]:::flow
+        collectResults[["Join: All Results"]]:::join
+        generateReport["Generate Report"]:::agent
+        initBatch --> eachDoc --> processOne --> collectResults --> generateReport
     end
 
     %% Styling
@@ -82,13 +109,93 @@ export default function MultiWorkflowEditPage() {
   const [isDryRun, setIsDryRun] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [resultsExpanded, setResultsExpanded] = useState(true)
+  const [promptCopied, setPromptCopied] = useState(false)
 
-  // Export all workflows
+  // Workflow selection state
+  const [workflows, setWorkflows] = useState<WorkflowInfo[]>([])
+  const [selectedWorkflowIds, setSelectedWorkflowIds] = useState<Set<string>>(new Set())
+  const [showWorkflowSelector, setShowWorkflowSelector] = useState(false)
+  const [isLoadingWorkflows, setIsLoadingWorkflows] = useState(false)
+
+  // Fetch available workflows on mount
+  useEffect(() => {
+    const fetchWorkflows = async () => {
+      setIsLoadingWorkflows(true)
+      try {
+        const response = await fetch(`${API_BASE}/workflows`, {
+          headers: getAuthHeader(),
+        })
+        if (response.ok) {
+          const data = await response.json()
+          const workflowList = (data.data || []).map((w: { _id: string; name: string; description?: string; steps?: unknown[] }) => ({
+            _id: w._id,
+            name: w.name,
+            description: w.description,
+            stepCount: w.steps?.length || 0,
+          }))
+          setWorkflows(workflowList)
+        }
+      } catch (err) {
+        console.error('Failed to fetch workflows:', err)
+      } finally {
+        setIsLoadingWorkflows(false)
+      }
+    }
+    fetchWorkflows()
+  }, [])
+
+  // Toggle workflow selection
+  const toggleWorkflowSelection = useCallback((workflowId: string) => {
+    setSelectedWorkflowIds(prev => {
+      const next = new Set(prev)
+      if (next.has(workflowId)) {
+        next.delete(workflowId)
+      } else {
+        next.add(workflowId)
+      }
+      return next
+    })
+  }, [])
+
+  // Select/deselect all workflows
+  const toggleSelectAll = useCallback(() => {
+    if (selectedWorkflowIds.size === workflows.length) {
+      setSelectedWorkflowIds(new Set())
+    } else {
+      setSelectedWorkflowIds(new Set(workflows.map(w => w._id)))
+    }
+  }, [workflows, selectedWorkflowIds.size])
+
+  // Copy AI prompt to clipboard
+  const handleCopyAIPrompt = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/workflows/ai-prompt-multi`, {
+        headers: getAuthHeader(),
+      })
+      if (!response.ok) {
+        throw new Error(`Failed to fetch AI prompt: ${response.statusText}`)
+      }
+      const data = await response.json()
+      await navigator.clipboard.writeText(data.data.prompt)
+      setPromptCopied(true)
+      setTimeout(() => setPromptCopied(false), 2000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to copy AI prompt')
+    }
+  }, [])
+
+  // Export workflows (all or selected)
   const handleExport = useCallback(async () => {
     setIsLoading(true)
     setError(null)
     try {
-      const response = await fetch(`${API_BASE}/workflows/export-multi`, {
+      // Build URL with optional workflow ID filter
+      const url = new URL(`${API_BASE}/workflows/export-multi`, window.location.origin)
+      if (selectedWorkflowIds.size > 0 && selectedWorkflowIds.size < workflows.length) {
+        url.searchParams.set('ids', Array.from(selectedWorkflowIds).join(','))
+      }
+
+      const response = await fetch(url.toString(), {
         headers: getAuthHeader(),
       })
       if (!response.ok) {
@@ -206,6 +313,19 @@ export default function MultiWorkflowEditPage() {
               <Button
                 variant="outline"
                 size="sm"
+                onClick={handleCopyAIPrompt}
+                className="gap-2"
+              >
+                {promptCopied ? (
+                  <Check className="h-4 w-4 text-green-500" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+                {promptCopied ? 'Copied!' : 'Copy AI Prompt'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={handleNewFromTemplate}
                 className="gap-2"
               >
@@ -213,10 +333,24 @@ export default function MultiWorkflowEditPage() {
                 New from Template
               </Button>
               <Button
+                variant={showWorkflowSelector ? 'secondary' : 'outline'}
+                size="sm"
+                onClick={() => setShowWorkflowSelector(!showWorkflowSelector)}
+                className="gap-2"
+              >
+                <Filter className="h-4 w-4" />
+                Select Workflows
+                {selectedWorkflowIds.size > 0 && (
+                  <Badge variant="secondary" className="ml-1">
+                    {selectedWorkflowIds.size}
+                  </Badge>
+                )}
+              </Button>
+              <Button
                 variant="outline"
                 size="sm"
                 onClick={handleExport}
-                disabled={isLoading}
+                disabled={isLoading || workflows.length === 0}
                 className="gap-2"
               >
                 {isLoading ? (
@@ -224,12 +358,64 @@ export default function MultiWorkflowEditPage() {
                 ) : (
                   <Download className="h-4 w-4" />
                 )}
-                Export All Workflows
+                {selectedWorkflowIds.size > 0 && selectedWorkflowIds.size < workflows.length
+                  ? `Export ${selectedWorkflowIds.size} Selected`
+                  : 'Export All Workflows'}
               </Button>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Workflow selector panel */}
+      {showWorkflowSelector && (
+        <div className="border-b bg-muted/20 flex-shrink-0">
+          <div className="container mx-auto px-4 py-3">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium">Select Workflows to Export</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={toggleSelectAll}
+                className="text-xs"
+              >
+                {selectedWorkflowIds.size === workflows.length ? 'Deselect All' : 'Select All'}
+              </Button>
+            </div>
+            {isLoadingWorkflows ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Loading workflows...
+              </div>
+            ) : workflows.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No workflows found</p>
+            ) : (
+              <div className="flex flex-wrap gap-2 max-h-32 overflow-auto">
+                {workflows.map((workflow) => (
+                  <label
+                    key={workflow._id}
+                    className={cn(
+                      'flex items-center gap-2 px-3 py-1.5 border rounded-lg cursor-pointer transition-colors',
+                      selectedWorkflowIds.has(workflow._id)
+                        ? 'border-primary bg-primary/10'
+                        : 'border-border hover:bg-muted/50'
+                    )}
+                  >
+                    <Checkbox
+                      checked={selectedWorkflowIds.has(workflow._id)}
+                      onCheckedChange={() => toggleWorkflowSelection(workflow._id)}
+                    />
+                    <span className="text-sm font-medium">{workflow.name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      ({workflow.stepCount} steps)
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Main content - flex grow */}
       <div className="flex-1 flex flex-col min-h-0 container mx-auto px-4 py-4">

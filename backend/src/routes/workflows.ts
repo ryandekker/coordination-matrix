@@ -517,6 +517,167 @@ flowchart TD
   }
 });
 
+// GET /api/workflows/ai-prompt-multi - Generate AI prompt for multi-workflow generation
+// NOTE: This must come BEFORE /:id route to avoid being matched as an ID
+workflowsRouter.get('/ai-prompt-multi', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+
+    // Fetch existing workflows for context
+    const workflows = await db
+      .collection<Workflow>('workflows')
+      .find({ isActive: true })
+      .project({ _id: 1, name: 1, description: 1 })
+      .sort({ name: 1 })
+      .toArray();
+
+    // Fetch available agents
+    const agents = await db
+      .collection('users')
+      .find({ isAgent: true, isActive: true })
+      .project({ _id: 1, displayName: 1 })
+      .sort({ displayName: 1 })
+      .toArray();
+
+    // Build the multi-workflow prompt
+    const prompt = `# Multi-Workflow Generation Instructions
+
+You are generating multiple workflows for the Coordination Matrix system using a subgraph-based Mermaid format.
+
+## Format Overview
+
+All workflows are defined in a single \`flowchart TD\` block, with each workflow as a subgraph. Metadata is provided in comments before each subgraph.
+
+## Step Types and Shapes
+
+| Type | Purpose | Mermaid Shape | Class |
+|------|---------|---------------|-------|
+| agent | AI-automated task | \`["text"]\` rectangle | agent |
+| manual | Human task | \`("text")\` rounded | manual |
+| external | API call + callback | \`{{"text"}}\` hexagon | external |
+| webhook | Fire-and-forget HTTP | \`{{"text"}}\` hexagon | external |
+| decision | Conditional routing | \`{"text"}\` diamond | decision |
+| foreach | Fan-out loop | \`[["Each: text"]]\` | foreach |
+| join | Fan-in aggregation | \`[["Join: text"]]\` | join |
+| flow | Nested workflow | \`[["Run: Workflow Name"]]\` | flow |
+
+## Template Variables
+
+- \`{{input.path}}\` - Access input payload values
+- \`{{item}}\`, \`{{_index}}\`, \`{{_total}}\` - ForEach loop context
+- \`{{callbackUrl}}\` - System callback URL for external steps
+
+## Format Structure
+
+\`\`\`mermaid
+flowchart TD
+
+    %% @workflow: "Workflow Name"
+    %% @description: What this workflow does
+    %% @id: existing_id (only for updating existing workflows)
+    subgraph unique_id["Workflow Name"]
+        direction TB
+        step1["First Step"]:::agent
+        step2("Manual Review"):::manual
+        step1 --> step2
+    end
+
+    %% @workflow: "Second Workflow"
+    %% @description: Another workflow
+    subgraph workflow2["Second Workflow"]
+        direction TB
+        a["Start"]:::agent
+        b[["Run: Workflow Name"]]:::flow
+        c["Finish"]:::agent
+        a --> b --> c
+    end
+
+    %% Required styling (include all that you use)
+    classDef agent fill:#3B82F6,color:#fff
+    classDef manual fill:#8B5CF6,color:#fff
+    classDef external fill:#F97316,color:#fff
+    classDef decision fill:#F59E0B,color:#fff
+    classDef foreach fill:#10B981,color:#fff
+    classDef join fill:#6366F1,color:#fff
+    classDef flow fill:#EC4899,color:#fff
+\`\`\`
+
+## Important Rules
+
+1. Each workflow must be wrapped in a subgraph with \`direction TB\`
+2. Use \`%% @workflow: "Name"\` comment before each subgraph
+3. Always quote labels with double quotes: \`["Step Name"]\`
+4. Include all classDef definitions at the end
+5. For nested workflows, use \`[["Run: Workflow Name"]]\` with \`:::flow\`
+6. Never use inline style statements
+7. Each subgraph needs a unique ID (left of the brackets)
+
+## Nested Workflow References
+
+To call another workflow from a step, use the flow step type:
+- Mermaid: \`nested[["Run: Other Workflow"]]\`
+- The system will match by workflow name or ID
+
+## Available Context
+
+### Existing Workflows (can be referenced in flow steps)
+${workflows.length > 0 ? workflows.map(w => `- ${w.name}${w.description ? ` - ${w.description}` : ''} (ID: ${w._id})`).join('\n') : '- No existing workflows'}
+
+### Available Agents (for defaultAssigneeId)
+${agents.length > 0 ? agents.map(a => `- ${a.displayName} (${a._id})`).join('\n') : '- No agents configured'}
+
+## Example: Complete Multi-Workflow Document
+
+\`\`\`mermaid
+flowchart TD
+
+    %% @workflow: "Document Processing"
+    %% @description: Process and validate uploaded documents
+    subgraph docProcess["Document Processing"]
+        direction TB
+        upload["Receive Document"]:::agent
+        validate{{"Validate Format"}}:::external
+        review("Human Review"):::manual
+        upload --> validate --> review
+    end
+
+    %% @workflow: "Batch Document Pipeline"
+    %% @description: Process multiple documents in batch
+    subgraph batchPipeline["Batch Document Pipeline"]
+        direction TB
+        start["Initialize Batch"]:::agent
+        loop[["Each: Document"]]:::foreach
+        process[["Run: Document Processing"]]:::flow
+        aggregate[["Join: Results"]]:::join
+        complete["Finalize Report"]:::agent
+        start --> loop --> process --> aggregate --> complete
+    end
+
+    classDef agent fill:#3B82F6,color:#fff
+    classDef manual fill:#8B5CF6,color:#fff
+    classDef external fill:#F97316,color:#fff
+    classDef decision fill:#F59E0B,color:#fff
+    classDef foreach fill:#10B981,color:#fff
+    classDef join fill:#6366F1,color:#fff
+    classDef flow fill:#EC4899,color:#fff
+\`\`\`
+
+Now generate workflows based on the user's requirements. Output only the Mermaid diagram code block.
+`;
+
+    res.json({
+      data: {
+        prompt,
+        format: 'multi-mermaid',
+        workflowCount: workflows.length,
+        agentCount: agents.length
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/workflows/:id - Get a specific workflow
 workflowsRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
