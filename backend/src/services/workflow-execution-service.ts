@@ -2764,6 +2764,23 @@ class WorkflowExecutionService {
 
     // Now run the join check which will aggregate and complete/fail the task
     const result = await this.checkJoinConditionWithDebug(joinTaskId, foreachTaskId);
+
+    // If the join was successful, emit the task completion event to trigger workflow advancement
+    if (result.success) {
+      const updatedJoinTask = await this.tasks.findOne({ _id: joinTaskId });
+      if (updatedJoinTask && updatedJoinTask.status === 'completed') {
+        console.log(`[WorkflowExecutionService] rerunJoinTask: emitting completion event for join ${joinTaskId}`);
+        // Emit the task status change event to trigger handleWorkflowTaskComplete
+        await publishTaskEvent({
+          type: 'task.status_changed',
+          taskId: joinTaskId,
+          task: updatedJoinTask,
+          previousStatus: 'waiting',
+          newStatus: 'completed',
+        });
+      }
+    }
+
     return {
       success: result.success,
       debug: {
