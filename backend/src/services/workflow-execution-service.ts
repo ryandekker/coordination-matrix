@@ -2771,13 +2771,7 @@ class WorkflowExecutionService {
       if (updatedJoinTask && updatedJoinTask.status === 'completed') {
         console.log(`[WorkflowExecutionService] rerunJoinTask: emitting completion event for join ${joinTaskId}`);
         // Emit the task status change event to trigger handleWorkflowTaskComplete
-        await publishTaskEvent({
-          type: 'task.status_changed',
-          taskId: joinTaskId,
-          task: updatedJoinTask,
-          previousStatus: 'waiting',
-          newStatus: 'completed',
-        });
+        await publishTaskEvent('task.status.changed', updatedJoinTask, {});
       }
     }
 
@@ -3130,6 +3124,9 @@ class WorkflowExecutionService {
     }
 
     // Get the root task (parent for the new task)
+    if (!run.rootTaskId) {
+      return { success: false, error: 'Workflow run has no root task' };
+    }
     const rootTask = await this.tasks.findOne({ _id: run.rootTaskId });
     if (!rootTask) {
       return { success: false, error: 'Root task not found' };

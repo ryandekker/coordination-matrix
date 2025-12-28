@@ -1333,7 +1333,6 @@ function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId: strin
     if (step.itemVariable) metadata.itemVariable = step.itemVariable;
     if (step.maxItems) metadata.maxItems = step.maxItems;
     if (step.awaitStepId) metadata.awaitStepId = step.awaitStepId;
-    if (step.awaitTag) metadata.awaitTag = step.awaitTag;
     if (step.joinBoundary) metadata.joinBoundary = step.joinBoundary;
     if (step.minSuccessPercent) metadata.minSuccessPercent = step.minSuccessPercent;
     if (step.flowId) metadata.flowId = step.flowId;
