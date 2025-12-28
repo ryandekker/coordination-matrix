@@ -29,8 +29,8 @@ export function WorkflowTrigger({ task }: WorkflowTriggerProps) {
   const workflows = workflowsData?.data?.filter((w: Workflow) => w.isActive) || []
 
   // Check if task already has a spawned workflow
-  const spawnedWorkflowRunId = (task as any).spawnedWorkflowRunId
-  const workflowResult = (task as any).workflowResult
+  const spawnedWorkflowRunId = task.spawnedWorkflowRunId
+  const workflowResult = task.workflowResult
 
   const handleTriggerWorkflow = async () => {
     if (!selectedWorkflowId) return

@@ -563,6 +563,14 @@ export interface Task {
     timeoutMs?: number
     maxWaitMs?: number
   }
+  // Write-only: trigger a workflow from this task
+  triggerWorkflowId?: string
+  // Read-only: workflow run spawned by this task
+  spawnedWorkflowRunId?: string
+  workflowResult?: {
+    status?: 'completed' | 'failed' | 'running'
+    error?: string
+  }
   _resolved?: {
     assignee?: { _id: string; displayName: string }
     createdBy?: { _id: string; displayName: string }
