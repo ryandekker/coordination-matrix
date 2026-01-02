@@ -1021,6 +1021,569 @@ flowchart TD
   }
 });
 
+// GET /api/workflows/ai-prompt-multi - Get AI prompt for multi-workflow editing (subgraph format)
+workflowsRouter.get('/ai-prompt-multi', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { includeContext = 'true' } = req.query;
+
+    // Fetch context data
+    const agents = await db
+      .collection('users')
+      .find({ isAgent: true, isActive: true })
+      .project({ _id: 1, displayName: 1, agentPrompt: 1 })
+      .sort({ displayName: 1 })
+      .toArray();
+
+    const users = await db
+      .collection('users')
+      .find({ isAgent: { $ne: true }, isActive: true })
+      .project({ _id: 1, displayName: 1, email: 1 })
+      .sort({ displayName: 1 })
+      .toArray();
+
+    const workflows = await db
+      .collection<Workflow>('workflows')
+      .find({ isActive: true })
+      .project({ _id: 1, name: 1, description: 1 })
+      .sort({ name: 1 })
+      .toArray();
+
+    const tagResults = await db.collection('tasks').distinct('tags');
+    const tags = (tagResults as string[]).filter(t => t && typeof t === 'string').sort();
+
+    // Build the comprehensive multi-workflow prompt
+    let prompt = `# Multi-Workflow Generation Guide for Coordination Matrix
+
+You are generating **multiple workflow definitions** in a single Mermaid document for the Coordination Matrix system. This format allows you to create, edit, and manage multiple workflows (including nested/dependent workflows) in one diagram using **subgraphs**.
+
+---
+
+## CRITICAL: Mermaid Syntax Constraints
+
+**Assume a strict Mermaid parser.** Follow these rules exactly to avoid syntax errors.
+
+### Allowed Node Shapes (Use ONLY These)
+
+| Purpose | Syntax | Example |
+|---------|--------|---------|
+| Agent / Flow / ForEach / Join | Rectangle \`["Label"]\` | \`step1["Process Data"]\` |
+| Decision | Diamond \`{"Label"}\` | \`check{"Is Valid?"}\` |
+| Manual | Stadium \`("Label")\` | \`review("Human Review")\` |
+| External / Webhook | Rectangle \`["Label"]\` | \`api["Call API"]\` |
+
+**DO NOT USE** these shapes (parser compatibility issues):
+- \`[[ subroutine ]]\` - Use \`["Label"]\` instead
+- \`{{ hexagon }}\` - Use \`["Label"]\` instead
+
+### Quoting Rules (Critical)
+
+1. **Always quote node labels:** \`["Text"]\` not \`[Text]\`
+2. **Always quote edge labels:** \`-->|"Label"|\` not \`-->|Label|\`
+3. **Avoid special characters in labels:** No \`()\`, \`:\`, \`→\`, or unicode symbols
+4. **Keep labels simple:** Put detailed descriptions in \`%% @step()\` comments, not labels
+
+### Subgraph Labels (Very Important)
+
+Subgraph labels must be **simple ASCII text**:
+
+**SAFE:**
+\`\`\`
+subgraph emailWorkflow["Email Processing"]
+subgraph step1["Validate Input"]
+\`\`\`
+
+**AVOID:**
+\`\`\`
+subgraph bad["Process (with details)"]     // NO: parentheses
+subgraph bad2["Step → Next"]               // NO: unicode arrows
+subgraph bad3["Type: Validation"]          // NO: colons in label
+\`\`\`
+
+### Structure Rules
+
+1. Put \`direction TB\` **immediately after** \`subgraph\`, before any nodes
+2. Put \`%% @step()\` comments **inside** the subgraph, after node definitions
+3. Put \`classDef\` declarations **at the end** of the document, outside subgraphs
+4. JSON in comments must be **valid** - no trailing commas
+
+### When Modifying Existing Diagrams
+
+- **Keep existing Mermaid syntax unchanged** unless explicitly asked to change it
+- Make semantic changes via \`%% @step()\` comments only
+- Do not change node shapes or subgraph labels unnecessarily
+
+---
+
+## Multi-Workflow Document Structure
+
+Each workflow is represented as a **subgraph** with metadata comments:
+
+\`\`\`mermaid
+flowchart TD
+
+    %% @workflow: "Workflow Name"
+    %% @description: Description of this workflow
+    %% @isActive: true
+    %% @rootTaskTitleTemplate: {{input.projectName}} - Processing
+    subgraph workflowId["Workflow Name"]
+        direction TB
+        step1["First Step"]:::agent
+        step2("Manual Review"):::manual
+        step1 --> step2
+        %% @step(step1): {"additionalInstructions":"Details here"}
+    end
+
+    %% @workflow: "Second Workflow"
+    %% @description: Another workflow
+    subgraph workflow2["Second Workflow"]
+        direction TB
+        stepA["Start"]:::agent
+        stepB["Run Nested Workflow"]:::flow
+        stepA --> stepB
+        %% @step(stepB): {"flowId":"workflowId"}
+    end
+
+    %% Styling (required at end)
+    classDef agent fill:#3B82F6,color:#fff
+    classDef manual fill:#8B5CF6,color:#fff
+    classDef external fill:#F97316,color:#fff
+    classDef decision fill:#F59E0B,color:#fff
+    classDef foreach fill:#10B981,color:#fff
+    classDef join fill:#6366F1,color:#fff
+    classDef flow fill:#EC4899,color:#fff
+\`\`\`
+
+## Workflow Metadata Comments
+
+Place these comments **immediately before** each subgraph:
+
+| Metadata | Required | Description |
+|----------|----------|-------------|
+| \`%% @workflow: "Name"\` | Yes | Workflow display name |
+| \`%% @id: abc123\` | No | Existing workflow ID (for updates) |
+| \`%% @description: ...\` | No | Workflow description |
+| \`%% @isActive: true\` | No | Whether workflow is active (default: true) |
+| \`%% @rootTaskTitleTemplate: ...\` | No | Dynamic title using \`{{input.field}}\` |
+
+**Important:**
+- Omit \`@id\` for new workflows (system will generate)
+- Include \`@id\` only when editing existing workflows
+
+---
+
+## Step Types Reference
+
+### 1. Agent Step (\`agent\`)
+AI-powered automated task executed by the automation daemon.
+
+**Mermaid Shape:** Rectangle \`["text"]\`
+\`\`\`
+step1["Analyze Content"]:::agent
+%% @step(step1): {"additionalInstructions":"Review for grammar and accuracy","defaultAssigneeId":"agent-id"}
+\`\`\`
+
+**Configuration Options:**
+- \`additionalInstructions\`: Prompt/instructions for the AI agent
+- \`defaultAssigneeId\`: Agent ID to execute this task
+- \`description\`: Step description
+
+---
+
+### 2. Manual Step (\`manual\`)
+Human-in-the-loop task that waits for a user to complete it via the UI.
+
+**Mermaid Shape:** Stadium/Rounded \`("text")\`
+\`\`\`
+approve("Manager Approval"):::manual
+%% @step(approve): {"additionalInstructions":"Review and approve or reject","defaultAssigneeId":"user-id"}
+\`\`\`
+
+**Configuration Options:**
+- \`additionalInstructions\`: Instructions shown to the human
+- \`defaultAssigneeId\`: User ID to assign the task to
+
+---
+
+### 3. External Step (\`external\`)
+Calls an external API and **waits for a callback response**.
+
+**Mermaid Shape:** Rectangle \`["text"]\` (use \`:::external\` class for styling)
+\`\`\`
+ocr["OCR Processing"]:::external
+%% @step(ocr): {"externalConfig":{"endpoint":"https://api.example.com/process","method":"POST","payloadTemplate":"{\\"url\\":\\"{{input.documentUrl}}\\",\\"callback\\":\\"{{callbackUrl}}\\"}"}}
+\`\`\`
+
+**Configuration Options (externalConfig object):**
+- \`endpoint\`: URL to call (supports \`{{variable}}\` templates)
+- \`method\`: GET, POST, PUT, PATCH, DELETE
+- \`headers\`: Request headers
+- \`payloadTemplate\`: JSON body with template variables
+- \`responseMapping\`: Map response fields to output
+
+**Available Template Variables:**
+- \`{{callbackUrl}}\` - System callback URL for the external service
+- \`{{callbackSecret}}\` - Secret token for callback authentication
+- \`{{input.field}}\` - Values from workflow input payload
+
+---
+
+### 4. Webhook Step (\`webhook\`)
+Outbound HTTP call that does NOT wait for a callback (fire-and-forget).
+
+**Mermaid Shape:** Rectangle \`["text"]\` (use \`:::external\` class for styling)
+\`\`\`
+notify["Slack Notification"]:::external
+%% @step(notify): {"webhookConfig":{"url":"https://hooks.slack.com/xxx","method":"POST","bodyTemplate":"{\\"text\\":\\"Completed: {{input.name}}\\"}"}}
+\`\`\`
+
+**Configuration Options (webhookConfig object):**
+- \`url\`: URL to call
+- \`method\`: HTTP method (default: POST)
+- \`headers\`: Request headers
+- \`bodyTemplate\`: JSON body template
+- \`maxRetries\`: Max retry attempts (default: 3)
+- \`timeoutMs\`: Request timeout (default: 30000)
+
+---
+
+### 5. Decision Step (\`decision\`)
+Routes workflow to different paths based on conditions.
+
+**Mermaid Shape:** Diamond \`{"text"}\`
+\`\`\`
+checkPriority{"Priority Level?"}:::decision
+checkPriority -->|"Critical"| escalate
+checkPriority -->|"Normal"| standardQueue
+checkPriority -->|"Low"| backlog
+%% @step(checkPriority): {"defaultConnection":"backlog"}
+\`\`\`
+
+**Connections:**
+- Use \`-->|"Label"|\` syntax for labeled branches
+- Edge labels become condition labels in the workflow
+- Set \`defaultConnection\` for fallback routing
+
+**Condition Syntax (in connections):**
+- \`field:value\` - Exact match
+- \`field:value1,value2\` - Match any
+- \`field:>10\` - Greater than (also <, >=, <=)
+- \`field:!value\` - Not equal
+
+---
+
+### 6. ForEach Step (\`foreach\`)
+Fan-out: Creates parallel child tasks for each item in an array.
+
+**Mermaid Shape:** Rectangle \`["text"]\` (use \`:::foreach\` class for styling)
+\`\`\`
+processItems["Process Each Recipient"]:::foreach
+processItems --> sendEmail
+%% @step(processItems): {"itemsPath":"recipients","itemVariable":"recipient","maxItems":50}
+\`\`\`
+
+**Configuration Options:**
+- \`itemsPath\`: JSONPath to array in input (e.g., "recipients", "data.items")
+- \`itemVariable\`: Variable name for each item (default: "item")
+- \`maxItems\`: Safety limit (default: 100)
+
+**Child Task Variables:**
+- \`{{item}}\` or \`{{variableName}}\` - Current item
+- \`{{_index}}\` - Zero-based index
+- \`{{_total}}\` - Total count
+
+---
+
+### 7. Join Step (\`join\`)
+Fan-in: Waits for all parallel tasks from a ForEach to complete.
+
+**Mermaid Shape:** Rectangle \`["text"]\` (use \`:::join\` class for styling)
+\`\`\`
+aggregate["Aggregate Results"]:::join
+%% @step(aggregate): {"awaitStepId":"processItems","minSuccessPercent":90}
+\`\`\`
+
+**Configuration Options:**
+- \`awaitStepId\`: ID of the ForEach step to wait for
+- \`minSuccessPercent\`: Minimum % that must succeed (default: 100)
+- \`joinBoundary\`: Advanced boundary conditions object
+  - \`minCount\`: Minimum tasks to complete
+  - \`maxWaitMs\`: Maximum wait time
+  - \`failOnTimeout\`: Fail or continue with partial results
+
+**Output Available to Next Step:**
+- \`aggregatedResults\`: Array of all child task outputs
+- \`successCount\`: Number of successful children
+- \`failedCount\`: Number of failed children
+
+---
+
+### 8. Flow Step (\`flow\`)
+Delegates execution to another workflow (nested/child workflow).
+
+**Mermaid Shape:** Rectangle \`["text"]\` (use \`:::flow\` class for styling)
+\`\`\`
+validate["Run Validation"]:::flow
+%% @step(validate): {"flowId":"workflow-id-here","inputMapping":{"document":"{{input.content}}","rules":"{{input.validationRules}}"}}
+\`\`\`
+
+**Configuration Options:**
+- \`flowId\`: ID of the workflow to run
+- \`inputMapping\`: Map values from current context to child workflow input
+
+**Cross-Workflow References:**
+When referencing workflows defined in the same document, use the subgraph ID:
+\`\`\`
+%% @step(runChild): {"flowId":"childWorkflowId"}
+\`\`\`
+After import, the system will resolve these to actual workflow IDs.
+
+---
+
+## Template Variables Summary
+
+| Variable | Context | Description |
+|----------|---------|-------------|
+| \`{{input.path.to.value}}\` | All steps | Access workflow input payload by dot path |
+| \`{{item}}\` or \`{{_item}}\` | ForEach children | Current item being processed |
+| \`{{_index}}\` | ForEach children | Zero-based index (0, 1, 2...) |
+| \`{{_total}}\` | ForEach children | Total number of items |
+| \`{{callbackUrl}}\` | External steps | System callback URL |
+| \`{{callbackSecret}}\` | External steps | Secret for callback auth |
+| \`{{foreachWebhookUrl}}\` | External→ForEach | URL to stream items |
+
+---
+
+## Shape-to-Type Quick Reference
+
+**Use only these safe shapes to avoid parser errors:**
+
+| Step Type | Shape | Syntax | Class |
+|-----------|-------|--------|-------|
+| agent | Rectangle | \`["text"]\` | \`:::agent\` |
+| manual | Stadium | \`("text")\` | \`:::manual\` |
+| external | Rectangle | \`["text"]\` | \`:::external\` |
+| webhook | Rectangle | \`["text"]\` | \`:::external\` |
+| decision | Diamond | \`{"text"}\` | \`:::decision\` |
+| foreach | Rectangle | \`["text"]\` | \`:::foreach\` |
+| join | Rectangle | \`["text"]\` | \`:::join\` |
+| flow | Rectangle | \`["text"]\` | \`:::flow\` |
+
+**Note:** The step type is determined by the \`:::class\` suffix AND the \`%% @step()\` configuration, not by the shape. Use rectangles for maximum compatibility.
+
+---
+
+## Common Multi-Workflow Patterns
+
+### Pattern 1: Parent Workflow with Nested Child
+
+\`\`\`mermaid
+flowchart TD
+
+    %% @workflow: "Email Validation"
+    %% @description: Validates a single email address
+    subgraph emailValidation["Email Validation"]
+        direction TB
+        validate["Validate Format"]:::agent
+        checkDomain["Check Domain"]:::external
+        validate --> checkDomain
+        %% @step(validate): {"additionalInstructions":"Check email format using regex"}
+        %% @step(checkDomain): {"externalConfig":{"endpoint":"https://api.example.com/domain-check"}}
+    end
+
+    %% @workflow: "Batch Email Processor"
+    %% @description: Processes multiple emails using the validation workflow
+    subgraph batchProcessor["Batch Email Processor"]
+        direction TB
+        start["Parse Email List"]:::agent
+        foreach["Process Each Email"]:::foreach
+        runValidation["Run Email Validation"]:::flow
+        join["Collect Results"]:::join
+        report["Generate Report"]:::agent
+
+        start --> foreach
+        foreach --> runValidation
+        runValidation --> join
+        join --> report
+
+        %% @step(foreach): {"itemsPath":"emails","itemVariable":"email"}
+        %% @step(runValidation): {"flowId":"emailValidation","inputMapping":{"emailAddress":"{{email}}"}}
+        %% @step(join): {"awaitStepId":"foreach","minSuccessPercent":80}
+    end
+
+    classDef agent fill:#3B82F6,color:#fff
+    classDef manual fill:#8B5CF6,color:#fff
+    classDef external fill:#F97316,color:#fff
+    classDef decision fill:#F59E0B,color:#fff
+    classDef foreach fill:#10B981,color:#fff
+    classDef join fill:#6366F1,color:#fff
+    classDef flow fill:#EC4899,color:#fff
+\`\`\`
+
+### Pattern 2: Conditional Routing to Different Workflows
+
+\`\`\`mermaid
+flowchart TD
+
+    %% @workflow: "Quick Review"
+    %% @description: Fast automated review for simple cases
+    subgraph quickReview["Quick Review"]
+        direction TB
+        autoReview["Auto Review"]:::agent
+        %% @step(autoReview): {"additionalInstructions":"Quick automated check for standard compliance"}
+    end
+
+    %% @workflow: "Deep Review"
+    %% @description: Thorough review with human oversight
+    subgraph deepReview["Deep Review"]
+        direction TB
+        aiAnalysis["AI Deep Analysis"]:::agent
+        humanReview("Human Review"):::manual
+        aiAnalysis --> humanReview
+        %% @step(aiAnalysis): {"additionalInstructions":"Comprehensive analysis of all aspects"}
+    end
+
+    %% @workflow: "Document Triage"
+    %% @description: Routes documents to appropriate review workflow
+    subgraph docTriage["Document Triage"]
+        direction TB
+        classify["Classify Document"]:::agent
+        route{"Complexity?"}:::decision
+        simple["Run Quick Review"]:::flow
+        complex["Run Deep Review"]:::flow
+        notify["Send Notification"]:::external
+
+        classify --> route
+        route -->|"Simple"| simple
+        route -->|"Complex"| complex
+        simple --> notify
+        complex --> notify
+
+        %% @step(classify): {"additionalInstructions":"Analyze document complexity and type"}
+        %% @step(route): {"defaultConnection":"simple"}
+        %% @step(simple): {"flowId":"quickReview"}
+        %% @step(complex): {"flowId":"deepReview"}
+    end
+
+    classDef agent fill:#3B82F6,color:#fff
+    classDef manual fill:#8B5CF6,color:#fff
+    classDef external fill:#F97316,color:#fff
+    classDef decision fill:#F59E0B,color:#fff
+    classDef foreach fill:#10B981,color:#fff
+    classDef join fill:#6366F1,color:#fff
+    classDef flow fill:#EC4899,color:#fff
+\`\`\`
+
+### Pattern 3: Pipeline with Shared Utilities
+
+\`\`\`mermaid
+flowchart TD
+
+    %% @workflow: "Send Notification"
+    %% @description: Reusable notification sender
+    subgraph sendNotification["Send Notification"]
+        direction TB
+        formatMsg["Format Message"]:::agent
+        send["Send via API"]:::external
+        formatMsg --> send
+        %% @step(formatMsg): {"additionalInstructions":"Format message based on channel: {{input.channel}}"}
+        %% @step(send): {"externalConfig":{"endpoint":"{{input.notificationUrl}}","method":"POST"}}
+    end
+
+    %% @workflow: "Main Pipeline"
+    %% @description: Main processing pipeline that uses notifications
+    subgraph mainPipeline["Main Pipeline"]
+        direction TB
+        process["Process Data"]:::agent
+        notifyStart["Notify Start"]:::flow
+        transform["Transform Results"]:::agent
+        review("Human Review"):::manual
+        notifyEnd["Notify End"]:::flow
+
+        process --> notifyStart
+        notifyStart --> transform
+        transform --> review
+        review --> notifyEnd
+
+        %% @step(notifyStart): {"flowId":"sendNotification","inputMapping":{"channel":"slack","message":"Processing started for {{input.name}}"}}
+        %% @step(notifyEnd): {"flowId":"sendNotification","inputMapping":{"channel":"email","message":"Review completed for {{input.name}}"}}
+    end
+
+    classDef agent fill:#3B82F6,color:#fff
+    classDef manual fill:#8B5CF6,color:#fff
+    classDef external fill:#F97316,color:#fff
+    classDef decision fill:#F59E0B,color:#fff
+    classDef foreach fill:#10B981,color:#fff
+    classDef join fill:#6366F1,color:#fff
+    classDef flow fill:#EC4899,color:#fff
+\`\`\`
+
+---
+
+## Important Rules
+
+1. **Subgraph Structure:**
+   - Each workflow must be in its own \`subgraph id["Name"]...end\` block
+   - Always include \`direction TB\` inside each subgraph
+   - Metadata comments go **before** the subgraph
+
+2. **Node Styling:**
+   - Use \`:::className\` syntax directly on nodes (e.g., \`step1["Name"]:::agent\`)
+   - Never use inline \`style\` statements
+   - Include all \`classDef\` declarations at the end of the document
+
+3. **Quoting:**
+   - Always quote labels: \`["Label"]\` not \`[Label]\`
+   - Quote edge labels: \`-->|"Label"|\` not \`-->|Label|\`
+
+4. **Step Configuration:**
+   - Use \`%% @step(nodeId): {json}\` comments inside the subgraph
+   - JSON must be valid (escape quotes in strings)
+
+5. **Cross-References:**
+   - Use subgraph IDs when referencing workflows in the same document
+   - The system resolves these to actual IDs on import
+
+6. **Updates vs Creates:**
+   - Include \`%% @id: existingId\` to update an existing workflow
+   - Omit \`@id\` to create a new workflow
+`;
+
+    // Add context section if requested
+    if (includeContext === 'true') {
+      prompt += `
+---
+
+## Available Context (Current System)
+
+### AI Agents
+Use these IDs for \`defaultAssigneeId\` on agent steps:
+${agents.length > 0 ? agents.map(a => `- **${a.displayName}** (\`${a._id}\`)${a.agentPrompt ? `\n  _${a.agentPrompt.substring(0, 100).replace(/\n/g, ' ')}${a.agentPrompt.length > 100 ? '...' : ''}_` : ''}`).join('\n') : '- _No agents configured_'}
+
+### Users
+Use these IDs for \`defaultAssigneeId\` on manual steps:
+${users.length > 0 ? users.map(u => `- **${u.displayName}**${u.email ? ` <${u.email}>` : ''} (\`${u._id}\`)`).join('\n') : '- _No users configured_'}
+
+### Existing Workflows
+Use these IDs for \`flowId\` on flow steps (or reference by subgraph ID if in same document):
+${workflows.length > 0 ? workflows.map(w => `- **${w.name}** (\`${w._id}\`)${w.description ? `\n  _${w.description}_` : ''}`).join('\n') : '- _No workflows configured_'}
+
+### Available Tags
+${tags.length > 0 ? tags.map(t => `\`${t}\``).join(', ') : '- _No tags in use yet_'}
+`;
+    }
+
+    res.json({
+      data: {
+        prompt,
+        includeContext: includeContext === 'true'
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/workflows/:id - Get a specific workflow
 workflowsRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
