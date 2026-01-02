@@ -74,8 +74,8 @@ const concurrently = spawn('npx', [
   'concurrently',
   '-n', 'api,web',
   '-c', 'blue,green',
-  `cd backend && npm run dev`,
-  `cd frontend && PORT=${fePort} npm run dev`
+  `"cd backend && npm run dev"`,
+  `"cd frontend && PORT=${fePort} npm run dev"`
 ], {
   cwd: ROOT_DIR,
   stdio: 'inherit',
