@@ -54,30 +54,61 @@ async function isPortAvailable(port) {
 }
 
 /**
- * Find an available port starting from the preferred port
+ * Try to bind to a port and return the server if successful
  */
-async function findAvailablePort(preferredPort, basePort, range) {
+async function tryBindPort(port) {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.once('error', () => resolve(null));
+    server.once('listening', () => resolve(server));
+    server.listen(port, '127.0.0.1');
+  });
+}
+
+/**
+ * Find an available port and keep it bound to prevent races
+ */
+async function findAndBindPort(preferredPort, basePort, range) {
   // First try the preferred port
-  if (await isPortAvailable(preferredPort)) {
-    return preferredPort;
+  let server = await tryBindPort(preferredPort);
+  if (server) {
+    return { port: preferredPort, server };
   }
 
   // Then scan through the range
   for (let i = 0; i < range; i++) {
     const port = basePort + i;
-    if (port !== preferredPort && await isPortAvailable(port)) {
-      return port;
+    if (port !== preferredPort) {
+      server = await tryBindPort(port);
+      if (server) {
+        return { port, server };
+      }
     }
   }
 
   // Fallback: try higher ports
   for (let port = basePort + range; port < 65535; port++) {
-    if (await isPortAvailable(port)) {
-      return port;
+    server = await tryBindPort(port);
+    if (server) {
+      return { port, server };
     }
   }
 
   throw new Error(`No available ports found in range ${basePort}-${basePort + range}`);
+}
+
+/**
+ * Find and hold both BE and FE ports to prevent race conditions
+ */
+async function findAndHoldPorts(preferredBePort, beBase, preferredFePort, feBase, range) {
+  const be = await findAndBindPort(preferredBePort, beBase, range);
+  const fe = await findAndBindPort(preferredFePort, feBase, range);
+  return {
+    bePort: be.port,
+    fePort: fe.port,
+    beServer: be.server,
+    feServer: fe.server
+  };
 }
 
 /**
@@ -161,24 +192,19 @@ async function main() {
     return;
   }
 
-  // Check if current ports are still valid
-  const current = getCurrentPorts();
-  let fePort, bePort;
+  // Find available ports - always verify they're truly free
+  // We find BE port first, then FE port, keeping both servers bound briefly
+  // to prevent race conditions with other processes
+  const { bePort, fePort, beServer, feServer } = await findAndHoldPorts(
+    preferredBePort, BE_PORT_BASE,
+    preferredFePort, FE_PORT_BASE,
+    PORT_RANGE
+  );
 
-  // Try to reuse existing ports if they're still available
-  if (current.bePort && await isPortAvailable(current.bePort)) {
-    bePort = current.bePort;
-    // Calculate FE port based on the BE port offset
-    const existingOffset = current.bePort - BE_PORT_BASE;
-    fePort = FE_PORT_BASE + existingOffset;
-    if (!await isPortAvailable(fePort)) {
-      fePort = await findAvailablePort(preferredFePort, FE_PORT_BASE, PORT_RANGE);
-    }
-  } else {
-    // Find new available ports
-    bePort = await findAvailablePort(preferredBePort, BE_PORT_BASE, PORT_RANGE);
-    fePort = await findAvailablePort(preferredFePort, FE_PORT_BASE, PORT_RANGE);
-  }
+  // Release the held ports just before we return
+  // The servers will bind to them immediately after
+  beServer.close();
+  feServer.close();
 
   // Write the env files
   writeEnvFiles(fePort, bePort);
