@@ -3,10 +3,9 @@
  * Dynamic port allocation for multi-worktree development
  *
  * This script:
- * 1. Derives unique port numbers based on the worktree directory path
- * 2. Checks if those ports are available, finding alternatives if not
- * 3. Writes .env.local files for both frontend and backend
- * 4. Outputs the ports for use by npm scripts
+ * 1. Finds the first available port pair (30xx for frontend, 31xx for backend)
+ * 2. Writes .env.local files for both frontend and backend
+ * 3. Outputs the ports for use by npm scripts
  *
  * Usage:
  *   node scripts/dev-ports.mjs           # Setup ports and output JSON
@@ -17,41 +16,15 @@
 import { createServer } from 'net';
 import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'fs';
 import { join, basename } from 'path';
-import { createHash } from 'crypto';
 
 const ROOT_DIR = process.cwd();
 const FRONTEND_ENV = join(ROOT_DIR, 'frontend', '.env.local');
 const BACKEND_ENV = join(ROOT_DIR, 'backend', '.env.local');
 
-// Port ranges for different worktrees
-// FE: 3000-3099, BE: 3100-3199
+// Port ranges: FE: 3000-3099, BE: 3100-3199
 const FE_PORT_BASE = 3000;
 const BE_PORT_BASE = 3100;
 const PORT_RANGE = 100;
-
-/**
- * Generate a consistent hash-based port offset from the directory path
- */
-function getPortOffset(path) {
-  const hash = createHash('md5').update(path).digest('hex');
-  // Use first 4 hex chars to get a number 0-65535, then mod by range
-  return parseInt(hash.slice(0, 4), 16) % PORT_RANGE;
-}
-
-/**
- * Check if a port is available
- */
-async function isPortAvailable(port) {
-  return new Promise((resolve) => {
-    const server = createServer();
-    server.once('error', () => resolve(false));
-    server.once('listening', () => {
-      server.close();
-      resolve(true);
-    });
-    server.listen(port, '127.0.0.1');
-  });
-}
 
 /**
  * Try to bind to a port and return the server if successful
@@ -61,54 +34,33 @@ async function tryBindPort(port) {
     const server = createServer();
     server.once('error', () => resolve(null));
     server.once('listening', () => resolve(server));
-    server.listen(port, '127.0.0.1');
+    server.listen(port);
   });
 }
 
 /**
- * Find an available port and keep it bound to prevent races
+ * Find the first available port pair (FE at 30xx, BE at 31xx with same offset)
  */
-async function findAndBindPort(preferredPort, basePort, range) {
-  // First try the preferred port
-  let server = await tryBindPort(preferredPort);
-  if (server) {
-    return { port: preferredPort, server };
-  }
+async function findAvailablePortPair() {
+  for (let offset = 0; offset < PORT_RANGE; offset++) {
+    const fePort = FE_PORT_BASE + offset;
+    const bePort = BE_PORT_BASE + offset;
 
-  // Then scan through the range
-  for (let i = 0; i < range; i++) {
-    const port = basePort + i;
-    if (port !== preferredPort) {
-      server = await tryBindPort(port);
-      if (server) {
-        return { port, server };
-      }
+    // Try to bind both ports
+    const feServer = await tryBindPort(fePort);
+    if (!feServer) continue;
+
+    const beServer = await tryBindPort(bePort);
+    if (!beServer) {
+      feServer.close();
+      continue;
     }
+
+    // Found an available pair
+    return { fePort, bePort, feServer, beServer };
   }
 
-  // Fallback: try higher ports
-  for (let port = basePort + range; port < 65535; port++) {
-    server = await tryBindPort(port);
-    if (server) {
-      return { port, server };
-    }
-  }
-
-  throw new Error(`No available ports found in range ${basePort}-${basePort + range}`);
-}
-
-/**
- * Find and hold both BE and FE ports to prevent race conditions
- */
-async function findAndHoldPorts(preferredBePort, beBase, preferredFePort, feBase, range) {
-  const be = await findAndBindPort(preferredBePort, beBase, range);
-  const fe = await findAndBindPort(preferredFePort, feBase, range);
-  return {
-    bePort: be.port,
-    fePort: fe.port,
-    beServer: be.server,
-    feServer: fe.server
-  };
+  throw new Error(`No available port pairs found in range ${FE_PORT_BASE}-${FE_PORT_BASE + PORT_RANGE}`);
 }
 
 /**
@@ -120,13 +72,13 @@ function getCurrentPorts() {
 
   if (existsSync(FRONTEND_ENV)) {
     const content = readFileSync(FRONTEND_ENV, 'utf-8');
-    const match = content.match(/NEXT_PUBLIC_API_URL=http:\/\/localhost:(\d+)/);
-    if (match) bePort = parseInt(match[1], 10);
+    const portMatch = content.match(/^PORT=(\d+)/m);
+    if (portMatch) fePort = parseInt(portMatch[1], 10);
   }
 
   if (existsSync(BACKEND_ENV)) {
     const content = readFileSync(BACKEND_ENV, 'utf-8');
-    const portMatch = content.match(/PORT=(\d+)/);
+    const portMatch = content.match(/^PORT=(\d+)/m);
     if (portMatch) bePort = parseInt(portMatch[1], 10);
   }
 
@@ -137,10 +89,11 @@ function getCurrentPorts() {
  * Write .env.local files for frontend and backend
  */
 function writeEnvFiles(fePort, bePort) {
-  // Frontend .env.local - tells Next.js which backend to connect to
+  // Frontend .env.local - tells Next.js which backend to connect to and which port to use
   const frontendEnv = `# Auto-generated by dev-ports.mjs for multi-worktree support
 # Do not commit this file
 NEXT_PUBLIC_API_URL=http://localhost:${bePort}/api
+PORT=${fePort}
 `;
   writeFileSync(FRONTEND_ENV, frontendEnv);
 
@@ -175,36 +128,21 @@ async function main() {
     return;
   }
 
-  // Get the worktree identifier (use directory name for uniqueness)
-  const worktreePath = ROOT_DIR;
-  const worktreeName = basename(worktreePath);
-  const offset = getPortOffset(worktreePath);
-
-  // Calculate preferred ports
-  const preferredFePort = FE_PORT_BASE + offset;
-  const preferredBePort = BE_PORT_BASE + offset;
+  const worktreeName = basename(ROOT_DIR);
 
   if (args.includes('--show')) {
     const current = getCurrentPorts();
     console.error(`Worktree: ${worktreeName}`);
-    console.error(`Preferred ports: FE=${preferredFePort}, BE=${preferredBePort}`);
-    console.error(`Current config: FE port in .env.local pointing to BE=${current.bePort || 'none'}`);
+    console.error(`Current config: FE=${current.fePort || 'none'}, BE=${current.bePort || 'none'}`);
     return;
   }
 
-  // Find available ports - always verify they're truly free
-  // We find BE port first, then FE port, keeping both servers bound briefly
-  // to prevent race conditions with other processes
-  const { bePort, fePort, beServer, feServer } = await findAndHoldPorts(
-    preferredBePort, BE_PORT_BASE,
-    preferredFePort, FE_PORT_BASE,
-    PORT_RANGE
-  );
+  // Find first available port pair
+  const { fePort, bePort, feServer, beServer } = await findAvailablePortPair();
 
   // Release the held ports just before we return
-  // The servers will bind to them immediately after
-  beServer.close();
   feServer.close();
+  beServer.close();
 
   // Write the env files
   writeEnvFiles(fePort, bePort);
