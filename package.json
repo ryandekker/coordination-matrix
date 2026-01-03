@@ -11,6 +11,7 @@
     "dev:ports": "node scripts/dev-ports.mjs",
     "dev:ports:show": "node scripts/dev-ports.mjs --show",
     "dev:ports:clean": "node scripts/dev-ports.mjs --clean",
+    "kill-devs": "node scripts/kill-devs.mjs",
     "dev:daemon": "cd backend && npm run daemon:watch",
     "db:start": "docker compose -f docker-compose.dev.yml up -d",
     "db:stop": "docker compose -f docker-compose.dev.yml down",

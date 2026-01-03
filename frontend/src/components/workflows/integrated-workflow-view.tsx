@@ -182,10 +182,11 @@ function generateMermaidFromSteps(steps: WorkflowStep[]): string {
 
   lines.push('')
 
-  // Create connections
-  steps.forEach((step, index) => {
-    // Check for explicit connections first
+  // Create connections - first collect all explicit connections
+  let hasExplicitConnections = false
+  steps.forEach((step) => {
     if (step.connections && step.connections.length > 0) {
+      hasExplicitConnections = true
       step.connections.forEach(conn => {
         if (conn.targetStepId) {
           const label = conn.label || conn.condition
@@ -196,11 +197,18 @@ function generateMermaidFromSteps(steps: WorkflowStep[]): string {
           }
         }
       })
-    } else if (index < steps.length - 1) {
-      // Default: connect to next step
-      lines.push(`  ${step.id} --> ${steps[index + 1].id}`)
     }
   })
+
+  // Only add linear connections if NO nodes have explicit connections defined
+  // This preserves nonlinear workflows while supporting legacy linear-only workflows
+  if (!hasExplicitConnections) {
+    steps.forEach((step, index) => {
+      if (index < steps.length - 1) {
+        lines.push(`  ${step.id} --> ${steps[index + 1].id}`)
+      }
+    })
+  }
 
   lines.push('')
   lines.push(...styles)

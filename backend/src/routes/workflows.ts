@@ -1819,25 +1819,106 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
       continue;
     }
 
-    // Parse connections
-    // Labeled connections: A -->|"label"| B or A -->|label| B
-    const labeledConnMatch = line.match(/([\w-]+)\s*-->?\|["']?([^|"']+?)["']?\|\s*([\w-]+)/);
-    if (labeledConnMatch) {
-      connections.push({
-        from: labeledConnMatch[1],
-        to: labeledConnMatch[3],
-        label: labeledConnMatch[2].trim()
-      });
-      continue;
+    // Parse connections - handle chained connections like: A -->|"label"| B --> C
+    // Also extract inline node definitions from connection lines
+
+    // Helper to extract inline node definition and return node ID
+    const extractInlineNode = (segment: string): string | null => {
+      // Double square brackets [[ ]] - flow/foreach/join
+      const doubleSquare = segment.match(/([\w-]+)\[\[["']?([^"\]]+?)["']?\]\]/);
+      if (doubleSquare) {
+        const [, id, text] = doubleSquare;
+        const lowerText = text.toLowerCase();
+        let stepType: WorkflowStepType = 'flow';
+        let cleanName = text;
+        if (lowerText.startsWith('run:') || lowerText.startsWith('flow:')) {
+          cleanName = text.replace(/^(run|flow):\s*/i, '').trim();
+        } else if (lowerText.startsWith('each:') || lowerText.startsWith('foreach:')) {
+          stepType = 'foreach';
+          cleanName = text.replace(/^(each|foreach):\s*/i, '').trim();
+        } else if (lowerText.startsWith('join:') || lowerText.startsWith('merge:')) {
+          stepType = 'join';
+          cleanName = text.replace(/^(join|merge):\s*/i, '').trim();
+        }
+        if (!nodes.has(id)) {
+          nodes.set(id, { id, name: cleanName, stepType });
+        }
+        return id;
+      }
+
+      // Diamond { } - decision
+      const diamond = segment.match(/([\w-]+)\{["']?([^"}]+?)["']?\}/);
+      if (diamond) {
+        const [, id, text] = diamond;
+        if (!nodes.has(id)) {
+          nodes.set(id, { id, name: text, stepType: 'decision' });
+        }
+        return id;
+      }
+
+      // Round ( ) - manual
+      const round = segment.match(/([\w-]+)\(["']?([^")]+?)["']?\)/);
+      if (round) {
+        const [, id, text] = round;
+        if (!nodes.has(id)) {
+          nodes.set(id, { id, name: text, stepType: 'manual' });
+        }
+        return id;
+      }
+
+      // Square [ ] - agent
+      const square = segment.match(/([\w-]+)\[["']?([^"\]]+?)["']?\]/);
+      if (square) {
+        const [, id, text] = square;
+        if (!nodes.has(id)) {
+          nodes.set(id, { id, name: text, stepType: 'agent' });
+        }
+        return id;
+      }
+
+      return null;
+    };
+
+    // First, find all labeled connections in the line
+    const labeledConnRegex = /([\w-]+(?:\[\[.*?\]\]|\{.*?\}|\(.*?\)|\[.*?\])?)\s*-->?\|["']?([^|"']+?)["']?\|\s*([\w-]+(?:\[\[.*?\]\]|\{.*?\}|\(.*?\)|\[.*?\])?)/g;
+    let labeledMatch;
+    const labeledFromTo = new Set<string>();  // Track labeled connections to avoid duplicates
+
+    while ((labeledMatch = labeledConnRegex.exec(line)) !== null) {
+      let from = labeledMatch[1];
+      let to = labeledMatch[3];
+      const label = labeledMatch[2].trim();
+
+      // Extract inline nodes if present
+      const fromNode = extractInlineNode(from);
+      const toNode = extractInlineNode(to);
+
+      // Use extracted node ID or the raw ID
+      from = fromNode || from.match(/^([\w-]+)/)?.[1] || from;
+      to = toNode || to.match(/^([\w-]+)/)?.[1] || to;
+
+      connections.push({ from, to, label });
+      labeledFromTo.add(`${from}->${to}`);
     }
 
-    // Simple connections: A --> B
-    const simpleConnMatch = line.match(/([\w-]+)\s*-->\s*([\w-]+)/);
-    if (simpleConnMatch) {
-      // Check if already added as labeled connection
-      const from = simpleConnMatch[1];
-      const to = simpleConnMatch[2];
-      if (!connections.some((c) => c.from === from && c.to === to)) {
+    // Then, find all simple connections that weren't already captured as labeled
+    const simpleConnRegex = /([\w-]+(?:\[\[.*?\]\]|\{.*?\}|\(.*?\)|\[.*?\])?)\s*-->\s*([\w-]+(?:\[\[.*?\]\]|\{.*?\}|\(.*?\)|\[.*?\])?)/g;
+    let simpleMatch;
+
+    while ((simpleMatch = simpleConnRegex.exec(line)) !== null) {
+      let from = simpleMatch[1];
+      let to = simpleMatch[2];
+
+      // Extract inline nodes if present
+      const fromNode = extractInlineNode(from);
+      const toNode = extractInlineNode(to);
+
+      // Use extracted node ID or the raw ID
+      from = fromNode || from.match(/^([\w-]+)/)?.[1] || from;
+      to = toNode || to.match(/^([\w-]+)/)?.[1] || to;
+
+      // Only add if not already captured as a labeled connection
+      if (!labeledFromTo.has(`${from}->${to}`) && !connections.some((c) => c.from === from && c.to === to)) {
         connections.push({ from, to });
       }
     }
@@ -2093,12 +2174,12 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     }
   }
 
-  // Add linear connections for nodes without explicit connections
-  for (let i = 0; i < steps.length - 1; i++) {
-    const step = steps[i];
-    const nodeId = step.id || `step${i}`;
-
-    if (!connectedFrom.has(nodeId)) {
+  // Only add linear connections if NO nodes have explicit connections defined
+  // This preserves nonlinear workflows while supporting legacy linear-only workflows
+  if (connectedFrom.size === 0) {
+    for (let i = 0; i < steps.length - 1; i++) {
+      const step = steps[i];
+      const nodeId = step.id || `step${i}`;
       const nextNodeId = steps[i + 1].id || `step${i + 1}`;
       lines.push(`    ${nodeId} --> ${nextNodeId}`);
     }
