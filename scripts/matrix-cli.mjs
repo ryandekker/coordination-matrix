@@ -32,6 +32,15 @@
  *   views           List saved views
  *   view:tasks <id> Get tasks from a view
  *
+ * Document Commands:
+ *   documents       List documents (alias: docs)
+ *   document <id>   Get a document (alias: doc)
+ *   document:create Create a document
+ *   document:update Update a document
+ *   document:delete Delete/archive a document
+ *   document:versions Get version history
+ *   document:search Semantic search for documents
+ *
  * User Commands:
  *   users           List users
  *   agents          List AI agents
@@ -736,6 +745,204 @@ async function cmdViewTasks(args) {
 }
 
 // ============================================================================
+// Document Commands
+// ============================================================================
+
+async function cmdDocuments(args) {
+  const params = new URLSearchParams();
+
+  if (args.type) params.set('type', args.type);
+  if (args.status) params.set('status', args.status);
+  if (args.search) params.set('search', args.search);
+  if (args.tags) params.set('tags', args.tags);
+  if (args.limit) params.set('limit', args.limit);
+  if (args.page) params.set('page', args.page);
+  if (args.resolve) params.set('resolveReferences', 'true');
+  if (args.archived) params.set('includeArchived', 'true');
+
+  const result = await api.get(`/api/documents?${params}`);
+
+  if (!result.ok) {
+    error(`Failed to fetch documents: ${result.data?.error || result.error}`);
+    process.exit(1);
+  }
+
+  if (args.ids) {
+    result.data.data.forEach(d => console.log(d._id));
+  } else if (args.brief) {
+    result.data.data.forEach(d => {
+      console.log(`${d._id} | ${d.type.padEnd(10)} | ${d.status.padEnd(10)} | v${d.version} | ${d.title}`);
+    });
+    console.log(`\n(${result.data.pagination.total} total)`);
+  } else {
+    output(result.data);
+  }
+}
+
+async function cmdDocument(args) {
+  const id = args._[0];
+
+  if (!id) {
+    error('Document ID is required: matrix-cli document <id>');
+    process.exit(1);
+  }
+
+  const params = new URLSearchParams();
+  if (args.resolve) params.set('resolveReferences', 'true');
+
+  const result = await api.get(`/api/documents/${id}?${params}`);
+
+  if (!result.ok) {
+    error(`Failed to fetch document: ${result.data?.error || result.error}`);
+    process.exit(1);
+  }
+
+  if (args.content) {
+    // Just output the markdown content
+    console.log(result.data.data.content);
+  } else {
+    output(result.data);
+  }
+}
+
+async function cmdDocumentCreate(args) {
+  const doc = {};
+
+  // Required
+  doc.title = args.title || await prompt('Title: ');
+  doc.content = args.content || '';
+
+  // Optional
+  if (args.type) doc.type = args.type;
+  if (args.status) doc.status = args.status;
+  if (args.summary) doc.summary = args.summary;
+  if (args.tags) doc.tags = args.tags.split(',').map(t => t.trim());
+
+  const result = await api.post('/api/documents', doc);
+
+  if (!result.ok) {
+    error(`Failed to create document: ${result.data?.error || result.error}`);
+    process.exit(1);
+  }
+
+  success(`Document created: ${result.data.data._id}`);
+  if (args.brief) {
+    console.log(result.data.data._id);
+  } else {
+    output(result.data);
+  }
+}
+
+async function cmdDocumentUpdate(args) {
+  const id = args._[0];
+
+  if (!id) {
+    error('Document ID is required: matrix-cli document:update <id>');
+    process.exit(1);
+  }
+
+  const updates = {};
+  if (args.title !== undefined) updates.title = args.title;
+  if (args.content !== undefined) updates.content = args.content;
+  if (args.summary !== undefined) updates.summary = args.summary;
+  if (args.type !== undefined) updates.type = args.type;
+  if (args.status !== undefined) updates.status = args.status;
+  if (args.tags !== undefined) updates.tags = args.tags.split(',').map(t => t.trim());
+  if (args['change-description']) updates.changeDescription = args['change-description'];
+
+  if (Object.keys(updates).length === 0) {
+    error('No updates provided. Use --title, --content, --summary, --type, --status, or --tags');
+    process.exit(1);
+  }
+
+  const result = await api.patch(`/api/documents/${id}`, updates);
+
+  if (!result.ok) {
+    error(`Failed to update document: ${result.data?.error || result.error}`);
+    process.exit(1);
+  }
+
+  success(`Document updated: ${result.data.data._id}`);
+  output(result.data);
+}
+
+async function cmdDocumentDelete(args) {
+  const id = args._[0];
+
+  if (!id) {
+    error('Document ID is required: matrix-cli document:delete <id>');
+    process.exit(1);
+  }
+
+  const params = new URLSearchParams();
+  if (args.permanent) params.set('permanent', 'true');
+
+  const result = await api.delete(`/api/documents/${id}?${params}`);
+
+  if (!result.ok) {
+    error(`Failed to delete document: ${result.data?.error || result.error}`);
+    process.exit(1);
+  }
+
+  success(result.data.message || 'Document deleted');
+}
+
+async function cmdDocumentVersions(args) {
+  const id = args._[0];
+
+  if (!id) {
+    error('Document ID is required: matrix-cli document:versions <id>');
+    process.exit(1);
+  }
+
+  const result = await api.get(`/api/documents/${id}/versions`);
+
+  if (!result.ok) {
+    error(`Failed to fetch versions: ${result.data?.error || result.error}`);
+    process.exit(1);
+  }
+
+  if (args.brief) {
+    result.data.data.forEach(v => {
+      console.log(`v${v.version} | ${v.modifiedAt} | ${v.modifiedByName} | ${v.changeDescription || ''}`);
+    });
+  } else {
+    output(result.data);
+  }
+}
+
+async function cmdDocumentSearch(args) {
+  const promptText = args._[0] || args.prompt;
+
+  if (!promptText) {
+    error('Search prompt is required: matrix-cli document:search "your search query"');
+    process.exit(1);
+  }
+
+  const body = { prompt: promptText };
+  if (args.type) body.type = args.type.split(',');
+  if (args.status) body.status = args.status.split(',');
+  if (args.tags) body.tags = args.tags.split(',');
+  if (args.limit) body.limit = parseInt(args.limit, 10);
+  if (args['min-score']) body.minScore = parseFloat(args['min-score']);
+
+  const result = await api.post('/api/documents/search', body);
+
+  if (!result.ok) {
+    error(`Failed to search documents: ${result.data?.error || result.error}`);
+    process.exit(1);
+  }
+
+  if (args.brief) {
+    result.data.data.forEach(r => {
+      console.log(`${r.document._id} | score: ${r.score.toFixed(3)} | ${r.document.title}`);
+    });
+  } else {
+    output(result.data);
+  }
+}
+
+// ============================================================================
 // User Commands
 // ============================================================================
 
@@ -1169,6 +1376,15 @@ View Commands:
   views                     List saved views
   view:tasks <id>           Get tasks from a view (--limit, --resolve)
 
+Document Commands:
+  documents (docs)          List documents (--type, --status, --search, --tags)
+  document (doc) <id>       Get a document (--content, --resolve)
+  document:create           Create document (--title, --content, --type, --status)
+  document:update <id>      Update document (--title, --content, --status, --type)
+  document:delete <id>      Delete document (--permanent for hard delete)
+  document:versions <id>    Get version history
+  document:search "query"   Semantic search (--type, --status, --limit, --min-score)
+
 User Commands:
   users                     List users (--role, --search)
   agents                    List AI agents
@@ -1212,6 +1428,10 @@ Examples:
 
   # Generic API request
   matrix-cli request /api/tasks --method POST --body '{"title":"Test"}'
+
+  # Create and search documents
+  matrix-cli document:create --title "SOP: Content Approval" --type sop --status draft
+  matrix-cli document:search "social media guidelines" --type sop,strategy --brief
 `);
 }
 
@@ -1341,6 +1561,22 @@ async function main() {
     // Views
     'views': cmdViews,
     'view:tasks': cmdViewTasks,
+
+    // Documents
+    'documents': cmdDocuments,
+    'docs': cmdDocuments,
+    'document': cmdDocument,
+    'doc': cmdDocument,
+    'document:create': cmdDocumentCreate,
+    'doc:create': cmdDocumentCreate,
+    'document:update': cmdDocumentUpdate,
+    'doc:update': cmdDocumentUpdate,
+    'document:delete': cmdDocumentDelete,
+    'doc:delete': cmdDocumentDelete,
+    'document:versions': cmdDocumentVersions,
+    'doc:versions': cmdDocumentVersions,
+    'document:search': cmdDocumentSearch,
+    'doc:search': cmdDocumentSearch,
 
     // Users
     'users': cmdUsers,
