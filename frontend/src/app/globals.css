@@ -256,11 +256,23 @@
 }
 
 .bytemd-container .cm-string {
-  color: #98c379;
+  color: hsl(var(--muted-foreground));
 }
 
 .bytemd-container .cm-keyword {
-  color: #c678dd;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Code/formatting markers - more neutral */
+.bytemd-container .cm-formatting,
+.bytemd-container .cm-formatting-header,
+.bytemd-container .cm-formatting-list,
+.bytemd-container .cm-formatting-quote,
+.bytemd-container .cm-formatting-code,
+.bytemd-container .cm-formatting-code-block,
+.bytemd-container .cm-formatting-strong,
+.bytemd-container .cm-formatting-em {
+  color: hsl(var(--muted-foreground));
 }
 
 .bytemd-container .cm-strong {
@@ -347,5 +359,39 @@
 
 .bytemd-container .bytemd-dropdown-item:hover {
   background: hsl(var(--muted));
+}
+
+/* Status bar at bottom */
+.bytemd-container .bytemd-status {
+  background: hsl(var(--muted) / 0.5);
+  border-top: 1px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+}
+
+.bytemd-container .bytemd-status-left,
+.bytemd-container .bytemd-status-right {
+  color: hsl(var(--muted-foreground));
+}
+
+/* Help text and tips */
+.bytemd-container .bytemd-help {
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  border: 1px solid hsl(var(--border));
+}
+
+/* Active toolbar items */
+.bytemd-container .bytemd-toolbar-icon.bytemd-toolbar-icon-active {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+/* Toolbar right section (fullscreen, help icons) */
+.bytemd-container .bytemd-toolbar-right .bytemd-toolbar-icon {
+  color: hsl(var(--muted-foreground));
+}
+
+.bytemd-container .bytemd-toolbar-right .bytemd-toolbar-icon:hover {
+  color: hsl(var(--foreground));
 }
 

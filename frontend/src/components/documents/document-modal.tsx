@@ -233,21 +233,26 @@ export function DocumentModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-6xl h-[90vh] flex flex-col p-0 [&>button]:hidden">
-        <DialogHeader className="px-6 py-4 border-b flex-shrink-0">
-          <div className="flex items-center justify-between">
-            <DialogTitle className="text-xl">
-              {isCreating ? 'New Document' : 'Edit Document'}
-            </DialogTitle>
-            <div className="flex items-center gap-2">
+        <DialogHeader className="px-4 py-3 border-b flex-shrink-0">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              <Input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder={isCreating ? 'New document title...' : 'Document title'}
+                className="text-xl font-semibold border-0 px-0 focus-visible:ring-0 h-auto py-0 bg-transparent"
+              />
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
               {hasChanges && (
-                <Badge variant="outline" className="text-yellow-600">
-                  Unsaved changes
+                <Badge variant="outline" className="text-yellow-600 dark:text-yellow-400">
+                  Unsaved
                 </Badge>
               )}
               {document && (
-                <Badge variant="outline">v{document.version}</Badge>
+                <Badge variant="secondary">v{document.version}</Badge>
               )}
-              <Button onClick={handleSave} disabled={isSaving || !hasChanges}>
+              <Button onClick={handleSave} disabled={isSaving || !hasChanges} size="sm">
                 {isSaving ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
@@ -255,7 +260,7 @@ export function DocumentModal({
                 )}
                 {isCreating ? 'Create' : 'Save'}
               </Button>
-              <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)}>
+              <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)} className="h-8 w-8">
                 <X className="h-4 w-4" />
                 <span className="sr-only">Close</span>
               </Button>
@@ -266,15 +271,6 @@ export function DocumentModal({
         <div className="flex flex-1 min-h-0">
           {/* Main content area */}
           <div className="flex-1 flex flex-col min-w-0 border-r">
-            {/* Title input */}
-            <div className="px-6 py-3 border-b">
-              <Input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Document title"
-                className="text-lg font-medium border-0 px-0 focus-visible:ring-0"
-              />
-            </div>
 
             {/* Tabs */}
             <Tabs
