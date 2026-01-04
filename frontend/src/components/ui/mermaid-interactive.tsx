@@ -13,7 +13,8 @@ interface MermaidInteractiveProps {
   onError?: (error: string) => void
 }
 
-let mermaidInitialized = false
+// Track current theme to allow re-init on theme change
+let currentMermaidTheme: string | null = null
 
 export function MermaidInteractive({
   chart,
@@ -30,6 +31,12 @@ export function MermaidInteractive({
   const [isLoading, setIsLoading] = useState(true)
   const renderIdRef = useRef(0)
 
+  // Detect dark mode
+  const getTheme = useCallback(() => {
+    if (typeof window === 'undefined') return 'default'
+    return document.documentElement.classList.contains('dark') ? 'dark' : 'default'
+  }, [])
+
   const renderChart = useCallback(async (chartCode: string, renderId: number) => {
     if (!chartCode) {
       setSvg('')
@@ -40,10 +47,13 @@ export function MermaidInteractive({
     try {
       const mermaid = (await import('mermaid')).default
 
-      if (!mermaidInitialized) {
+      const theme = getTheme()
+
+      // Re-initialize if theme changed
+      if (currentMermaidTheme !== theme) {
         mermaid.initialize({
           startOnLoad: false,
-          theme: 'default',
+          theme: theme,
           securityLevel: 'loose',
           flowchart: {
             useMaxWidth: true,
@@ -51,7 +61,7 @@ export function MermaidInteractive({
             curve: 'basis',
           },
         })
-        mermaidInitialized = true
+        currentMermaidTheme = theme
       }
 
       const id = `mermaid-interactive-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
@@ -71,7 +81,7 @@ export function MermaidInteractive({
         setIsLoading(false)
       }
     }
-  }, [onError])
+  }, [onError, getTheme])
 
   useEffect(() => {
     renderIdRef.current += 1
@@ -87,6 +97,23 @@ export function MermaidInteractive({
     return () => {
       clearTimeout(timeoutId)
     }
+  }, [chart, renderChart])
+
+  // Listen for theme changes
+  useEffect(() => {
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.attributeName === 'class') {
+          // Theme changed, force re-render
+          renderIdRef.current += 1
+          renderChart(chart, renderIdRef.current)
+        }
+      })
+    })
+
+    observer.observe(document.documentElement, { attributes: true })
+
+    return () => observer.disconnect()
   }, [chart, renderChart])
 
   // Add click handlers to rendered nodes
