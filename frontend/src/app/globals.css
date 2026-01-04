@@ -157,6 +157,7 @@
   height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .bytemd-container .bytemd {
@@ -165,16 +166,35 @@
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .bytemd-container .bytemd-body {
   flex: 1;
   min-height: 0;
+  overflow: hidden;
+}
+
+.bytemd-container .bytemd-body > .bytemd-editor,
+.bytemd-container .bytemd-body > .bytemd-preview {
+  height: 100%;
+  overflow: auto;
+}
+
+.bytemd-container .bytemd-split {
+  height: 100%;
+}
+
+.bytemd-container .bytemd-split .bytemd-editor,
+.bytemd-container .bytemd-split .bytemd-preview {
+  height: 100%;
+  overflow: auto;
 }
 
 .bytemd-container .bytemd-toolbar {
   border-bottom: 1px solid hsl(var(--border));
-  background: hsl(var(--muted) / 0.3);
+  background: hsl(var(--background));
 }
 
 .bytemd-container .bytemd-toolbar-icon {
@@ -289,6 +309,15 @@
   color: hsl(var(--foreground));
 }
 
+.bytemd-container .bytemd-preview .markdown-body h1,
+.bytemd-container .bytemd-preview .markdown-body h2,
+.bytemd-container .bytemd-preview .markdown-body h3,
+.bytemd-container .bytemd-preview .markdown-body h4,
+.bytemd-container .bytemd-preview .markdown-body h5,
+.bytemd-container .bytemd-preview .markdown-body h6 {
+  color: hsl(var(--foreground));
+}
+
 .bytemd-container .bytemd-preview .markdown-body h1 {
   font-size: 1.75em;
   font-weight: 700;
@@ -312,6 +341,35 @@
 
 .bytemd-container .bytemd-preview .markdown-body a {
   color: hsl(var(--primary));
+}
+
+/* Lists in preview */
+.bytemd-container .bytemd-preview .markdown-body ul,
+.bytemd-container .bytemd-preview .markdown-body ol {
+  padding-left: 2em;
+  margin: 0.5em 0;
+}
+
+.bytemd-container .bytemd-preview .markdown-body ul {
+  list-style-type: disc;
+}
+
+.bytemd-container .bytemd-preview .markdown-body ol {
+  list-style-type: decimal;
+}
+
+.bytemd-container .bytemd-preview .markdown-body li {
+  margin: 0.25em 0;
+}
+
+.bytemd-container .bytemd-preview .markdown-body ul ul,
+.bytemd-container .bytemd-preview .markdown-body ol ul {
+  list-style-type: circle;
+}
+
+.bytemd-container .bytemd-preview .markdown-body ul ul ul,
+.bytemd-container .bytemd-preview .markdown-body ol ol ul {
+  list-style-type: square;
 }
 
 .bytemd-container .bytemd-preview .markdown-body code {
@@ -363,7 +421,7 @@
 
 /* Status bar at bottom */
 .bytemd-container .bytemd-status {
-  background: hsl(var(--muted) / 0.5);
+  background: hsl(var(--background));
   border-top: 1px solid hsl(var(--border));
   color: hsl(var(--muted-foreground));
 }
