@@ -152,3 +152,93 @@
   animation: pulse-bg-dark 0.4s ease-in-out 3;
 }
 
+/* ByteMD Editor Styles */
+.bytemd-container {
+  height: 100%;
+}
+
+.bytemd-container .bytemd {
+  height: 100%;
+  border: none;
+}
+
+.bytemd-container .bytemd-toolbar {
+  @apply border-b bg-muted/30;
+}
+
+.bytemd-container .bytemd-editor {
+  @apply bg-background;
+}
+
+.bytemd-container .bytemd-preview {
+  @apply bg-background;
+}
+
+/* Dark mode support for ByteMD */
+.dark .bytemd-container .bytemd {
+  @apply bg-background;
+}
+
+.dark .bytemd-container .bytemd-toolbar {
+  @apply bg-muted/30 border-border;
+}
+
+.dark .bytemd-container .bytemd-toolbar-icon:hover {
+  @apply bg-muted;
+}
+
+.dark .bytemd-container .bytemd-editor .CodeMirror {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+.dark .bytemd-container .bytemd-preview {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+.dark .bytemd-container .bytemd-split .bytemd-editor,
+.dark .bytemd-container .bytemd-split .bytemd-preview {
+  @apply border-border;
+}
+
+/* CodeMirror theming for dark mode */
+.dark .bytemd-container .CodeMirror-gutters {
+  background: hsl(var(--muted));
+  border-color: hsl(var(--border));
+}
+
+.dark .bytemd-container .CodeMirror-linenumber {
+  color: hsl(var(--muted-foreground));
+}
+
+.dark .bytemd-container .CodeMirror-cursor {
+  border-left-color: hsl(var(--foreground));
+}
+
+.dark .bytemd-container .CodeMirror-selected {
+  background: hsl(var(--accent) / 0.3);
+}
+
+/* Markdown syntax highlighting in dark mode */
+.dark .bytemd-container .cm-header {
+  color: hsl(var(--primary));
+}
+
+.dark .bytemd-container .cm-link,
+.dark .bytemd-container .cm-url {
+  color: hsl(var(--primary));
+}
+
+.dark .bytemd-container .cm-comment {
+  color: hsl(var(--muted-foreground));
+}
+
+.dark .bytemd-container .cm-string {
+  color: #98c379;
+}
+
+.dark .bytemd-container .cm-keyword {
+  color: #c678dd;
+}
+

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import dynamic from 'next/dynamic'
 import { Document, DocumentType, DocumentStatus } from '@/lib/api'
 import {
   useCreateDocument,
@@ -26,43 +27,34 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Toggle } from '@/components/ui/toggle'
-import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
-import {
-  Save,
-  Eye,
-  History,
-  FileEdit,
-  Loader2,
-  Bold,
-  Italic,
-  Strikethrough,
-  List,
-  ListOrdered,
-  Quote,
-  Code,
-  Heading1,
-  Heading2,
-  Heading3,
-  Undo,
-  Redo,
-} from 'lucide-react'
+import { Save, History, FileEdit, Loader2, X } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import { useEditor, EditorContent } from '@tiptap/react'
-import StarterKit from '@tiptap/starter-kit'
-import Placeholder from '@tiptap/extension-placeholder'
 
-const DOCUMENT_TYPES: { value: DocumentType; label: string }[] = [
-  { value: 'sop', label: 'SOP' },
-  { value: 'strategy', label: 'Strategy' },
-  { value: 'plan', label: 'Plan' },
-  { value: 'template', label: 'Template' },
-  { value: 'reference', label: 'Reference' },
-  { value: 'output', label: 'Output' },
-  { value: 'custom', label: 'Custom' },
+// Dynamic import for ByteMD editor to avoid SSR issues
+const Editor = dynamic(
+  () => import('@bytemd/react').then((mod) => mod.Editor),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-full text-muted-foreground p-8">
+        Loading editor...
+      </div>
+    ),
+  }
+)
+
+// Import ByteMD styles
+import 'bytemd/dist/index.css'
+
+const DOCUMENT_TYPES: { value: DocumentType; label: string; description: string }[] = [
+  { value: 'sop', label: 'SOP', description: 'Standard operating procedures and how-to guides' },
+  { value: 'strategy', label: 'Strategy', description: 'Strategic plans and campaign documents' },
+  { value: 'plan', label: 'Plan', description: 'Implementation plans and roadmaps' },
+  { value: 'template', label: 'Template', description: 'Reusable document templates' },
+  { value: 'reference', label: 'Reference', description: 'Reference materials and style guides' },
+  { value: 'output', label: 'Output', description: 'Agent-generated deliverables' },
+  { value: 'custom', label: 'Custom', description: 'Other document types' },
 ]
 
 const DOCUMENT_STATUSES: { value: DocumentStatus; label: string }[] = [
@@ -71,129 +63,6 @@ const DOCUMENT_STATUSES: { value: DocumentStatus; label: string }[] = [
   { value: 'approved', label: 'Approved' },
   { value: 'archived', label: 'Archived' },
 ]
-
-// Toolbar component for the editor
-function EditorToolbar({ editor }: { editor: ReturnType<typeof useEditor> }) {
-  if (!editor) return null
-
-  return (
-    <div className="flex flex-wrap items-center gap-1 p-2 border-b bg-muted/30">
-      <Toggle
-        size="sm"
-        pressed={editor.isActive('bold')}
-        onPressedChange={() => editor.chain().focus().toggleBold().run()}
-        aria-label="Bold"
-      >
-        <Bold className="h-4 w-4" />
-      </Toggle>
-      <Toggle
-        size="sm"
-        pressed={editor.isActive('italic')}
-        onPressedChange={() => editor.chain().focus().toggleItalic().run()}
-        aria-label="Italic"
-      >
-        <Italic className="h-4 w-4" />
-      </Toggle>
-      <Toggle
-        size="sm"
-        pressed={editor.isActive('strike')}
-        onPressedChange={() => editor.chain().focus().toggleStrike().run()}
-        aria-label="Strikethrough"
-      >
-        <Strikethrough className="h-4 w-4" />
-      </Toggle>
-      <Toggle
-        size="sm"
-        pressed={editor.isActive('code')}
-        onPressedChange={() => editor.chain().focus().toggleCode().run()}
-        aria-label="Code"
-      >
-        <Code className="h-4 w-4" />
-      </Toggle>
-
-      <Separator orientation="vertical" className="mx-1 h-6" />
-
-      <Toggle
-        size="sm"
-        pressed={editor.isActive('heading', { level: 1 })}
-        onPressedChange={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
-        aria-label="Heading 1"
-      >
-        <Heading1 className="h-4 w-4" />
-      </Toggle>
-      <Toggle
-        size="sm"
-        pressed={editor.isActive('heading', { level: 2 })}
-        onPressedChange={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-        aria-label="Heading 2"
-      >
-        <Heading2 className="h-4 w-4" />
-      </Toggle>
-      <Toggle
-        size="sm"
-        pressed={editor.isActive('heading', { level: 3 })}
-        onPressedChange={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
-        aria-label="Heading 3"
-      >
-        <Heading3 className="h-4 w-4" />
-      </Toggle>
-
-      <Separator orientation="vertical" className="mx-1 h-6" />
-
-      <Toggle
-        size="sm"
-        pressed={editor.isActive('bulletList')}
-        onPressedChange={() => editor.chain().focus().toggleBulletList().run()}
-        aria-label="Bullet List"
-      >
-        <List className="h-4 w-4" />
-      </Toggle>
-      <Toggle
-        size="sm"
-        pressed={editor.isActive('orderedList')}
-        onPressedChange={() => editor.chain().focus().toggleOrderedList().run()}
-        aria-label="Ordered List"
-      >
-        <ListOrdered className="h-4 w-4" />
-      </Toggle>
-      <Toggle
-        size="sm"
-        pressed={editor.isActive('blockquote')}
-        onPressedChange={() => editor.chain().focus().toggleBlockquote().run()}
-        aria-label="Quote"
-      >
-        <Quote className="h-4 w-4" />
-      </Toggle>
-      <Toggle
-        size="sm"
-        pressed={editor.isActive('codeBlock')}
-        onPressedChange={() => editor.chain().focus().toggleCodeBlock().run()}
-        aria-label="Code Block"
-      >
-        <Code className="h-4 w-4" />
-      </Toggle>
-
-      <Separator orientation="vertical" className="mx-1 h-6" />
-
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => editor.chain().focus().undo().run()}
-        disabled={!editor.can().undo()}
-      >
-        <Undo className="h-4 w-4" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => editor.chain().focus().redo().run()}
-        disabled={!editor.can().redo()}
-      >
-        <Redo className="h-4 w-4" />
-      </Button>
-    </div>
-  )
-}
 
 interface DocumentModalProps {
   open: boolean
@@ -214,7 +83,7 @@ export function DocumentModal({
   const [type, setType] = useState<DocumentType>('custom')
   const [status, setStatus] = useState<DocumentStatus>('draft')
   const [tags, setTags] = useState('')
-  const [activeTab, setActiveTab] = useState<'edit' | 'preview' | 'history'>('edit')
+  const [activeTab, setActiveTab] = useState<'edit' | 'history'>('edit')
   const [isSaving, setIsSaving] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
 
@@ -230,28 +99,6 @@ export function DocumentModal({
   const createDocument = useCreateDocument()
   const updateDocument = useUpdateDocument()
   const { data: versionsData } = useDocumentVersions(document?._id || null)
-
-  // Initialize Tiptap editor
-  const editor = useEditor({
-    extensions: [
-      StarterKit,
-      Placeholder.configure({
-        placeholder: 'Start writing your document...',
-      }),
-    ],
-    content: '',
-    immediatelyRender: false, // Avoid SSR hydration mismatches
-    editorProps: {
-      attributes: {
-        class: 'prose prose-sm dark:prose-invert max-w-none focus:outline-none min-h-[400px] p-4',
-      },
-    },
-    onUpdate: ({ editor }) => {
-      // Convert to markdown-like text (simplified)
-      const html = editor.getHTML()
-      setContent(html)
-    },
-  })
 
   // Initialize form when document changes
   useEffect(() => {
@@ -270,10 +117,6 @@ export function DocumentModal({
         status: document.status,
         tags: document.tags?.join(', ') || '',
       }
-      // Set editor content
-      if (editor) {
-        editor.commands.setContent(document.content || '')
-      }
     } else {
       setTitle('')
       setContent('')
@@ -282,12 +125,9 @@ export function DocumentModal({
       setStatus('draft')
       setTags('')
       lastSavedRef.current = null
-      if (editor) {
-        editor.commands.setContent('')
-      }
     }
     setHasChanges(false)
-  }, [document, editor])
+  }, [document])
 
   // Track changes
   useEffect(() => {
@@ -378,6 +218,11 @@ export function DocumentModal({
 
   const versions = versionsData?.data || []
 
+  // GFM plugin for GitHub Flavored Markdown
+  const plugins = typeof window !== 'undefined'
+    ? [require('@bytemd/plugin-gfm').default()]
+    : []
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-6xl h-[90vh] flex flex-col p-0 [&>button]:hidden">
@@ -404,8 +249,8 @@ export function DocumentModal({
                 {isCreating ? 'Create' : 'Save'}
               </Button>
               <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)}>
+                <X className="h-4 w-4" />
                 <span className="sr-only">Close</span>
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
               </Button>
             </div>
           </div>
@@ -427,7 +272,7 @@ export function DocumentModal({
             {/* Tabs */}
             <Tabs
               value={activeTab}
-              onValueChange={(v) => setActiveTab(v as 'edit' | 'preview' | 'history')}
+              onValueChange={(v) => setActiveTab(v as 'edit' | 'history')}
               className="flex-1 flex flex-col min-h-0"
             >
               <div className="px-6 border-b">
@@ -435,10 +280,6 @@ export function DocumentModal({
                   <TabsTrigger value="edit" className="gap-2">
                     <FileEdit className="h-4 w-4" />
                     Edit
-                  </TabsTrigger>
-                  <TabsTrigger value="preview" className="gap-2">
-                    <Eye className="h-4 w-4" />
-                    Preview
                   </TabsTrigger>
                   {!isCreating && (
                     <TabsTrigger value="history" className="gap-2">
@@ -449,17 +290,14 @@ export function DocumentModal({
                 </TabsList>
               </div>
 
-              <TabsContent value="edit" className="flex-1 m-0 overflow-hidden flex flex-col">
-                <EditorToolbar editor={editor} />
-                <div className="flex-1 overflow-auto">
-                  <EditorContent editor={editor} className="h-full" />
+              <TabsContent value="edit" className="flex-1 m-0 overflow-hidden">
+                <div className="h-full bytemd-container">
+                  <Editor
+                    value={content}
+                    plugins={plugins}
+                    onChange={(v) => setContent(v)}
+                  />
                 </div>
-              </TabsContent>
-
-              <TabsContent value="preview" className="flex-1 m-0 overflow-auto p-6">
-                <article className="prose prose-sm dark:prose-invert max-w-none">
-                  <div dangerouslySetInnerHTML={{ __html: content }} />
-                </article>
               </TabsContent>
 
               <TabsContent value="history" className="flex-1 m-0 overflow-auto p-6">
@@ -512,11 +350,16 @@ export function DocumentModal({
                 <SelectContent>
                   {DOCUMENT_TYPES.map((t) => (
                     <SelectItem key={t.value} value={t.value}>
-                      {t.label}
+                      <div>
+                        <div>{t.label}</div>
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">
+                {DOCUMENT_TYPES.find(t => t.value === type)?.description}
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -540,9 +383,12 @@ export function DocumentModal({
               <Textarea
                 value={summary}
                 onChange={(e) => setSummary(e.target.value)}
-                placeholder="Brief description of this document"
+                placeholder="Brief description for search"
                 rows={3}
               />
+              <p className="text-xs text-muted-foreground">
+                Used for semantic search matching
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -553,7 +399,7 @@ export function DocumentModal({
                 placeholder="Comma-separated tags"
               />
               <p className="text-xs text-muted-foreground">
-                Separate multiple tags with commas
+                e.g., marketing, social-media, q4
               </p>
             </div>
 
