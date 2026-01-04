@@ -1021,6 +1021,17 @@ flowchart TD
   }
 });
 
+// Forward declarations for multi-workflow routes
+// These are defined later in the file but need to be registered before /:id
+
+// GET /api/workflows/export-multi - Export workflows as multi-workflow Mermaid
+// (Registered here to avoid being caught by /:id route - implementation below)
+workflowsRouter.get('/export-multi', handleExportMulti);
+
+// POST /api/workflows/import-multi - Import workflows from multi-workflow Mermaid
+// (Registered here to avoid being caught by /:id route - implementation below)
+workflowsRouter.post('/import-multi', handleImportMulti);
+
 // GET /api/workflows/:id - Get a specific workflow
 workflowsRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -1214,8 +1225,8 @@ workflowsRouter.post('/generate-mermaid', async (req: Request, res: Response, ne
   }
 });
 
-// GET /api/workflows/export-multi - Export all workflows as multi-workflow Mermaid
-workflowsRouter.get('/export-multi', async (req: Request, res: Response, next: NextFunction) => {
+// Handler for GET /api/workflows/export-multi - Export workflows as multi-workflow Mermaid
+async function handleExportMulti(req: Request, res: Response, next: NextFunction) {
   try {
     const db = getDb();
     const { ids } = req.query;
@@ -1319,7 +1330,7 @@ workflowsRouter.get('/export-multi', async (req: Request, res: Response, next: N
   } catch (error) {
     next(error);
   }
-});
+}
 
 // Helper to generate subgraph content (nodes and connections only, no flowchart declaration)
 function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId: string): string {
@@ -1436,8 +1447,8 @@ function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId: strin
   return lines.join('\n');
 }
 
-// POST /api/workflows/import-multi - Import multiple workflows from multi-workflow Mermaid
-workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: NextFunction) => {
+// Handler for POST /api/workflows/import-multi - Import workflows from multi-workflow Mermaid
+async function handleImportMulti(req: Request, res: Response, next: NextFunction) {
   try {
     const db = getDb();
     const { mermaid, dryRun = false } = req.body;
@@ -1588,7 +1599,7 @@ workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: 
   } catch (error) {
     next(error);
   }
-});
+}
 
 // Parse multi-workflow Mermaid document with subgraphs
 interface ParsedWorkflowSection {

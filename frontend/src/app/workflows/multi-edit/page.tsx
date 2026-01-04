@@ -241,22 +241,20 @@ export default function MultiWorkflowEditPage() {
                 <Plus className="h-4 w-4" />
                 New from Template
               </Button>
-              {workflowIds.length === 0 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleExport()}
-                  disabled={isLoading}
-                  className="gap-2"
-                >
-                  {isLoading ? (
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Download className="h-4 w-4" />
-                  )}
-                  Export All Workflows
-                </Button>
-              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleExport([])}
+                disabled={isLoading}
+                className="gap-2"
+              >
+                {isLoading ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                Export All
+              </Button>
               {workflowIds.length > 0 && (
                 <Button
                   variant="outline"
@@ -270,7 +268,7 @@ export default function MultiWorkflowEditPage() {
                   ) : (
                     <RefreshCw className="h-4 w-4" />
                   )}
-                  Reload
+                  Reload Selected
                 </Button>
               )}
             </div>
