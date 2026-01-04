@@ -220,7 +220,14 @@ export function DocumentModal({
 
   // GFM plugin for GitHub Flavored Markdown
   const plugins = typeof window !== 'undefined'
-    ? [require('@bytemd/plugin-gfm').default()]
+    ? (() => {
+        try {
+          const gfm = require('@bytemd/plugin-gfm')
+          return [typeof gfm.default === 'function' ? gfm.default() : gfm()]
+        } catch {
+          return []
+        }
+      })()
     : []
 
   return (
