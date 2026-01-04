@@ -19,7 +19,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Select,
   SelectContent,
@@ -28,7 +27,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { Save, History, FileEdit, Loader2, X } from 'lucide-react'
+import { Save, History, Loader2, X } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
 // Dynamic import for ByteMD editor to avoid SSR issues
@@ -83,7 +82,7 @@ export function DocumentModal({
   const [type, setType] = useState<DocumentType>('custom')
   const [status, setStatus] = useState<DocumentStatus>('draft')
   const [tags, setTags] = useState('')
-  const [activeTab, setActiveTab] = useState<'edit' | 'history'>('edit')
+  const [showHistory, setShowHistory] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
 
@@ -268,42 +267,21 @@ export function DocumentModal({
           </div>
         </DialogHeader>
 
-        <div className="flex flex-1 min-h-0">
-          {/* Main content area */}
-          <div className="flex-1 flex flex-col min-w-0 border-r">
-
-            {/* Tabs */}
-            <Tabs
-              value={activeTab}
-              onValueChange={(v) => setActiveTab(v as 'edit' | 'history')}
-              className="flex-1 flex flex-col min-h-0"
-            >
-              <div className="px-6 border-b">
-                <TabsList className="bg-transparent h-10">
-                  <TabsTrigger value="edit" className="gap-2">
-                    <FileEdit className="h-4 w-4" />
-                    Edit
-                  </TabsTrigger>
-                  {!isCreating && (
-                    <TabsTrigger value="history" className="gap-2">
-                      <History className="h-4 w-4" />
-                      History ({versions.length})
-                    </TabsTrigger>
-                  )}
-                </TabsList>
-              </div>
-
-              <TabsContent value="edit" className="flex-1 m-0 overflow-hidden flex flex-col min-h-0">
-                <div className="flex-1 min-h-0 bytemd-container">
-                  <Editor
-                    value={content}
-                    plugins={plugins}
-                    onChange={(v) => setContent(v)}
-                  />
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          {/* Main content area - Editor */}
+          <div className="flex-1 flex flex-col min-w-0 min-h-0 border-r overflow-hidden">
+            {showHistory ? (
+              /* History View */
+              <div className="flex-1 overflow-auto p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium flex items-center gap-2">
+                    <History className="h-5 w-5" />
+                    Version History
+                  </h3>
+                  <Button variant="outline" size="sm" onClick={() => setShowHistory(false)}>
+                    Back to Editor
+                  </Button>
                 </div>
-              </TabsContent>
-
-              <TabsContent value="history" className="flex-1 m-0 overflow-auto p-6">
                 {versions.length === 0 ? (
                   <div className="text-center text-muted-foreground py-8">
                     No version history available
@@ -338,8 +316,17 @@ export function DocumentModal({
                     ))}
                   </div>
                 )}
-              </TabsContent>
-            </Tabs>
+              </div>
+            ) : (
+              /* Editor View */
+              <div className="flex-1 min-h-0 overflow-hidden bytemd-container">
+                <Editor
+                  value={content}
+                  plugins={plugins}
+                  onChange={(v) => setContent(v)}
+                />
+              </div>
+            )}
           </div>
 
           {/* Sidebar */}
@@ -407,21 +394,32 @@ export function DocumentModal({
             </div>
 
             {document && (
-              <div className="space-y-2 pt-4 border-t">
-                <div className="text-sm">
-                  <span className="text-muted-foreground">Created: </span>
-                  {formatDistanceToNow(new Date(document.createdAt), { addSuffix: true })}
-                </div>
-                <div className="text-sm">
-                  <span className="text-muted-foreground">Updated: </span>
-                  {formatDistanceToNow(new Date(document.updatedAt), { addSuffix: true })}
-                </div>
-                {document._resolved?.createdBy && (
+              <div className="space-y-4 pt-4 border-t">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-start gap-2"
+                  onClick={() => setShowHistory(!showHistory)}
+                >
+                  <History className="h-4 w-4" />
+                  {showHistory ? 'Back to Editor' : `History (${versions.length})`}
+                </Button>
+                <div className="space-y-2">
                   <div className="text-sm">
-                    <span className="text-muted-foreground">Author: </span>
-                    {document._resolved.createdBy.displayName}
+                    <span className="text-muted-foreground">Created: </span>
+                    {formatDistanceToNow(new Date(document.createdAt), { addSuffix: true })}
                   </div>
-                )}
+                  <div className="text-sm">
+                    <span className="text-muted-foreground">Updated: </span>
+                    {formatDistanceToNow(new Date(document.updatedAt), { addSuffix: true })}
+                  </div>
+                  {document._resolved?.createdBy && (
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">Author: </span>
+                      {document._resolved.createdBy.displayName}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
