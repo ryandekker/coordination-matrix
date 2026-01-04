@@ -989,4 +989,178 @@ db.tags.createIndex({ name: 1 }, { unique: true });
 // Index for active tags
 db.tags.createIndex({ isActive: 1 });
 
+// ============================================================================
+// DOCUMENTS COLLECTION - Markdown documentation with semantic search
+// ============================================================================
+db.createCollection('documents', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['title', 'content', 'type', 'status', 'version', 'createdAt'],
+      properties: {
+        title: {
+          bsonType: 'string',
+          description: 'Document title - required'
+        },
+        content: {
+          bsonType: 'string',
+          description: 'Markdown content - required'
+        },
+        summary: {
+          bsonType: 'string',
+          description: 'Brief summary of the document (AI-generated or manual)'
+        },
+
+        // Classification
+        type: {
+          bsonType: 'string',
+          enum: ['sop', 'strategy', 'plan', 'template', 'reference', 'output', 'custom'],
+          description: 'Document type - required'
+        },
+        status: {
+          bsonType: 'string',
+          enum: ['draft', 'review', 'approved', 'archived'],
+          description: 'Document status - required'
+        },
+        tags: {
+          bsonType: 'array',
+          items: { bsonType: 'string' },
+          description: 'Document tags for categorization'
+        },
+
+        // Ownership
+        createdById: {
+          bsonType: ['objectId', 'null'],
+          description: 'User who created this document'
+        },
+        lastModifiedById: {
+          bsonType: ['objectId', 'null'],
+          description: 'User who last modified this document'
+        },
+
+        // Semantic search - vector embedding
+        embedding: {
+          bsonType: 'array',
+          items: { bsonType: 'double' },
+          description: 'Vector embedding for semantic search'
+        },
+        embeddingModel: {
+          bsonType: 'string',
+          description: 'Model used to generate embedding (e.g., text-embedding-3-small)'
+        },
+        embeddingUpdatedAt: {
+          bsonType: ['date', 'null'],
+          description: 'When the embedding was last updated'
+        },
+
+        // Relationships
+        parentDocumentId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Parent document for hierarchical organization'
+        },
+        relatedTaskIds: {
+          bsonType: 'array',
+          items: { bsonType: 'objectId' },
+          description: 'Tasks that reference this document'
+        },
+        workflowRunId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Workflow run that created this document'
+        },
+
+        // Versioning
+        version: {
+          bsonType: 'int',
+          minimum: 1,
+          description: 'Document version number - required'
+        },
+
+        // Flexible metadata
+        metadata: {
+          bsonType: 'object',
+          description: 'Additional metadata for the document'
+        },
+
+        // Timestamps
+        createdAt: {
+          bsonType: 'date',
+          description: 'Creation timestamp - required'
+        },
+        updatedAt: {
+          bsonType: 'date',
+          description: 'Last update timestamp'
+        }
+      }
+    }
+  }
+});
+
+// Document indexes
+db.documents.createIndex({ type: 1 });
+db.documents.createIndex({ status: 1 });
+db.documents.createIndex({ tags: 1 });
+db.documents.createIndex({ createdById: 1 });
+db.documents.createIndex({ parentDocumentId: 1 });
+db.documents.createIndex({ workflowRunId: 1 });
+db.documents.createIndex({ createdAt: -1 });
+db.documents.createIndex({ updatedAt: -1 });
+// Full-text search on title, content, and summary
+db.documents.createIndex({ title: 'text', content: 'text', summary: 'text' });
+// Compound indexes for common queries
+db.documents.createIndex({ type: 1, status: 1 });
+db.documents.createIndex({ status: 1, createdAt: -1 });
+
+// ============================================================================
+// DOCUMENT VERSIONS COLLECTION - Version history for documents
+// ============================================================================
+db.createCollection('document_versions', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['documentId', 'version', 'title', 'content', 'modifiedById', 'modifiedAt'],
+      properties: {
+        documentId: {
+          bsonType: 'objectId',
+          description: 'Reference to the parent document - required'
+        },
+        version: {
+          bsonType: 'int',
+          minimum: 1,
+          description: 'Version number - required'
+        },
+        title: {
+          bsonType: 'string',
+          description: 'Document title at this version - required'
+        },
+        content: {
+          bsonType: 'string',
+          description: 'Markdown content at this version - required'
+        },
+        summary: {
+          bsonType: 'string',
+          description: 'Summary at this version'
+        },
+        changeDescription: {
+          bsonType: 'string',
+          description: 'Description of changes made in this version'
+        },
+        modifiedById: {
+          bsonType: 'objectId',
+          description: 'User who created this version - required'
+        },
+        modifiedAt: {
+          bsonType: 'date',
+          description: 'When this version was created - required'
+        }
+      }
+    }
+  }
+});
+
+// Document version indexes
+db.document_versions.createIndex({ documentId: 1, version: -1 });
+db.document_versions.createIndex({ documentId: 1, modifiedAt: -1 });
+// Unique constraint: only one version number per document
+db.document_versions.createIndex({ documentId: 1, version: 1 }, { unique: true });
+
 print('Database initialization complete!');

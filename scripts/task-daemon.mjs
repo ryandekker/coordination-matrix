@@ -876,6 +876,153 @@ async function addTaskComment(config, taskId, comment) {
 }
 
 // ============================================================================
+// Document Operations
+// ============================================================================
+
+async function searchDocuments(config, query) {
+  try {
+    const response = await fetch(`${config.apiUrl}/documents/search`, {
+      method: 'POST',
+      headers: getHeaders(config),
+      body: JSON.stringify(query),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`Failed to search documents (${response.status}): ${error}`);
+      return [];
+    }
+    const result = await response.json();
+    return result.data || [];
+  } catch (error) {
+    console.error('Document search error:', error.message || error);
+    return [];
+  }
+}
+
+async function createDocument(config, documentData) {
+  if (config.noUpdate) {
+    console.log(`[Skip create] Would create document:`, documentData.title);
+    return null;
+  }
+
+  try {
+    const response = await fetch(`${config.apiUrl}/documents`, {
+      method: 'POST',
+      headers: getHeaders(config),
+      body: JSON.stringify(documentData),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`Failed to create document (${response.status}): ${error}`);
+      return null;
+    }
+    const result = await response.json();
+    return result.data;
+  } catch (error) {
+    console.error('Create document error:', error.message || error);
+    return null;
+  }
+}
+
+async function updateDocument(config, documentId, updates) {
+  if (config.noUpdate) {
+    console.log(`[Skip update] Would update document ${documentId}:`, updates);
+    return null;
+  }
+
+  try {
+    const response = await fetch(`${config.apiUrl}/documents/${documentId}`, {
+      method: 'PATCH',
+      headers: getHeaders(config),
+      body: JSON.stringify(updates),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`Failed to update document (${response.status}): ${error}`);
+      return null;
+    }
+    const result = await response.json();
+    return result.data;
+  } catch (error) {
+    console.error('Update document error:', error.message || error);
+    return null;
+  }
+}
+
+async function processDocumentOperations(config, taskId, documentOperations) {
+  const results = [];
+
+  for (const op of documentOperations) {
+    switch (op.action) {
+      case 'create': {
+        console.log(`[Document] Creating document: ${op.document?.title}`);
+        const doc = await createDocument(config, {
+          title: op.document?.title || 'Untitled',
+          content: op.document?.content || '',
+          summary: op.document?.summary,
+          type: op.document?.type || 'output',
+          status: op.document?.status || 'draft',
+          tags: op.document?.tags,
+        });
+        if (doc) {
+          results.push({ action: 'create', success: true, documentId: doc._id, title: doc.title });
+          // Link to task
+          await fetch(`${config.apiUrl}/documents/${doc._id}/link-task`, {
+            method: 'POST',
+            headers: getHeaders(config),
+            body: JSON.stringify({ taskId }),
+          });
+        } else {
+          results.push({ action: 'create', success: false, error: 'Failed to create document' });
+        }
+        break;
+      }
+      case 'update': {
+        console.log(`[Document] Updating document: ${op.documentId}`);
+        const updated = await updateDocument(config, op.documentId, op.changes);
+        if (updated) {
+          results.push({ action: 'update', success: true, documentId: op.documentId });
+        } else {
+          results.push({ action: 'update', success: false, documentId: op.documentId, error: 'Failed to update document' });
+        }
+        break;
+      }
+      case 'search': {
+        console.log(`[Document] Searching: ${op.prompt}`);
+        const searchResults = await searchDocuments(config, {
+          prompt: op.prompt,
+          type: op.type,
+          status: op.status,
+          tags: op.tags,
+          limit: op.limit || 5,
+        });
+        results.push({
+          action: 'search',
+          success: true,
+          query: op.prompt,
+          resultsCount: searchResults.length,
+          storeAs: op.storeResultsAs,
+          results: searchResults.map(r => ({
+            documentId: r.document._id,
+            title: r.document.title,
+            score: r.score,
+          })),
+        });
+        break;
+      }
+      default:
+        console.warn(`[Document] Unknown operation: ${op.action}`);
+        results.push({ action: op.action, success: false, error: 'Unknown operation' });
+    }
+  }
+
+  return results;
+}
+
+// ============================================================================
 // Prompt Assembly
 // ============================================================================
 
@@ -922,6 +1069,18 @@ function assemblePrompt(task, agent, workflowStep) {
   };
   sections.push(`## Task Context\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\``);
 
+  // 7. Referenced documents (from findDocument step or task links)
+  // Check for documents stored by findDocument step
+  const foundDocsKeys = Object.keys(task.metadata || {}).filter(k =>
+    k === 'foundDocuments' || k.endsWith('Documents') || k.endsWith('Doc') || k.endsWith('Docs')
+  );
+  for (const key of foundDocsKeys) {
+    const docs = task.metadata[key];
+    if (Array.isArray(docs) && docs.length > 0) {
+      sections.push(`## Referenced Documents (${key})\nThe following documents were found and are available for reference:\n\`\`\`json\n${JSON.stringify(docs, null, 2)}\n\`\`\``);
+    }
+  }
+
   return sections.join('\n\n---\n\n');
 }
 
@@ -961,6 +1120,7 @@ function parseResponse(responseText) {
         nextAction: parsed.nextAction,
         nextActionReason: parsed.nextActionReason || '',
         metadata: parsed.metadata || {},
+        documentOperations: parsed.documentOperations || [],
       },
     };
   } catch (e) {
@@ -1131,6 +1291,91 @@ async function processTask(config, task) {
       workflowStep = workflow.steps?.find(s => s.id === task.workflowStage);
       if (workflowStep) {
         log.debug(`Using workflow step: ${workflowStep.name}`);
+      }
+    }
+  }
+
+  // Handle findDocument step type - search for documents and inject into context
+  if (workflowStep?.stepType === 'findDocument' && workflowStep.findDocumentConfig) {
+    log.info('Processing findDocument step...');
+    const findConfig = workflowStep.findDocumentConfig;
+
+    // Resolve search prompt with task context
+    let searchPrompt = findConfig.searchPrompt || '';
+    if (searchPrompt && task.metadata?.inputPayload) {
+      // Simple template variable replacement for {{input.variable}}
+      searchPrompt = searchPrompt.replace(/\{\{input\.(\w+)\}\}/g, (match, key) => {
+        return task.metadata.inputPayload[key] || match;
+      });
+    }
+
+    try {
+      const searchResults = await searchDocuments(config, {
+        prompt: searchPrompt,
+        type: findConfig.documentTypes,
+        status: findConfig.documentStatus,
+        tags: findConfig.tags,
+        limit: findConfig.limit || 5,
+        minScore: findConfig.minScore || 0.5,
+      });
+
+      if (searchResults.length === 0 && findConfig.failIfNotFound) {
+        log.error('findDocument: No documents found and failIfNotFound is true');
+        await updateTask(config, task._id, {
+          status: 'on_hold',
+          assignee: null,
+          metadata: {
+            ...(task.metadata || {}),
+            output: {
+              timestamp: new Date().toISOString(),
+              status: 'FAILED',
+              action: 'HOLD',
+              error: {
+                code: 'DOCUMENT_NOT_FOUND',
+                searchPrompt,
+                message: `No documents found matching search criteria`,
+              },
+            },
+          },
+        });
+        await addTaskComment(config, task._id, `Daemon: findDocument failed - no documents matched "${searchPrompt}"`);
+        return;
+      }
+
+      // Store results in task metadata for context
+      const storeAs = findConfig.storeAs || 'foundDocuments';
+      task.metadata = task.metadata || {};
+      task.metadata[storeAs] = searchResults.map(r => ({
+        id: r.document._id,
+        title: r.document.title,
+        content: r.document.content,
+        summary: r.document.summary,
+        type: r.document.type,
+        score: r.score,
+      }));
+
+      log.info(`findDocument: Found ${searchResults.length} documents, stored as ${storeAs}`);
+    } catch (err) {
+      log.error('findDocument search failed:', err.message);
+      if (findConfig.failIfNotFound) {
+        await updateTask(config, task._id, {
+          status: 'on_hold',
+          assignee: null,
+          metadata: {
+            ...(task.metadata || {}),
+            output: {
+              timestamp: new Date().toISOString(),
+              status: 'FAILED',
+              action: 'HOLD',
+              error: {
+                code: 'DOCUMENT_SEARCH_ERROR',
+                message: err.message,
+              },
+            },
+          },
+        });
+        await addTaskComment(config, task._id, `Daemon: findDocument error - ${err.message}`);
+        return;
       }
     }
   }
@@ -1318,6 +1563,14 @@ async function processTask(config, task) {
     const existingTags = new Set(task.tags || []);
     parsedResponse.data.metadata.suggestedTags.forEach(t => existingTags.add(t));
     tagsUpdate = Array.from(existingTags);
+  }
+
+  // Process document operations if any
+  if (parsedResponse.data.documentOperations?.length > 0) {
+    log.info(`Processing ${parsedResponse.data.documentOperations.length} document operations...`);
+    const docResults = await processDocumentOperations(config, task._id, parsedResponse.data.documentOperations);
+    output.documentOperations = docResults;
+    log.info('Document operations completed', { results: docResults.length });
   }
 
   // Merge with existing metadata
