@@ -380,7 +380,7 @@ export function DocumentModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl h-[90vh] flex flex-col p-0">
+      <DialogContent className="max-w-6xl h-[90vh] flex flex-col p-0 [&>button]:hidden">
         <DialogHeader className="px-6 py-4 border-b flex-shrink-0">
           <div className="flex items-center justify-between">
             <DialogTitle className="text-xl">
@@ -402,6 +402,10 @@ export function DocumentModal({
                   <Save className="mr-2 h-4 w-4" />
                 )}
                 {isCreating ? 'Create' : 'Save'}
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)}>
+                <span className="sr-only">Close</span>
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
               </Button>
             </div>
           </div>
