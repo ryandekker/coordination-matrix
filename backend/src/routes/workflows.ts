@@ -1340,10 +1340,25 @@ function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId: strin
   const metadataComments: string[] = [];
   const connectedFrom = new Set<string>();
 
+  // Build a map from original step ID to prefixed node ID for connection resolution
+  const stepIdToNodeId = new Map<string, string>();
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    const originalId = step.id || `step${i}`;
+    // Always prefix with workflow ID to ensure uniqueness across workflows
+    const nodeId = `${workflowId}_${originalId}`;
+    stepIdToNodeId.set(originalId, nodeId);
+    // Also map the full original ID in case connections use it
+    if (step.id) {
+      stepIdToNodeId.set(step.id, nodeId);
+    }
+  }
+
   // Generate node definitions based on step type
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
-    const nodeId = step.id || `${workflowId}_step${i}`;
+    const originalId = step.id || `step${i}`;
+    const nodeId = stepIdToNodeId.get(originalId)!;
     const nodeName = step.name.replace(/"/g, "'");
 
     // Collect step metadata
@@ -1413,14 +1428,17 @@ function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId: strin
   // Generate connections
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
-    const nodeId = step.id || `${workflowId}_step${i}`;
+    const originalId = step.id || `step${i}`;
+    const nodeId = stepIdToNodeId.get(originalId)!;
 
     if (step.connections && step.connections.length > 0) {
       for (const conn of step.connections) {
+        // Resolve target step ID to prefixed node ID
+        const targetNodeId = stepIdToNodeId.get(conn.targetStepId) || `${workflowId}_${conn.targetStepId}`;
         if (conn.condition || conn.label) {
-          lines.push(`        ${nodeId} -->|"${conn.label || conn.condition}"| ${conn.targetStepId}`);
+          lines.push(`        ${nodeId} -->|"${conn.label || conn.condition}"| ${targetNodeId}`);
         } else {
-          lines.push(`        ${nodeId} --> ${conn.targetStepId}`);
+          lines.push(`        ${nodeId} --> ${targetNodeId}`);
         }
       }
       connectedFrom.add(nodeId);
@@ -1430,10 +1448,12 @@ function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId: strin
   // Add linear connections for nodes without explicit connections
   for (let i = 0; i < steps.length - 1; i++) {
     const step = steps[i];
-    const nodeId = step.id || `${workflowId}_step${i}`;
+    const originalId = step.id || `step${i}`;
+    const nodeId = stepIdToNodeId.get(originalId)!;
 
     if (!connectedFrom.has(nodeId)) {
-      const nextNodeId = steps[i + 1].id || `${workflowId}_step${i + 1}`;
+      const nextOriginalId = steps[i + 1].id || `step${i + 1}`;
+      const nextNodeId = stepIdToNodeId.get(nextOriginalId)!;
       lines.push(`        ${nodeId} --> ${nextNodeId}`);
     }
   }
