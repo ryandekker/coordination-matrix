@@ -240,6 +240,7 @@ export function DocumentModal({
       }),
     ],
     content: '',
+    immediatelyRender: false, // Avoid SSR hydration mismatches
     editorProps: {
       attributes: {
         class: 'prose prose-sm dark:prose-invert max-w-none focus:outline-none min-h-[400px] p-4',
