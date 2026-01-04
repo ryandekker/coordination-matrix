@@ -4,7 +4,6 @@ import { Document, DocumentSearchQuery, DocumentSearchResult } from '../types/in
 
 // OpenAI embedding model configuration
 const EMBEDDING_MODEL = 'text-embedding-3-small';
-const EMBEDDING_DIMENSIONS = 1536;
 
 // Get OpenAI API key from environment
 function getOpenAIKey(): string | null {
@@ -40,7 +39,7 @@ export async function generateEmbedding(text: string): Promise<number[] | null> 
       return null;
     }
 
-    const data = await response.json();
+    const data = await response.json() as { data: Array<{ embedding: number[] }> };
     return data.data[0].embedding;
   } catch (error) {
     console.error('Failed to generate embedding:', error);
@@ -223,7 +222,7 @@ export async function updateMissingEmbeddings(batchSize = 10): Promise<number> {
   const documents = await db
     .collection<Document>('documents')
     .find({
-      $or: [{ embedding: { $exists: false } }, { embedding: null }],
+      $or: [{ embedding: { $exists: false } }, { embedding: { $eq: null as unknown as number[] } }],
       status: { $ne: 'archived' },
     })
     .limit(batchSize)

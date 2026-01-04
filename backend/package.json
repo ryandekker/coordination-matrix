@@ -1,6 +1,7 @@
 {
   "name": "coordination-matrix-backend",
   "version": "1.0.0",
+  "type": "module",
   "description": "Backend API for Coordination Matrix - AI Workflow Task Management",
   "main": "dist/index.js",
   "scripts": {

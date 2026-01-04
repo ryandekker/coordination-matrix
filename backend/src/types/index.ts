@@ -1067,14 +1067,7 @@ export interface DocumentWithResolved extends Document {
   };
 }
 
-// Document event types for activity logging
-export type DocumentEventType =
-  | 'document.created'
-  | 'document.updated'
-  | 'document.deleted'
-  | 'document.status.changed'
-  | 'document.version.created';
-
+// DocumentEvent interface uses the DocumentEventType already defined above
 export interface DocumentEvent {
   id: string;
   type: DocumentEventType;
