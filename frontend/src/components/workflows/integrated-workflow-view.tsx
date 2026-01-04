@@ -123,15 +123,15 @@ function generateMermaidFromSteps(steps: WorkflowStep[]): string {
   const lines: string[] = ['flowchart TD']
   const styles: string[] = []
 
-  // Style definitions
+  // Style definitions - using saturated colors with white text for good contrast in both themes
   lines.push('  %% Style classes')
-  lines.push('  classDef agent fill:#dbeafe,stroke:#3b82f6,stroke-width:2px')
-  lines.push('  classDef external fill:#ffedd5,stroke:#f97316,stroke-width:2px')
-  lines.push('  classDef manual fill:#f3e8ff,stroke:#a855f7,stroke-width:2px')
-  lines.push('  classDef decision fill:#fef3c7,stroke:#f59e0b,stroke-width:2px')
-  lines.push('  classDef foreach fill:#dcfce7,stroke:#22c55e,stroke-width:2px')
-  lines.push('  classDef join fill:#e0e7ff,stroke:#6366f1,stroke-width:2px')
-  lines.push('  classDef flow fill:#fce7f3,stroke:#ec4899,stroke-width:2px')
+  lines.push('  classDef agent fill:#3B82F6,color:#fff,stroke:#2563EB,stroke-width:2px')
+  lines.push('  classDef external fill:#F97316,color:#fff,stroke:#EA580C,stroke-width:2px')
+  lines.push('  classDef manual fill:#8B5CF6,color:#fff,stroke:#7C3AED,stroke-width:2px')
+  lines.push('  classDef decision fill:#F59E0B,color:#fff,stroke:#D97706,stroke-width:2px')
+  lines.push('  classDef foreach fill:#10B981,color:#fff,stroke:#059669,stroke-width:2px')
+  lines.push('  classDef join fill:#6366F1,color:#fff,stroke:#4F46E5,stroke-width:2px')
+  lines.push('  classDef flow fill:#EC4899,color:#fff,stroke:#DB2777,stroke-width:2px')
   lines.push('')
 
   // Create nodes

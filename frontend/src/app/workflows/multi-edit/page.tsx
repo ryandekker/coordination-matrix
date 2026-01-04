@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { MermaidLiveEditor } from '@/components/ui/mermaid-live-editor'
 import { Button } from '@/components/ui/button'
@@ -73,6 +74,10 @@ const MULTI_WORKFLOW_TEMPLATE = `flowchart TD
 `
 
 export default function MultiWorkflowEditPage() {
+  const searchParams = useSearchParams()
+  const idsParam = searchParams.get('ids')
+  const workflowIds = idsParam ? idsParam.split(',').filter(Boolean) : []
+
   const [mermaidCode, setMermaidCode] = useState('')
   const [mermaidError, setMermaidError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -82,20 +87,28 @@ export default function MultiWorkflowEditPage() {
   const [isDryRun, setIsDryRun] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [resultsExpanded, setResultsExpanded] = useState(true)
+  const [workflowCount, setWorkflowCount] = useState<number>(0)
 
-  // Export all workflows
-  const handleExport = useCallback(async () => {
+  // Export workflows (by IDs if provided, or all)
+  const handleExport = useCallback(async (ids?: string[]) => {
     setIsLoading(true)
     setError(null)
     try {
-      const response = await fetch(`${API_BASE}/workflows/export-multi`, {
+      let url = `${API_BASE}/workflows/export-multi`
+      const idsToExport = ids || workflowIds
+      if (idsToExport.length > 0) {
+        url += `?ids=${idsToExport.join(',')}`
+      }
+      const response = await fetch(url, {
         headers: getAuthHeader(),
       })
       if (!response.ok) {
-        throw new Error(`Export failed: ${response.statusText}`)
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.message || `Export failed: ${response.statusText}`)
       }
       const result = await response.json()
       setMermaidCode(result.data.mermaid || '')
+      setWorkflowCount(result.data.workflows?.length || 0)
       setImportResults(null)
       setImportSummary(null)
     } catch (err) {
@@ -103,7 +116,14 @@ export default function MultiWorkflowEditPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [workflowIds])
+
+  // Auto-load workflows from URL params on mount
+  useEffect(() => {
+    if (workflowIds.length > 0) {
+      handleExport(workflowIds)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load template for new workflows
   const handleNewFromTemplate = useCallback(() => {
@@ -195,9 +215,18 @@ export default function MultiWorkflowEditPage() {
                 </Button>
               </Link>
               <div>
-                <h1 className="text-xl font-semibold">Multi-Workflow Editor</h1>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl font-semibold">Multi-Workflow Editor</h1>
+                  {workflowCount > 0 && (
+                    <Badge variant="secondary" className="text-xs">
+                      {workflowCount} workflow{workflowCount !== 1 ? 's' : ''}
+                    </Badge>
+                  )}
+                </div>
                 <p className="text-sm text-muted-foreground">
-                  Export, edit, and import multiple workflows as Mermaid
+                  {workflowIds.length > 0
+                    ? 'Edit selected workflows as Mermaid diagrams'
+                    : 'Export, edit, and import workflows as Mermaid'}
                 </p>
               </div>
             </div>
@@ -215,7 +244,7 @@ export default function MultiWorkflowEditPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={handleExport}
+                onClick={() => handleExport([])}
                 disabled={isLoading}
                 className="gap-2"
               >
@@ -224,8 +253,24 @@ export default function MultiWorkflowEditPage() {
                 ) : (
                   <Download className="h-4 w-4" />
                 )}
-                Export All Workflows
+                Export All
               </Button>
+              {workflowIds.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleExport()}
+                  disabled={isLoading}
+                  className="gap-2"
+                >
+                  {isLoading ? (
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                  Reload Selected
+                </Button>
+              )}
             </div>
           </div>
         </div>
