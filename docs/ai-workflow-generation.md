@@ -719,6 +719,137 @@ flowchart TD
 
 ---
 
+## Multi-Workflow Import Format
+
+For importing multiple workflows in a single file, use subgraphs with metadata comments:
+
+### Metadata Comments
+
+Place these **before** each subgraph:
+
+| Annotation | Required | Description |
+|------------|----------|-------------|
+| `%% @workflow: "Name"` | Yes | Workflow name |
+| `%% @description: text` | No | Workflow description |
+| `%% @isActive: true/false` | No | Whether workflow is active (default: true) |
+| `%% @rootTaskTitleTemplate: text` | No | Template for root task titles |
+| `%% @id: workflowId` | No | Existing ID to update (omit for new) |
+
+### Multi-Workflow Example
+
+```mermaid
+flowchart TD
+
+    %% @workflow: "Email Router"
+    %% @description: Routes inbound emails to appropriate handlers
+    %% @isActive: true
+    %% @rootTaskTitleTemplate: Email Router - {{input.email.subject}}
+
+    subgraph emailRouter["Email Router"]
+        direction TB
+
+        classify["Classify Email"]
+        route{"Route Type"}
+        replyFlow[["Run: Reply Draft"]]
+        noiseFlow[["Run: Noise Label"]]
+
+        classify --> route
+        route -->|"reply"| replyFlow
+        route -->|"noise"| noiseFlow
+
+        %% @step(classify): {"defaultAssigneeId":"agent123","additionalInstructions":"Classify email into: reply, info, action, noise."}
+        %% @step(route): {"defaultConnection":"noiseFlow"}
+        %% @step(replyFlow): {"flowId":"draftEmailResponse","inputMapping":{"email":"{{input.email}}"}}
+        %% @step(noiseFlow): {"flowId":"labelNoise"}
+    end
+
+    %% @workflow: "Draft Email Response"
+    %% @description: Generates draft replies
+
+    subgraph draftEmailResponse["Draft Email Response"]
+        direction TB
+
+        plan["Plan Reply"]
+        draft{{"Generate via API"}}
+
+        plan --> draft
+
+        %% @step(plan): {"additionalInstructions":"Create reply outline."}
+        %% @step(draft): {"externalConfig":{"endpoint":"{{input.api.url}}","method":"POST"}}
+    end
+
+    %% Styling (required at end)
+    classDef agent fill:#3B82F6,color:#fff
+    classDef decision fill:#F59E0B,color:#fff
+    classDef external fill:#F97316,color:#fff
+    classDef flow fill:#EC4899,color:#fff
+```
+
+### Important Notes for @step JSON
+
+1. **JSON must be valid**: The parser will skip steps with invalid JSON and report warnings
+2. **Use escaped quotes correctly**: Inside `bodyTemplate` or `payloadTemplate`, use `\"` for quotes in the nested JSON string
+3. **Templates containing JSON**: For complex templates, consider using single quotes or proper escaping:
+
+**Correct:**
+```
+%% @step(notify): {"webhookConfig":{"bodyTemplate":"{\"status\": \"{{status}}\"}"}}
+```
+
+**Incorrect (double-escaped):**
+```
+%% @step(notify): {"webhookConfig":{"bodyTemplate":"{\\"status\\": \\"{{status}}\\"}"}}
+```
+
+### Step Type from CSS Class
+
+The parser infers step type from the `:::class` suffix:
+
+```mermaid
+analyze["Analyze Data"]:::agent      %% stepType: agent
+review("Human Review"):::manual       %% stepType: manual
+callApi{{"External API"}}:::external  %% stepType: external
+route{"Decision"}:::decision          %% stepType: decision
+process[["Each: Item"]]:::foreach     %% stepType: foreach
+merge[["Join: Results"]]:::join       %% stepType: join
+runSub[["Run: Subprocess"]]:::flow    %% stepType: flow
+```
+
+### API Endpoint
+
+```http
+POST /api/workflows/import-multi
+Content-Type: application/json
+
+{
+  "mermaid": "flowchart TD\n\n    %% @workflow: \"Name\"...",
+  "dryRun": true
+}
+```
+
+**Response:**
+```json
+{
+  "data": {
+    "results": [
+      {
+        "name": "Email Router",
+        "id": "674abc...",
+        "action": "create",
+        "stepCount": 4,
+        "warnings": ["Invalid JSON in @step(xyz): Unexpected token..."]
+      }
+    ],
+    "summary": { "total": 2, "created": 2, "updated": 0, "skipped": 0 },
+    "dryRun": true
+  }
+}
+```
+
+Use `dryRun: true` to validate before importing.
+
+---
+
 ## API Endpoints
 
 ### Parse Mermaid to Steps

@@ -976,4 +976,341 @@ const tags = [
 
 db.tags.insertMany(tags);
 
+// ============================================================================
+// DOCUMENTS - Example documentation and SOPs
+// ============================================================================
+
+const documents = [
+  {
+    title: 'Social Media Posting Guidelines',
+    content: `# Social Media Posting Guidelines
+
+## Overview
+This document outlines the standards and best practices for all social media content published on behalf of the organization.
+
+## Content Standards
+
+### Voice and Tone
+- Professional yet approachable
+- Avoid jargon unless speaking to technical audiences
+- Use active voice
+- Be concise and clear
+
+### Visual Guidelines
+- Use approved brand colors only
+- Minimum image resolution: 1200x630px
+- Include alt text for all images
+- Videos should include captions
+
+### Approval Workflow
+1. Draft content is created
+2. Content reviewed by marketing lead
+3. Legal review for campaigns over $5k
+4. Final approval by department head
+5. Schedule or publish
+
+## Platform-Specific Guidelines
+
+### LinkedIn
+- Professional tone
+- Industry insights and thought leadership
+- Company updates and milestones
+- Best posting times: 8-10am, 12pm, 5-6pm
+
+### Twitter/X
+- More casual, conversational
+- Quick updates and engagement
+- Trending topic participation (when appropriate)
+- Best posting times: 9am, 12pm, 3pm
+
+### Instagram
+- Visual-first approach
+- Behind-the-scenes content
+- User-generated content (with permission)
+- Best posting times: 11am-1pm, 7-9pm
+
+## Hashtag Policy
+- Use 3-5 relevant hashtags per post
+- Maintain list of approved brand hashtags
+- Research trending hashtags before using
+
+## Crisis Communication
+- All communications during a crisis must go through PR
+- Do not respond to negative comments without approval
+- Escalate potential issues immediately
+`,
+    summary: 'Guidelines for creating and publishing social media content across all platforms',
+    type: 'sop',
+    status: 'approved',
+    tags: ['social-media', 'marketing', 'guidelines'],
+    version: 1,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  },
+  {
+    title: 'Q4 2024 Content Strategy',
+    content: `# Q4 2024 Content Strategy
+
+## Executive Summary
+This document outlines our content strategy for Q4 2024, focusing on product launches, holiday campaigns, and year-end engagement.
+
+## Strategic Goals
+1. Increase social media engagement by 25%
+2. Launch 3 new product awareness campaigns
+3. Drive holiday season conversions
+4. Build year-end thought leadership content
+
+## Content Pillars
+
+### 1. Product Education
+- Feature deep-dives
+- How-to content
+- Customer success stories
+
+### 2. Industry Leadership
+- Market trend analysis
+- Expert interviews
+- Research reports
+
+### 3. Community Building
+- User-generated content
+- Interactive polls and Q&As
+- Behind-the-scenes content
+
+## Campaign Calendar
+
+### October
+- Week 1-2: Product launch campaign
+- Week 3-4: Industry event coverage
+
+### November
+- Week 1-2: Customer appreciation
+- Week 3-4: Pre-holiday prep content
+
+### December
+- Week 1-2: Holiday campaign
+- Week 3-4: Year in review series
+
+## KPIs and Metrics
+| Metric | Target | Current |
+|--------|--------|---------|
+| Engagement Rate | 4.5% | 3.2% |
+| Follower Growth | +15% | - |
+| Lead Generation | 500 | - |
+| Content Pieces | 60 | - |
+
+## Resources Required
+- 2 content writers
+- 1 designer
+- Paid media budget: $25,000
+- Influencer partnerships: 3
+`,
+    summary: 'Strategic content plan for Q4 2024 including campaigns, goals, and resource allocation',
+    type: 'strategy',
+    status: 'approved',
+    tags: ['marketing', 'q4', 'strategy'],
+    version: 1,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  },
+  {
+    title: 'Content Approval Workflow Template',
+    content: `# Content Approval Workflow
+
+## Template Variables
+- **Content Type**: [Blog/Social/Email/Video]
+- **Campaign**: [Campaign Name]
+- **Target Publish Date**: [Date]
+- **Author**: [Name]
+
+## Checklist
+
+### Pre-Submission
+- [ ] Content aligns with brand guidelines
+- [ ] Spelling and grammar checked
+- [ ] Links verified
+- [ ] Images have alt text
+- [ ] Legal disclaimers included (if applicable)
+
+### Review Stages
+
+#### Stage 1: Editorial Review
+Reviewer: Marketing Lead
+Timeline: 2 business days
+- [ ] Messaging accuracy
+- [ ] Tone and voice
+- [ ] SEO optimization
+- [ ] Call-to-action clarity
+
+#### Stage 2: Brand Review
+Reviewer: Brand Manager
+Timeline: 1 business day
+- [ ] Visual brand compliance
+- [ ] Logo usage
+- [ ] Color palette
+- [ ] Typography
+
+#### Stage 3: Legal Review (if required)
+Reviewer: Legal Team
+Timeline: 3 business days
+- [ ] Compliance statements
+- [ ] Trademark usage
+- [ ] Claims verification
+- [ ] Disclosure requirements
+
+### Final Approval
+- [ ] All stages complete
+- [ ] Final proofread
+- [ ] Scheduled or published
+
+## Notes
+[Add any additional notes or context here]
+`,
+    summary: 'Template for content approval workflows with checklists and review stages',
+    type: 'template',
+    status: 'approved',
+    tags: ['marketing', 'workflow', 'template'],
+    version: 1,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  },
+  {
+    title: 'Brand Voice Reference Guide',
+    content: `# Brand Voice Reference Guide
+
+## Our Brand Personality
+We are **knowledgeable**, **approachable**, and **innovative**.
+
+## Voice Characteristics
+
+### 1. Expert but Accessible
+**Do:** Explain complex topics in simple terms
+**Don't:** Use jargon without explanation
+
+*Example:*
+- ✅ "Our AI helps you find the right customers faster"
+- ❌ "Our ML-powered propensity model optimizes CAC through predictive analytics"
+
+### 2. Confident but Not Arrogant
+**Do:** State benefits clearly
+**Don't:** Make unsubstantiated claims
+
+*Example:*
+- ✅ "Teams using our platform report 40% time savings"
+- ❌ "We're the best solution on the market"
+
+### 3. Friendly but Professional
+**Do:** Use conversational language
+**Don't:** Be overly casual or use slang
+
+*Example:*
+- ✅ "Need help? We're here for you."
+- ❌ "Yo, hit us up if you need anything!"
+
+## Tone Variations by Context
+
+| Context | Tone | Example |
+|---------|------|---------|
+| Marketing | Enthusiastic, inspiring | "Transform your workflow today" |
+| Support | Empathetic, helpful | "We understand this is frustrating" |
+| Technical | Clear, precise | "Follow these steps to configure..." |
+| Crisis | Calm, transparent | "We're aware of the issue and working on it" |
+
+## Words We Use
+- Transform
+- Streamline
+- Empower
+- Collaborate
+- Innovate
+
+## Words We Avoid
+- Revolutionary (overused)
+- Synergy (corporate jargon)
+- Disrupt (cliché)
+- Guru/Ninja (dated)
+`,
+    summary: 'Reference guide for maintaining consistent brand voice across all communications',
+    type: 'reference',
+    status: 'approved',
+    tags: ['marketing', 'brand', 'guidelines'],
+    version: 1,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  },
+  {
+    title: 'Email Campaign Checklist',
+    content: `# Email Campaign Checklist
+
+## Pre-Send Checklist
+
+### Content
+- [ ] Subject line is compelling (under 50 characters)
+- [ ] Preview text is set
+- [ ] Personalization tokens work correctly
+- [ ] All links are tracked and working
+- [ ] Unsubscribe link is present
+- [ ] Physical address included (CAN-SPAM)
+- [ ] Images have alt text
+- [ ] Plain text version created
+
+### Design
+- [ ] Mobile responsive
+- [ ] Tested on major email clients (Gmail, Outlook, Apple Mail)
+- [ ] Brand colors and fonts used
+- [ ] Clear call-to-action button
+- [ ] Loading time under 3 seconds
+
+### Targeting
+- [ ] Correct audience segment selected
+- [ ] Exclusions applied (recent purchasers, etc.)
+- [ ] Suppression lists checked
+- [ ] Send time optimized
+
+### Testing
+- [ ] Seed list test sent
+- [ ] Spam score checked (under 5.0)
+- [ ] A/B test configured (if applicable)
+- [ ] Analytics tracking verified
+
+### Approvals
+- [ ] Copy approved by marketing
+- [ ] Design approved by brand
+- [ ] Legal review complete (if promotional)
+- [ ] Final sign-off received
+
+## Post-Send
+- [ ] Monitor delivery rates
+- [ ] Check for bounce issues
+- [ ] Track initial opens/clicks
+- [ ] Document learnings
+`,
+    summary: 'Comprehensive checklist for email campaign preparation and launch',
+    type: 'sop',
+    status: 'approved',
+    tags: ['email', 'marketing', 'checklist'],
+    version: 1,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  }
+];
+
+db.documents.insertMany(documents);
+
+// Create version records for each document
+const insertedDocs = db.documents.find().toArray();
+const versions = insertedDocs.map(doc => ({
+  documentId: doc._id,
+  version: 1,
+  title: doc.title,
+  content: doc.content,
+  summary: doc.summary,
+  changeDescription: 'Initial version',
+  modifiedById: null,
+  modifiedAt: doc.createdAt
+}));
+
+if (versions.length > 0) {
+  db.document_versions.insertMany(versions);
+}
+
 print('Seed data inserted successfully!');

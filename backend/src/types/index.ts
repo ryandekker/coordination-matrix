@@ -18,16 +18,17 @@ export type Urgency = 'low' | 'normal' | 'high' | 'urgent';
 
 // Task types that map 1:1 to workflow step types
 export type TaskType =
-  | 'flow'         // Workflow parent task (root task of a workflow run)
-  | 'trigger'      // Entry point / trigger step
-  | 'agent'        // Automated/AI execution (default)
-  | 'manual'       // Human execution
-  | 'decision'     // Conditional branching
-  | 'foreach'      // Fan-out iteration (spawns subtasks)
-  | 'join'         // Fan-in synchronization (awaits boundary conditions)
-  | 'flow'         // Nested workflow
-  | 'external'     // Outbound HTTP call with callback
-  | 'webhook';     // Outbound HTTP call (fire-and-forget)
+  | 'flow'          // Workflow parent task (root task of a workflow run)
+  | 'trigger'       // Entry point / trigger step
+  | 'agent'         // Automated/AI execution (default)
+  | 'manual'        // Human execution
+  | 'decision'      // Conditional branching
+  | 'foreach'       // Fan-out iteration (spawns subtasks)
+  | 'join'          // Fan-in synchronization (awaits boundary conditions)
+  | 'flow'          // Nested workflow
+  | 'external'      // Outbound HTTP call with callback
+  | 'webhook'       // Outbound HTTP call (fire-and-forget)
+  | 'findDocument'; // Search for a document using semantic search
 
 // How the task gets executed
 export type ExecutionMode =
@@ -440,6 +441,18 @@ export type TaskEventType =
   | 'task.moved'
   | 'task.comment.added';
 
+export type DocumentEventType =
+  | 'document.created'
+  | 'document.updated'
+  | 'document.deleted'
+  | 'document.status.changed'
+  | 'document.version.created'
+  | 'document.restored'
+  | 'document.linked'
+  | 'document.unlinked';
+
+export type ActivityEventType = TaskEventType | DocumentEventType;
+
 export interface FieldChange {
   field: string;
   oldValue: unknown;
@@ -466,8 +479,9 @@ export type EventHandler = (event: TaskEvent) => void | Promise<void>;
 
 export interface ActivityLogEntry {
   _id: ObjectId;
-  taskId: ObjectId;
-  eventType: TaskEventType;
+  taskId?: ObjectId | null;
+  documentId?: ObjectId | null;
+  eventType: ActivityEventType;
   actorId?: ObjectId | null;
   actorType: 'user' | 'system' | 'daemon';
   changes?: FieldChange[];
@@ -583,15 +597,16 @@ export type WorkflowRunStatus =
 
 // Workflow step types - maps 1:1 to TaskType
 export type WorkflowStepType =
-  | 'trigger'      // Entry point / workflow start
-  | 'agent'        // Automated/AI execution
-  | 'manual'       // Human execution
-  | 'external'     // Wait for external callback
-  | 'webhook'      // Outbound HTTP call
-  | 'decision'     // Conditional branching
-  | 'foreach'      // Fan-out iteration (spawns subtasks)
-  | 'join'         // Fan-in synchronization (awaits boundary conditions)
-  | 'flow';        // Nested workflow
+  | 'trigger'       // Entry point / workflow start
+  | 'agent'         // Automated/AI execution
+  | 'manual'        // Human execution
+  | 'external'      // Wait for external callback
+  | 'webhook'       // Outbound HTTP call
+  | 'decision'      // Conditional branching
+  | 'foreach'       // Fan-out iteration (spawns subtasks)
+  | 'join'          // Fan-in synchronization (awaits boundary conditions)
+  | 'flow'          // Nested workflow
+  | 'findDocument'; // Search for a document using semantic search
 
 export interface WorkflowStep {
   id: string;
@@ -651,6 +666,18 @@ export interface WorkflowStep {
 
   // Input aggregation
   inputPath?: string;                   // JSONPath to extract input from previous steps
+
+  // FindDocument step config - semantic search for documents
+  findDocumentConfig?: {
+    searchPrompt?: string;              // Template for search prompt (e.g., "Find SOPs about {{input.topic}}")
+    documentTypes?: DocumentType[];     // Filter by document types
+    documentStatus?: DocumentStatus[];  // Filter by status (default: ['approved'])
+    tags?: string[];                    // Filter by tags
+    limit?: number;                     // Max results (default: 1)
+    minScore?: number;                  // Minimum similarity score (default: 0.5)
+    storeAs?: string;                   // Variable name to store result (default: 'document')
+    failIfNotFound?: boolean;           // Fail the step if no document found (default: false)
+  };
 }
 
 export interface Workflow {
@@ -972,4 +999,106 @@ export interface Tag {
   createdById?: ObjectId | null;
   createdAt: Date;
   updatedAt?: Date | null;
+}
+
+// ============================================================================
+// Document Types (Markdown Documentation)
+// ============================================================================
+
+export type DocumentType = 'sop' | 'strategy' | 'plan' | 'template' | 'reference' | 'output' | 'custom';
+
+export type DocumentStatus = 'draft' | 'review' | 'approved' | 'archived';
+
+export interface Document {
+  _id: ObjectId;
+
+  // Core fields
+  title: string;
+  content: string;           // Markdown content
+  summary?: string;          // AI-generated or manual summary
+
+  // Classification
+  type: DocumentType;
+  status: DocumentStatus;
+  tags?: string[];
+
+  // Ownership
+  createdById: ObjectId | null;
+  lastModifiedById?: ObjectId | null;
+
+  // Semantic search
+  embedding?: number[];      // Vector embedding for semantic search
+  embeddingModel?: string;   // e.g., 'text-embedding-3-small'
+  embeddingUpdatedAt?: Date | null;
+
+  // Relationships
+  parentDocumentId?: ObjectId | null;  // For document hierarchies
+  relatedTaskIds?: ObjectId[];         // Tasks that reference this doc
+  workflowRunId?: ObjectId | null;     // If created by a workflow
+
+  // Versioning
+  version: number;
+
+  // Metadata
+  metadata?: Record<string, unknown>;
+
+  // Timestamps
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface DocumentVersion {
+  _id: ObjectId;
+  documentId: ObjectId;
+  version: number;
+  title: string;
+  content: string;
+  summary?: string;
+  changeDescription?: string;
+  modifiedById: ObjectId;
+  modifiedAt: Date;
+}
+
+export interface DocumentWithResolved extends Document {
+  _resolved?: {
+    createdBy?: { _id: string; displayName: string };
+    lastModifiedBy?: { _id: string; displayName: string };
+    parentDocument?: { _id: string; title: string };
+  };
+}
+
+// Document event types for activity logging
+export type DocumentEventType =
+  | 'document.created'
+  | 'document.updated'
+  | 'document.deleted'
+  | 'document.status.changed'
+  | 'document.version.created';
+
+export interface DocumentEvent {
+  id: string;
+  type: DocumentEventType;
+  documentId: ObjectId;
+  document: Document;
+  changes?: FieldChange[];
+  actorId?: ObjectId | null;
+  actorType: 'user' | 'system' | 'daemon';
+  timestamp: Date;
+  metadata?: Record<string, unknown>;
+}
+
+// Semantic search types
+export interface DocumentSearchQuery {
+  prompt: string;                    // Natural language search prompt
+  type?: DocumentType[];             // Filter by document types
+  status?: DocumentStatus[];         // Filter by status
+  tags?: string[];                   // Filter by tags
+  limit?: number;                    // Max results (default: 10)
+  minScore?: number;                 // Minimum similarity score (0-1)
+}
+
+export interface DocumentSearchResult {
+  document: Document;
+  score: number;                     // Similarity score (0-1)
+  highlights?: string[];             // Relevant text snippets
 }

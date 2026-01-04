@@ -24,6 +24,7 @@ import {
   ArrowLeftRight,
   Activity,
   Tags,
+  FileText,
 } from 'lucide-react'
 import { Logo } from '@/components/ui/logo'
 import { View } from '@/lib/api'
@@ -48,6 +49,7 @@ interface NavItem {
 const staticNavigation: NavItem[] = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard, exact: true },
   { name: 'All Tasks', href: '/tasks', icon: ListTodo, exact: true },
+  { name: 'Documents', href: '/documents', icon: FileText, exact: true },
   { name: 'Activity', href: '/activity', icon: Activity, exact: true },
 ]
 

@@ -424,13 +424,13 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     }
   }
 
-  // Add linear connections
-  for (let i = 0; i < steps.length - 1; i++) {
-    const step = steps[i]
-    const nodeId = step.id || `step${i}`
-    const nextStep = steps[i + 1]
-
-    if (!connectedFrom.has(nodeId)) {
+  // Only add linear connections if NO nodes have explicit connections defined
+  // This preserves nonlinear workflows while supporting legacy linear-only workflows
+  if (connectedFrom.size === 0) {
+    for (let i = 0; i < steps.length - 1; i++) {
+      const step = steps[i]
+      const nodeId = step.id || `step${i}`
+      const nextStep = steps[i + 1]
       const nextNodeId = nextStep.id || `step${i + 1}`
 
       if (step.stepType === 'foreach' && nextStep.stepType === 'join') {

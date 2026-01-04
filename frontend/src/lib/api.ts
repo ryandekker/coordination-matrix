@@ -1312,3 +1312,214 @@ export const webhooksApi = {
     return handleResponse(response)
   },
 }
+
+// Document Types
+export type DocumentType = 'sop' | 'strategy' | 'plan' | 'template' | 'reference' | 'output' | 'custom'
+export type DocumentStatus = 'draft' | 'review' | 'approved' | 'archived'
+
+export interface Document {
+  _id: string
+  title: string
+  content: string
+  summary?: string
+  type: DocumentType
+  status: DocumentStatus
+  tags?: string[]
+  createdById: string | null
+  lastModifiedById?: string | null
+  parentDocumentId?: string | null
+  relatedTaskIds?: string[]
+  workflowRunId?: string | null
+  version: number
+  metadata?: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+  _resolved?: {
+    createdBy?: { _id: string; displayName: string }
+    lastModifiedBy?: { _id: string; displayName: string }
+    parentDocument?: { _id: string; title: string }
+  }
+}
+
+export interface DocumentVersion {
+  _id: string
+  documentId: string
+  version: number
+  title: string
+  content: string
+  summary?: string
+  changeDescription?: string
+  modifiedById: string
+  modifiedByName?: string
+  modifiedAt: string
+}
+
+export interface DocumentSearchQuery {
+  prompt: string
+  type?: DocumentType[]
+  status?: DocumentStatus[]
+  tags?: string[]
+  limit?: number
+  minScore?: number
+}
+
+export interface DocumentSearchResult {
+  document: Document
+  score: number
+  highlights?: string[]
+}
+
+// Documents API
+export const documentsApi = {
+  list: async (params?: {
+    page?: number
+    limit?: number
+    sortBy?: string
+    sortOrder?: 'asc' | 'desc'
+    search?: string
+    type?: DocumentType | DocumentType[]
+    status?: DocumentStatus | DocumentStatus[]
+    tags?: string[]
+    includeArchived?: boolean
+    createdById?: string
+    workflowRunId?: string
+    parentDocumentId?: string | null
+    resolveReferences?: boolean
+  }): Promise<PaginatedResponse<Document>> => {
+    const searchParams = new URLSearchParams()
+    if (params?.page) searchParams.append('page', String(params.page))
+    if (params?.limit) searchParams.append('limit', String(params.limit))
+    if (params?.sortBy) searchParams.append('sortBy', params.sortBy)
+    if (params?.sortOrder) searchParams.append('sortOrder', params.sortOrder)
+    if (params?.search) searchParams.append('search', params.search)
+    if (params?.type) {
+      const types = Array.isArray(params.type) ? params.type : [params.type]
+      types.forEach(t => searchParams.append('type', t))
+    }
+    if (params?.status) {
+      const statuses = Array.isArray(params.status) ? params.status : [params.status]
+      statuses.forEach(s => searchParams.append('status', s))
+    }
+    if (params?.tags) {
+      params.tags.forEach(t => searchParams.append('tags', t))
+    }
+    if (params?.includeArchived) searchParams.append('includeArchived', 'true')
+    if (params?.createdById) searchParams.append('createdById', params.createdById)
+    if (params?.workflowRunId) searchParams.append('workflowRunId', params.workflowRunId)
+    if (params?.parentDocumentId !== undefined) {
+      searchParams.append('parentDocumentId', params.parentDocumentId || '__root__')
+    }
+    if (params?.resolveReferences) searchParams.append('resolveReferences', 'true')
+    const response = await authFetch(`${API_BASE}/documents?${searchParams}`)
+    return handleResponse(response)
+  },
+
+  get: async (id: string, resolveReferences = false): Promise<ApiResponse<Document>> => {
+    const params = resolveReferences ? '?resolveReferences=true' : ''
+    const response = await authFetch(`${API_BASE}/documents/${id}${params}`)
+    return handleResponse(response)
+  },
+
+  create: async (data: {
+    title: string
+    content: string
+    summary?: string
+    type?: DocumentType
+    status?: DocumentStatus
+    tags?: string[]
+    parentDocumentId?: string | null
+    workflowRunId?: string | null
+    metadata?: Record<string, unknown>
+  }): Promise<ApiResponse<Document>> => {
+    const response = await authFetch(`${API_BASE}/documents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  update: async (id: string, data: {
+    title?: string
+    content?: string
+    summary?: string
+    type?: DocumentType
+    status?: DocumentStatus
+    tags?: string[]
+    parentDocumentId?: string | null
+    metadata?: Record<string, unknown>
+    changeDescription?: string
+  }): Promise<ApiResponse<Document>> => {
+    const response = await authFetch(`${API_BASE}/documents/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  delete: async (id: string, permanent = false): Promise<ApiResponse<void>> => {
+    const params = permanent ? '?permanent=true' : ''
+    const response = await authFetch(`${API_BASE}/documents/${id}${params}`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
+
+  // Version management
+  getVersions: async (id: string): Promise<ApiResponse<DocumentVersion[]>> => {
+    const response = await authFetch(`${API_BASE}/documents/${id}/versions`)
+    return handleResponse(response)
+  },
+
+  getVersion: async (id: string, version: number): Promise<ApiResponse<DocumentVersion>> => {
+    const response = await authFetch(`${API_BASE}/documents/${id}/versions/${version}`)
+    return handleResponse(response)
+  },
+
+  restoreVersion: async (id: string, version: number): Promise<ApiResponse<Document>> => {
+    const response = await authFetch(`${API_BASE}/documents/${id}/restore/${version}`, {
+      method: 'POST',
+    })
+    return handleResponse(response)
+  },
+
+  diffVersions: async (id: string, fromVersion: number, toVersion: number): Promise<ApiResponse<{
+    from: DocumentVersion
+    to: DocumentVersion
+  }>> => {
+    const response = await authFetch(`${API_BASE}/documents/${id}/diff`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fromVersion, toVersion }),
+    })
+    return handleResponse(response)
+  },
+
+  // Task linking
+  linkTask: async (id: string, taskId: string): Promise<ApiResponse<void>> => {
+    const response = await authFetch(`${API_BASE}/documents/${id}/link-task`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ taskId }),
+    })
+    return handleResponse(response)
+  },
+
+  unlinkTask: async (id: string, taskId: string): Promise<ApiResponse<void>> => {
+    const response = await authFetch(`${API_BASE}/documents/${id}/link-task/${taskId}`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
+
+  // Semantic search
+  search: async (query: DocumentSearchQuery): Promise<ApiResponse<DocumentSearchResult[]>> => {
+    const response = await authFetch(`${API_BASE}/documents/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(query),
+    })
+    return handleResponse(response)
+  },
+}

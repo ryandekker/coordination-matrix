@@ -11,6 +11,7 @@
     "dev:ports": "node scripts/dev-ports.mjs",
     "dev:ports:show": "node scripts/dev-ports.mjs --show",
     "dev:ports:clean": "node scripts/dev-ports.mjs --clean",
+    "kill-devs": "node scripts/kill-devs.mjs",
     "dev:daemon": "cd backend && npm run daemon:watch",
     "db:start": "docker compose -f docker-compose.dev.yml up -d",
     "db:stop": "docker compose -f docker-compose.dev.yml down",
@@ -40,6 +41,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@radix-ui/react-separator": "^1.1.8",
     "mongodb": "^7.0.0",
     "yaml": "^2.8.2"
   }

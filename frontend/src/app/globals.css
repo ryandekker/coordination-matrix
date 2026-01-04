@@ -151,3 +151,351 @@
 .dark .animate-pulse-bg {
   animation: pulse-bg-dark 0.4s ease-in-out 3;
 }
+
+/* ByteMD Editor Styles */
+.bytemd-container {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Force bytemd to fill container using absolute positioning */
+.bytemd-container .bytemd {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  border: none !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.bytemd-container .bytemd-toolbar {
+  flex-shrink: 0 !important;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+}
+
+.bytemd-container .bytemd-body {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: hidden !important;
+  display: flex !important;
+  position: relative !important;
+}
+
+.bytemd-container .bytemd-body > .bytemd-editor,
+.bytemd-container .bytemd-body > .bytemd-preview {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  overflow: auto !important;
+  position: relative !important;
+}
+
+.bytemd-container .bytemd-split {
+  height: 100% !important;
+  display: flex !important;
+  min-height: 0 !important;
+  flex: 1 1 0 !important;
+}
+
+.bytemd-container .bytemd-split .bytemd-editor,
+.bytemd-container .bytemd-split .bytemd-preview {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  overflow: auto !important;
+}
+
+/* CodeMirror height fix */
+.bytemd-container .CodeMirror {
+  height: 100% !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+}
+
+.bytemd-container .bytemd-editor {
+  position: relative !important;
+}
+
+/* CodeMirror scroll wrapper */
+.bytemd-container .CodeMirror-scroll {
+  overflow: auto !important;
+  height: 100% !important;
+}
+
+/* Status bar at bottom should not grow */
+.bytemd-container .bytemd-status {
+  flex-shrink: 0 !important;
+}
+
+.bytemd-container .bytemd-toolbar-icon {
+  color: hsl(var(--foreground));
+}
+
+.bytemd-container .bytemd-toolbar-icon:hover {
+  background: hsl(var(--muted));
+}
+
+.bytemd-container .bytemd-editor,
+.bytemd-container .bytemd-preview {
+  background: hsl(var(--background));
+}
+
+.bytemd-container .bytemd-split .bytemd-editor,
+.bytemd-container .bytemd-split .bytemd-preview {
+  border-color: hsl(var(--border));
+}
+
+/* CodeMirror base styling */
+.bytemd-container .CodeMirror {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+.bytemd-container .CodeMirror-gutters {
+  background: hsl(var(--muted));
+  border-color: hsl(var(--border));
+}
+
+.bytemd-container .CodeMirror-linenumber {
+  color: hsl(var(--muted-foreground));
+}
+
+.bytemd-container .CodeMirror-cursor {
+  border-left-color: hsl(var(--foreground));
+}
+
+.bytemd-container .CodeMirror-selected {
+  background: hsl(var(--accent) / 0.3) !important;
+}
+
+/* Markdown syntax highlighting - headings with size */
+.bytemd-container .cm-header,
+.bytemd-container .cm-header-1,
+.bytemd-container .cm-header-2,
+.bytemd-container .cm-header-3,
+.bytemd-container .cm-header-4,
+.bytemd-container .cm-header-5,
+.bytemd-container .cm-header-6 {
+  color: hsl(var(--foreground)) !important;
+}
+
+.bytemd-container .cm-header-1 {
+  font-size: 1.75em;
+  font-weight: 700;
+}
+
+.bytemd-container .cm-header-2 {
+  font-size: 1.5em;
+  font-weight: 600;
+}
+
+.bytemd-container .cm-header-3 {
+  font-size: 1.25em;
+  font-weight: 600;
+}
+
+.bytemd-container .cm-header-4,
+.bytemd-container .cm-header-5,
+.bytemd-container .cm-header-6 {
+  font-size: 1.1em;
+  font-weight: 600;
+}
+
+.bytemd-container .cm-link,
+.bytemd-container .cm-url {
+  color: hsl(var(--primary));
+}
+
+.bytemd-container .cm-comment {
+  color: hsl(var(--muted-foreground));
+}
+
+.bytemd-container .cm-string {
+  color: hsl(var(--muted-foreground));
+}
+
+.bytemd-container .cm-keyword {
+  color: hsl(var(--muted-foreground));
+}
+
+/* Code/formatting markers - more neutral */
+.bytemd-container .cm-formatting,
+.bytemd-container .cm-formatting-header,
+.bytemd-container .cm-formatting-list,
+.bytemd-container .cm-formatting-quote,
+.bytemd-container .cm-formatting-code,
+.bytemd-container .cm-formatting-code-block,
+.bytemd-container .cm-formatting-strong,
+.bytemd-container .cm-formatting-em {
+  color: hsl(var(--muted-foreground));
+}
+
+.bytemd-container .cm-strong {
+  font-weight: 700;
+}
+
+.bytemd-container .cm-em {
+  font-style: italic;
+}
+
+/* Preview pane styling */
+.bytemd-container .bytemd-preview .markdown-body {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+.bytemd-container .bytemd-preview .markdown-body h1,
+.bytemd-container .bytemd-preview .markdown-body h2,
+.bytemd-container .bytemd-preview .markdown-body h3,
+.bytemd-container .bytemd-preview .markdown-body h4,
+.bytemd-container .bytemd-preview .markdown-body h5,
+.bytemd-container .bytemd-preview .markdown-body h6 {
+  color: hsl(var(--foreground));
+}
+
+.bytemd-container .bytemd-preview .markdown-body h1 {
+  font-size: 1.75em;
+  font-weight: 700;
+  border-bottom: 1px solid hsl(var(--border));
+  padding-bottom: 0.3em;
+  margin-bottom: 0.5em;
+}
+
+.bytemd-container .bytemd-preview .markdown-body h2 {
+  font-size: 1.5em;
+  font-weight: 600;
+  border-bottom: 1px solid hsl(var(--border));
+  padding-bottom: 0.3em;
+  margin-bottom: 0.5em;
+}
+
+.bytemd-container .bytemd-preview .markdown-body h3 {
+  font-size: 1.25em;
+  font-weight: 600;
+}
+
+.bytemd-container .bytemd-preview .markdown-body a {
+  color: hsl(var(--primary));
+}
+
+/* Lists in preview */
+.bytemd-container .bytemd-preview .markdown-body ul,
+.bytemd-container .bytemd-preview .markdown-body ol {
+  padding-left: 2em;
+  margin: 0.5em 0;
+}
+
+.bytemd-container .bytemd-preview .markdown-body ul {
+  list-style-type: disc;
+}
+
+.bytemd-container .bytemd-preview .markdown-body ol {
+  list-style-type: decimal;
+}
+
+.bytemd-container .bytemd-preview .markdown-body li {
+  margin: 0.25em 0;
+}
+
+.bytemd-container .bytemd-preview .markdown-body ul ul,
+.bytemd-container .bytemd-preview .markdown-body ol ul {
+  list-style-type: circle;
+}
+
+.bytemd-container .bytemd-preview .markdown-body ul ul ul,
+.bytemd-container .bytemd-preview .markdown-body ol ol ul {
+  list-style-type: square;
+}
+
+.bytemd-container .bytemd-preview .markdown-body code {
+  background: hsl(var(--muted));
+  padding: 0.2em 0.4em;
+  border-radius: 3px;
+}
+
+.bytemd-container .bytemd-preview .markdown-body pre {
+  background: hsl(var(--muted));
+  padding: 1em;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
+.bytemd-container .bytemd-preview .markdown-body blockquote {
+  border-left: 4px solid hsl(var(--border));
+  padding-left: 1em;
+  color: hsl(var(--muted-foreground));
+}
+
+.bytemd-container .bytemd-preview .markdown-body table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.bytemd-container .bytemd-preview .markdown-body th,
+.bytemd-container .bytemd-preview .markdown-body td {
+  border: 1px solid hsl(var(--border));
+  padding: 0.5em 1em;
+}
+
+.bytemd-container .bytemd-preview .markdown-body th {
+  background: hsl(var(--muted));
+}
+
+/* Dropdown and popup menus */
+.bytemd-container .bytemd-dropdown,
+.bytemd-container .tippy-box {
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+}
+
+.bytemd-container .bytemd-dropdown-item:hover {
+  background: hsl(var(--muted));
+}
+
+/* Status bar at bottom */
+.bytemd-container .bytemd-status {
+  background: hsl(var(--background));
+  border-top: 1px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+}
+
+.bytemd-container .bytemd-status-left,
+.bytemd-container .bytemd-status-right {
+  color: hsl(var(--muted-foreground));
+}
+
+/* Help text and tips */
+.bytemd-container .bytemd-help {
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  border: 1px solid hsl(var(--border));
+}
+
+/* Active toolbar items */
+.bytemd-container .bytemd-toolbar-icon.bytemd-toolbar-icon-active {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+/* Toolbar right section (fullscreen, help icons) */
+.bytemd-container .bytemd-toolbar-right .bytemd-toolbar-icon {
+  color: hsl(var(--muted-foreground));
+}
+
+.bytemd-container .bytemd-toolbar-right .bytemd-toolbar-icon:hover {
+  color: hsl(var(--foreground));
+}
+

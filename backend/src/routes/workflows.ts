@@ -1584,6 +1584,17 @@ ${tags.length > 0 ? tags.map(t => `\`${t}\``).join(', ') : '- _No tags in use ye
   }
 });
 
+// Forward declarations for multi-workflow routes
+// These are defined later in the file but need to be registered before /:id
+
+// GET /api/workflows/export-multi - Export workflows as multi-workflow Mermaid
+// (Registered here to avoid being caught by /:id route - implementation below)
+workflowsRouter.get('/export-multi', handleExportMulti);
+
+// POST /api/workflows/import-multi - Import workflows from multi-workflow Mermaid
+// (Registered here to avoid being caught by /:id route - implementation below)
+workflowsRouter.post('/import-multi', handleImportMulti);
+
 // GET /api/workflows/:id - Get a specific workflow
 workflowsRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -1777,8 +1788,8 @@ workflowsRouter.post('/generate-mermaid', async (req: Request, res: Response, ne
   }
 });
 
-// GET /api/workflows/export-multi - Export all workflows as multi-workflow Mermaid
-workflowsRouter.get('/export-multi', async (req: Request, res: Response, next: NextFunction) => {
+// Handler for GET /api/workflows/export-multi - Export workflows as multi-workflow Mermaid
+async function handleExportMulti(req: Request, res: Response, next: NextFunction) {
   try {
     const db = getDb();
     const { ids } = req.query;
@@ -1786,8 +1797,23 @@ workflowsRouter.get('/export-multi', async (req: Request, res: Response, next: N
     // Build query - optionally filter by IDs
     const query: Record<string, unknown> = {};
     if (ids && typeof ids === 'string') {
-      const idList = ids.split(',').map(id => new ObjectId(id.trim()));
-      query._id = { $in: idList };
+      const idStrings = ids.split(',').map(id => id.trim()).filter(Boolean);
+      const validIds: ObjectId[] = [];
+      for (const idStr of idStrings) {
+        try {
+          if (ObjectId.isValid(idStr)) {
+            validIds.push(new ObjectId(idStr));
+          }
+        } catch {
+          // Skip invalid IDs
+        }
+      }
+      if (validIds.length > 0) {
+        query._id = { $in: validIds };
+      } else if (idStrings.length > 0) {
+        // All provided IDs were invalid
+        throw createError('Invalid workflow IDs provided', 400);
+      }
     }
 
     const workflows = await db
@@ -1867,7 +1893,7 @@ workflowsRouter.get('/export-multi', async (req: Request, res: Response, next: N
   } catch (error) {
     next(error);
   }
-});
+}
 
 // Helper to generate subgraph content (nodes and connections only, no flowchart declaration)
 function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId: string): string {
@@ -1877,10 +1903,25 @@ function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId: strin
   const metadataComments: string[] = [];
   const connectedFrom = new Set<string>();
 
+  // Build a map from original step ID to prefixed node ID for connection resolution
+  const stepIdToNodeId = new Map<string, string>();
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    const originalId = step.id || `step${i}`;
+    // Always prefix with workflow ID to ensure uniqueness across workflows
+    const nodeId = `${workflowId}_${originalId}`;
+    stepIdToNodeId.set(originalId, nodeId);
+    // Also map the full original ID in case connections use it
+    if (step.id) {
+      stepIdToNodeId.set(step.id, nodeId);
+    }
+  }
+
   // Generate node definitions based on step type
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
-    const nodeId = step.id || `${workflowId}_step${i}`;
+    const originalId = step.id || `step${i}`;
+    const nodeId = stepIdToNodeId.get(originalId)!;
     const nodeName = step.name.replace(/"/g, "'");
 
     // Collect step metadata
@@ -1950,14 +1991,17 @@ function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId: strin
   // Generate connections
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
-    const nodeId = step.id || `${workflowId}_step${i}`;
+    const originalId = step.id || `step${i}`;
+    const nodeId = stepIdToNodeId.get(originalId)!;
 
     if (step.connections && step.connections.length > 0) {
       for (const conn of step.connections) {
+        // Resolve target step ID to prefixed node ID
+        const targetNodeId = stepIdToNodeId.get(conn.targetStepId) || `${workflowId}_${conn.targetStepId}`;
         if (conn.condition || conn.label) {
-          lines.push(`        ${nodeId} -->|"${conn.label || conn.condition}"| ${conn.targetStepId}`);
+          lines.push(`        ${nodeId} -->|"${conn.label || conn.condition}"| ${targetNodeId}`);
         } else {
-          lines.push(`        ${nodeId} --> ${conn.targetStepId}`);
+          lines.push(`        ${nodeId} --> ${targetNodeId}`);
         }
       }
       connectedFrom.add(nodeId);
@@ -1967,10 +2011,12 @@ function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId: strin
   // Add linear connections for nodes without explicit connections
   for (let i = 0; i < steps.length - 1; i++) {
     const step = steps[i];
-    const nodeId = step.id || `${workflowId}_step${i}`;
+    const originalId = step.id || `step${i}`;
+    const nodeId = stepIdToNodeId.get(originalId)!;
 
     if (!connectedFrom.has(nodeId)) {
-      const nextNodeId = steps[i + 1].id || `${workflowId}_step${i + 1}`;
+      const nextOriginalId = steps[i + 1].id || `step${i + 1}`;
+      const nextNodeId = stepIdToNodeId.get(nextOriginalId)!;
       lines.push(`        ${nodeId} --> ${nextNodeId}`);
     }
   }
@@ -1984,8 +2030,8 @@ function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId: strin
   return lines.join('\n');
 }
 
-// POST /api/workflows/import-multi - Import multiple workflows from multi-workflow Mermaid
-workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: NextFunction) => {
+// Handler for POST /api/workflows/import-multi - Import workflows from multi-workflow Mermaid
+async function handleImportMulti(req: Request, res: Response, next: NextFunction) {
   try {
     const db = getDb();
     const { mermaid, dryRun = false } = req.body;
@@ -2007,6 +2053,7 @@ workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: 
       action: 'create' | 'update' | 'skip';
       stepCount: number;
       error?: string;
+      warnings?: string[];
     }> = [];
 
     for (const section of workflowSections) {
@@ -2026,8 +2073,8 @@ workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: 
         // Create a fake flowchart for parsing
         const mermaidDiagram = `flowchart TD\n${mermaidContent}`;
 
-        // Parse steps from the subgraph content
-        const steps = parseMermaidToSteps(mermaidDiagram);
+        // Parse steps from the subgraph content (with warnings)
+        const { steps, warnings } = parseMermaidToStepsWithWarnings(mermaidDiagram);
 
         if (dryRun) {
           // Just report what would happen
@@ -2036,6 +2083,7 @@ workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: 
             id: workflowId || undefined,
             action: workflowId ? 'update' : 'create',
             stepCount: steps.length,
+            warnings: warnings.length > 0 ? warnings : undefined,
           });
         } else {
           // Actually create or update
@@ -2063,6 +2111,7 @@ workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: 
                 id: workflowId,
                 action: 'update',
                 stepCount: steps.length,
+                warnings: warnings.length > 0 ? warnings : undefined,
               });
             } else {
               // ID not found, create new instead
@@ -2085,6 +2134,7 @@ workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: 
                 id: insertResult.insertedId.toString(),
                 action: 'create',
                 stepCount: steps.length,
+                warnings: warnings.length > 0 ? warnings : undefined,
               });
             }
           } else {
@@ -2108,6 +2158,7 @@ workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: 
               id: insertResult.insertedId.toString(),
               action: 'create',
               stepCount: steps.length,
+              warnings: warnings.length > 0 ? warnings : undefined,
             });
           }
         }
@@ -2136,7 +2187,7 @@ workflowsRouter.post('/import-multi', async (req: Request, res: Response, next: 
   } catch (error) {
     next(error);
   }
-});
+}
 
 // Parse multi-workflow Mermaid document with subgraphs
 interface ParsedWorkflowSection {
@@ -2240,9 +2291,22 @@ function parseMultiWorkflowMermaid(mermaid: string): ParsedWorkflowSection[] {
   return workflows;
 }
 
+// Result type for parseMermaidToSteps that includes parse warnings
+interface ParseMermaidResult {
+  steps: WorkflowStep[];
+  warnings: string[];
+}
+
 // Helper function to parse Mermaid flowchart to workflow steps
 function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
+  const result = parseMermaidToStepsWithWarnings(mermaid);
+  return result.steps;
+}
+
+// Version that returns warnings for error reporting
+function parseMermaidToStepsWithWarnings(mermaid: string): ParseMermaidResult {
   const steps: WorkflowStep[] = [];
+  const warnings: string[] = [];
   const lines = mermaid.split('\n').map((l) => l.trim()).filter(Boolean);
 
   // Node storage with full step info
@@ -2258,6 +2322,9 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
   // Step metadata from comments: %% @step(nodeId): {json}
   const stepMetadata: Map<string, Record<string, unknown>> = new Map();
 
+  // Track class definitions for step type inference from :::class suffix
+  const nodeClasses: Map<string, string> = new Map();
+
   for (const line of lines) {
     // Parse step configuration comments first
     const stepConfigMatch = line.match(/%% @step\(([^)]+)\):\s*(.+)/);
@@ -2266,10 +2333,22 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
         const [, stepId, configJson] = stepConfigMatch;
         const config = JSON.parse(configJson);
         stepMetadata.set(stepId, config);
-      } catch {
-        // Invalid JSON, skip
+      } catch (e) {
+        // Capture JSON parse errors with details
+        const errorMsg = e instanceof Error ? e.message : 'Unknown error';
+        warnings.push(`Invalid JSON in @step(${stepConfigMatch[1]}): ${errorMsg}`);
       }
       continue;
+    }
+
+    // Extract :::class suffix from any node definition
+    const classMatch = line.match(/:::([\w-]+)\s*$/);
+    if (classMatch) {
+      // Find the node ID at the start of the line
+      const nodeIdMatch = line.match(/^([\w-]+)/);
+      if (nodeIdMatch) {
+        nodeClasses.set(nodeIdMatch[1], classMatch[1]);
+      }
     }
 
     // Skip diagram type declarations, styling, and other comments
@@ -2367,40 +2446,138 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
 
     // Single square brackets [ ] - agent task (default)
     // Pattern: ID["text"] or ID[text]
-    // Check for ext: prefix to make it external
+    // Check for ext: prefix to make it external, or :::class suffix for type override
     const squareMatch = line.match(/^([\w-]+)\[["']?([^"\]]+?)["']?\]/);
     if (squareMatch) {
       const [, id, text] = squareMatch;
       const lowerText = text.toLowerCase();
 
-      if (lowerText.startsWith('ext:') || lowerText.startsWith('api:') || lowerText.startsWith('webhook:')) {
-        const cleanName = text.replace(/^(ext|api|webhook):\s*/i, '').trim();
-        nodes.set(id, { id, name: cleanName, stepType: 'external' });
-      } else {
-        nodes.set(id, { id, name: text, stepType: 'agent' });
+      // Check for :::class suffix to determine step type
+      const classType = nodeClasses.get(id);
+      let stepType: WorkflowStepType = 'agent';
+
+      if (classType) {
+        // Map class names to step types
+        const classToType: Record<string, WorkflowStepType> = {
+          'agent': 'agent',
+          'manual': 'manual',
+          'external': 'external',
+          'webhook': 'external',
+          'decision': 'decision',
+          'foreach': 'foreach',
+          'join': 'join',
+          'flow': 'flow',
+        };
+        stepType = classToType[classType] || 'agent';
+      } else if (lowerText.startsWith('ext:') || lowerText.startsWith('api:') || lowerText.startsWith('webhook:')) {
+        stepType = 'external';
       }
+
+      const cleanName = text.replace(/^(ext|api|webhook):\s*/i, '').trim();
+      nodes.set(id, { id, name: cleanName, stepType });
       continue;
     }
 
-    // Parse connections
-    // Labeled connections: A -->|"label"| B or A -->|label| B
-    const labeledConnMatch = line.match(/([\w-]+)\s*-->?\|["']?([^|"']+?)["']?\|\s*([\w-]+)/);
-    if (labeledConnMatch) {
-      connections.push({
-        from: labeledConnMatch[1],
-        to: labeledConnMatch[3],
-        label: labeledConnMatch[2].trim()
-      });
-      continue;
+    // Parse connections - handle chained connections like: A -->|"label"| B --> C
+    // Also extract inline node definitions from connection lines
+
+    // Helper to extract inline node definition and return node ID
+    const extractInlineNode = (segment: string): string | null => {
+      // Double square brackets [[ ]] - flow/foreach/join
+      const doubleSquare = segment.match(/([\w-]+)\[\[["']?([^"\]]+?)["']?\]\]/);
+      if (doubleSquare) {
+        const [, id, text] = doubleSquare;
+        const lowerText = text.toLowerCase();
+        let stepType: WorkflowStepType = 'flow';
+        let cleanName = text;
+        if (lowerText.startsWith('run:') || lowerText.startsWith('flow:')) {
+          cleanName = text.replace(/^(run|flow):\s*/i, '').trim();
+        } else if (lowerText.startsWith('each:') || lowerText.startsWith('foreach:')) {
+          stepType = 'foreach';
+          cleanName = text.replace(/^(each|foreach):\s*/i, '').trim();
+        } else if (lowerText.startsWith('join:') || lowerText.startsWith('merge:')) {
+          stepType = 'join';
+          cleanName = text.replace(/^(join|merge):\s*/i, '').trim();
+        }
+        if (!nodes.has(id)) {
+          nodes.set(id, { id, name: cleanName, stepType });
+        }
+        return id;
+      }
+
+      // Diamond { } - decision
+      const diamond = segment.match(/([\w-]+)\{["']?([^"}]+?)["']?\}/);
+      if (diamond) {
+        const [, id, text] = diamond;
+        if (!nodes.has(id)) {
+          nodes.set(id, { id, name: text, stepType: 'decision' });
+        }
+        return id;
+      }
+
+      // Round ( ) - manual
+      const round = segment.match(/([\w-]+)\(["']?([^")]+?)["']?\)/);
+      if (round) {
+        const [, id, text] = round;
+        if (!nodes.has(id)) {
+          nodes.set(id, { id, name: text, stepType: 'manual' });
+        }
+        return id;
+      }
+
+      // Square [ ] - agent
+      const square = segment.match(/([\w-]+)\[["']?([^"\]]+?)["']?\]/);
+      if (square) {
+        const [, id, text] = square;
+        if (!nodes.has(id)) {
+          nodes.set(id, { id, name: text, stepType: 'agent' });
+        }
+        return id;
+      }
+
+      return null;
+    };
+
+    // First, find all labeled connections in the line
+    const labeledConnRegex = /([\w-]+(?:\[\[.*?\]\]|\{.*?\}|\(.*?\)|\[.*?\])?)\s*-->?\|["']?([^|"']+?)["']?\|\s*([\w-]+(?:\[\[.*?\]\]|\{.*?\}|\(.*?\)|\[.*?\])?)/g;
+    let labeledMatch;
+    const labeledFromTo = new Set<string>();  // Track labeled connections to avoid duplicates
+
+    while ((labeledMatch = labeledConnRegex.exec(line)) !== null) {
+      let from = labeledMatch[1];
+      let to = labeledMatch[3];
+      const label = labeledMatch[2].trim();
+
+      // Extract inline nodes if present
+      const fromNode = extractInlineNode(from);
+      const toNode = extractInlineNode(to);
+
+      // Use extracted node ID or the raw ID
+      from = fromNode || from.match(/^([\w-]+)/)?.[1] || from;
+      to = toNode || to.match(/^([\w-]+)/)?.[1] || to;
+
+      connections.push({ from, to, label });
+      labeledFromTo.add(`${from}->${to}`);
     }
 
-    // Simple connections: A --> B
-    const simpleConnMatch = line.match(/([\w-]+)\s*-->\s*([\w-]+)/);
-    if (simpleConnMatch) {
-      // Check if already added as labeled connection
-      const from = simpleConnMatch[1];
-      const to = simpleConnMatch[2];
-      if (!connections.some((c) => c.from === from && c.to === to)) {
+    // Then, find all simple connections that weren't already captured as labeled
+    const simpleConnRegex = /([\w-]+(?:\[\[.*?\]\]|\{.*?\}|\(.*?\)|\[.*?\])?)\s*-->\s*([\w-]+(?:\[\[.*?\]\]|\{.*?\}|\(.*?\)|\[.*?\])?)/g;
+    let simpleMatch;
+
+    while ((simpleMatch = simpleConnRegex.exec(line)) !== null) {
+      let from = simpleMatch[1];
+      let to = simpleMatch[2];
+
+      // Extract inline nodes if present
+      const fromNode = extractInlineNode(from);
+      const toNode = extractInlineNode(to);
+
+      // Use extracted node ID or the raw ID
+      from = fromNode || from.match(/^([\w-]+)/)?.[1] || from;
+      to = toNode || to.match(/^([\w-]+)/)?.[1] || to;
+
+      // Only add if not already captured as a labeled connection
+      if (!labeledFromTo.has(`${from}->${to}`) && !connections.some((c) => c.from === from && c.to === to)) {
         connections.push({ from, to });
       }
     }
@@ -2530,7 +2707,7 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
     }
   }
 
-  return steps;
+  return { steps, warnings };
 }
 
 // Helper function to generate Mermaid diagram from workflow steps
@@ -2656,12 +2833,12 @@ function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string): string
     }
   }
 
-  // Add linear connections for nodes without explicit connections
-  for (let i = 0; i < steps.length - 1; i++) {
-    const step = steps[i];
-    const nodeId = step.id || `step${i}`;
-
-    if (!connectedFrom.has(nodeId)) {
+  // Only add linear connections if NO nodes have explicit connections defined
+  // This preserves nonlinear workflows while supporting legacy linear-only workflows
+  if (connectedFrom.size === 0) {
+    for (let i = 0; i < steps.length - 1; i++) {
+      const step = steps[i];
+      const nodeId = step.id || `step${i}`;
       const nextNodeId = steps[i + 1].id || `step${i + 1}`;
       lines.push(`    ${nodeId} --> ${nextNodeId}`);
     }

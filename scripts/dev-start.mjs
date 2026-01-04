@@ -44,16 +44,20 @@ const backendEnv = readFileSync(backendEnvPath, 'utf-8');
 const frontendEnv = readFileSync(frontendEnvPath, 'utf-8');
 
 const bePortMatch = backendEnv.match(/PORT=(\d+)/);
-const feApiUrlMatch = frontendEnv.match(/NEXT_PUBLIC_API_URL=http:\/\/localhost:(\d+)/);
+const fePortMatch = frontendEnv.match(/PORT=(\d+)/);
 
 if (!bePortMatch) {
   console.error('Could not read backend port from .env.local');
   process.exit(1);
 }
 
+if (!fePortMatch) {
+  console.error('Could not read frontend port from .env.local');
+  process.exit(1);
+}
+
 const bePort = parseInt(bePortMatch[1], 10);
-// Frontend port is backend port - 100 (FE range starts at 3000, BE at 3100)
-const fePort = bePort - 100;
+const fePort = parseInt(fePortMatch[1], 10);
 
 console.log(`Starting development servers...`);
 console.log(`  Frontend: http://localhost:${fePort}`);
@@ -69,17 +73,17 @@ try {
   // Ignore errors if already running
 }
 
-// Start backend and frontend concurrently
+// Start backend and frontend concurrently using npx concurrently directly
 const concurrently = spawn('npx', [
   'concurrently',
   '-n', 'api,web',
   '-c', 'blue,green',
+  '--kill-others-on-fail',
   `"cd backend && PORT=${bePort} CORS_ORIGIN=http://localhost:${fePort} npm run dev"`,
   `"cd frontend && PORT=${fePort} npm run dev"`
 ], {
   cwd: ROOT_DIR,
   stdio: 'inherit',
-  shell: true,
   env: { ...process.env }
 });
 
