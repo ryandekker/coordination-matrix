@@ -30,9 +30,18 @@ import {
 import { toast } from 'sonner'
 import { Save, Eye, History, FileEdit, Loader2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
-// Dynamic import for markdown editor to avoid SSR issues
-const MDEditor = dynamic(() => import('@uiw/react-md-editor'), { ssr: false })
+// Dynamic import for Novel editor to avoid SSR issues
+const Editor = dynamic(() => import('novel').then((mod) => mod.Editor), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-full text-muted-foreground">
+      Loading editor...
+    </div>
+  ),
+})
 
 const DOCUMENT_TYPES: { value: DocumentType; label: string }[] = [
   { value: 'sop', label: 'SOP' },
@@ -273,21 +282,28 @@ export function DocumentModal({
               </div>
 
               <TabsContent value="edit" className="flex-1 m-0 overflow-hidden">
-                <div className="h-full" data-color-mode="light">
-                  <MDEditor
-                    value={content}
-                    onChange={(val) => setContent(val || '')}
-                    height="100%"
-                    preview="edit"
-                    hideToolbar={false}
+                <div className="h-full overflow-auto">
+                  <Editor
+                    defaultValue={content}
+                    onUpdate={(editor) => {
+                      if (editor) {
+                        // Get markdown content from the editor
+                        const markdown = editor.storage.markdown?.getMarkdown?.() || editor.getText()
+                        setContent(markdown)
+                      }
+                    }}
+                    disableLocalStorage
+                    className="min-h-full border-0"
                   />
                 </div>
               </TabsContent>
 
               <TabsContent value="preview" className="flex-1 m-0 overflow-auto p-6">
-                <div data-color-mode="light">
-                  <MDEditor.Markdown source={content} />
-                </div>
+                <article className="prose prose-sm dark:prose-invert max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {content}
+                  </ReactMarkdown>
+                </article>
               </TabsContent>
 
               <TabsContent value="history" className="flex-1 m-0 overflow-auto p-6">

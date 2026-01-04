@@ -2,7 +2,6 @@
 
 import { use, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import dynamic from 'next/dynamic'
 import { useDocument, useDocumentVersions } from '@/hooks/use-documents'
 import { DocumentStatus, DocumentType } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -20,8 +19,8 @@ import {
 } from 'lucide-react'
 import { formatDistanceToNow, format } from 'date-fns'
 import { DocumentModal } from '@/components/documents/document-modal'
-
-const MDEditor = dynamic(() => import('@uiw/react-md-editor'), { ssr: false })
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 const DOCUMENT_TYPES: Record<DocumentType, string> = {
   sop: 'SOP',
@@ -158,9 +157,11 @@ export default function DocumentViewPage({
         </div>
 
         <TabsContent value="content" className="flex-1 m-0 overflow-auto p-6">
-          <div className="max-w-4xl mx-auto" data-color-mode="light">
-            <MDEditor.Markdown source={document.content} />
-          </div>
+          <article className="max-w-4xl mx-auto prose prose-sm dark:prose-invert">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {document.content}
+            </ReactMarkdown>
+          </article>
         </TabsContent>
 
         <TabsContent value="history" className="flex-1 m-0 overflow-auto p-6">
