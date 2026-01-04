@@ -1,4 +1,20 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+import { existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+// Load .env.local first (for multi-worktree dev), then .env as fallback
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const rootDir = join(__dirname, '..');
+const envLocalPath = join(rootDir, '.env.local');
+const envPath = join(rootDir, '.env');
+
+if (existsSync(envLocalPath)) {
+  dotenv.config({ path: envLocalPath });
+}
+if (existsSync(envPath)) {
+  dotenv.config({ path: envPath }); // Won't override existing vars
+}
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';

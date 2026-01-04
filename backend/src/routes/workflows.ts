@@ -1490,6 +1490,7 @@ async function handleImportMulti(req: Request, res: Response, next: NextFunction
       action: 'create' | 'update' | 'skip';
       stepCount: number;
       error?: string;
+      warnings?: string[];
     }> = [];
 
     for (const section of workflowSections) {
@@ -1509,8 +1510,8 @@ async function handleImportMulti(req: Request, res: Response, next: NextFunction
         // Create a fake flowchart for parsing
         const mermaidDiagram = `flowchart TD\n${mermaidContent}`;
 
-        // Parse steps from the subgraph content
-        const steps = parseMermaidToSteps(mermaidDiagram);
+        // Parse steps from the subgraph content (with warnings)
+        const { steps, warnings } = parseMermaidToStepsWithWarnings(mermaidDiagram);
 
         if (dryRun) {
           // Just report what would happen
@@ -1519,6 +1520,7 @@ async function handleImportMulti(req: Request, res: Response, next: NextFunction
             id: workflowId || undefined,
             action: workflowId ? 'update' : 'create',
             stepCount: steps.length,
+            warnings: warnings.length > 0 ? warnings : undefined,
           });
         } else {
           // Actually create or update
@@ -1546,6 +1548,7 @@ async function handleImportMulti(req: Request, res: Response, next: NextFunction
                 id: workflowId,
                 action: 'update',
                 stepCount: steps.length,
+                warnings: warnings.length > 0 ? warnings : undefined,
               });
             } else {
               // ID not found, create new instead
@@ -1568,6 +1571,7 @@ async function handleImportMulti(req: Request, res: Response, next: NextFunction
                 id: insertResult.insertedId.toString(),
                 action: 'create',
                 stepCount: steps.length,
+                warnings: warnings.length > 0 ? warnings : undefined,
               });
             }
           } else {
@@ -1591,6 +1595,7 @@ async function handleImportMulti(req: Request, res: Response, next: NextFunction
               id: insertResult.insertedId.toString(),
               action: 'create',
               stepCount: steps.length,
+              warnings: warnings.length > 0 ? warnings : undefined,
             });
           }
         }
@@ -1723,9 +1728,22 @@ function parseMultiWorkflowMermaid(mermaid: string): ParsedWorkflowSection[] {
   return workflows;
 }
 
+// Result type for parseMermaidToSteps that includes parse warnings
+interface ParseMermaidResult {
+  steps: WorkflowStep[];
+  warnings: string[];
+}
+
 // Helper function to parse Mermaid flowchart to workflow steps
 function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
+  const result = parseMermaidToStepsWithWarnings(mermaid);
+  return result.steps;
+}
+
+// Version that returns warnings for error reporting
+function parseMermaidToStepsWithWarnings(mermaid: string): ParseMermaidResult {
   const steps: WorkflowStep[] = [];
+  const warnings: string[] = [];
   const lines = mermaid.split('\n').map((l) => l.trim()).filter(Boolean);
 
   // Node storage with full step info
@@ -1741,6 +1759,9 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
   // Step metadata from comments: %% @step(nodeId): {json}
   const stepMetadata: Map<string, Record<string, unknown>> = new Map();
 
+  // Track class definitions for step type inference from :::class suffix
+  const nodeClasses: Map<string, string> = new Map();
+
   for (const line of lines) {
     // Parse step configuration comments first
     const stepConfigMatch = line.match(/%% @step\(([^)]+)\):\s*(.+)/);
@@ -1749,10 +1770,22 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
         const [, stepId, configJson] = stepConfigMatch;
         const config = JSON.parse(configJson);
         stepMetadata.set(stepId, config);
-      } catch {
-        // Invalid JSON, skip
+      } catch (e) {
+        // Capture JSON parse errors with details
+        const errorMsg = e instanceof Error ? e.message : 'Unknown error';
+        warnings.push(`Invalid JSON in @step(${stepConfigMatch[1]}): ${errorMsg}`);
       }
       continue;
+    }
+
+    // Extract :::class suffix from any node definition
+    const classMatch = line.match(/:::([\w-]+)\s*$/);
+    if (classMatch) {
+      // Find the node ID at the start of the line
+      const nodeIdMatch = line.match(/^([\w-]+)/);
+      if (nodeIdMatch) {
+        nodeClasses.set(nodeIdMatch[1], classMatch[1]);
+      }
     }
 
     // Skip diagram type declarations, styling, and other comments
@@ -1850,18 +1883,35 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
 
     // Single square brackets [ ] - agent task (default)
     // Pattern: ID["text"] or ID[text]
-    // Check for ext: prefix to make it external
+    // Check for ext: prefix to make it external, or :::class suffix for type override
     const squareMatch = line.match(/^([\w-]+)\[["']?([^"\]]+?)["']?\]/);
     if (squareMatch) {
       const [, id, text] = squareMatch;
       const lowerText = text.toLowerCase();
 
-      if (lowerText.startsWith('ext:') || lowerText.startsWith('api:') || lowerText.startsWith('webhook:')) {
-        const cleanName = text.replace(/^(ext|api|webhook):\s*/i, '').trim();
-        nodes.set(id, { id, name: cleanName, stepType: 'external' });
-      } else {
-        nodes.set(id, { id, name: text, stepType: 'agent' });
+      // Check for :::class suffix to determine step type
+      const classType = nodeClasses.get(id);
+      let stepType: WorkflowStepType = 'agent';
+
+      if (classType) {
+        // Map class names to step types
+        const classToType: Record<string, WorkflowStepType> = {
+          'agent': 'agent',
+          'manual': 'manual',
+          'external': 'external',
+          'webhook': 'external',
+          'decision': 'decision',
+          'foreach': 'foreach',
+          'join': 'join',
+          'flow': 'flow',
+        };
+        stepType = classToType[classType] || 'agent';
+      } else if (lowerText.startsWith('ext:') || lowerText.startsWith('api:') || lowerText.startsWith('webhook:')) {
+        stepType = 'external';
       }
+
+      const cleanName = text.replace(/^(ext|api|webhook):\s*/i, '').trim();
+      nodes.set(id, { id, name: cleanName, stepType });
       continue;
     }
 
@@ -2094,7 +2144,7 @@ function parseMermaidToSteps(mermaid: string): WorkflowStep[] {
     }
   }
 
-  return steps;
+  return { steps, warnings };
 }
 
 // Helper function to generate Mermaid diagram from workflow steps

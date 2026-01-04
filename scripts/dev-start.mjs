@@ -73,13 +73,14 @@ try {
   // Ignore errors if already running
 }
 
-// Start backend and frontend concurrently
+// Start backend and frontend concurrently using npx concurrently directly
 const concurrently = spawn('npx', [
   'concurrently',
   '-n', 'api,web',
   '-c', 'blue,green',
-  `cd backend && PORT=${bePort} CORS_ORIGIN=http://localhost:${fePort} npm run dev`,
-  `cd frontend && PORT=${fePort} npm run dev`
+  '--kill-others-on-fail',
+  'npm run dev --prefix backend',
+  `npm run dev --prefix frontend -- -p ${fePort}`
 ], {
   cwd: ROOT_DIR,
   stdio: 'inherit',
