@@ -155,90 +155,197 @@
 /* ByteMD Editor Styles */
 .bytemd-container {
   height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .bytemd-container .bytemd {
   height: 100%;
   border: none;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.bytemd-container .bytemd-body {
+  flex: 1;
+  min-height: 0;
 }
 
 .bytemd-container .bytemd-toolbar {
-  @apply border-b bg-muted/30;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--muted) / 0.3);
 }
 
-.bytemd-container .bytemd-editor {
-  @apply bg-background;
+.bytemd-container .bytemd-toolbar-icon {
+  color: hsl(var(--foreground));
 }
 
+.bytemd-container .bytemd-toolbar-icon:hover {
+  background: hsl(var(--muted));
+}
+
+.bytemd-container .bytemd-editor,
 .bytemd-container .bytemd-preview {
-  @apply bg-background;
+  background: hsl(var(--background));
 }
 
-/* Dark mode support for ByteMD */
-.dark .bytemd-container .bytemd {
-  @apply bg-background;
+.bytemd-container .bytemd-split .bytemd-editor,
+.bytemd-container .bytemd-split .bytemd-preview {
+  border-color: hsl(var(--border));
 }
 
-.dark .bytemd-container .bytemd-toolbar {
-  @apply bg-muted/30 border-border;
-}
-
-.dark .bytemd-container .bytemd-toolbar-icon:hover {
-  @apply bg-muted;
-}
-
-.dark .bytemd-container .bytemd-editor .CodeMirror {
+/* CodeMirror base styling */
+.bytemd-container .CodeMirror {
   background: hsl(var(--background));
   color: hsl(var(--foreground));
+  height: 100%;
 }
 
-.dark .bytemd-container .bytemd-preview {
-  background: hsl(var(--background));
-  color: hsl(var(--foreground));
-}
-
-.dark .bytemd-container .bytemd-split .bytemd-editor,
-.dark .bytemd-container .bytemd-split .bytemd-preview {
-  @apply border-border;
-}
-
-/* CodeMirror theming for dark mode */
-.dark .bytemd-container .CodeMirror-gutters {
+.bytemd-container .CodeMirror-gutters {
   background: hsl(var(--muted));
   border-color: hsl(var(--border));
 }
 
-.dark .bytemd-container .CodeMirror-linenumber {
+.bytemd-container .CodeMirror-linenumber {
   color: hsl(var(--muted-foreground));
 }
 
-.dark .bytemd-container .CodeMirror-cursor {
+.bytemd-container .CodeMirror-cursor {
   border-left-color: hsl(var(--foreground));
 }
 
-.dark .bytemd-container .CodeMirror-selected {
-  background: hsl(var(--accent) / 0.3);
+.bytemd-container .CodeMirror-selected {
+  background: hsl(var(--accent) / 0.3) !important;
 }
 
-/* Markdown syntax highlighting in dark mode */
-.dark .bytemd-container .cm-header {
+/* Markdown syntax highlighting - headings with size */
+.bytemd-container .cm-header-1 {
+  font-size: 1.75em;
+  font-weight: 700;
+  color: hsl(var(--foreground));
+}
+
+.bytemd-container .cm-header-2 {
+  font-size: 1.5em;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.bytemd-container .cm-header-3 {
+  font-size: 1.25em;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.bytemd-container .cm-header-4,
+.bytemd-container .cm-header-5,
+.bytemd-container .cm-header-6 {
+  font-size: 1.1em;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.bytemd-container .cm-link,
+.bytemd-container .cm-url {
   color: hsl(var(--primary));
 }
 
-.dark .bytemd-container .cm-link,
-.dark .bytemd-container .cm-url {
-  color: hsl(var(--primary));
-}
-
-.dark .bytemd-container .cm-comment {
+.bytemd-container .cm-comment {
   color: hsl(var(--muted-foreground));
 }
 
-.dark .bytemd-container .cm-string {
+.bytemd-container .cm-string {
   color: #98c379;
 }
 
-.dark .bytemd-container .cm-keyword {
+.bytemd-container .cm-keyword {
   color: #c678dd;
+}
+
+.bytemd-container .cm-strong {
+  font-weight: 700;
+}
+
+.bytemd-container .cm-em {
+  font-style: italic;
+}
+
+/* Preview pane styling */
+.bytemd-container .bytemd-preview .markdown-body {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+.bytemd-container .bytemd-preview .markdown-body h1 {
+  font-size: 1.75em;
+  font-weight: 700;
+  border-bottom: 1px solid hsl(var(--border));
+  padding-bottom: 0.3em;
+  margin-bottom: 0.5em;
+}
+
+.bytemd-container .bytemd-preview .markdown-body h2 {
+  font-size: 1.5em;
+  font-weight: 600;
+  border-bottom: 1px solid hsl(var(--border));
+  padding-bottom: 0.3em;
+  margin-bottom: 0.5em;
+}
+
+.bytemd-container .bytemd-preview .markdown-body h3 {
+  font-size: 1.25em;
+  font-weight: 600;
+}
+
+.bytemd-container .bytemd-preview .markdown-body a {
+  color: hsl(var(--primary));
+}
+
+.bytemd-container .bytemd-preview .markdown-body code {
+  background: hsl(var(--muted));
+  padding: 0.2em 0.4em;
+  border-radius: 3px;
+}
+
+.bytemd-container .bytemd-preview .markdown-body pre {
+  background: hsl(var(--muted));
+  padding: 1em;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
+.bytemd-container .bytemd-preview .markdown-body blockquote {
+  border-left: 4px solid hsl(var(--border));
+  padding-left: 1em;
+  color: hsl(var(--muted-foreground));
+}
+
+.bytemd-container .bytemd-preview .markdown-body table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.bytemd-container .bytemd-preview .markdown-body th,
+.bytemd-container .bytemd-preview .markdown-body td {
+  border: 1px solid hsl(var(--border));
+  padding: 0.5em 1em;
+}
+
+.bytemd-container .bytemd-preview .markdown-body th {
+  background: hsl(var(--muted));
+}
+
+/* Dropdown and popup menus */
+.bytemd-container .bytemd-dropdown,
+.bytemd-container .tippy-box {
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+}
+
+.bytemd-container .bytemd-dropdown-item:hover {
+  background: hsl(var(--muted));
 }
 
