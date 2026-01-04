@@ -303,7 +303,7 @@ export default function MultiWorkflowEditPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={handleExport}
+              onClick={() => handleExport()}
               disabled={isLoading}
               className="gap-1.5"
             >

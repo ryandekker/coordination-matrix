@@ -1,5 +1,7 @@
 'use client'
 
+export const runtime = 'edge'
+
 import { use, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useDocument, useDocumentVersions } from '@/hooks/use-documents'
