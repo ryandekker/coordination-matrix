@@ -293,8 +293,8 @@ export function DocumentModal({
                 </TabsList>
               </div>
 
-              <TabsContent value="edit" className="flex-1 m-0 overflow-hidden">
-                <div className="h-full bytemd-container">
+              <TabsContent value="edit" className="flex-1 m-0 overflow-hidden flex flex-col min-h-0">
+                <div className="flex-1 min-h-0 bytemd-container">
                   <Editor
                     value={content}
                     plugins={plugins}
