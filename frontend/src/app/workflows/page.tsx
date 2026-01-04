@@ -981,6 +981,15 @@ export default function WorkflowsPage() {
             <span className="text-sm text-muted-foreground">
               {selectedCount} selected
             </span>
+            <Link href={`/workflows/multi-edit?ids=${selectedWorkflowIds.join(',')}`}>
+              <Button
+                variant="default"
+                size="sm"
+              >
+                <Pencil className="h-4 w-4 mr-1" />
+                Edit Selected
+              </Button>
+            </Link>
             <Button
               variant="outline"
               size="sm"

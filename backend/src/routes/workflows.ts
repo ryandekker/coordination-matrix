@@ -1223,8 +1223,23 @@ workflowsRouter.get('/export-multi', async (req: Request, res: Response, next: N
     // Build query - optionally filter by IDs
     const query: Record<string, unknown> = {};
     if (ids && typeof ids === 'string') {
-      const idList = ids.split(',').map(id => new ObjectId(id.trim()));
-      query._id = { $in: idList };
+      const idStrings = ids.split(',').map(id => id.trim()).filter(Boolean);
+      const validIds: ObjectId[] = [];
+      for (const idStr of idStrings) {
+        try {
+          if (ObjectId.isValid(idStr)) {
+            validIds.push(new ObjectId(idStr));
+          }
+        } catch {
+          // Skip invalid IDs
+        }
+      }
+      if (validIds.length > 0) {
+        query._id = { $in: validIds };
+      } else if (idStrings.length > 0) {
+        // All provided IDs were invalid
+        throw createError('Invalid workflow IDs provided', 400);
+      }
     }
 
     const workflows = await db

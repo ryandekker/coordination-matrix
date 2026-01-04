@@ -1,17 +1,11 @@
 'use client'
 
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { MermaidLiveEditor } from '@/components/ui/mermaid-live-editor'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
 import { getAuthHeader } from '@/lib/auth'
 import {
   ArrowLeft,
@@ -27,21 +21,10 @@ import {
   Eye,
   ChevronDown,
   ChevronUp,
-  Search,
-  ListFilter,
-  Workflow,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
-
-interface WorkflowSummary {
-  _id: string
-  name: string
-  description?: string
-  isActive: boolean
-  steps?: { id: string; name: string }[]
-}
 
 interface ImportResult {
   name: string
@@ -91,6 +74,10 @@ const MULTI_WORKFLOW_TEMPLATE = `flowchart TD
 `
 
 export default function MultiWorkflowEditPage() {
+  const searchParams = useSearchParams()
+  const idsParam = searchParams.get('ids')
+  const workflowIds = idsParam ? idsParam.split(',').filter(Boolean) : []
+
   const [mermaidCode, setMermaidCode] = useState('')
   const [mermaidError, setMermaidError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -100,101 +87,43 @@ export default function MultiWorkflowEditPage() {
   const [isDryRun, setIsDryRun] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [resultsExpanded, setResultsExpanded] = useState(true)
+  const [workflowCount, setWorkflowCount] = useState<number>(0)
 
-  // Workflow selection state
-  const [workflows, setWorkflows] = useState<WorkflowSummary[]>([])
-  const [selectedWorkflowIds, setSelectedWorkflowIds] = useState<Set<string>>(new Set())
-  const [workflowSearchQuery, setWorkflowSearchQuery] = useState('')
-  const [isLoadingWorkflows, setIsLoadingWorkflows] = useState(false)
-  const [selectorExpanded, setSelectorExpanded] = useState(true)
-
-  // Fetch all workflows on mount
-  useEffect(() => {
-    const fetchWorkflows = async () => {
-      setIsLoadingWorkflows(true)
-      try {
-        const response = await fetch(`${API_BASE}/workflows?includeInactive=true`, {
-          headers: getAuthHeader(),
-        })
-        if (response.ok) {
-          const result = await response.json()
-          setWorkflows(result.data || [])
-        }
-      } catch {
-        // Silently fail - workflows list is optional
-      } finally {
-        setIsLoadingWorkflows(false)
-      }
-    }
-    fetchWorkflows()
-  }, [])
-
-  // Filter workflows by search query
-  const filteredWorkflows = useMemo(() => {
-    if (!workflowSearchQuery.trim()) return workflows
-    const query = workflowSearchQuery.toLowerCase()
-    return workflows.filter(w =>
-      w.name.toLowerCase().includes(query) ||
-      w.description?.toLowerCase().includes(query)
-    )
-  }, [workflows, workflowSearchQuery])
-
-  // Toggle workflow selection
-  const toggleWorkflowSelection = useCallback((id: string) => {
-    setSelectedWorkflowIds(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) {
-        next.delete(id)
-      } else {
-        next.add(id)
-      }
-      return next
-    })
-  }, [])
-
-  // Select all filtered workflows
-  const selectAllFiltered = useCallback(() => {
-    setSelectedWorkflowIds(prev => {
-      const next = new Set(prev)
-      for (const w of filteredWorkflows) {
-        next.add(w._id)
-      }
-      return next
-    })
-  }, [filteredWorkflows])
-
-  // Deselect all workflows
-  const deselectAll = useCallback(() => {
-    setSelectedWorkflowIds(new Set())
-  }, [])
-
-  // Export selected workflows (or all if none selected)
-  const handleExport = useCallback(async () => {
+  // Export workflows (by IDs if provided, or all)
+  const handleExport = useCallback(async (ids?: string[]) => {
     setIsLoading(true)
     setError(null)
     try {
       let url = `${API_BASE}/workflows/export-multi`
-      if (selectedWorkflowIds.size > 0) {
-        url += `?ids=${Array.from(selectedWorkflowIds).join(',')}`
+      const idsToExport = ids || workflowIds
+      if (idsToExport.length > 0) {
+        url += `?ids=${idsToExport.join(',')}`
       }
       const response = await fetch(url, {
         headers: getAuthHeader(),
       })
       if (!response.ok) {
-        throw new Error(`Export failed: ${response.statusText}`)
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.message || `Export failed: ${response.statusText}`)
       }
       const result = await response.json()
       setMermaidCode(result.data.mermaid || '')
+      setWorkflowCount(result.data.workflows?.length || 0)
       setImportResults(null)
       setImportSummary(null)
-      // Collapse selector after export to give more room to editor
-      setSelectorExpanded(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Export failed')
     } finally {
       setIsLoading(false)
     }
-  }, [selectedWorkflowIds])
+  }, [workflowIds])
+
+  // Auto-load workflows from URL params on mount
+  useEffect(() => {
+    if (workflowIds.length > 0) {
+      handleExport(workflowIds)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load template for new workflows
   const handleNewFromTemplate = useCallback(() => {
@@ -286,9 +215,18 @@ export default function MultiWorkflowEditPage() {
                 </Button>
               </Link>
               <div>
-                <h1 className="text-xl font-semibold">Multi-Workflow Editor</h1>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl font-semibold">Multi-Workflow Editor</h1>
+                  {workflowCount > 0 && (
+                    <Badge variant="secondary" className="text-xs">
+                      {workflowCount} workflow{workflowCount !== 1 ? 's' : ''}
+                    </Badge>
+                  )}
+                </div>
                 <p className="text-sm text-muted-foreground">
-                  Export, edit, and import multiple workflows as Mermaid
+                  {workflowIds.length > 0
+                    ? 'Edit selected workflows as Mermaid diagrams'
+                    : 'Export, edit, and import workflows as Mermaid'}
                 </p>
               </div>
             </div>
@@ -303,149 +241,40 @@ export default function MultiWorkflowEditPage() {
                 <Plus className="h-4 w-4" />
                 New from Template
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleExport}
-                disabled={isLoading}
-                className="gap-2"
-              >
-                {isLoading ? (
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="h-4 w-4" />
-                )}
-                {selectedWorkflowIds.size > 0
-                  ? `Export ${selectedWorkflowIds.size} Selected`
-                  : 'Export All Workflows'}
-              </Button>
+              {workflowIds.length === 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleExport()}
+                  disabled={isLoading}
+                  className="gap-2"
+                >
+                  {isLoading ? (
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4" />
+                  )}
+                  Export All Workflows
+                </Button>
+              )}
+              {workflowIds.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleExport()}
+                  disabled={isLoading}
+                  className="gap-2"
+                >
+                  {isLoading ? (
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                  Reload
+                </Button>
+              )}
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* Workflow Selector */}
-      <div className="border-b bg-muted/10 flex-shrink-0">
-        <div className="container mx-auto px-4">
-          <Collapsible open={selectorExpanded} onOpenChange={setSelectorExpanded}>
-            <CollapsibleTrigger className="flex items-center justify-between w-full py-3 hover:bg-muted/20 transition-colors rounded">
-              <div className="flex items-center gap-3">
-                <ListFilter className="h-4 w-4 text-muted-foreground" />
-                <span className="font-medium text-sm">
-                  Select Workflows to Edit
-                </span>
-                {selectedWorkflowIds.size > 0 && (
-                  <Badge variant="secondary" className="text-xs">
-                    {selectedWorkflowIds.size} selected
-                  </Badge>
-                )}
-                {workflows.length > 0 && selectedWorkflowIds.size === 0 && (
-                  <span className="text-xs text-muted-foreground">
-                    (all {workflows.length} workflows will be exported)
-                  </span>
-                )}
-              </div>
-              {selectorExpanded ? (
-                <ChevronUp className="h-4 w-4 text-muted-foreground" />
-              ) : (
-                <ChevronDown className="h-4 w-4 text-muted-foreground" />
-              )}
-            </CollapsibleTrigger>
-
-            <CollapsibleContent>
-              <div className="pb-4 space-y-3">
-                {/* Search and bulk actions */}
-                <div className="flex items-center gap-3">
-                  <div className="relative flex-1 max-w-sm">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Search workflows..."
-                      value={workflowSearchQuery}
-                      onChange={(e) => setWorkflowSearchQuery(e.target.value)}
-                      className="pl-9 h-9"
-                    />
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={selectAllFiltered}
-                    className="text-xs"
-                  >
-                    Select All{workflowSearchQuery ? ' Filtered' : ''}
-                  </Button>
-                  {selectedWorkflowIds.size > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={deselectAll}
-                      className="text-xs text-muted-foreground"
-                    >
-                      Clear Selection
-                    </Button>
-                  )}
-                </div>
-
-                {/* Workflows list */}
-                {isLoadingWorkflows ? (
-                  <div className="flex items-center justify-center py-6">
-                    <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
-                  </div>
-                ) : workflows.length === 0 ? (
-                  <div className="text-center py-6 text-muted-foreground text-sm">
-                    No workflows found. Create some workflows first.
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 max-h-[200px] overflow-y-auto pr-2">
-                    {filteredWorkflows.map((workflow) => (
-                      <div
-                        key={workflow._id}
-                        onClick={() => toggleWorkflowSelection(workflow._id)}
-                        className={cn(
-                          'flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors',
-                          selectedWorkflowIds.has(workflow._id)
-                            ? 'bg-primary/5 border-primary/30'
-                            : 'bg-background hover:bg-muted/30 border-border'
-                        )}
-                      >
-                        <Checkbox
-                          checked={selectedWorkflowIds.has(workflow._id)}
-                          onCheckedChange={() => toggleWorkflowSelection(workflow._id)}
-                          onClick={(e) => e.stopPropagation()}
-                          className="mt-0.5"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <Workflow className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                            <span className="font-medium text-sm truncate">
-                              {workflow.name}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2 mt-1">
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                'text-[10px] px-1.5 py-0',
-                                workflow.isActive
-                                  ? 'text-green-600 border-green-300'
-                                  : 'text-gray-400 border-gray-300'
-                              )}
-                            >
-                              {workflow.isActive ? 'Active' : 'Inactive'}
-                            </Badge>
-                            {workflow.steps && (
-                              <span className="text-[10px] text-muted-foreground">
-                                {workflow.steps.length} steps
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
         </div>
       </div>
 
