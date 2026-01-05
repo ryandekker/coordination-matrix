@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { ObjectId, Filter, Sort, Document, WithId } from 'mongodb';
+import { ObjectId, Filter, Sort, Document } from 'mongodb';
 import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
 import { ReferenceResolver } from '../services/reference-resolver.js';
@@ -186,6 +186,7 @@ tasksRouter.get('/', async (req: Request, res: Response, next: NextFunction) => 
     ]);
 
     // Add child count to each task to enable expand/collapse UI
+    // Use a single aggregation query to get counts
     const taskIds = tasks.map(t => t._id);
     const childCounts = await db.collection<Task>('tasks').aggregate([
       { $match: { parentId: { $in: taskIds } } },
@@ -193,11 +194,12 @@ tasksRouter.get('/', async (req: Request, res: Response, next: NextFunction) => 
     ]).toArray();
 
     const childCountMap = new Map(childCounts.map(c => [c._id.toString(), c.count]));
+    // Return childCount as a number instead of creating wasteful placeholder arrays
     const tasksWithChildInfo = tasks.map(task => ({
       ...task,
-      children: childCountMap.get(task._id.toString())
-        ? Array(childCountMap.get(task._id.toString())).fill({})
-        : []
+      childCount: childCountMap.get(task._id.toString()) || 0,
+      // Keep empty children array for backward compatibility (UI expects it)
+      children: []
     }));
 
     let resolvedTasks = tasksWithChildInfo;
@@ -267,25 +269,25 @@ tasksRouter.get('/tree', async (req: Request, res: Response, next: NextFunction)
   }
 });
 
-// Helper to get all descendant IDs recursively
-async function getDescendantIds(db: ReturnType<typeof getDb>, parentId: ObjectId, maxDepth = 10, currentDepth = 0): Promise<ObjectId[]> {
-  if (currentDepth >= maxDepth) return [];
+// Helper to get all descendant IDs using $graphLookup (single query instead of N+1)
+async function getDescendantIds(db: ReturnType<typeof getDb>, parentId: ObjectId, maxDepth = 10): Promise<ObjectId[]> {
+  const result = await db.collection<Task>('tasks').aggregate([
+    { $match: { _id: parentId } },
+    {
+      $graphLookup: {
+        from: 'tasks',
+        startWith: '$_id',
+        connectFromField: '_id',
+        connectToField: 'parentId',
+        as: 'descendants',
+        maxDepth: maxDepth - 1, // graphLookup maxDepth is 0-indexed
+        depthField: 'depth'
+      }
+    },
+    { $project: { descendants: '$descendants._id' } }
+  ]).toArray();
 
-  const children = await db
-    .collection<Task>('tasks')
-    .find({ parentId })
-    .project({ _id: 1 })
-    .toArray();
-
-  const childIds = children.map(c => c._id);
-  const grandchildIds: ObjectId[] = [];
-
-  for (const childId of childIds) {
-    const descendants = await getDescendantIds(db, childId, maxDepth, currentDepth + 1);
-    grandchildIds.push(...descendants);
-  }
-
-  return [...childIds, ...grandchildIds];
+  return result[0]?.descendants || [];
 }
 
 // GET /api/tasks/webhook-attempts - List all tasks with webhook attempts
@@ -621,11 +623,12 @@ tasksRouter.get('/:id/children', async (req: Request, res: Response, next: NextF
     ]).toArray();
 
     const childCountMap = new Map(childCounts.map(c => [c._id.toString(), c.count]));
+    // Return childCount as a number instead of creating wasteful placeholder arrays
     const childrenWithChildInfo = children.map(task => ({
       ...task,
-      children: childCountMap.get(task._id.toString())
-        ? Array(childCountMap.get(task._id.toString())).fill({})
-        : []
+      childCount: childCountMap.get(task._id.toString()) || 0,
+      // Keep empty children array for backward compatibility
+      children: []
     }));
 
     let resolvedChildren = childrenWithChildInfo;
@@ -649,32 +652,38 @@ tasksRouter.get('/:id/children', async (req: Request, res: Response, next: NextF
   }
 });
 
-// GET /api/tasks/:id/ancestors - Get all ancestors of a task (walks up the parent chain)
+// GET /api/tasks/:id/ancestors - Get all ancestors of a task using $graphLookup (single query)
 tasksRouter.get('/:id/ancestors', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
     const { resolveReferences = 'true' } = req.query;
 
     const taskId = toObjectId(req.params.id);
-    const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
 
-    if (!task) {
+    // Use $graphLookup to fetch all ancestors in a single query
+    const result = await db.collection<Task>('tasks').aggregate([
+      { $match: { _id: taskId } },
+      {
+        $graphLookup: {
+          from: 'tasks',
+          startWith: '$parentId',
+          connectFromField: 'parentId',
+          connectToField: '_id',
+          as: 'ancestors',
+          maxDepth: 50, // Reasonable max depth for task hierarchies
+          depthField: 'depth'
+        }
+      }
+    ]).toArray();
+
+    if (result.length === 0) {
       throw createError('Task not found', 404);
     }
 
-    // Walk up the parent chain to find all ancestors
-    const ancestors: Task[] = [];
-    let currentParentId = task.parentId;
-
-    while (currentParentId) {
-      const parent = await db.collection<Task>('tasks').findOne({ _id: currentParentId });
-      if (!parent) break;
-      ancestors.push(parent);
-      currentParentId = parent.parentId;
-    }
-
-    // Reverse so root is first
-    ancestors.reverse();
+    // Sort ancestors by depth descending (root first) and remove depth field
+    const ancestors = (result[0].ancestors || [])
+      .sort((a: Task & { depth: number }, b: Task & { depth: number }) => b.depth - a.depth)
+      .map(({ depth, ...task }: Task & { depth: number }) => task as Task);
 
     let resolvedAncestors = ancestors;
     if (resolveReferences === 'true') {
@@ -1016,20 +1025,51 @@ tasksRouter.put('/:id/move', async (req: Request, res: Response, next: NextFunct
     if (newParentId) {
       const parentOid = toObjectId(newParentId);
 
-      // Check for circular reference - walk up the parent chain from the new parent
-      let currentParentId: ObjectId | null = parentOid;
-      while (currentParentId) {
-        if (currentParentId.equals(taskId)) {
-          throw createError('Cannot move task to one of its descendants', 400);
+      // Check for circular reference using $graphLookup (single query instead of N+1)
+      const ancestorCheck = await db.collection<Task>('tasks').aggregate([
+        { $match: { _id: parentOid } },
+        {
+          $graphLookup: {
+            from: 'tasks',
+            startWith: '$parentId',
+            connectFromField: 'parentId',
+            connectToField: '_id',
+            as: 'ancestors',
+            maxDepth: 50
+          }
+        },
+        {
+          $project: {
+            _id: 1,
+            parentId: 1,
+            title: 1,
+            status: 1,
+            urgency: 1,
+            tags: 1,
+            assigneeId: 1,
+            workflowId: 1,
+            workflowRunId: 1,
+            workflowStepId: 1,
+            taskType: 1,
+            createdAt: 1,
+            updatedAt: 1,
+            metadata: 1,
+            isCircular: {
+              $in: [taskId, { $concatArrays: [['$_id'], '$ancestors._id'] }]
+            }
+          }
         }
-        const ancestor: WithId<Task> | null = await db.collection<Task>('tasks').findOne({ _id: currentParentId });
-        currentParentId = ancestor?.parentId || null;
-      }
+      ]).toArray();
 
-      newParent = await db.collection<Task>('tasks').findOne({ _id: parentOid });
-      if (!newParent) {
+      if (ancestorCheck.length === 0) {
         throw createError('New parent task not found', 404);
       }
+
+      if (ancestorCheck[0].isCircular) {
+        throw createError('Cannot move task to one of its descendants', 400);
+      }
+
+      newParent = ancestorCheck[0] as unknown as Task;
     }
 
     // Update the task's parent

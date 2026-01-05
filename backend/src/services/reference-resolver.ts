@@ -6,6 +6,10 @@ interface ResolvedReferences {
   [key: string]: Record<string, unknown> | undefined;
 }
 
+// Static cache for field configs with TTL (5 minutes)
+const FIELD_CONFIG_CACHE_TTL = 5 * 60 * 1000;
+const fieldConfigCache: Map<string, { data: FieldConfig[]; timestamp: number }> = new Map();
+
 /**
  * Resolves references and lookups for a set of documents based on field configurations
  */
@@ -15,11 +19,31 @@ export class ReferenceResolver {
   private referenceCache: Map<string, Map<string, Document>> = new Map();
 
   async loadFieldConfigs(collectionName: string): Promise<void> {
+    const now = Date.now();
+    const cached = fieldConfigCache.get(collectionName);
+
+    // Return cached data if still valid
+    if (cached && now - cached.timestamp < FIELD_CONFIG_CACHE_TTL) {
+      this.fieldConfigs = cached.data;
+      return;
+    }
+
+    // Fetch from database
     const db = getDb();
     this.fieldConfigs = await db
       .collection<FieldConfig>('field_configs')
       .find({ collectionName })
       .toArray();
+
+    // Update cache
+    fieldConfigCache.set(collectionName, { data: this.fieldConfigs, timestamp: now });
+  }
+
+  /**
+   * Clear the static field config cache (useful for testing or manual refresh)
+   */
+  static clearFieldConfigCache(): void {
+    fieldConfigCache.clear();
   }
 
   async resolveDocuments<T extends Document>(
