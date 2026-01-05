@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "deploy": "npx @cloudflare/next-on-pages && wrangler pages deploy .vercel/output/static"
+    "deploy": "[ -f .env.local ] && mv .env.local .env.local.bak; npx @cloudflare/next-on-pages; deploy_status=$?; [ -f .env.local.bak ] && mv .env.local.bak .env.local; exit $deploy_status",
+    "deploy:push": "wrangler pages deploy .vercel/output/static"
   },
   "dependencies": {
     "@bytemd/plugin-gfm": "^1.22.0",

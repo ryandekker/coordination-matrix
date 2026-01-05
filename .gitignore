@@ -13,6 +13,7 @@ dist/
 build/
 .next/
 out/
+.vercel/
 
 # Logs
 logs/
