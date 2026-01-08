@@ -54,7 +54,12 @@ app.use(cors({
   origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
   credentials: true,
 }));
-app.use(morgan('combined'));
+// Use 'short' format in production for reduced I/O overhead, 'combined' in development
+const morganFormat = process.env.NODE_ENV === 'production' ? 'short' : 'combined';
+app.use(morgan(morganFormat, {
+  // Skip health check logging to reduce noise
+  skip: (req) => req.url === '/health'
+}));
 app.use(express.json({ limit: '10mb' }));
 
 // Health check

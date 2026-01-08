@@ -180,10 +180,13 @@ export function useDeleteTask() {
   return useMutation({
     mutationFn: ({ id, deleteChildren = true }: { id: string; deleteChildren?: boolean }) =>
       tasksApi.delete(id, deleteChildren),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      queryClient.invalidateQueries({ queryKey: ['task-tree'] })
-      queryClient.invalidateQueries({ queryKey: ['task-children'] })
+    onSuccess: (_data, { id }) => {
+      // Remove the specific task from cache
+      queryClient.removeQueries({ queryKey: ['task', id] })
+      // Invalidate task lists (but don't force immediate refetch)
+      queryClient.invalidateQueries({ queryKey: ['tasks'], refetchType: 'none' })
+      queryClient.invalidateQueries({ queryKey: ['task-tree'], refetchType: 'none' })
+      queryClient.invalidateQueries({ queryKey: ['task-children'], refetchType: 'none' })
     },
   })
 }
@@ -280,10 +283,11 @@ export function useBulkUpdateTasks() {
       }
     },
     onSettled: () => {
-      // Refetch to get resolved references and ensure data is in sync
-      queryClient.invalidateQueries({ queryKey: ['tasks'], refetchType: 'all' })
-      queryClient.invalidateQueries({ queryKey: ['task-tree'], refetchType: 'all' })
-      queryClient.invalidateQueries({ queryKey: ['task-children'], refetchType: 'all' })
+      // Invalidate without forcing immediate refetch - data already optimistically updated
+      // SSE will handle real-time sync
+      queryClient.invalidateQueries({ queryKey: ['tasks'], refetchType: 'none' })
+      queryClient.invalidateQueries({ queryKey: ['task-tree'], refetchType: 'none' })
+      queryClient.invalidateQueries({ queryKey: ['task-children'], refetchType: 'none' })
     },
   })
 }
@@ -307,11 +311,44 @@ export function useBulkDeleteTasks() {
 
   return useMutation({
     mutationFn: (taskIds: string[]) => tasksApi.bulkDelete(taskIds),
-    onSuccess: () => {
-      // Force refetch all task-related queries
-      queryClient.invalidateQueries({ queryKey: ['tasks'], refetchType: 'all' })
-      queryClient.invalidateQueries({ queryKey: ['task-tree'], refetchType: 'all' })
-      queryClient.invalidateQueries({ queryKey: ['task-children'], refetchType: 'all' })
+    onMutate: async (taskIds) => {
+      // Cancel outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ['tasks'] })
+
+      // Snapshot previous values
+      const previousTasks = queryClient.getQueriesData({ queryKey: ['tasks'] })
+
+      const taskIdSet = new Set(taskIds)
+
+      // Optimistically remove tasks from lists
+      queryClient.setQueriesData({ queryKey: ['tasks'] }, (old: unknown) => {
+        if (!old) return old
+        const oldData = old as { data: Task[]; pagination: { total: number } }
+        return {
+          ...oldData,
+          data: oldData.data.filter((task: Task) => !taskIdSet.has(task._id)),
+          pagination: {
+            ...oldData.pagination,
+            total: Math.max(0, oldData.pagination.total - taskIds.length)
+          }
+        }
+      })
+
+      return { previousTasks }
+    },
+    onError: (_err, _taskIds, context) => {
+      // Rollback on error
+      if (context?.previousTasks) {
+        context.previousTasks.forEach(([queryKey, data]) => {
+          queryClient.setQueryData(queryKey, data)
+        })
+      }
+    },
+    onSettled: () => {
+      // Invalidate without forcing immediate refetch
+      queryClient.invalidateQueries({ queryKey: ['tasks'], refetchType: 'none' })
+      queryClient.invalidateQueries({ queryKey: ['task-tree'], refetchType: 'none' })
+      queryClient.invalidateQueries({ queryKey: ['task-children'], refetchType: 'none' })
     },
   })
 }

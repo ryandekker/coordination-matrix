@@ -181,6 +181,11 @@ db.tasks.createIndex({ workflowRunId: 1, status: 1 });
 db.tasks.createIndex({ parentId: 1, createdAt: 1 });
 // For filtered subtask queries (parent + status + sort)
 db.tasks.createIndex({ parentId: 1, status: 1, createdAt: 1 });
+// Additional compound indexes for common query patterns (performance optimization)
+// For workflowStepId with status filter (used in workflow step lookups)
+db.tasks.createIndex({ workflowStepId: 1, status: 1 });
+// For assignee-based queries with status and date sort
+db.tasks.createIndex({ assigneeId: 1, status: 1, createdAt: -1 });
 
 // ============================================================================
 // FIELD CONFIGURATIONS - Dynamic field definitions
