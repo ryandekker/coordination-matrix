@@ -158,6 +158,13 @@ interface WorkflowStep {
   branches?: { condition: string | null; targetStepId: string }[]
 }
 
+interface StepCounts {
+  total: number
+  agent: number
+  manual: number
+  other: number
+}
+
 interface WorkflowData {
   _id: string
   name: string
@@ -170,6 +177,18 @@ interface WorkflowData {
   updatedAt?: string
 }
 
+// Brief workflow data (without full steps array)
+interface BriefWorkflowData {
+  _id: string
+  name: string
+  description: string
+  isActive: boolean
+  stepCounts: StepCounts
+  mermaidDiagram?: string
+  createdAt: string
+  updatedAt?: string
+}
+
 interface WorkflowStats {
   runCount: number
   lastRunAt: string | null
@@ -177,16 +196,25 @@ interface WorkflowStats {
   failedCount: number
 }
 
-interface WorkflowWithStats extends WorkflowData {
-  steps: WorkflowStep[]
+interface WorkflowListItem extends BriefWorkflowData {
   stats?: WorkflowStats
+  // Steps are loaded on-demand when expanded
+  steps?: WorkflowStep[]
 }
 
-async function fetchWorkflows(): Promise<{ data: WorkflowData[] }> {
-  // Include inactive workflows so frontend filtering can show all statuses
-  const response = await authFetch(`${API_BASE}/workflows?includeInactive=true`)
+async function fetchWorkflows(): Promise<{ data: BriefWorkflowData[] }> {
+  // Use brief=true to get step counts instead of full steps array
+  const response = await authFetch(`${API_BASE}/workflows?includeInactive=true&brief=true`)
   if (!response.ok) {
     throw new Error('Failed to fetch workflows')
+  }
+  return response.json()
+}
+
+async function fetchWorkflowById(id: string): Promise<{ data: WorkflowData }> {
+  const response = await authFetch(`${API_BASE}/workflows/${id}`)
+  if (!response.ok) {
+    throw new Error('Failed to fetch workflow')
   }
   return response.json()
 }
@@ -468,18 +496,18 @@ export default function WorkflowsPage() {
     })
   }
 
-  // Normalize workflows to ensure steps array exists and add stats
+  // State for lazily loaded workflow steps
+  const [loadedSteps, setLoadedSteps] = useState<Record<string, WorkflowStep[]>>({})
+  const [loadingSteps, setLoadingSteps] = useState<Set<string>>(new Set())
+
+  // Normalize workflows and add stats
   // Then apply filters
-  const workflows = useMemo<WorkflowWithStats[]>(() => {
+  const workflows = useMemo<WorkflowListItem[]>(() => {
     let result = (workflowsData?.data || []).map(w => ({
       ...w,
-      steps: (w.steps || (w.stages?.map((name, i) => ({
-        id: `stage-${i}`,
-        name,
-        type: 'manual' as const,
-        hitlPhase: 'none',
-      })) || [])) as WorkflowStep[],
       stats: statsMap?.[w._id],
+      // Include loaded steps if available
+      steps: loadedSteps[w._id],
     }))
 
     // Apply search filter
@@ -499,7 +527,7 @@ export default function WorkflowsPage() {
     }
 
     return result
-  }, [workflowsData?.data, statsMap, searchQuery, statusFilter])
+  }, [workflowsData?.data, statsMap, searchQuery, statusFilter, loadedSteps])
 
   // Get selected workflow IDs
   const selectedWorkflowIds = useMemo(() => {
@@ -516,9 +544,17 @@ export default function WorkflowsPage() {
     setIsEditorOpen(true)
   }, [])
 
-  const openEditEditor = useCallback((workflow: WorkflowData) => {
-    setEditingWorkflow(workflow)
-    setIsEditorOpen(true)
+  // Fetch full workflow data before opening editor (since list view only has brief data)
+  const openEditEditor = useCallback(async (workflow: WorkflowListItem | WorkflowData) => {
+    try {
+      const { data: fullWorkflow } = await fetchWorkflowById(workflow._id)
+      setEditingWorkflow(fullWorkflow)
+      setIsEditorOpen(true)
+    } catch {
+      // Fallback to whatever data we have
+      setEditingWorkflow(workflow as WorkflowData)
+      setIsEditorOpen(true)
+    }
   }, [])
 
   const closeEditor = useCallback(() => {
@@ -541,14 +577,34 @@ export default function WorkflowsPage() {
     }
   }, [updateMutation, createMutation])
 
-  const handleToggleActive = useCallback((workflow: WorkflowData) => {
+  const handleToggleActive = useCallback((workflow: WorkflowListItem) => {
     updateMutation.mutate({
       id: workflow._id,
       data: { isActive: !workflow.isActive },
     })
   }, [updateMutation])
 
-  // Toggle row expansion
+  // Load steps for a workflow (on-demand)
+  const loadWorkflowSteps = useCallback(async (id: string) => {
+    if (loadedSteps[id] || loadingSteps.has(id)) return
+
+    setLoadingSteps(prev => new Set(prev).add(id))
+    try {
+      const { data: fullWorkflow } = await fetchWorkflowById(id)
+      setLoadedSteps(prev => ({
+        ...prev,
+        [id]: fullWorkflow.steps || [],
+      }))
+    } finally {
+      setLoadingSteps(prev => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+    }
+  }, [loadedSteps, loadingSteps])
+
+  // Toggle row expansion and fetch steps if expanding
   const toggleRowExpanded = useCallback((id: string) => {
     setExpandedRows(prev => {
       const next = new Set(prev)
@@ -556,13 +612,15 @@ export default function WorkflowsPage() {
         next.delete(id)
       } else {
         next.add(id)
+        // Fetch steps when expanding
+        loadWorkflowSteps(id)
       }
       return next
     })
-  }, [])
+  }, [loadWorkflowSteps])
 
   // Table columns - memoized to prevent TanStack Table from reinitializing on every render
-  const columns = useMemo<ColumnDef<WorkflowWithStats>[]>(() => [
+  const columns = useMemo<ColumnDef<WorkflowListItem>[]>(() => [
     {
       id: 'select',
       header: ({ table }) => (
@@ -593,7 +651,8 @@ export default function WorkflowsPage() {
       header: () => null,
       cell: ({ row }) => {
         const isExpanded = expandedRows.has(row.original._id)
-        const hasSteps = row.original.steps.length > 0
+        const isLoading = loadingSteps.has(row.original._id)
+        const hasSteps = row.original.stepCounts.total > 0
         if (!hasSteps) return null
         return (
           <Button
@@ -602,7 +661,9 @@ export default function WorkflowsPage() {
             className="h-8 w-8 p-0"
             onClick={() => toggleRowExpanded(row.original._id)}
           >
-            {isExpanded ? (
+            {isLoading ? (
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+            ) : isExpanded ? (
               <ChevronDown className="h-4 w-4" />
             ) : (
               <ChevronRight className="h-4 w-4" />
@@ -658,32 +719,25 @@ export default function WorkflowsPage() {
       id: 'steps',
       header: 'Steps',
       cell: ({ row }) => {
-        const steps = row.original.steps
-        const agentCount = steps.filter(
-          (s) => s.stepType === 'agent' || (!s.stepType && s.execution !== 'manual' && s.type !== 'manual')
-        ).length
-        const manualCount = steps.filter(
-          (s) => s.stepType === 'manual' || (!s.stepType && (s.execution === 'manual' || s.type === 'manual'))
-        ).length
-        const otherCount = steps.length - agentCount - manualCount
+        const { stepCounts } = row.original
 
         return (
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground">{steps.length}</span>
-            {agentCount > 0 && (
+            <span className="text-muted-foreground">{stepCounts.total}</span>
+            {stepCounts.agent > 0 && (
               <span className="text-blue-600 flex items-center gap-1">
                 <Bot className="h-3 w-3" />
-                {agentCount}
+                {stepCounts.agent}
               </span>
             )}
-            {manualCount > 0 && (
+            {stepCounts.manual > 0 && (
               <span className="text-purple-600 flex items-center gap-1">
                 <User className="h-3 w-3" />
-                {manualCount}
+                {stepCounts.manual}
               </span>
             )}
-            {otherCount > 0 && (
-              <span className="text-gray-500">+{otherCount}</span>
+            {stepCounts.other > 0 && (
+              <span className="text-gray-500">+{stepCounts.other}</span>
             )}
           </div>
         )
@@ -802,7 +856,7 @@ export default function WorkflowsPage() {
         </div>
       ),
     },
-  ], [handleToggleActive, openEditEditor, duplicateMutation, expandedRows, toggleRowExpanded])
+  ], [handleToggleActive, openEditEditor, duplicateMutation, expandedRows, toggleRowExpanded, loadingSteps])
 
   const table = useReactTable({
     data: workflows,
@@ -992,6 +1046,8 @@ export default function WorkflowsPage() {
             <TableBody>
               {table.getRowModel().rows.map(row => {
                 const isExpanded = expandedRows.has(row.original._id)
+                const isLoading = loadingSteps.has(row.original._id)
+                const steps = row.original.steps || []
                 return (
                   <React.Fragment key={row.id}>
                     <TableRow>
@@ -1004,32 +1060,41 @@ export default function WorkflowsPage() {
                         </TableCell>
                       ))}
                     </TableRow>
-                    {isExpanded && row.original.steps.length > 0 && (
+                    {isExpanded && (
                       <TableRow className="bg-muted/30 hover:bg-muted/30">
                         <TableCell colSpan={columns.length} className="p-0">
                           <div className="px-4 py-3">
-                            <table className="w-full text-sm">
-                              <thead>
-                                <tr className="text-left text-muted-foreground">
-                                  <th className="pb-2 pl-1 w-8">#</th>
-                                  <th className="pb-2 w-8"></th>
-                                  <th className="pb-2">Step Name</th>
-                                  <th className="pb-2 w-24">Type</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {row.original.steps.map((step, idx) => (
-                                  <tr key={step.id || idx} className="border-t border-border/50">
-                                    <td className="py-1.5 pl-1 text-muted-foreground">{idx + 1}</td>
-                                    <td className="py-1.5">{getStepTypeIcon(step.stepType, step.execution, step.type)}</td>
-                                    <td className="py-1.5">{step.name}</td>
-                                    <td className="py-1.5 text-muted-foreground capitalize">
-                                      {step.stepType || (step.execution === 'manual' || step.type === 'manual' ? 'manual' : 'agent')}
-                                    </td>
+                            {isLoading ? (
+                              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+                                Loading steps...
+                              </div>
+                            ) : steps.length > 0 ? (
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="text-left text-muted-foreground">
+                                    <th className="pb-2 pl-1 w-8">#</th>
+                                    <th className="pb-2 w-8"></th>
+                                    <th className="pb-2">Step Name</th>
+                                    <th className="pb-2 w-24">Type</th>
                                   </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                                </thead>
+                                <tbody>
+                                  {steps.map((step, idx) => (
+                                    <tr key={step.id || idx} className="border-t border-border/50">
+                                      <td className="py-1.5 pl-1 text-muted-foreground">{idx + 1}</td>
+                                      <td className="py-1.5">{getStepTypeIcon(step.stepType, step.execution, step.type)}</td>
+                                      <td className="py-1.5">{step.name}</td>
+                                      <td className="py-1.5 text-muted-foreground capitalize">
+                                        {step.stepType || (step.execution === 'manual' || step.type === 'manual' ? 'manual' : 'agent')}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            ) : (
+                              <div className="text-sm text-muted-foreground italic">No steps defined</div>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>

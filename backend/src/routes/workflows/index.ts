@@ -13,10 +13,13 @@ export const workflowsRouter = Router();
 workflowsRouter.use(aiPromptRoutes);
 
 // GET /api/workflows - List all workflows
+// Query params:
+//   - includeInactive: 'true' to include inactive workflows
+//   - brief: 'true' to return step counts instead of full steps array (for faster list views)
 workflowsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { includeInactive } = req.query;
+    const { includeInactive, brief } = req.query;
 
     const filter: Record<string, unknown> = {};
     if (includeInactive !== 'true') {
@@ -28,6 +31,34 @@ workflowsRouter.get('/', async (req: Request, res: Response, next: NextFunction)
       .find(filter)
       .sort({ name: 1 })
       .toArray();
+
+    // In brief mode, replace steps array with step counts for lighter payload
+    if (brief === 'true') {
+      const briefWorkflows = workflows.map(w => {
+        const steps = w.steps || [];
+        const agentCount = steps.filter(s =>
+          s.stepType === 'agent' || (!s.stepType && s.execution !== 'manual' && s.type !== 'manual')
+        ).length;
+        const manualCount = steps.filter(s =>
+          s.stepType === 'manual' || (!s.stepType && (s.execution === 'manual' || s.type === 'manual'))
+        ).length;
+        const otherCount = steps.length - agentCount - manualCount;
+
+        // Return workflow without steps array, but with step counts
+        const { steps: _steps, ...rest } = w;
+        return {
+          ...rest,
+          stepCounts: {
+            total: steps.length,
+            agent: agentCount,
+            manual: manualCount,
+            other: otherCount,
+          },
+        };
+      });
+      res.json({ data: briefWorkflows });
+      return;
+    }
 
     res.json({ data: workflows });
   } catch (error) {
