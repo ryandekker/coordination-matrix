@@ -35,9 +35,10 @@ import {
   CornerDownRight,
   ChevronUp,
   ChevronDown,
+  FileSearch,
 } from 'lucide-react'
 
-type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow'
+type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow' | 'findDocument'
 
 interface StepConnection {
   targetStepId: string
@@ -57,6 +58,20 @@ interface JoinBoundary {
   minPercent?: number
   maxWaitMs?: number
   failOnTimeout?: boolean
+}
+
+type DocumentType = 'sop' | 'strategy' | 'plan' | 'template' | 'reference' | 'output' | 'custom'
+type DocumentStatus = 'draft' | 'review' | 'approved' | 'archived'
+
+interface FindDocumentConfig {
+  searchPrompt?: string
+  documentTypes?: DocumentType[]
+  documentStatus?: DocumentStatus[]
+  tags?: string[]
+  limit?: number
+  minScore?: number
+  storeAs?: string
+  failIfNotFound?: boolean
 }
 
 interface WorkflowStep {
@@ -86,6 +101,7 @@ interface WorkflowStep {
   prompt?: string
   hitlPhase?: string
   branches?: { condition: string | null; targetStepId: string }[]
+  findDocumentConfig?: FindDocumentConfig
 }
 
 interface LoopScope {
@@ -119,6 +135,7 @@ const STEP_TYPES: { type: WorkflowStepType; label: string; description: string; 
   { type: 'foreach', label: 'ForEach', description: 'Loop over items', icon: Repeat, color: 'text-green-500', bgColor: 'bg-green-500/10' },
   { type: 'join', label: 'Join', description: 'Aggregate results', icon: Merge, color: 'text-indigo-500', bgColor: 'bg-indigo-500/10' },
   { type: 'flow', label: 'Flow', description: 'Nested workflow', icon: WorkflowIcon, color: 'text-pink-500', bgColor: 'bg-pink-500/10' },
+  { type: 'findDocument', label: 'Find Document', description: 'Search documents', icon: FileSearch, color: 'text-cyan-500', bgColor: 'bg-cyan-500/10' },
 ]
 
 function getStepTypeInfo(stepType?: WorkflowStepType) {
@@ -800,6 +817,191 @@ export function StepConfigPanel({
                 placeholder="workflow-id"
                 className="font-mono text-sm"
               />
+            </div>
+          </div>
+        )}
+
+        {/* FindDocument configuration */}
+        {step.stepType === 'findDocument' && (
+          <div className="space-y-3 border-t pt-3">
+            <div className="bg-cyan-50 dark:bg-cyan-950/30 border border-cyan-200 dark:border-cyan-800 rounded-lg p-3 text-sm">
+              <div className="flex items-start gap-2">
+                <FileSearch className="h-4 w-4 text-cyan-600 dark:text-cyan-400 mt-0.5 flex-shrink-0" />
+                <div className="text-cyan-800 dark:text-cyan-200">
+                  <p className="font-medium">Find Document</p>
+                  <p className="text-xs mt-1">
+                    Search for documents using semantic search. Found documents are available to subsequent steps.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Search Prompt</label>
+              <div className="flex gap-1">
+                <Textarea
+                  value={step.findDocumentConfig?.searchPrompt || ''}
+                  onChange={(e) => onUpdate({
+                    findDocumentConfig: { ...step.findDocumentConfig, searchPrompt: e.target.value }
+                  })}
+                  placeholder='e.g., "Find SOPs about {{input.topic}}" or "Documentation for {{item.productName}}"'
+                  className="min-h-[60px] font-mono text-sm"
+                />
+              </div>
+              <TokenBrowser
+                workflowId={workflowId}
+                previousSteps={previousSteps}
+                currentStepIndex={stepIndex}
+                loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
+                onSelectToken={(token) => {
+                  const current = step.findDocumentConfig?.searchPrompt || ''
+                  onUpdate({
+                    findDocumentConfig: { ...step.findDocumentConfig, searchPrompt: current + token }
+                  })
+                }}
+                variant="text"
+              />
+              <p className="text-xs text-muted-foreground">
+                Use template variables like {`{{input.field}}`} to build dynamic search queries from previous step data.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Document Types</label>
+                <Select
+                  value={step.findDocumentConfig?.documentTypes?.[0] || '_any'}
+                  onValueChange={(val) => onUpdate({
+                    findDocumentConfig: {
+                      ...step.findDocumentConfig,
+                      documentTypes: val === '_any' ? undefined : [val as DocumentType]
+                    }
+                  })}
+                >
+                  <SelectTrigger className="h-8">
+                    <SelectValue placeholder="Any type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_any">Any type</SelectItem>
+                    <SelectItem value="sop">SOP</SelectItem>
+                    <SelectItem value="strategy">Strategy</SelectItem>
+                    <SelectItem value="plan">Plan</SelectItem>
+                    <SelectItem value="template">Template</SelectItem>
+                    <SelectItem value="reference">Reference</SelectItem>
+                    <SelectItem value="output">Output</SelectItem>
+                    <SelectItem value="custom">Custom</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Document Status</label>
+                <Select
+                  value={step.findDocumentConfig?.documentStatus?.[0] || 'approved'}
+                  onValueChange={(val) => onUpdate({
+                    findDocumentConfig: {
+                      ...step.findDocumentConfig,
+                      documentStatus: [val as DocumentStatus]
+                    }
+                  })}
+                >
+                  <SelectTrigger className="h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="approved">Approved</SelectItem>
+                    <SelectItem value="draft">Draft</SelectItem>
+                    <SelectItem value="review">Review</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Max Results</label>
+                <Input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={step.findDocumentConfig?.limit || 1}
+                  onChange={(e) => onUpdate({
+                    findDocumentConfig: {
+                      ...step.findDocumentConfig,
+                      limit: parseInt(e.target.value) || 1
+                    }
+                  })}
+                  className="font-mono text-sm h-8"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Min Score (0-1)</label>
+                <Input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  value={step.findDocumentConfig?.minScore || 0.5}
+                  onChange={(e) => onUpdate({
+                    findDocumentConfig: {
+                      ...step.findDocumentConfig,
+                      minScore: parseFloat(e.target.value) || 0.5
+                    }
+                  })}
+                  className="font-mono text-sm h-8"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Store Result As</label>
+                <Input
+                  value={step.findDocumentConfig?.storeAs || 'document'}
+                  onChange={(e) => onUpdate({
+                    findDocumentConfig: {
+                      ...step.findDocumentConfig,
+                      storeAs: e.target.value || 'document'
+                    }
+                  })}
+                  placeholder="document"
+                  className="font-mono text-sm h-8"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Access via {`{{steps.${step.id}.${step.findDocumentConfig?.storeAs || 'document'}}}`}
+                </p>
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Tags (comma-separated)</label>
+                <Input
+                  value={step.findDocumentConfig?.tags?.join(', ') || ''}
+                  onChange={(e) => onUpdate({
+                    findDocumentConfig: {
+                      ...step.findDocumentConfig,
+                      tags: e.target.value ? e.target.value.split(',').map(t => t.trim()).filter(Boolean) : undefined
+                    }
+                  })}
+                  placeholder="e.g., onboarding, hr"
+                  className="font-mono text-sm h-8"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id={`failIfNotFound-${step.id}`}
+                checked={step.findDocumentConfig?.failIfNotFound || false}
+                onChange={(e) => onUpdate({
+                  findDocumentConfig: {
+                    ...step.findDocumentConfig,
+                    failIfNotFound: e.target.checked
+                  }
+                })}
+                className="h-4 w-4 rounded border-gray-300"
+              />
+              <label htmlFor={`failIfNotFound-${step.id}`} className="text-sm">
+                Fail step if no document found
+              </label>
             </div>
           </div>
         )}

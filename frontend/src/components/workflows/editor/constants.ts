@@ -6,6 +6,7 @@ import {
   Repeat,
   Merge,
   Workflow as WorkflowIcon,
+  FileSearch,
 } from 'lucide-react'
 import type { StepTypeInfo, WorkflowStepType } from './types'
 
@@ -17,6 +18,7 @@ export const STEP_TYPES: StepTypeInfo[] = [
   { type: 'foreach', label: 'ForEach', description: 'Loop over items', icon: Repeat, color: 'text-green-500', bgColor: 'bg-green-500/10' },
   { type: 'join', label: 'Join', description: 'Aggregate results', icon: Merge, color: 'text-indigo-500', bgColor: 'bg-indigo-500/10' },
   { type: 'flow', label: 'Flow', description: 'Nested workflow', icon: WorkflowIcon, color: 'text-pink-500', bgColor: 'bg-pink-500/10' },
+  { type: 'findDocument', label: 'Find Document', description: 'Search documents', icon: FileSearch, color: 'text-cyan-500', bgColor: 'bg-cyan-500/10' },
 ]
 
 export function getStepTypeInfo(stepType?: WorkflowStepType): StepTypeInfo {
