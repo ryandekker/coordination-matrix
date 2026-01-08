@@ -211,7 +211,7 @@ function FindDocumentConfig({
       const response = await fetch(`/api/documents?search=${encodeURIComponent(query)}&limit=10`)
       if (response.ok) {
         const data = await response.json()
-        setSearchResults(data.documents || [])
+        setSearchResults(data.data || [])
       }
     } catch (error) {
       console.error('Failed to search documents:', error)
