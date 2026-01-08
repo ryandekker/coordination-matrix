@@ -1445,6 +1445,86 @@ class WorkflowExecutionService {
       return;
     }
 
+    const storeAs = config.storeAs || 'document';
+    const failIfNotFound = config.failIfNotFound ?? false;
+    const mode = config.mode || 'dynamic';
+
+    // Static mode: fetch a specific document by ID
+    if (mode === 'static' && config.documentId) {
+      console.log(`[WorkflowExecutionService] FindDocument static mode: fetching document ${config.documentId}`);
+      try {
+        const db = getDb();
+        const document = await db.collection('documents').findOne({
+          _id: new ObjectId(config.documentId)
+        });
+
+        if (!document) {
+          if (failIfNotFound) {
+            console.warn(`[WorkflowExecutionService] FindDocument step ${step.id} - document not found`);
+            await this.tasks.updateOne(
+              { _id: findDocTask._id },
+              {
+                $set: {
+                  status: 'failed' as TaskStatus,
+                  'metadata.error': `Document ${config.documentId} not found`,
+                  'metadata.mode': 'static',
+                  'metadata.documentId': config.documentId,
+                }
+              }
+            );
+            return;
+          }
+          // Not failing, just store null
+          await this.tasks.updateOne(
+            { _id: findDocTask._id },
+            {
+              $set: {
+                status: 'completed' as TaskStatus,
+                [`metadata.${storeAs}`]: null,
+                'metadata.mode': 'static',
+                'metadata.documentId': config.documentId,
+                'metadata.resultCount': 0,
+              }
+            }
+          );
+          return;
+        }
+
+        // Remove embedding from response (too large)
+        const { embedding, ...documentWithoutEmbedding } = document as Record<string, unknown>;
+
+        await this.tasks.updateOne(
+          { _id: findDocTask._id },
+          {
+            $set: {
+              status: 'completed' as TaskStatus,
+              [`metadata.${storeAs}`]: { document: documentWithoutEmbedding },
+              'metadata.mode': 'static',
+              'metadata.documentId': config.documentId,
+              'metadata.resultCount': 1,
+            }
+          }
+        );
+        console.log(`[WorkflowExecutionService] FindDocument step ${step.id} (static) completed successfully`);
+        return;
+      } catch (error) {
+        console.error(`[WorkflowExecutionService] FindDocument step ${step.id} (static) failed:`, error);
+        await this.tasks.updateOne(
+          { _id: findDocTask._id },
+          {
+            $set: {
+              status: 'failed' as TaskStatus,
+              'metadata.error': error instanceof Error ? error.message : 'Failed to fetch document',
+              'metadata.mode': 'static',
+              'metadata.documentId': config.documentId,
+            }
+          }
+        );
+        return;
+      }
+    }
+
+    // Dynamic mode: semantic search
     // Resolve the search prompt with template variables from inputPayload
     let searchPrompt = config.searchPrompt || '';
     if (searchPrompt && inputPayload) {
@@ -1466,13 +1546,14 @@ class WorkflowExecutionService {
           $set: {
             status: 'failed' as TaskStatus,
             'metadata.error': 'No search prompt provided or resolved to empty',
+            'metadata.mode': 'dynamic',
           }
         }
       );
       return;
     }
 
-    console.log(`[WorkflowExecutionService] FindDocument search prompt: "${searchPrompt}"`);
+    console.log(`[WorkflowExecutionService] FindDocument dynamic mode, search prompt: "${searchPrompt}"`);
 
     try {
       // Execute the semantic search
@@ -1487,9 +1568,6 @@ class WorkflowExecutionService {
 
       console.log(`[WorkflowExecutionService] FindDocument found ${searchResults.length} documents`);
 
-      const storeAs = config.storeAs || 'document';
-      const failIfNotFound = config.failIfNotFound ?? false;
-
       if (searchResults.length === 0 && failIfNotFound) {
         console.warn(`[WorkflowExecutionService] FindDocument step ${step.id} found no documents and failIfNotFound is true`);
         await this.tasks.updateOne(
@@ -1498,6 +1576,7 @@ class WorkflowExecutionService {
             $set: {
               status: 'failed' as TaskStatus,
               'metadata.error': 'No documents found matching search criteria',
+              'metadata.mode': 'dynamic',
               'metadata.searchPrompt': searchPrompt,
               'metadata.searchConfig': {
                 documentTypes: config.documentTypes,
@@ -1531,21 +1610,23 @@ class WorkflowExecutionService {
           $set: {
             status: 'completed' as TaskStatus,
             [`metadata.${storeAs}`]: documentResult,
+            'metadata.mode': 'dynamic',
             'metadata.searchPrompt': searchPrompt,
             'metadata.resultCount': searchResults.length,
           }
         }
       );
 
-      console.log(`[WorkflowExecutionService] FindDocument step ${step.id} completed successfully`);
+      console.log(`[WorkflowExecutionService] FindDocument step ${step.id} (dynamic) completed successfully`);
     } catch (error) {
-      console.error(`[WorkflowExecutionService] FindDocument step ${step.id} failed:`, error);
+      console.error(`[WorkflowExecutionService] FindDocument step ${step.id} (dynamic) failed:`, error);
       await this.tasks.updateOne(
         { _id: findDocTask._id },
         {
           $set: {
             status: 'failed' as TaskStatus,
             'metadata.error': error instanceof Error ? error.message : 'Search failed',
+            'metadata.mode': 'dynamic',
             'metadata.searchPrompt': searchPrompt,
           }
         }
