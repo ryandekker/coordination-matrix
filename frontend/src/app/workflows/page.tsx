@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, Fragment, useMemo, useCallback, memo } from 'react'
+import React, { useState, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
@@ -8,7 +8,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   useReactTable,
   getCoreRowModel,
-  getExpandedRowModel,
   getFilteredRowModel,
   flexRender,
   ColumnDef,
@@ -39,7 +38,6 @@ import {
   XCircle,
   Search,
   X,
-  Check,
   Book,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -236,53 +234,18 @@ async function duplicateWorkflow(id: string): Promise<{ data: WorkflowData }> {
   return response.json()
 }
 
-// Get icon for step type
-function getStepIcon(step: WorkflowStep) {
-  // Normalize step type - handle legacy 'task' type
-  const stepType = step.stepType || (step.execution === 'manual' || step.type === 'manual' ? 'manual' : 'agent')
-
-  switch (stepType) {
-    case 'agent':
-      return <Bot className="h-4 w-4 text-blue-500" />
-    case 'external':
-      return <Globe className="h-4 w-4 text-orange-500" />
-    case 'manual':
-      return <User className="h-4 w-4 text-purple-500" />
-    case 'decision':
-      return <GitBranch className="h-4 w-4 text-amber-500" />
-    case 'foreach':
-      return <Repeat className="h-4 w-4 text-green-500" />
-    case 'join':
-      return <Merge className="h-4 w-4 text-indigo-500" />
-    case 'flow':
-      return <Workflow className="h-4 w-4 text-pink-500" />
-    default:
-      return <Bot className="h-4 w-4 text-blue-500" />
-  }
-}
-
-// Get step type label
-function getStepTypeLabel(step: WorkflowStep): string {
-  // Normalize step type - handle legacy 'task' type
-  const stepType = step.stepType || (step.execution === 'manual' || step.type === 'manual' ? 'manual' : 'agent')
-
-  switch (stepType) {
-    case 'agent':
-      return 'Agent'
-    case 'external':
-      return 'External'
-    case 'manual':
-      return 'Manual'
-    case 'decision':
-      return 'Decision'
-    case 'foreach':
-      return 'ForEach'
-    case 'join':
-      return 'Join'
-    case 'flow':
-      return 'Flow'
-    default:
-      return 'Agent'
+// Get step type icon (inline helper)
+function getStepTypeIcon(stepType: WorkflowStepType | undefined, execution?: string, type?: string) {
+  const effectiveType = stepType || (execution === 'manual' || type === 'manual' ? 'manual' : 'agent')
+  switch (effectiveType) {
+    case 'agent': return <Bot className="h-3 w-3 text-blue-500" />
+    case 'external': return <Globe className="h-3 w-3 text-orange-500" />
+    case 'manual': return <User className="h-3 w-3 text-purple-500" />
+    case 'decision': return <GitBranch className="h-3 w-3 text-amber-500" />
+    case 'foreach': return <Repeat className="h-3 w-3 text-green-500" />
+    case 'join': return <Merge className="h-3 w-3 text-indigo-500" />
+    case 'flow': return <Workflow className="h-3 w-3 text-pink-500" />
+    default: return <Bot className="h-3 w-3 text-blue-500" />
   }
 }
 
@@ -337,73 +300,6 @@ function formatRelativeTime(date: string | null): string {
   return then.toLocaleDateString()
 }
 
-// Expanded row content showing steps - memoized to prevent unnecessary re-renders
-const StepsDetail = memo(function StepsDetail({ workflow }: { workflow: WorkflowWithStats }) {
-  if (!workflow.steps || workflow.steps.length === 0) {
-    return (
-      <div className="p-4 text-sm text-muted-foreground italic">
-        No steps defined
-      </div>
-    )
-  }
-
-  return (
-    <div className="p-4 bg-muted/30">
-      <div className="mb-2 text-sm font-medium text-muted-foreground">Workflow Steps</div>
-      <div className="flex items-center gap-2 overflow-x-auto pb-2">
-        {workflow.steps.map((step, index) => {
-          const effectiveType = step.stepType || (step.execution === 'manual' || step.type === 'manual' ? 'manual' : 'agent')
-          const getBorderStyle = () => {
-            switch (effectiveType) {
-              case 'agent': return 'border-blue-300 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-800'
-              case 'external': return 'border-orange-300 bg-orange-50 dark:bg-orange-950/30 dark:border-orange-800'
-              case 'manual': return 'border-purple-300 bg-purple-50 dark:bg-purple-950/30 dark:border-purple-800'
-              case 'decision': return 'border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800'
-              case 'foreach': return 'border-green-300 bg-green-50 dark:bg-green-950/30 dark:border-green-800'
-              case 'join': return 'border-indigo-300 bg-indigo-50 dark:bg-indigo-950/30 dark:border-indigo-800'
-              case 'flow': return 'border-pink-300 bg-pink-50 dark:bg-pink-950/30 dark:border-pink-800'
-              default: return 'border-gray-200 bg-gray-50 dark:bg-gray-900/30 dark:border-gray-700'
-            }
-          }
-          return (
-            <div key={step.id || index} className="flex items-center">
-              <div
-                className={cn(
-                  'flex flex-col items-center gap-1 rounded-lg border p-3 min-w-[120px]',
-                  getBorderStyle()
-                )}
-              >
-                <div className="flex items-center gap-2">
-                  {getStepIcon(step)}
-                  <span className="text-sm font-medium">{step.name}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Badge variant="outline" className="text-xs">
-                    {getStepTypeLabel(step)}
-                  </Badge>
-                  {(step.prompt || step.additionalInstructions) && (
-                    <span title="Has instructions">
-                      <FileText className="h-3 w-3 text-muted-foreground" />
-                    </span>
-                  )}
-                </div>
-              </div>
-              {index < workflow.steps.length - 1 && (
-                <ChevronRight className="h-5 w-5 text-muted-foreground mx-1 flex-shrink-0" />
-              )}
-            </div>
-          )
-        })}
-      </div>
-      {workflow.description && (
-        <div className="mt-3 text-sm text-muted-foreground">
-          {workflow.description}
-        </div>
-      )}
-    </div>
-  )
-})
-
 export default function WorkflowsPage() {
   const router = useRouter()
   const queryClient = useQueryClient()
@@ -427,6 +323,7 @@ export default function WorkflowsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
 
   const { data: workflowsData, isLoading, error } = useQuery({
     queryKey: ['workflows'],
@@ -651,6 +548,19 @@ export default function WorkflowsPage() {
     })
   }, [updateMutation])
 
+  // Toggle row expansion
+  const toggleRowExpanded = useCallback((id: string) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }, [])
+
   // Table columns - memoized to prevent TanStack Table from reinitializing on every render
   const columns = useMemo<ColumnDef<WorkflowWithStats>[]>(() => [
     {
@@ -670,7 +580,6 @@ export default function WorkflowsPage() {
           <Checkbox
             checked={row.getIsSelected()}
             onCheckedChange={(value) => row.toggleSelected(!!value)}
-            onClick={(e) => e.stopPropagation()}
             aria-label="Select row"
             className="h-5 w-5"
           />
@@ -682,29 +591,36 @@ export default function WorkflowsPage() {
     {
       id: 'expander',
       header: () => null,
-      cell: ({ row }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 w-8 p-0"
-          onClick={(e) => {
-            e.stopPropagation()
-            row.toggleExpanded()
-          }}
-        >
-          {row.getIsExpanded() ? (
-            <ChevronDown className="h-4 w-4" />
-          ) : (
-            <ChevronRight className="h-4 w-4" />
-          )}
-        </Button>
-      ),
+      cell: ({ row }) => {
+        const isExpanded = expandedRows.has(row.original._id)
+        const hasSteps = row.original.steps.length > 0
+        if (!hasSteps) return null
+        return (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0"
+            onClick={() => toggleRowExpanded(row.original._id)}
+          >
+            {isExpanded ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+          </Button>
+        )
+      },
     },
     {
       accessorKey: 'name',
       header: 'Workflow',
       cell: ({ row }) => (
-        <div className="font-medium">{row.original.name}</div>
+        <button
+          className="font-medium text-left hover:underline focus:outline-none focus:underline"
+          onClick={() => openEditEditor(row.original)}
+        >
+          {row.original.name}
+        </button>
       ),
     },
     {
@@ -886,15 +802,13 @@ export default function WorkflowsPage() {
         </div>
       ),
     },
-  ], [handleToggleActive, openEditEditor, duplicateMutation])
+  ], [handleToggleActive, openEditEditor, duplicateMutation, expandedRows, toggleRowExpanded])
 
   const table = useReactTable({
     data: workflows,
     columns,
     getCoreRowModel: getCoreRowModel(),
-    getExpandedRowModel: getExpandedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
-    getRowCanExpand: () => true,
     onRowSelectionChange: setRowSelection,
     state: {
       rowSelection,
@@ -1076,30 +990,53 @@ export default function WorkflowsPage() {
               ))}
             </TableHeader>
             <TableBody>
-              {table.getRowModel().rows.map(row => (
-                <Fragment key={row.id}>
-                  <TableRow
-                    className="cursor-pointer"
-                    onClick={() => row.toggleExpanded()}
-                  >
-                    {row.getVisibleCells().map(cell => (
-                      <TableCell
-                        key={cell.id}
-                        className={cell.column.id === 'select' ? 'w-12 pr-0' : undefined}
-                      >
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                  {row.getIsExpanded() && (
+              {table.getRowModel().rows.map(row => {
+                const isExpanded = expandedRows.has(row.original._id)
+                return (
+                  <React.Fragment key={row.id}>
                     <TableRow>
-                      <TableCell colSpan={columns.length} className="p-0">
-                        <StepsDetail workflow={row.original} />
-                      </TableCell>
+                      {row.getVisibleCells().map(cell => (
+                        <TableCell
+                          key={cell.id}
+                          className={cell.column.id === 'select' ? 'w-12 pr-0' : undefined}
+                        >
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </TableCell>
+                      ))}
                     </TableRow>
-                  )}
-                </Fragment>
-              ))}
+                    {isExpanded && row.original.steps.length > 0 && (
+                      <TableRow className="bg-muted/30 hover:bg-muted/30">
+                        <TableCell colSpan={columns.length} className="p-0">
+                          <div className="px-4 py-3">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="text-left text-muted-foreground">
+                                  <th className="pb-2 pl-1 w-8">#</th>
+                                  <th className="pb-2 w-8"></th>
+                                  <th className="pb-2">Step Name</th>
+                                  <th className="pb-2 w-24">Type</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {row.original.steps.map((step, idx) => (
+                                  <tr key={step.id || idx} className="border-t border-border/50">
+                                    <td className="py-1.5 pl-1 text-muted-foreground">{idx + 1}</td>
+                                    <td className="py-1.5">{getStepTypeIcon(step.stepType, step.execution, step.type)}</td>
+                                    <td className="py-1.5">{step.name}</td>
+                                    <td className="py-1.5 text-muted-foreground capitalize">
+                                      {step.stepType || (step.execution === 'manual' || step.type === 'manual' ? 'manual' : 'agent')}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </React.Fragment>
+                )
+              })}
             </TableBody>
           </Table>
         </div>
