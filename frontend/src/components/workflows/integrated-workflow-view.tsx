@@ -297,7 +297,7 @@ export function IntegratedWorkflowView({
     onStepsChange(newSteps)
   }, [steps, onStepsChange])
 
-  // Add a new step
+  // Add a new step after the specified index (simple append for config panel "Add Step After" button)
   const addStep = useCallback((afterIndex: number, type: WorkflowStepType = 'agent') => {
     const newStep: WorkflowStep = {
       id: `step-${Date.now()}`,
@@ -328,13 +328,65 @@ export function IntegratedWorkflowView({
     updateStep(index, { stepType: type })
   }, [updateStep])
 
-  // Handle adding step after a node (from edge + button)
-  const handleAddAfter = useCallback((afterStepId: string) => {
-    const afterIndex = steps.findIndex(s => s.id === afterStepId)
-    if (afterIndex >= 0) {
-      addStep(afterIndex)
+  // Handle adding step between two nodes (from edge + button)
+  const handleAddAfter = useCallback((sourceStepId: string, targetStepId?: string) => {
+    const sourceIndex = steps.findIndex(s => s.id === sourceStepId)
+    if (sourceIndex < 0) return
+
+    const newStep: WorkflowStep = {
+      id: `step-${Date.now()}`,
+      name: 'New Agent Step',
+      stepType: 'agent',
     }
-  }, [steps, addStep])
+
+    const newSteps = [...steps]
+    const sourceStep = steps[sourceIndex]
+
+    // Check if this is an explicit connections workflow
+    const hasExplicitConnections = steps.some(s => s.connections && s.connections.length > 0)
+
+    if (hasExplicitConnections && sourceStep && targetStepId) {
+      // Update the source step's connection that goes to target to now go to new step
+      if (sourceStep.connections && sourceStep.connections.length > 0) {
+        const updatedSourceConnections = sourceStep.connections.map(conn => {
+          if (conn.targetStepId === targetStepId) {
+            // Redirect this connection to the new step
+            return { ...conn, targetStepId: newStep.id }
+          }
+          return conn
+        })
+        newSteps[sourceIndex] = { ...sourceStep, connections: updatedSourceConnections }
+      } else {
+        // Source has no connections, add one to new step
+        newSteps[sourceIndex] = { ...sourceStep, connections: [{ targetStepId: newStep.id }] }
+      }
+
+      // New step connects to the original target
+      newStep.connections = [{ targetStepId }]
+    } else if (hasExplicitConnections && sourceStep) {
+      // No target step specified, but explicit connections - add connection from source to new step
+      if (sourceStep.connections && sourceStep.connections.length > 0) {
+        // Insert new step before the first connection target
+        const firstTarget = sourceStep.connections[0]?.targetStepId
+        if (firstTarget) {
+          const updatedSourceConnections = [
+            { targetStepId: newStep.id },
+            ...sourceStep.connections.slice(1)
+          ]
+          newSteps[sourceIndex] = { ...sourceStep, connections: updatedSourceConnections }
+          newStep.connections = [{ targetStepId: firstTarget }]
+        }
+      } else {
+        newSteps[sourceIndex] = { ...sourceStep, connections: [{ targetStepId: newStep.id }] }
+      }
+    }
+
+    // Insert new step after source step in the array
+    newSteps.splice(sourceIndex + 1, 0, newStep)
+    onStepsChange(newSteps)
+    setSelectedStepId(newStep.id)
+    setIsPanelCollapsed(false)
+  }, [steps, onStepsChange])
 
   return (
     <div className={cn('flex gap-2 h-full', className)}>
@@ -422,7 +474,7 @@ export function IntegratedWorkflowView({
         {steps.length > 0 && (
           <div className="px-3 py-1.5 border-t bg-muted/30 text-xs text-muted-foreground flex items-center gap-1.5 flex-shrink-0">
             <MousePointerClick className="h-3 w-3" />
-            Click node to edit • Hover arrow for +
+            Click node to edit • Hover between nodes to insert step
           </div>
         )}
       </div>

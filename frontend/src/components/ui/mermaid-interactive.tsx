@@ -9,7 +9,7 @@ interface MermaidInteractiveProps {
   selectedNodeId?: string | null
   stepIds?: string[]  // List of step IDs in order for edge buttons
   onNodeClick?: (nodeId: string) => void
-  onAddAfter?: (stepId: string) => void
+  onAddAfter?: (sourceStepId: string, targetStepId?: string) => void  // Insert between source and target
   onError?: (error: string) => void
 }
 
@@ -196,25 +196,31 @@ export function MermaidInteractive({
 
           const midPoint = pathElement.getPointAtLength(pathLength / 2)
 
-          // Try to determine which step this edge comes from
-          // Look at the parent's class for LS-{stepId} pattern
+          // Try to determine which step this edge comes from and goes to
+          // Look at the parent's class for LS-{stepId} and LE-{stepId} patterns
           const parent = pathElement.closest('.edgePath')
           let sourceStepId: string | null = null
+          let targetStepId: string | null = null
 
           if (parent) {
             const classList = parent.getAttribute('class') || ''
-            // Try to match LS-{stepId} pattern
+            // Try to match LS-{stepId} (source) and LE-{stepId} (target) patterns
             const sourceMatch = classList.match(/LS-([^\s]+)/)
+            const targetMatch = classList.match(/LE-([^\s]+)/)
             if (sourceMatch) {
               sourceStepId = sourceMatch[1]
             }
+            if (targetMatch) {
+              targetStepId = targetMatch[1]
+            }
           }
 
-          // If we couldn't find source from class, use position-based detection
+          // If we couldn't find source/target from class, use position-based detection
+          const startPoint = pathElement.getPointAtLength(0)
+          const endPoint = pathElement.getPointAtLength(pathLength)
+
           if (!sourceStepId) {
-            // Find the closest step node above this path's start point
-            const startPoint = pathElement.getPointAtLength(0)
-            let closestStepId: string | null = null
+            // Find the closest step node to the start point of the path
             let closestDist = Infinity
 
             stepIds.forEach(stepId => {
@@ -227,12 +233,32 @@ export function MermaidInteractive({
                   const dist = Math.hypot(startPoint.x - nodeCenterX, startPoint.y - nodeBottomY)
                   if (dist < closestDist && dist < 100) {
                     closestDist = dist
-                    closestStepId = stepId
+                    sourceStepId = stepId
                   }
                 }
               }
             })
-            sourceStepId = closestStepId
+          }
+
+          if (!targetStepId) {
+            // Find the closest step node to the end point of the path
+            let closestDist = Infinity
+
+            stepIds.forEach(stepId => {
+              const nodeEl = container.querySelector(`[id*="${stepId}"]`)
+              if (nodeEl) {
+                const bbox = (nodeEl as SVGGraphicsElement).getBBox?.()
+                if (bbox) {
+                  const nodeCenterX = bbox.x + bbox.width / 2
+                  const nodeTopY = bbox.y
+                  const dist = Math.hypot(endPoint.x - nodeCenterX, endPoint.y - nodeTopY)
+                  if (dist < closestDist && dist < 100) {
+                    closestDist = dist
+                    targetStepId = stepId
+                  }
+                }
+              }
+            })
           }
 
           if (!sourceStepId) return
@@ -248,11 +274,12 @@ export function MermaidInteractive({
           const defaultPlusColor = isDark ? '#a1a1aa' : '#71717a'  // zinc-400 : zinc-500 (gray)
           const hoverPlusColor = '#1e40af'  // blue-800 (dark blue)
 
-          // Create minimal plus button - background matches page, plus is accent color
+          // Create minimal plus button - hidden by default, shown on edge hover
           const buttonGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g')
           buttonGroup.setAttribute('class', 'add-step-btn')
           buttonGroup.style.cursor = 'pointer'
           buttonGroup.style.transition = 'all 0.15s ease'
+          buttonGroup.style.opacity = '0'  // Hidden by default
 
           // Background circle - semi-transparent muted by default
           const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
@@ -304,9 +331,44 @@ export function MermaidInteractive({
           buttonGroup.addEventListener('click', (e) => {
             e.stopPropagation()
             e.preventDefault()
-            onAddAfter(sourceStepId!)
+            onAddAfter(sourceStepId!, targetStepId || undefined)
           })
 
+          // Create a larger invisible hit area for edge hover detection
+          const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+          hitArea.setAttribute('cx', String(midPoint.x))
+          hitArea.setAttribute('cy', String(midPoint.y))
+          hitArea.setAttribute('r', '25')  // Larger area for easier hover
+          hitArea.setAttribute('fill', 'transparent')
+          hitArea.style.cursor = 'pointer'
+
+          // Track if mouse is over either hit area or button
+          let isHovering = false
+
+          const showButton = () => {
+            isHovering = true
+            buttonGroup.style.opacity = '1'
+          }
+
+          const hideButton = () => {
+            isHovering = false
+            // Small delay to allow moving from hit area to button
+            setTimeout(() => {
+              if (!isHovering) {
+                buttonGroup.style.opacity = '0'
+              }
+            }, 100)
+          }
+
+          // Show button when hovering near the edge midpoint
+          hitArea.addEventListener('mouseenter', showButton)
+          hitArea.addEventListener('mouseleave', hideButton)
+
+          // Also track hover on the button itself
+          buttonGroup.addEventListener('mouseenter', showButton)
+          buttonGroup.addEventListener('mouseleave', hideButton)
+
+          svgElement.appendChild(hitArea)
           svgElement.appendChild(buttonGroup)
         } catch {
           // getTotalLength might fail on some paths
