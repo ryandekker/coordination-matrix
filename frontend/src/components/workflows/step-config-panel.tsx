@@ -1,6 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { getAuthHeader } from '@/lib/auth'
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -208,7 +211,9 @@ function FindDocumentConfig({
 
     setIsSearching(true)
     try {
-      const response = await fetch(`/api/documents?search=${encodeURIComponent(query)}&limit=10`)
+      const response = await fetch(`${API_BASE}/documents?search=${encodeURIComponent(query)}&limit=10`, {
+        headers: getAuthHeader(),
+      })
       if (response.ok) {
         const data = await response.json()
         setSearchResults(data.data || [])

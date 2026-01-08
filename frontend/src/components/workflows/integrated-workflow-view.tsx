@@ -19,6 +19,7 @@ import {
   Workflow as WorkflowIcon,
   MousePointerClick,
   Layers,
+  FileSearch,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -94,6 +95,7 @@ const STEP_TYPES: { type: WorkflowStepType; label: string; description: string; 
   { type: 'foreach', label: 'ForEach', description: 'Loop over items', icon: Repeat, color: 'text-green-500' },
   { type: 'join', label: 'Join', description: 'Aggregate', icon: Merge, color: 'text-indigo-500' },
   { type: 'flow', label: 'Flow', description: 'Nested workflow', icon: WorkflowIcon, color: 'text-pink-500' },
+  { type: 'findDocument', label: 'Find Document', description: 'Search documents', icon: FileSearch, color: 'text-cyan-500' },
 ]
 
 function detectLoopScopes(steps: WorkflowStep[]): LoopScope[] {
