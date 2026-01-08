@@ -4,6 +4,8 @@
   "description": "AI Workflow Task Management System",
   "private": true,
   "scripts": {
+    "postinstall": "cd backend && npm install && cd ../frontend && npm install",
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
     "dev": "node scripts/dev-start.mjs",
     "dev:restart": "pkill -f 'tsx watch' 2>/dev/null; pkill -f 'next dev' 2>/dev/null; sleep 1 && npm run dev",
     "dev:backend": "cd backend && npm run dev",
@@ -19,7 +21,6 @@
     "db:logs": "docker compose -f docker-compose.dev.yml logs -f mongodb",
     "db:migrate": "cd backend && npm run db:migrate",
     "db:migrate:status": "cd backend && npm run db:migrate:status",
-    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
     "build": "cd backend && npm run build && cd ../frontend && npm run build",
     "lint": "cd backend && npm run lint && cd ../frontend && npm run lint",
     "test": "cd backend && npm test",
