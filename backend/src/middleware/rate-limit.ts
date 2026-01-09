@@ -1,4 +1,26 @@
 import rateLimit from 'express-rate-limit';
+import { Request } from 'express';
+
+/**
+ * Helper to safely get client IP, handling IPv6 normalization.
+ * IPv6 addresses are normalized to prevent bypass attacks.
+ */
+function getClientKey(req: Request, prefix: string = ''): string {
+  // Get IP, preferring X-Forwarded-For for proxied requests
+  let ip = req.ip || req.socket.remoteAddress || 'unknown';
+
+  // Normalize IPv6 addresses (strip zone ID, handle ::ffff: prefix)
+  if (ip.includes(':')) {
+    // Remove zone ID (e.g., %eth0)
+    ip = ip.split('%')[0];
+    // For IPv4-mapped IPv6 addresses, extract the IPv4 part
+    if (ip.startsWith('::ffff:')) {
+      ip = ip.substring(7);
+    }
+  }
+
+  return prefix ? `${prefix}:${ip}` : ip;
+}
 
 /**
  * Rate limiter for authentication endpoints.
@@ -36,16 +58,18 @@ export const loginRateLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  // Disable the IPv6 key generator validation since we handle it ourselves
+  validate: { xForwardedForHeader: false },
   // Use a custom key generator that includes the email (if available) to prevent
   // distributed brute force attacks from multiple IPs targeting the same account
   keyGenerator: (req) => {
     const email = req.body?.email?.toLowerCase() || '';
-    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const clientKey = getClientKey(req, 'login');
     // If email is provided, rate limit by email as well
     if (email) {
-      return `login:${email}:${ip}`;
+      return `${clientKey}:${email}`;
     }
-    return `login:${ip}`;
+    return clientKey;
   },
 });
 
@@ -123,10 +147,11 @@ export const passwordChangeRateLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  // Disable the IPv6 key generator validation since we handle it ourselves
+  validate: { xForwardedForHeader: false },
   keyGenerator: (req) => {
     // Rate limit by user ID if available (from auth middleware)
     const userId = (req as unknown as { user?: { userId: string } }).user?.userId;
-    const ip = req.ip || req.socket.remoteAddress || 'unknown';
-    return userId ? `pwd-change:${userId}` : `pwd-change:${ip}`;
+    return userId ? `pwd-change:${userId}` : getClientKey(req, 'pwd-change');
   },
 });

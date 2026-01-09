@@ -226,42 +226,34 @@ interface TaskDataTableProps {
 
 // Helper to organize flat filtered results into a tree structure
 // When filtering, both parent and child may match - group children under matching parents
+// Optimized: O(n) complexity using single pass
 function organizeTasksIntoTree(tasks: Task[]): Task[] {
   if (tasks.length === 0) return []
 
-  // Create a map of all task IDs for quick lookup
-  const taskMap = new Map<string, Task>()
-  for (const task of tasks) {
+  // Single pass: create map and identify relationships
+  const taskMap = new Map<string, Task & { children: Task[] }>()
+  const rootTasks: Task[] = []
+
+  // First pass: create all task copies with empty children arrays
+  for (let i = 0; i < tasks.length; i++) {
+    const task = tasks[i]
     taskMap.set(task._id, { ...task, children: [] })
   }
 
-  // Separate tasks into root-level and those that should be nested under a parent
-  const rootTasks: Task[] = []
-  const childrenByParent = new Map<string, Task[]>()
-
-  for (const task of tasks) {
+  // Second pass: build tree structure
+  for (let i = 0; i < tasks.length; i++) {
+    const task = tasks[i]
     const taskCopy = taskMap.get(task._id)!
     const parentId = task.parentId?.toString()
 
-    // If this task has a parent that's also in the results, it should be nested
+    // If this task has a parent that's also in the results, nest it
     if (parentId && taskMap.has(parentId)) {
-      if (!childrenByParent.has(parentId)) {
-        childrenByParent.set(parentId, [])
-      }
-      childrenByParent.get(parentId)!.push(taskCopy)
+      taskMap.get(parentId)!.children.push(taskCopy)
     } else {
-      // No parent in results, or no parent at all - show at root level
+      // No parent in results - show at root level
       rootTasks.push(taskCopy)
     }
   }
-
-  // Attach children to their parents
-  childrenByParent.forEach((children, parentId) => {
-    const parent = taskMap.get(parentId)
-    if (parent) {
-      parent.children = children
-    }
-  })
 
   return rootTasks
 }
@@ -614,7 +606,9 @@ const TaskRow = memo(function TaskRow({
   // Use pre-attached children if available, otherwise use fetched children
   const children = hasPreAttachedChildren ? (task.children || []) : (childrenData?.data || [])
   const childrenPagination = childrenData?.pagination
-  const hasChildren = hasPreAttachedChildren || (isExpanded ? children.length > 0 : Boolean(task.children && task.children.length > 0))
+  // Use childCount (number) from backend if available, otherwise fall back to checking children array
+  const hasChildren = hasPreAttachedChildren
+    || (isExpanded ? children.length > 0 : ((task as Task & { childCount?: number }).childCount ?? 0) > 0 || Boolean(task.children && task.children.length > 0))
   const hasMoreChildren = !hasPreAttachedChildren && childrenPagination && childrenPagination.totalPages > 1
 
   // Reset to page 1 when collapsing

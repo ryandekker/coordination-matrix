@@ -665,7 +665,7 @@ export interface ExternalJob {
 }
 
 // Workflow step types
-export type WorkflowStepType = 'task' | 'decision' | 'foreach' | 'join' | 'flow'
+export type WorkflowStepType = 'task' | 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow' | 'findDocument'
 export type ExecutionMode = 'automated' | 'manual'
 
 export interface DecisionBranch {

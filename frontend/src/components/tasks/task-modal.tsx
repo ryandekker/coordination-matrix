@@ -42,7 +42,7 @@ import {
   DEFAULT_TASK_MODAL_TAB,
   type TaskModalTab,
 } from '@/lib/task-type-config'
-import { Settings2, Database, Activity, Workflow, ExternalLink, ArrowUpRight, ListTree, Plus, Loader2, RotateCcw } from 'lucide-react'
+import { Settings2, Database, Activity, Workflow, ExternalLink, ArrowUpRight, ListTree, RotateCcw } from 'lucide-react'
 import {
   Tooltip,
   TooltipContent,
@@ -53,6 +53,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { UserChip, UserAvatar } from '@/components/ui/user-chip'
 import { TagInput } from '@/components/ui/tag-input'
+import { SubtasksList } from './task-modal/subtasks-list'
+import { MetadataEditor } from './task-modal/metadata-editor'
 
 interface TaskModalProps {
   task: Task | null
@@ -1573,130 +1575,11 @@ export function TaskModal({
     )
   }
 
-  // Metadata content for sidebar
-  const MetadataContent = () => (
-    <div className="p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <label className="text-xs font-medium text-muted-foreground">Task Metadata</label>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-5 px-1.5 text-[10px]"
-          onClick={() => {
-            if (!isMetadataEditMode) {
-              // Switching to edit mode - store the initial value
-              const initialValue = JSON.stringify(task?.metadata || {}, null, 2)
-              savedMetadataValueRef.current = initialValue
-              currentMetadataValueRef.current = initialValue
-              setMetadataError(null)
-              // Set textarea value after it mounts
-              setTimeout(() => {
-                if (metadataTextareaRef.current) {
-                  metadataTextareaRef.current.value = initialValue
-                }
-              }, 0)
-            }
-            setIsMetadataEditMode(!isMetadataEditMode)
-          }}
-        >
-          {isMetadataEditMode ? 'View' : 'Edit'}
-        </Button>
-      </div>
-
-      {isMetadataEditMode ? (
-        // Edit mode - uncontrolled JSON textarea (ref-based to avoid re-render lag)
-        <div className="space-y-1">
-          <textarea
-            ref={metadataTextareaRef}
-            onInput={(e) => {
-              currentMetadataValueRef.current = (e.target as HTMLTextAreaElement).value
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.stopPropagation()
-              }
-            }}
-            placeholder='{"key": "value"}'
-            rows={12}
-            className={cn(
-              'flex w-full rounded-md border bg-background px-3 py-1.5 text-xs font-mono',
-              'placeholder:text-muted-foreground resize-y transition-colors',
-              'focus-visible:outline-none',
-              metadataError
-                ? 'border-destructive focus-visible:border-destructive'
-                : 'border-input focus-visible:border-primary'
-            )}
-          />
-          <div className="flex items-center justify-between">
-            {metadataError ? (
-              <p className="text-[10px] text-destructive">{metadataError}</p>
-            ) : (
-              <p className="text-[10px] text-muted-foreground">&nbsp;</p>
-            )}
-            <div className="flex gap-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
-                onClick={() => {
-                  currentMetadataValueRef.current = savedMetadataValueRef.current
-                  if (metadataTextareaRef.current) {
-                    metadataTextareaRef.current.value = savedMetadataValueRef.current
-                  }
-                  setMetadataError(null)
-                  setTimeout(() => {
-                    if (metadataTextareaRef.current) {
-                      metadataTextareaRef.current.value = currentMetadataValueRef.current
-                    }
-                  }, 0)
-                }}
-              >
-                Reset
-              </Button>
-              <Button
-                type="button"
-                variant="default"
-                size="sm"
-                className="h-5 px-2 text-[10px]"
-                onClick={async () => {
-                  if (!task) return
-                  const currentValue = currentMetadataValueRef.current
-                  const { valid, parsed, error } = parseMetadataJson(currentValue)
-                  setMetadataError(error)
-                  setTimeout(() => {
-                    if (metadataTextareaRef.current) {
-                      metadataTextareaRef.current.value = currentMetadataValueRef.current
-                    }
-                  }, 0)
-                  if (!valid) return
-                  try {
-                    await updateTask.mutateAsync({ id: task._id, data: { metadata: parsed as Record<string, unknown> } })
-                    savedMetadataValueRef.current = currentValue
-                    setIsMetadataEditMode(false)
-                  } catch {
-                    // Silently fail
-                  }
-                }}
-              >
-                Save
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : (
-        // View mode - collapsible tree view
-        <div className="px-3 py-2 text-sm bg-muted/50 rounded-md border max-h-[calc(100vh-300px)] overflow-y-auto">
-          <JsonViewer
-            data={task?.metadata}
-            defaultExpanded={true}
-            maxInitialDepth={2}
-          />
-        </div>
-      )}
-    </div>
-  )
+  // Metadata save handler
+  const handleMetadataSave = useCallback(async (parsed: Record<string, unknown>) => {
+    if (!task) return
+    await updateTask.mutateAsync({ id: task._id, data: { metadata: parsed } })
+  }, [task, updateTask])
 
   // Edit mode - two column layout with tabbed sidebar
   return (
@@ -1776,119 +1659,33 @@ export function TaskModal({
               </TabsContent>
 
               <TabsContent value={TASK_MODAL_TABS.SUBTASKS} className="flex-1 min-h-0 overflow-y-auto mt-0">
-                <div className="p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      Subtasks {subtasks.length > 0 && `(${subtasks.length})`}
-                    </label>
-                  </div>
-
-                  {/* Quick create input */}
-                  <div className="relative">
-                    <Plus className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                    <input
-                      ref={subtaskInputRef}
-                      type="text"
-                      value={newSubtaskTitle}
-                      onChange={(e) => setNewSubtaskTitle(e.target.value)}
-                      onKeyDown={handleSubtaskInputKeyDown}
-                      placeholder="Add subtask... (Enter to create)"
-                      disabled={isCreatingSubtask}
-                      className={cn(
-                        'w-full h-8 pl-8 pr-8 text-sm rounded-md border border-input bg-background',
-                        'placeholder:text-muted-foreground/60',
-                        'focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary',
-                        'disabled:opacity-50 disabled:cursor-not-allowed'
-                      )}
-                    />
-                    {isCreatingSubtask && (
-                      <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground animate-spin" />
-                    )}
-                  </div>
-
-                  {isLoadingChildren ? (
-                    <div className="flex items-center justify-center py-8 text-muted-foreground">
-                      <span className="text-sm">Loading subtasks...</span>
-                    </div>
-                  ) : subtasks.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
-                      <ListTree className="h-6 w-6 mb-1.5 opacity-50" />
-                      <span className="text-xs">No subtasks yet</span>
-                    </div>
-                  ) : (
-                    <div className="space-y-1">
-                      {subtasks.map((subtask) => {
-                        const subtaskStatus = statusOptions.find(s => s.code === subtask.status)
-                        const subtaskAssignee = users.find(u => u._id === subtask.assigneeId)
-                        const subtaskTypeConfig = getTaskTypeConfig(subtask.taskType)
-                        const SubtaskTypeIcon = subtaskTypeConfig.icon
-
-                        return (
-                          <button
-                            key={subtask._id}
-                            type="button"
-                            onClick={() => handleSubtaskClick(subtask._id)}
-                            className={cn(
-                              'w-full flex items-center gap-2 px-3 py-2 rounded-md text-left',
-                              'bg-muted/30 hover:bg-muted/60 transition-colors',
-                              'border border-transparent hover:border-border'
-                            )}
-                          >
-                            {/* Task type icon */}
-                            <SubtaskTypeIcon
-                              className="h-3.5 w-3.5 flex-shrink-0"
-                              style={{ color: subtaskTypeConfig.hexColor }}
-                            />
-
-                            {/* Status badge */}
-                            <span
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0"
-                              style={{
-                                backgroundColor: `${subtaskStatus?.color || '#888'}20`,
-                                color: subtaskStatus?.color || '#888',
-                              }}
-                            >
-                              <span
-                                className="h-1.5 w-1.5 rounded-full"
-                                style={{ backgroundColor: subtaskStatus?.color || '#888' }}
-                              />
-                              {subtaskStatus?.displayName || subtask.status}
-                            </span>
-
-                            {/* Title */}
-                            <span className="flex-1 text-sm truncate" title={subtask.title}>
-                              {subtask.title}
-                            </span>
-
-                            {/* Assignee avatar with tooltip */}
-                            {subtaskAssignee ? (
-                              <TooltipProvider delayDuration={200}>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <span
-                                      className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-medium flex-shrink-0 cursor-default"
-                                    >
-                                      {subtaskAssignee.displayName.charAt(0).toUpperCase()}
-                                    </span>
-                                  </TooltipTrigger>
-                                  <TooltipContent side="left" className="text-xs">
-                                    {subtaskAssignee.displayName}
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
-                            ) : (
-                              <span className="w-5 h-5 flex-shrink-0" />
-                            )}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
+                <SubtasksList
+                  subtasks={subtasks}
+                  isLoading={isLoadingChildren}
+                  statusOptions={statusOptions}
+                  users={users}
+                  onSubtaskClick={handleSubtaskClick}
+                  newSubtaskTitle={newSubtaskTitle}
+                  setNewSubtaskTitle={setNewSubtaskTitle}
+                  onSubtaskInputKeyDown={handleSubtaskInputKeyDown}
+                  isCreatingSubtask={isCreatingSubtask}
+                  subtaskInputRef={subtaskInputRef}
+                />
               </TabsContent>
 
               <TabsContent value={TASK_MODAL_TABS.METADATA} className="flex-1 min-h-0 overflow-y-auto mt-0">
-                <MetadataContent />
+                <MetadataEditor
+                  task={task}
+                  isEditMode={isMetadataEditMode}
+                  setIsEditMode={setIsMetadataEditMode}
+                  metadataError={metadataError}
+                  setMetadataError={setMetadataError}
+                  metadataTextareaRef={metadataTextareaRef}
+                  savedMetadataValueRef={savedMetadataValueRef}
+                  currentMetadataValueRef={currentMetadataValueRef}
+                  onSave={handleMetadataSave}
+                  parseMetadataJson={parseMetadataJson}
+                />
               </TabsContent>
 
               <TabsContent value={TASK_MODAL_TABS.ACTIVITY} className="flex-1 min-h-0 overflow-y-auto mt-0">

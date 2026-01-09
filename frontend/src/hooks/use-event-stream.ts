@@ -533,27 +533,39 @@ export function useEventStream(options?: {
         break
 
       case 'task.assignee.changed':
-        // Assignee changes need full refetch to get resolved user data (name, email, etc.)
-        queryClient.invalidateQueries({ queryKey: ['tasks'] })
+        // Assignee changes need refetch to get resolved user data
+        // Only invalidate the specific task and mark lists as stale (don't force refetch)
         queryClient.invalidateQueries({ queryKey: ['task', event.taskId] })
-        queryClient.invalidateQueries({ queryKey: ['task-tree'] })
-        queryClient.invalidateQueries({ queryKey: ['task-children'] })
+        queryClient.invalidateQueries({ queryKey: ['tasks'], refetchType: 'none' })
+        queryClient.invalidateQueries({ queryKey: ['task-tree'], refetchType: 'none' })
+        // For task-children, only invalidate if we know the parent
+        if (event.task?.parentId) {
+          queryClient.invalidateQueries({ queryKey: ['task-children', event.task.parentId], refetchType: 'active' })
+        }
         break
 
       case 'task.deleted':
-        // Remove from caches
+        // Remove from caches - optimistically remove from all caches
         queryClient.removeQueries({ queryKey: ['task', event.taskId] })
-        queryClient.invalidateQueries({ queryKey: ['tasks'] })
-        queryClient.invalidateQueries({ queryKey: ['task-tree'] })
-        queryClient.invalidateQueries({ queryKey: ['task-children'] })
+        // Optimistically remove from task lists
+        queryClient.setQueriesData({ queryKey: ['tasks'] }, (old: unknown) => {
+          if (!old) return old
+          const oldData = old as { data: Task[]; pagination: { total: number } }
+          const filtered = oldData.data.filter((t: Task) => t._id !== event.taskId)
+          if (filtered.length === oldData.data.length) return old
+          return {
+            ...oldData,
+            data: filtered,
+            pagination: { ...oldData.pagination, total: Math.max(0, oldData.pagination.total - 1) }
+          }
+        })
+        // Mark other caches as stale without forcing refetch
+        queryClient.invalidateQueries({ queryKey: ['task-tree'], refetchType: 'none' })
+        queryClient.invalidateQueries({ queryKey: ['task-children'], refetchType: 'none' })
         break
 
       case 'task.moved':
-        // Task parent changed - invalidate relevant caches
-        queryClient.invalidateQueries({ queryKey: ['tasks'] })
-        queryClient.invalidateQueries({ queryKey: ['task-tree'] })
-        queryClient.invalidateQueries({ queryKey: ['task-children'] })
-        // Update the specific task if we have task data
+        // Task parent changed - update specific task and mark lists as stale
         if (event.task) {
           queryClient.setQueryData(['task', event.taskId], (old: unknown) => {
             if (!old) return old
@@ -563,7 +575,19 @@ export function useEventStream(options?: {
               data: { ...oldData.data, ...event.task }
             }
           })
+          // Invalidate old and new parent's children if applicable
+          const oldParentId = event.changes?.find(c => c.field === 'parentId')?.oldValue as string | null
+          const newParentId = event.task.parentId
+          if (oldParentId) {
+            queryClient.invalidateQueries({ queryKey: ['task-children', oldParentId] })
+          }
+          if (newParentId) {
+            queryClient.invalidateQueries({ queryKey: ['task-children', newParentId] })
+          }
         }
+        // Mark lists as stale without forcing immediate refetch
+        queryClient.invalidateQueries({ queryKey: ['tasks'], refetchType: 'none' })
+        queryClient.invalidateQueries({ queryKey: ['task-tree'], refetchType: 'none' })
         break
 
       case 'task.comment.added':
