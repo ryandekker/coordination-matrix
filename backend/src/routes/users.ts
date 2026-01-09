@@ -3,8 +3,31 @@ import { ObjectId } from 'mongodb';
 import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
 import { User, Team } from '../types/index.js';
+import { requireRole, isAdmin } from '../middleware/authorize.js';
 
 export const usersRouter = Router();
+
+/**
+ * Helper to check if user can modify another user.
+ * - Admins can modify anyone
+ * - Users can only modify themselves
+ * - Users cannot change their own role
+ */
+function canModifyUser(req: Request, targetUserId: string): { allowed: boolean; selfUpdate: boolean } {
+  if (!req.user) {
+    return { allowed: false, selfUpdate: false };
+  }
+
+  const selfUpdate = req.user.userId === targetUserId;
+
+  // Admins can modify anyone
+  if (isAdmin(req)) {
+    return { allowed: true, selfUpdate };
+  }
+
+  // Users can only modify themselves
+  return { allowed: selfUpdate, selfUpdate };
+}
 
 // GET /api/users - Get all users
 usersRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
@@ -125,7 +148,8 @@ usersRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) 
 });
 
 // POST /api/users - Create a new user
-usersRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
+// Only admins can create users.
+usersRouter.post('/', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
     const { email, displayName, role, isAgent, agentPrompt, profilePicture, botColor } = req.body;
@@ -190,16 +214,34 @@ usersRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
 });
 
 // PATCH /api/users/:id - Update a user
+// Users can update themselves. Admins can update anyone.
+// Only admins can change user roles.
 usersRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
     const userId = new ObjectId(req.params.id);
     const updates = req.body;
 
+    // Check authorization
+    const { allowed } = canModifyUser(req, req.params.id);
+    if (!allowed) {
+      throw createError('You do not have permission to update this user', 403);
+    }
+
     delete updates._id;
     delete updates.email; // Email shouldn't be changed after creation
     delete updates.createdAt;
     updates.updatedAt = new Date();
+
+    // Only admins can change roles
+    if (updates.role !== undefined && !isAdmin(req)) {
+      throw createError('Only admins can change user roles', 403);
+    }
+
+    // Only admins can change isActive status
+    if (updates.isActive !== undefined && !isAdmin(req)) {
+      throw createError('Only admins can change user active status', 403);
+    }
 
     // Handle agent-specific fields
     // isAgent, agentPrompt, and botColor can be updated
@@ -230,10 +272,16 @@ usersRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
 });
 
 // DELETE /api/users/:id - Deactivate a user
-usersRouter.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
+// Only admins can deactivate users.
+usersRouter.delete('/:id', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
     const userId = new ObjectId(req.params.id);
+
+    // Prevent admin from deactivating themselves
+    if (req.user?.userId === req.params.id) {
+      throw createError('You cannot deactivate your own account', 400);
+    }
 
     const result = await db.collection<User>('users').findOneAndUpdate(
       { _id: userId },
@@ -291,7 +339,8 @@ usersRouter.get('/teams/:id', async (req: Request, res: Response, next: NextFunc
 });
 
 // POST /api/users/teams - Create a new team
-usersRouter.post('/teams', async (req: Request, res: Response, next: NextFunction) => {
+// Only admins can create teams.
+usersRouter.post('/teams', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
     const { name, description, memberIds } = req.body;
@@ -325,7 +374,8 @@ usersRouter.post('/teams', async (req: Request, res: Response, next: NextFunctio
 });
 
 // PATCH /api/users/teams/:id - Update a team
-usersRouter.patch('/teams/:id', async (req: Request, res: Response, next: NextFunction) => {
+// Only admins can update teams.
+usersRouter.patch('/teams/:id', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
     const teamId = new ObjectId(req.params.id);
@@ -356,7 +406,8 @@ usersRouter.patch('/teams/:id', async (req: Request, res: Response, next: NextFu
 });
 
 // DELETE /api/users/teams/:id - Delete a team
-usersRouter.delete('/teams/:id', async (req: Request, res: Response, next: NextFunction) => {
+// Only admins can delete teams.
+usersRouter.delete('/teams/:id', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
     const teamId = new ObjectId(req.params.id);
@@ -374,7 +425,8 @@ usersRouter.delete('/teams/:id', async (req: Request, res: Response, next: NextF
 });
 
 // PUT /api/users/teams/:id/members - Update team members
-usersRouter.put('/teams/:id/members', async (req: Request, res: Response, next: NextFunction) => {
+// Only admins can update team members.
+usersRouter.put('/teams/:id/members', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
     const teamId = new ObjectId(req.params.id);

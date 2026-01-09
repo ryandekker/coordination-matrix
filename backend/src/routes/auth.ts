@@ -4,6 +4,11 @@ import { z } from 'zod';
 import { getDb } from '../db/connection.js';
 import { generateToken, requireAuth } from '../middleware/auth.js';
 import { ObjectId } from 'mongodb';
+import {
+  loginRateLimiter,
+  registrationRateLimiter,
+  passwordChangeRateLimiter,
+} from '../middleware/rate-limit.js';
 
 const router = Router();
 
@@ -24,7 +29,8 @@ const changePasswordSchema = z.object({
 });
 
 // POST /api/auth/login
-router.post('/login', async (req: Request, res: Response): Promise<void> => {
+// Rate limited: 5 attempts per 15 minutes per IP+email combination
+router.post('/login', loginRateLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const validation = loginSchema.safeParse(req.body);
     if (!validation.success) {
@@ -88,7 +94,8 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
 });
 
 // POST /api/auth/register - Only allowed if no users exist (first user setup)
-router.post('/register', async (req: Request, res: Response): Promise<void> => {
+// Rate limited: 3 attempts per hour per IP
+router.post('/register', registrationRateLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const db = getDb();
     const usersCollection = db.collection('users');
@@ -179,7 +186,8 @@ router.get('/me', requireAuth, async (req: Request, res: Response): Promise<void
 });
 
 // POST /api/auth/change-password
-router.post('/change-password', requireAuth, async (req: Request, res: Response): Promise<void> => {
+// Rate limited: 5 attempts per hour per user
+router.post('/change-password', requireAuth, passwordChangeRateLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const validation = changePasswordSchema.safeParse(req.body);
     if (!validation.success) {
@@ -237,17 +245,20 @@ router.get('/status', async (_req: Request, res: Response): Promise<void> => {
 
 // POST /api/auth/dev-login - Development-only passwordless login
 // Only available when NODE_ENV !== 'production'
+// Rate limited like regular login to prevent abuse
 const devLoginSchema = z.object({
   email: z.string().email(),
 });
 
-router.post('/dev-login', async (req: Request, res: Response): Promise<void> => {
+router.post('/dev-login', loginRateLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     // Only allow in development mode
     if (process.env.NODE_ENV === 'production') {
       res.status(403).json({ error: 'Dev login is not available in production' });
       return;
     }
+
+    console.warn(`[SECURITY] Dev login used for email: ${req.body?.email} from IP: ${req.ip}`);
 
     const validation = devLoginSchema.safeParse(req.body);
     if (!validation.success) {

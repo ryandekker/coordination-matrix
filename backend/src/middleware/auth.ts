@@ -34,15 +34,30 @@ declare global {
   }
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'change-this-secret-in-production';
+// JWT Secret validation - CRITICAL SECURITY
+// In production, JWT_SECRET MUST be set to a strong random value
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('FATAL: JWT_SECRET environment variable is not set in production!');
+    console.error('This is a critical security vulnerability. The server cannot start without a JWT secret.');
+    process.exit(1);
+  } else {
+    console.warn('WARNING: JWT_SECRET not set - using insecure default for development only');
+  }
+}
+
+// Use the environment variable or a development-only fallback
+const JWT_SECRET_VALUE = JWT_SECRET || 'dev-only-insecure-secret-do-not-use-in-production';
 
 export function generateToken(user: AuthUser): string {
-  return jwt.sign(user, JWT_SECRET, { expiresIn: '7d' });
+  return jwt.sign(user, JWT_SECRET_VALUE, { expiresIn: '7d' });
 }
 
 export function verifyToken(token: string): AuthUser | null {
   try {
-    return jwt.verify(token, JWT_SECRET) as AuthUser;
+    return jwt.verify(token, JWT_SECRET_VALUE) as AuthUser;
   } catch {
     return null;
   }

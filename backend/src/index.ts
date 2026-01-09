@@ -38,6 +38,8 @@ import { tagsRouter } from './routes/tags.js';
 import { documentsRouter } from './routes/documents.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { requireAuth } from './middleware/auth.js';
+import { requireScope, SCOPES } from './middleware/authorize.js';
+import { generalApiRateLimiter } from './middleware/rate-limit.js';
 import { activityLogService } from './services/activity-log.js';
 import { webhookService } from './services/webhook-service.js';
 import { batchJobService } from './services/batch-job-service.js';
@@ -199,22 +201,55 @@ app.post('/api/workflow-runs/:id/callback/:stepId', async (req, res) => {
   }
 });
 
-// Protected API Routes - require authentication
-app.use('/api/tasks', requireAuth, tasksRouter);
-app.use('/api/lookups', requireAuth, lookupsRouter);
-app.use('/api/field-configs', requireAuth, fieldConfigsRouter);
-app.use('/api/views', requireAuth, viewsRouter);
-app.use('/api/users', requireAuth, usersRouter);
-app.use('/api/external-jobs', requireAuth, externalJobsRouter);
-app.use('/api/workflows', requireAuth, workflowsRouter);
-app.use('/api/auth/api-keys', requireAuth, apiKeysRouter);
-app.use('/api/activity-logs', requireAuth, activityLogsRouter);
-app.use('/api/webhooks', requireAuth, webhooksRouter);
-app.use('/api/batch-jobs', requireAuth, batchJobsRouter);
-app.use('/api/workflow-runs', requireAuth, workflowRunsRouter);
-app.use('/api/events', requireAuth, eventsRouter);
-app.use('/api/tags', requireAuth, tagsRouter);
-app.use('/api/documents', requireAuth, documentsRouter);
+// Apply general rate limiting to all API routes
+app.use('/api', generalApiRateLimiter);
+
+// Protected API Routes - require authentication and scope checks for API keys
+// Note: JWT-authenticated users bypass scope checks (they use role-based access)
+// API key users must have appropriate scopes
+
+// Tasks - most daemon operations use this
+app.use('/api/tasks', requireAuth, requireScope(SCOPES.TASKS_READ), tasksRouter);
+
+// Lookups and field configs - configuration data, read-only for most
+app.use('/api/lookups', requireAuth, requireScope(SCOPES.TASKS_READ), lookupsRouter);
+app.use('/api/field-configs', requireAuth, requireScope(SCOPES.TASKS_READ), fieldConfigsRouter);
+
+// Views/saved searches
+app.use('/api/views', requireAuth, requireScope(SCOPES.VIEWS_READ), viewsRouter);
+
+// Users - admin operations handled within route
+app.use('/api/users', requireAuth, requireScope(SCOPES.USERS_READ), usersRouter);
+
+// External jobs - workflow execution
+app.use('/api/external-jobs', requireAuth, requireScope(SCOPES.TASKS_READ), externalJobsRouter);
+
+// Workflows - read access for viewing, write handled within route
+app.use('/api/workflows', requireAuth, requireScope(SCOPES.WORKFLOWS_READ), workflowsRouter);
+
+// API keys - admin/self-management, handled within route
+app.use('/api/auth/api-keys', requireAuth, requireScope(SCOPES.API_KEYS_READ), apiKeysRouter);
+
+// Activity logs - read-only for most users
+app.use('/api/activity-logs', requireAuth, requireScope(SCOPES.TASKS_READ), activityLogsRouter);
+
+// Webhooks - admin feature
+app.use('/api/webhooks', requireAuth, requireScope(SCOPES.WEBHOOKS_READ), webhooksRouter);
+
+// Batch jobs - workflow execution
+app.use('/api/batch-jobs', requireAuth, requireScope(SCOPES.WORKFLOWS_READ), batchJobsRouter);
+
+// Workflow runs - execution control
+app.use('/api/workflow-runs', requireAuth, requireScope(SCOPES.WORKFLOWS_READ), workflowRunsRouter);
+
+// SSE events - needs task read access
+app.use('/api/events', requireAuth, requireScope(SCOPES.TASKS_READ), eventsRouter);
+
+// Tags - task-related
+app.use('/api/tags', requireAuth, requireScope(SCOPES.TASKS_READ), tagsRouter);
+
+// Documents - separate scope
+app.use('/api/documents', requireAuth, requireScope(SCOPES.DOCUMENTS_READ), documentsRouter);
 
 // Error handling
 app.use(errorHandler);

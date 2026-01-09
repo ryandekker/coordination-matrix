@@ -3,8 +3,35 @@ import { ObjectId } from 'mongodb';
 import crypto from 'crypto';
 import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
+import { isAdmin } from '../middleware/authorize.js';
 
 export const apiKeysRouter = Router();
+
+/**
+ * Helper to check if user can access an API key.
+ * Users can only access their own API keys unless they are admin.
+ */
+async function canAccessApiKey(req: Request, keyId: ObjectId): Promise<{ allowed: boolean; key: ApiKey | null }> {
+  const db = getDb();
+  const key = await db.collection<ApiKey>('api_keys').findOne({ _id: keyId });
+
+  if (!key) {
+    return { allowed: false, key: null };
+  }
+
+  // Admins can access any key
+  if (isAdmin(req)) {
+    return { allowed: true, key };
+  }
+
+  // Users can only access keys they created
+  const userId = req.user?.userId;
+  if (key.createdById && key.createdById.toString() === userId) {
+    return { allowed: true, key };
+  }
+
+  return { allowed: false, key };
+}
 
 export interface ApiKey {
   _id: ObjectId;
@@ -34,8 +61,10 @@ function hashApiKey(key: string): string {
   return crypto.createHash('sha256').update(key).digest('hex');
 }
 
-// GET /api/auth/api-keys - List all API keys (without the actual keys)
-// Query params:
+// GET /api/auth/api-keys - List API keys
+// Non-admins can only see their own keys.
+// Admins can see all keys and use filters.
+// Query params (admin only):
 //   - createdById: Filter by who created the key
 //   - actsAsUserId: Filter by which user the key acts as (inherits permissions from)
 //   - includeInactive: Include revoked/inactive keys
@@ -45,9 +74,17 @@ apiKeysRouter.get('/', async (req: Request, res: Response, next: NextFunction): 
     const { createdById, actsAsUserId, includeInactive } = req.query;
 
     const filter: Record<string, unknown> = {};
-    if (createdById) {
-      filter.createdById = new ObjectId(createdById as string);
+
+    // Non-admins can only see their own API keys
+    if (!isAdmin(req)) {
+      filter.createdById = new ObjectId(req.user!.userId);
+    } else {
+      // Admins can filter by createdById
+      if (createdById) {
+        filter.createdById = new ObjectId(createdById as string);
+      }
     }
+
     if (actsAsUserId) {
       filter.userId = new ObjectId(actsAsUserId as string);
     }
@@ -69,38 +106,46 @@ apiKeysRouter.get('/', async (req: Request, res: Response, next: NextFunction): 
 });
 
 // GET /api/auth/api-keys/:id - Get a specific API key
+// Users can only view their own API keys unless they are admin.
 apiKeysRouter.get('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const db = getDb();
     const keyId = new ObjectId(req.params.id);
+    const { allowed, key } = await canAccessApiKey(req, keyId);
 
-    const apiKey = await db
-      .collection<ApiKey>('api_keys')
-      .findOne({ _id: keyId }, { projection: { keyHash: 0 } });
-
-    if (!apiKey) {
+    if (!key) {
       throw createError('API key not found', 404);
     }
 
-    res.json({ data: apiKey });
+    if (!allowed) {
+      throw createError('You do not have permission to view this API key', 403);
+    }
+
+    // Return without keyHash
+    const { keyHash: _keyHash, ...safeKey } = key;
+    res.json({ data: safeKey });
   } catch (error) {
     next(error);
   }
 });
 
 // POST /api/auth/api-keys - Generate a new API key
+// Only admins and operators can create API keys.
+// Non-admins cannot set userId (impersonation) - only admins can create keys that act as other users.
 apiKeysRouter.post('/', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
-    const { name, description, scopes, expiresAt, createdById, userId } = req.body;
+    const { name, description, scopes, expiresAt, userId } = req.body;
 
     if (!name) {
       throw createError('name is required', 400);
     }
 
-    // Validate userId if provided - must reference an active user
+    // Validate userId if provided - only admins can create keys that impersonate users
     let validatedUserId: ObjectId | null = null;
     if (userId) {
+      if (!isAdmin(req)) {
+        throw createError('Only admins can create API keys that act as other users', 403);
+      }
       const user = await db.collection('users').findOne({
         _id: new ObjectId(userId),
         isActive: true,
@@ -123,7 +168,7 @@ apiKeysRouter.post('/', async (req: Request, res: Response, next: NextFunction):
       keyHash,
       keyPrefix,
       scopes: scopes || ['tasks:read', 'saved-searches:read'],
-      createdById: createdById ? new ObjectId(createdById) : null,
+      createdById: new ObjectId(req.user!.userId), // Always set to current user
       userId: validatedUserId,
       createdAt: now,
       expiresAt: expiresAt ? new Date(expiresAt) : null,
@@ -142,6 +187,7 @@ apiKeysRouter.post('/', async (req: Request, res: Response, next: NextFunction):
         key: rawKey, // Only returned once!
         keyPrefix: newApiKey.keyPrefix,
         scopes: newApiKey.scopes,
+        createdById: newApiKey.createdById,
         userId: newApiKey.userId,
         createdAt: newApiKey.createdAt,
         expiresAt: newApiKey.expiresAt,
@@ -154,15 +200,22 @@ apiKeysRouter.post('/', async (req: Request, res: Response, next: NextFunction):
 });
 
 // PATCH /api/auth/api-keys/:id - Update an API key
+// Users can only update their own API keys unless they are admin.
+// Only admins can change userId (impersonation).
 apiKeysRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
     const keyId = new ObjectId(req.params.id);
     const updates = req.body;
 
-    const existingKey = await db.collection<ApiKey>('api_keys').findOne({ _id: keyId });
+    const { allowed, key: existingKey } = await canAccessApiKey(req, keyId);
+
     if (!existingKey) {
       throw createError('API key not found', 404);
+    }
+
+    if (!allowed) {
+      throw createError('You do not have permission to update this API key', 403);
     }
 
     // Only allow updating certain fields
@@ -175,8 +228,11 @@ apiKeysRouter.patch('/:id', async (req: Request, res: Response, next: NextFuncti
     }
     if (updates.isActive !== undefined) allowedUpdates.isActive = updates.isActive;
 
-    // Allow updating userId (the user this key acts as)
+    // Allow updating userId (the user this key acts as) - ADMIN ONLY
     if (updates.userId !== undefined) {
+      if (!isAdmin(req)) {
+        throw createError('Only admins can change which user an API key acts as', 403);
+      }
       if (updates.userId === null) {
         allowedUpdates.userId = null;
       } else {
@@ -205,14 +261,20 @@ apiKeysRouter.patch('/:id', async (req: Request, res: Response, next: NextFuncti
 });
 
 // DELETE /api/auth/api-keys/:id - Revoke an API key
+// Users can only revoke their own API keys unless they are admin.
 apiKeysRouter.delete('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
     const keyId = new ObjectId(req.params.id);
 
-    const existingKey = await db.collection<ApiKey>('api_keys').findOne({ _id: keyId });
+    const { allowed, key: existingKey } = await canAccessApiKey(req, keyId);
+
     if (!existingKey) {
       throw createError('API key not found', 404);
+    }
+
+    if (!allowed) {
+      throw createError('You do not have permission to revoke this API key', 403);
     }
 
     // Soft delete by deactivating
@@ -228,14 +290,20 @@ apiKeysRouter.delete('/:id', async (req: Request, res: Response, next: NextFunct
 });
 
 // POST /api/auth/api-keys/:id/regenerate - Regenerate an API key
+// Users can only regenerate their own API keys unless they are admin.
 apiKeysRouter.post('/:id/regenerate', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
     const keyId = new ObjectId(req.params.id);
 
-    const existingKey = await db.collection<ApiKey>('api_keys').findOne({ _id: keyId });
+    const { allowed, key: existingKey } = await canAccessApiKey(req, keyId);
+
     if (!existingKey) {
       throw createError('API key not found', 404);
+    }
+
+    if (!allowed) {
+      throw createError('You do not have permission to regenerate this API key', 403);
     }
 
     // Generate a new key
