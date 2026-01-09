@@ -117,8 +117,8 @@ function detectLoopScopes(steps: WorkflowStep[]): LoopScope[] {
   return scopes
 }
 
-function generateMermaidFromSteps(steps: WorkflowStep[]): string {
-  if (steps.length === 0) return 'flowchart TD\n  Start([Start])'
+function generateMermaidFromSteps(steps: WorkflowStep[], includeStartNode: boolean = true): string {
+  if (steps.length === 0) return 'flowchart TD\n  __start__((" "))'
 
   const lines: string[] = ['flowchart TD']
   const styles: string[] = []
@@ -132,7 +132,14 @@ function generateMermaidFromSteps(steps: WorkflowStep[]): string {
   lines.push('  classDef foreach fill:#10B981,color:#fff,stroke:#059669,stroke-width:2px')
   lines.push('  classDef join fill:#6366F1,color:#fff,stroke:#4F46E5,stroke-width:2px')
   lines.push('  classDef flow fill:#EC4899,color:#fff,stroke:#DB2777,stroke-width:2px')
+  lines.push('  classDef startNode fill:#9CA3AF,color:#fff,stroke:#6B7280,stroke-width:1px')
   lines.push('')
+
+  // Add a Start node before the first step (small circle for visual indication)
+  if (includeStartNode && steps.length > 0) {
+    lines.push('  __start__((\" \"))')
+    styles.push('  class __start__ startNode')
+  }
 
   // Create nodes
   steps.forEach((step, index) => {
@@ -203,11 +210,31 @@ function generateMermaidFromSteps(steps: WorkflowStep[]): string {
   // Only add linear connections if NO nodes have explicit connections defined
   // This preserves nonlinear workflows while supporting legacy linear-only workflows
   if (!hasExplicitConnections) {
+    // Connect start node to first step
+    if (includeStartNode && steps.length > 0) {
+      lines.push(`  __start__ --> ${steps[0].id}`)
+    }
+    // Connect steps sequentially
     steps.forEach((step, index) => {
       if (index < steps.length - 1) {
         lines.push(`  ${step.id} --> ${steps[index + 1].id}`)
       }
     })
+  } else if (includeStartNode && steps.length > 0) {
+    // For explicit connections, find the first step (one with no incoming connections)
+    const stepsWithIncoming = new Set<string>()
+    steps.forEach(step => {
+      step.connections?.forEach(conn => {
+        if (conn.targetStepId) stepsWithIncoming.add(conn.targetStepId)
+      })
+    })
+    const firstSteps = steps.filter(s => !stepsWithIncoming.has(s.id))
+    if (firstSteps.length > 0) {
+      lines.push(`  __start__ --> ${firstSteps[0].id}`)
+    } else if (steps.length > 0) {
+      // Fallback: connect to first step in array
+      lines.push(`  __start__ --> ${steps[0].id}`)
+    }
   }
 
   lines.push('')
@@ -330,20 +357,41 @@ export function IntegratedWorkflowView({
 
   // Handle adding step between two nodes (from edge + button)
   const handleAddAfter = useCallback((sourceStepId: string, targetStepId?: string) => {
-    const sourceIndex = steps.findIndex(s => s.id === sourceStepId)
-    if (sourceIndex < 0) return
-
     const newStep: WorkflowStep = {
       id: `step-${Date.now()}`,
       name: 'New Agent Step',
       stepType: 'agent',
     }
 
-    const newSteps = [...steps]
-    const sourceStep = steps[sourceIndex]
-
     // Check if this is an explicit connections workflow
     const hasExplicitConnections = steps.some(s => s.connections && s.connections.length > 0)
+
+    // Special case: inserting before the first step (after the __start__ node)
+    if (sourceStepId === '__start__') {
+      // For explicit connections workflows, connect new step to the original first step
+      if (hasExplicitConnections && steps.length > 0) {
+        // Find the original first step (one with no incoming connections)
+        const stepsWithIncoming = new Set<string>()
+        steps.forEach(step => {
+          step.connections?.forEach(conn => {
+            if (conn.targetStepId) stepsWithIncoming.add(conn.targetStepId)
+          })
+        })
+        const originalFirstStep = steps.find(s => !stepsWithIncoming.has(s.id)) || steps[0]
+        newStep.connections = [{ targetStepId: originalFirstStep.id }]
+      }
+      const newSteps = [newStep, ...steps]
+      onStepsChange(newSteps)
+      setSelectedStepId(newStep.id)
+      setIsPanelCollapsed(false)
+      return
+    }
+
+    const sourceIndex = steps.findIndex(s => s.id === sourceStepId)
+    if (sourceIndex < 0) return
+
+    const newSteps = [...steps]
+    const sourceStep = steps[sourceIndex]
 
     if (hasExplicitConnections && sourceStep && targetStepId) {
       // Update the source step's connection that goes to target to now go to new step
@@ -380,6 +428,8 @@ export function IntegratedWorkflowView({
         newSteps[sourceIndex] = { ...sourceStep, connections: [{ targetStepId: newStep.id }] }
       }
     }
+    // For linear workflows (no explicit connections), we just insert in the array
+    // and the diagram will be regenerated based on array order
 
     // Insert new step after source step in the array
     newSteps.splice(sourceIndex + 1, 0, newStep)
@@ -462,7 +512,7 @@ export function IntegratedWorkflowView({
             <MermaidInteractive
               chart={mermaidCode}
               selectedNodeId={selectedStepId}
-              stepIds={steps.map(s => s.id)}
+              stepIds={['__start__', ...steps.map(s => s.id)]}
               onNodeClick={handleNodeClick}
               onAddAfter={handleAddAfter}
               className="min-h-[200px]"

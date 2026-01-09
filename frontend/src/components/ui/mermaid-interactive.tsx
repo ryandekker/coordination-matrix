@@ -197,21 +197,34 @@ export function MermaidInteractive({
           const midPoint = pathElement.getPointAtLength(pathLength / 2)
 
           // Try to determine which step this edge comes from and goes to
-          // Look at the parent's class for LS-{stepId} and LE-{stepId} patterns
-          const parent = pathElement.closest('.edgePath')
+          // Mermaid puts LS-{sourceId} and LE-{targetId} classes on the path element itself
           let sourceStepId: string | null = null
           let targetStepId: string | null = null
 
-          if (parent) {
-            const classList = parent.getAttribute('class') || ''
-            // Try to match LS-{stepId} (source) and LE-{stepId} (target) patterns
-            const sourceMatch = classList.match(/LS-([^\s]+)/)
-            const targetMatch = classList.match(/LE-([^\s]+)/)
-            if (sourceMatch) {
-              sourceStepId = sourceMatch[1]
-            }
-            if (targetMatch) {
-              targetStepId = targetMatch[1]
+          // First check the path element's own class (newer Mermaid versions)
+          const pathClass = pathElement.getAttribute('class') || ''
+          const pathSourceMatch = pathClass.match(/LS-([^\s]+)/)
+          const pathTargetMatch = pathClass.match(/LE-([^\s]+)/)
+          if (pathSourceMatch) {
+            sourceStepId = pathSourceMatch[1]
+          }
+          if (pathTargetMatch) {
+            targetStepId = pathTargetMatch[1]
+          }
+
+          // If not found on path, check parent .edgePath element (older Mermaid versions)
+          if (!sourceStepId || !targetStepId) {
+            const parent = pathElement.closest('.edgePath')
+            if (parent) {
+              const parentClass = parent.getAttribute('class') || ''
+              const parentSourceMatch = parentClass.match(/LS-([^\s]+)/)
+              const parentTargetMatch = parentClass.match(/LE-([^\s]+)/)
+              if (parentSourceMatch && !sourceStepId) {
+                sourceStepId = parentSourceMatch[1]
+              }
+              if (parentTargetMatch && !targetStepId) {
+                targetStepId = parentTargetMatch[1]
+              }
             }
           }
 
@@ -224,7 +237,8 @@ export function MermaidInteractive({
             let closestDist = Infinity
 
             stepIds.forEach(stepId => {
-              const nodeEl = container.querySelector(`[id*="${stepId}"]`)
+              // Look for node with ID containing the stepId (Mermaid format: flowchart-{stepId}-{number})
+              const nodeEl = container.querySelector(`g.node[id*="${stepId}"]`)
               if (nodeEl) {
                 const bbox = (nodeEl as SVGGraphicsElement).getBBox?.()
                 if (bbox) {
@@ -245,7 +259,8 @@ export function MermaidInteractive({
             let closestDist = Infinity
 
             stepIds.forEach(stepId => {
-              const nodeEl = container.querySelector(`[id*="${stepId}"]`)
+              // Look for node with ID containing the stepId (Mermaid format: flowchart-{stepId}-{number})
+              const nodeEl = container.querySelector(`g.node[id*="${stepId}"]`)
               if (nodeEl) {
                 const bbox = (nodeEl as SVGGraphicsElement).getBBox?.()
                 if (bbox) {
