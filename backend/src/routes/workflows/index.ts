@@ -88,13 +88,14 @@ workflowsRouter.get('/stats', async (_req: Request, res: Response, next: NextFun
   try {
     const db = getDb();
 
-    const collections = await db.listCollections({ name: 'workflowRuns' }).toArray();
+    // Collection name uses snake_case in the database
+    const collections = await db.listCollections({ name: 'workflow_runs' }).toArray();
     if (collections.length === 0) {
       res.json({ data: {} });
       return;
     }
 
-    const stats = await db.collection('workflowRuns').aggregate([
+    const stats = await db.collection('workflow_runs').aggregate([
       {
         $group: {
           _id: '$workflowId',
