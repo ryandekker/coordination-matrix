@@ -36,13 +36,30 @@ workflowsRouter.get('/', async (req: Request, res: Response, next: NextFunction)
     if (brief === 'true') {
       const briefWorkflows = workflows.map(w => {
         const steps = w.steps || [];
-        const agentCount = steps.filter(s =>
-          s.stepType === 'agent' || (!s.stepType && s.execution !== 'manual' && s.type !== 'manual')
-        ).length;
-        const manualCount = steps.filter(s =>
-          s.stepType === 'manual' || (!s.stepType && (s.execution === 'manual' || s.type === 'manual'))
-        ).length;
-        const otherCount = steps.length - agentCount - manualCount;
+
+        // Count by step type, with legacy fallback
+        let agentCount = 0;
+        let manualCount = 0;
+        let otherCount = 0;
+
+        for (const s of steps) {
+          // Check explicit stepType first
+          if (s.stepType === 'agent') {
+            agentCount++;
+          } else if (s.stepType === 'manual') {
+            manualCount++;
+          } else if (s.stepType) {
+            // Has stepType but it's not agent or manual (decision, foreach, join, flow, external, etc.)
+            otherCount++;
+          } else {
+            // Legacy fallback: check execution or type fields
+            if (s.execution === 'manual' || s.type === 'manual') {
+              manualCount++;
+            } else {
+              agentCount++;
+            }
+          }
+        }
 
         // Return workflow without steps array, but with step counts
         const { steps: _steps, ...rest } = w;
