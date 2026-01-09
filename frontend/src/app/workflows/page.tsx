@@ -32,8 +32,6 @@ import {
   FileText,
   Globe,
   Settings2,
-  Hash,
-  Calendar,
   CheckCircle2,
   XCircle,
   Search,
@@ -769,18 +767,15 @@ export default function WorkflowsPage() {
     },
     {
       id: 'runs',
-      header: 'Runs',
+      header: () => <span className="block text-center">Runs</span>,
       cell: ({ row }) => {
         const stats = row.original.stats
         if (!stats || stats.runCount === 0) {
           return <span className="block text-center text-muted-foreground">-</span>
         }
         return (
-          <div className="flex items-center gap-2 text-sm">
-            <span className="flex items-center gap-1">
-              <Hash className="h-3 w-3 text-muted-foreground" />
-              {stats.runCount}
-            </span>
+          <div className="flex items-center justify-center gap-2 text-sm">
+            <span>{stats.runCount}</span>
             {stats.completedCount > 0 && (
               <span className="text-green-600 flex items-center gap-1">
                 <CheckCircle2 className="h-3 w-3" />
@@ -799,15 +794,14 @@ export default function WorkflowsPage() {
     },
     {
       id: 'lastRun',
-      header: 'Last Run',
+      header: () => <span className="block text-center">Last Run</span>,
       cell: ({ row }) => {
         const stats = row.original.stats
         if (!stats || !stats.lastRunAt) {
           return <span className="block text-center text-muted-foreground">-</span>
         }
         return (
-          <span className="text-sm text-muted-foreground flex items-center gap-1">
-            <Calendar className="h-3 w-3" />
+          <span className="block text-center text-sm text-muted-foreground">
             {formatRelativeTime(stats.lastRunAt)}
           </span>
         )
