@@ -652,7 +652,7 @@ export default function WorkflowsPage() {
       cell: ({ row }) => {
         const isExpanded = expandedRows.has(row.original._id)
         const isLoading = loadingSteps.has(row.original._id)
-        const hasSteps = row.original.stepCounts.total > 0
+        const hasSteps = (row.original.stepCounts?.total ?? 0) > 0
         if (!hasSteps) return null
         return (
           <Button
@@ -719,7 +719,7 @@ export default function WorkflowsPage() {
       id: 'steps',
       header: 'Steps',
       cell: ({ row }) => {
-        const { stepCounts } = row.original
+        const stepCounts = row.original.stepCounts ?? { total: 0, agent: 0, manual: 0, other: 0 }
 
         return (
           <div className="flex items-center gap-2 text-sm">
