@@ -13,10 +13,13 @@ export const workflowsRouter = Router();
 workflowsRouter.use(aiPromptRoutes);
 
 // GET /api/workflows - List all workflows
+// Query params:
+//   - includeInactive: 'true' to include inactive workflows
+//   - brief: 'true' to return step counts instead of full steps array (for faster list views)
 workflowsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { includeInactive } = req.query;
+    const { includeInactive, brief } = req.query;
 
     const filter: Record<string, unknown> = {};
     if (includeInactive !== 'true') {
@@ -29,6 +32,51 @@ workflowsRouter.get('/', async (req: Request, res: Response, next: NextFunction)
       .sort({ name: 1 })
       .toArray();
 
+    // In brief mode, replace steps array with step counts for lighter payload
+    if (brief === 'true') {
+      const briefWorkflows = workflows.map(w => {
+        const steps = w.steps || [];
+
+        // Count by step type, with legacy fallback
+        let agentCount = 0;
+        let manualCount = 0;
+        let otherCount = 0;
+
+        for (const s of steps) {
+          // Check explicit stepType first
+          if (s.stepType === 'agent') {
+            agentCount++;
+          } else if (s.stepType === 'manual') {
+            manualCount++;
+          } else if (s.stepType) {
+            // Has stepType but it's not agent or manual (decision, foreach, join, flow, external, etc.)
+            otherCount++;
+          } else {
+            // Legacy fallback: check execution or type fields
+            if (s.execution === 'manual' || s.type === 'manual') {
+              manualCount++;
+            } else {
+              agentCount++;
+            }
+          }
+        }
+
+        // Return workflow without steps array, but with step counts
+        const { steps: _steps, ...rest } = w;
+        return {
+          ...rest,
+          stepCounts: {
+            total: steps.length,
+            agent: agentCount,
+            manual: manualCount,
+            other: otherCount,
+          },
+        };
+      });
+      res.json({ data: briefWorkflows });
+      return;
+    }
+
     res.json({ data: workflows });
   } catch (error) {
     next(error);
@@ -40,13 +88,14 @@ workflowsRouter.get('/stats', async (_req: Request, res: Response, next: NextFun
   try {
     const db = getDb();
 
-    const collections = await db.listCollections({ name: 'workflowRuns' }).toArray();
+    // Collection name uses snake_case in the database
+    const collections = await db.listCollections({ name: 'workflow_runs' }).toArray();
     if (collections.length === 0) {
       res.json({ data: {} });
       return;
     }
 
-    const stats = await db.collection('workflowRuns').aggregate([
+    const stats = await db.collection('workflow_runs').aggregate([
       {
         $group: {
           _id: '$workflowId',
@@ -71,7 +120,9 @@ workflowsRouter.get('/stats', async (_req: Request, res: Response, next: NextFun
 
     for (const stat of stats) {
       if (stat._id) {
-        statsMap[stat._id.toString()] = {
+        // Convert ObjectId to string for consistent keying
+        const key = typeof stat._id === 'string' ? stat._id : stat._id.toString();
+        statsMap[key] = {
           runCount: stat.runCount,
           lastRunAt: stat.lastRunAt,
           completedCount: stat.completedCount,
