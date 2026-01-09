@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, Fragment, useMemo, useCallback, memo } from 'react'
+import React, { useState, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
@@ -8,7 +8,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   useReactTable,
   getCoreRowModel,
-  getExpandedRowModel,
   getFilteredRowModel,
   flexRender,
   ColumnDef,
@@ -39,7 +38,6 @@ import {
   XCircle,
   Search,
   X,
-  Check,
   Book,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -160,6 +158,13 @@ interface WorkflowStep {
   branches?: { condition: string | null; targetStepId: string }[]
 }
 
+interface StepCounts {
+  total: number
+  agent: number
+  manual: number
+  other: number
+}
+
 interface WorkflowData {
   _id: string
   name: string
@@ -172,6 +177,18 @@ interface WorkflowData {
   updatedAt?: string
 }
 
+// Brief workflow data (without full steps array)
+interface BriefWorkflowData {
+  _id: string
+  name: string
+  description: string
+  isActive: boolean
+  stepCounts: StepCounts
+  mermaidDiagram?: string
+  createdAt: string
+  updatedAt?: string
+}
+
 interface WorkflowStats {
   runCount: number
   lastRunAt: string | null
@@ -179,16 +196,25 @@ interface WorkflowStats {
   failedCount: number
 }
 
-interface WorkflowWithStats extends WorkflowData {
-  steps: WorkflowStep[]
+interface WorkflowListItem extends BriefWorkflowData {
   stats?: WorkflowStats
+  // Steps are loaded on-demand when expanded
+  steps?: WorkflowStep[]
 }
 
-async function fetchWorkflows(): Promise<{ data: WorkflowData[] }> {
-  // Include inactive workflows so frontend filtering can show all statuses
-  const response = await authFetch(`${API_BASE}/workflows?includeInactive=true`)
+async function fetchWorkflows(): Promise<{ data: BriefWorkflowData[] }> {
+  // Use brief=true to get step counts instead of full steps array
+  const response = await authFetch(`${API_BASE}/workflows?includeInactive=true&brief=true`)
   if (!response.ok) {
     throw new Error('Failed to fetch workflows')
+  }
+  return response.json()
+}
+
+async function fetchWorkflowById(id: string): Promise<{ data: WorkflowData }> {
+  const response = await authFetch(`${API_BASE}/workflows/${id}`)
+  if (!response.ok) {
+    throw new Error('Failed to fetch workflow')
   }
   return response.json()
 }
@@ -236,53 +262,18 @@ async function duplicateWorkflow(id: string): Promise<{ data: WorkflowData }> {
   return response.json()
 }
 
-// Get icon for step type
-function getStepIcon(step: WorkflowStep) {
-  // Normalize step type - handle legacy 'task' type
-  const stepType = step.stepType || (step.execution === 'manual' || step.type === 'manual' ? 'manual' : 'agent')
-
-  switch (stepType) {
-    case 'agent':
-      return <Bot className="h-4 w-4 text-blue-500" />
-    case 'external':
-      return <Globe className="h-4 w-4 text-orange-500" />
-    case 'manual':
-      return <User className="h-4 w-4 text-purple-500" />
-    case 'decision':
-      return <GitBranch className="h-4 w-4 text-amber-500" />
-    case 'foreach':
-      return <Repeat className="h-4 w-4 text-green-500" />
-    case 'join':
-      return <Merge className="h-4 w-4 text-indigo-500" />
-    case 'flow':
-      return <Workflow className="h-4 w-4 text-pink-500" />
-    default:
-      return <Bot className="h-4 w-4 text-blue-500" />
-  }
-}
-
-// Get step type label
-function getStepTypeLabel(step: WorkflowStep): string {
-  // Normalize step type - handle legacy 'task' type
-  const stepType = step.stepType || (step.execution === 'manual' || step.type === 'manual' ? 'manual' : 'agent')
-
-  switch (stepType) {
-    case 'agent':
-      return 'Agent'
-    case 'external':
-      return 'External'
-    case 'manual':
-      return 'Manual'
-    case 'decision':
-      return 'Decision'
-    case 'foreach':
-      return 'ForEach'
-    case 'join':
-      return 'Join'
-    case 'flow':
-      return 'Flow'
-    default:
-      return 'Agent'
+// Get step type icon (inline helper)
+function getStepTypeIcon(stepType: WorkflowStepType | undefined, execution?: string, type?: string) {
+  const effectiveType = stepType || (execution === 'manual' || type === 'manual' ? 'manual' : 'agent')
+  switch (effectiveType) {
+    case 'agent': return <Bot className="h-3 w-3 text-blue-500" />
+    case 'external': return <Globe className="h-3 w-3 text-orange-500" />
+    case 'manual': return <User className="h-3 w-3 text-purple-500" />
+    case 'decision': return <GitBranch className="h-3 w-3 text-amber-500" />
+    case 'foreach': return <Repeat className="h-3 w-3 text-green-500" />
+    case 'join': return <Merge className="h-3 w-3 text-indigo-500" />
+    case 'flow': return <Workflow className="h-3 w-3 text-pink-500" />
+    default: return <Bot className="h-3 w-3 text-blue-500" />
   }
 }
 
@@ -337,73 +328,6 @@ function formatRelativeTime(date: string | null): string {
   return then.toLocaleDateString()
 }
 
-// Expanded row content showing steps - memoized to prevent unnecessary re-renders
-const StepsDetail = memo(function StepsDetail({ workflow }: { workflow: WorkflowWithStats }) {
-  if (!workflow.steps || workflow.steps.length === 0) {
-    return (
-      <div className="p-4 text-sm text-muted-foreground italic">
-        No steps defined
-      </div>
-    )
-  }
-
-  return (
-    <div className="p-4 bg-muted/30">
-      <div className="mb-2 text-sm font-medium text-muted-foreground">Workflow Steps</div>
-      <div className="flex items-center gap-2 overflow-x-auto pb-2">
-        {workflow.steps.map((step, index) => {
-          const effectiveType = step.stepType || (step.execution === 'manual' || step.type === 'manual' ? 'manual' : 'agent')
-          const getBorderStyle = () => {
-            switch (effectiveType) {
-              case 'agent': return 'border-blue-300 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-800'
-              case 'external': return 'border-orange-300 bg-orange-50 dark:bg-orange-950/30 dark:border-orange-800'
-              case 'manual': return 'border-purple-300 bg-purple-50 dark:bg-purple-950/30 dark:border-purple-800'
-              case 'decision': return 'border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800'
-              case 'foreach': return 'border-green-300 bg-green-50 dark:bg-green-950/30 dark:border-green-800'
-              case 'join': return 'border-indigo-300 bg-indigo-50 dark:bg-indigo-950/30 dark:border-indigo-800'
-              case 'flow': return 'border-pink-300 bg-pink-50 dark:bg-pink-950/30 dark:border-pink-800'
-              default: return 'border-gray-200 bg-gray-50 dark:bg-gray-900/30 dark:border-gray-700'
-            }
-          }
-          return (
-            <div key={step.id || index} className="flex items-center">
-              <div
-                className={cn(
-                  'flex flex-col items-center gap-1 rounded-lg border p-3 min-w-[120px]',
-                  getBorderStyle()
-                )}
-              >
-                <div className="flex items-center gap-2">
-                  {getStepIcon(step)}
-                  <span className="text-sm font-medium">{step.name}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Badge variant="outline" className="text-xs">
-                    {getStepTypeLabel(step)}
-                  </Badge>
-                  {(step.prompt || step.additionalInstructions) && (
-                    <span title="Has instructions">
-                      <FileText className="h-3 w-3 text-muted-foreground" />
-                    </span>
-                  )}
-                </div>
-              </div>
-              {index < workflow.steps.length - 1 && (
-                <ChevronRight className="h-5 w-5 text-muted-foreground mx-1 flex-shrink-0" />
-              )}
-            </div>
-          )
-        })}
-      </div>
-      {workflow.description && (
-        <div className="mt-3 text-sm text-muted-foreground">
-          {workflow.description}
-        </div>
-      )}
-    </div>
-  )
-})
-
 export default function WorkflowsPage() {
   const router = useRouter()
   const queryClient = useQueryClient()
@@ -427,6 +351,7 @@ export default function WorkflowsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
 
   const { data: workflowsData, isLoading, error } = useQuery({
     queryKey: ['workflows'],
@@ -436,7 +361,8 @@ export default function WorkflowsPage() {
   const { data: statsData } = useQuery({
     queryKey: ['workflow-stats'],
     queryFn: fetchWorkflowStats,
-    staleTime: 30000, // Cache for 30 seconds
+    staleTime: 60000, // Cache for 60 seconds
+    refetchOnWindowFocus: true, // Refetch when user returns to the page
   })
 
   const { data: usersData } = useQuery({
@@ -571,19 +497,42 @@ export default function WorkflowsPage() {
     })
   }
 
-  // Normalize workflows to ensure steps array exists and add stats
+  // State for lazily loaded workflow steps
+  const [loadedSteps, setLoadedSteps] = useState<Record<string, WorkflowStep[]>>({})
+  const [loadingSteps, setLoadingSteps] = useState<Set<string>>(new Set())
+
+  // Normalize workflows and add stats
   // Then apply filters
-  const workflows = useMemo<WorkflowWithStats[]>(() => {
-    let result = (workflowsData?.data || []).map(w => ({
-      ...w,
-      steps: (w.steps || (w.stages?.map((name, i) => ({
-        id: `stage-${i}`,
-        name,
-        type: 'manual' as const,
-        hitlPhase: 'none',
-      })) || [])) as WorkflowStep[],
-      stats: statsMap?.[w._id],
-    }))
+  const workflows = useMemo<WorkflowListItem[]>(() => {
+    let result = (workflowsData?.data || []).map(w => {
+      // Handle both brief response (stepCounts) and full response (steps array)
+      // This provides backwards compatibility if backend hasn't been updated yet
+      const briefData = w as BriefWorkflowData
+      const fullData = w as unknown as WorkflowData & { stepCounts?: StepCounts }
+
+      // If stepCounts is missing but steps array exists, compute counts
+      let stepCounts = briefData.stepCounts
+      if (!stepCounts && fullData.steps) {
+        const steps = fullData.steps
+        let agentCount = 0, manualCount = 0, otherCount = 0
+        for (const s of steps) {
+          if (s.stepType === 'agent') agentCount++
+          else if (s.stepType === 'manual') manualCount++
+          else if (s.stepType) otherCount++
+          else if (s.execution === 'manual' || s.type === 'manual') manualCount++
+          else agentCount++
+        }
+        stepCounts = { total: steps.length, agent: agentCount, manual: manualCount, other: otherCount }
+      }
+
+      return {
+        ...w,
+        stepCounts: stepCounts ?? { total: 0, agent: 0, manual: 0, other: 0 },
+        stats: statsMap?.[w._id],
+        // Include loaded steps if available
+        steps: loadedSteps[w._id],
+      }
+    })
 
     // Apply search filter
     if (searchQuery.trim()) {
@@ -602,7 +551,7 @@ export default function WorkflowsPage() {
     }
 
     return result
-  }, [workflowsData?.data, statsMap, searchQuery, statusFilter])
+  }, [workflowsData?.data, statsMap, searchQuery, statusFilter, loadedSteps])
 
   // Get selected workflow IDs
   const selectedWorkflowIds = useMemo(() => {
@@ -619,9 +568,17 @@ export default function WorkflowsPage() {
     setIsEditorOpen(true)
   }, [])
 
-  const openEditEditor = useCallback((workflow: WorkflowData) => {
-    setEditingWorkflow(workflow)
-    setIsEditorOpen(true)
+  // Fetch full workflow data before opening editor (since list view only has brief data)
+  const openEditEditor = useCallback(async (workflow: WorkflowListItem | WorkflowData) => {
+    try {
+      const { data: fullWorkflow } = await fetchWorkflowById(workflow._id)
+      setEditingWorkflow(fullWorkflow)
+      setIsEditorOpen(true)
+    } catch {
+      // Fallback to whatever data we have
+      setEditingWorkflow(workflow as WorkflowData)
+      setIsEditorOpen(true)
+    }
   }, [])
 
   const closeEditor = useCallback(() => {
@@ -644,15 +601,50 @@ export default function WorkflowsPage() {
     }
   }, [updateMutation, createMutation])
 
-  const handleToggleActive = useCallback((workflow: WorkflowData) => {
+  const handleToggleActive = useCallback((workflow: WorkflowListItem) => {
     updateMutation.mutate({
       id: workflow._id,
       data: { isActive: !workflow.isActive },
     })
   }, [updateMutation])
 
+  // Load steps for a workflow (on-demand)
+  const loadWorkflowSteps = useCallback(async (id: string) => {
+    if (loadedSteps[id] || loadingSteps.has(id)) return
+
+    setLoadingSteps(prev => new Set(prev).add(id))
+    try {
+      const { data: fullWorkflow } = await fetchWorkflowById(id)
+      setLoadedSteps(prev => ({
+        ...prev,
+        [id]: fullWorkflow.steps || [],
+      }))
+    } finally {
+      setLoadingSteps(prev => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+    }
+  }, [loadedSteps, loadingSteps])
+
+  // Toggle row expansion and fetch steps if expanding
+  const toggleRowExpanded = useCallback((id: string) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+        // Fetch steps when expanding
+        loadWorkflowSteps(id)
+      }
+      return next
+    })
+  }, [loadWorkflowSteps])
+
   // Table columns - memoized to prevent TanStack Table from reinitializing on every render
-  const columns = useMemo<ColumnDef<WorkflowWithStats>[]>(() => [
+  const columns = useMemo<ColumnDef<WorkflowListItem>[]>(() => [
     {
       id: 'select',
       header: ({ table }) => (
@@ -670,7 +662,6 @@ export default function WorkflowsPage() {
           <Checkbox
             checked={row.getIsSelected()}
             onCheckedChange={(value) => row.toggleSelected(!!value)}
-            onClick={(e) => e.stopPropagation()}
             aria-label="Select row"
             className="h-5 w-5"
           />
@@ -682,29 +673,39 @@ export default function WorkflowsPage() {
     {
       id: 'expander',
       header: () => null,
-      cell: ({ row }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 w-8 p-0"
-          onClick={(e) => {
-            e.stopPropagation()
-            row.toggleExpanded()
-          }}
-        >
-          {row.getIsExpanded() ? (
-            <ChevronDown className="h-4 w-4" />
-          ) : (
-            <ChevronRight className="h-4 w-4" />
-          )}
-        </Button>
-      ),
+      cell: ({ row }) => {
+        const isExpanded = expandedRows.has(row.original._id)
+        const isLoading = loadingSteps.has(row.original._id)
+        const hasSteps = (row.original.stepCounts?.total ?? 0) > 0
+        if (!hasSteps) return null
+        return (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0"
+            onClick={() => toggleRowExpanded(row.original._id)}
+          >
+            {isLoading ? (
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+            ) : isExpanded ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+          </Button>
+        )
+      },
     },
     {
       accessorKey: 'name',
       header: 'Workflow',
       cell: ({ row }) => (
-        <div className="font-medium">{row.original.name}</div>
+        <button
+          className="font-medium text-left hover:underline focus:outline-none focus:underline"
+          onClick={() => openEditEditor(row.original)}
+        >
+          {row.original.name}
+        </button>
       ),
     },
     {
@@ -742,32 +743,25 @@ export default function WorkflowsPage() {
       id: 'steps',
       header: 'Steps',
       cell: ({ row }) => {
-        const steps = row.original.steps
-        const agentCount = steps.filter(
-          (s) => s.stepType === 'agent' || (!s.stepType && s.execution !== 'manual' && s.type !== 'manual')
-        ).length
-        const manualCount = steps.filter(
-          (s) => s.stepType === 'manual' || (!s.stepType && (s.execution === 'manual' || s.type === 'manual'))
-        ).length
-        const otherCount = steps.length - agentCount - manualCount
+        const stepCounts = row.original.stepCounts ?? { total: 0, agent: 0, manual: 0, other: 0 }
 
         return (
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground">{steps.length}</span>
-            {agentCount > 0 && (
+            <span className="text-muted-foreground">{stepCounts.total}</span>
+            {stepCounts.agent > 0 && (
               <span className="text-blue-600 flex items-center gap-1">
                 <Bot className="h-3 w-3" />
-                {agentCount}
+                {stepCounts.agent}
               </span>
             )}
-            {manualCount > 0 && (
+            {stepCounts.manual > 0 && (
               <span className="text-purple-600 flex items-center gap-1">
                 <User className="h-3 w-3" />
-                {manualCount}
+                {stepCounts.manual}
               </span>
             )}
-            {otherCount > 0 && (
-              <span className="text-gray-500">+{otherCount}</span>
+            {stepCounts.other > 0 && (
+              <span className="text-gray-500">+{stepCounts.other}</span>
             )}
           </div>
         )
@@ -886,15 +880,13 @@ export default function WorkflowsPage() {
         </div>
       ),
     },
-  ], [handleToggleActive, openEditEditor, duplicateMutation])
+  ], [handleToggleActive, openEditEditor, duplicateMutation, expandedRows, toggleRowExpanded, loadingSteps])
 
   const table = useReactTable({
     data: workflows,
     columns,
     getCoreRowModel: getCoreRowModel(),
-    getExpandedRowModel: getExpandedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
-    getRowCanExpand: () => true,
     onRowSelectionChange: setRowSelection,
     state: {
       rowSelection,
@@ -1076,30 +1068,64 @@ export default function WorkflowsPage() {
               ))}
             </TableHeader>
             <TableBody>
-              {table.getRowModel().rows.map(row => (
-                <Fragment key={row.id}>
-                  <TableRow
-                    className="cursor-pointer"
-                    onClick={() => row.toggleExpanded()}
-                  >
-                    {row.getVisibleCells().map(cell => (
-                      <TableCell
-                        key={cell.id}
-                        className={cell.column.id === 'select' ? 'w-12 pr-0' : undefined}
-                      >
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                  {row.getIsExpanded() && (
+              {table.getRowModel().rows.map(row => {
+                const isExpanded = expandedRows.has(row.original._id)
+                const isLoading = loadingSteps.has(row.original._id)
+                const steps = row.original.steps || []
+                return (
+                  <React.Fragment key={row.id}>
                     <TableRow>
-                      <TableCell colSpan={columns.length} className="p-0">
-                        <StepsDetail workflow={row.original} />
-                      </TableCell>
+                      {row.getVisibleCells().map(cell => (
+                        <TableCell
+                          key={cell.id}
+                          className={cell.column.id === 'select' ? 'w-12 pr-0' : undefined}
+                        >
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </TableCell>
+                      ))}
                     </TableRow>
-                  )}
-                </Fragment>
-              ))}
+                    {isExpanded && (
+                      <TableRow className="bg-muted/30 hover:bg-muted/30">
+                        <TableCell colSpan={columns.length} className="p-0">
+                          <div className="px-4 py-3">
+                            {isLoading ? (
+                              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+                                Loading steps...
+                              </div>
+                            ) : steps.length > 0 ? (
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="text-left text-muted-foreground">
+                                    <th className="pb-2 pl-1 w-8">#</th>
+                                    <th className="pb-2 w-8"></th>
+                                    <th className="pb-2">Step Name</th>
+                                    <th className="pb-2 w-24">Type</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {steps.map((step, idx) => (
+                                    <tr key={step.id || idx} className="border-t border-border/50">
+                                      <td className="py-1.5 pl-1 text-muted-foreground">{idx + 1}</td>
+                                      <td className="py-1.5">{getStepTypeIcon(step.stepType, step.execution, step.type)}</td>
+                                      <td className="py-1.5">{step.name}</td>
+                                      <td className="py-1.5 text-muted-foreground capitalize">
+                                        {step.stepType || (step.execution === 'manual' || step.type === 'manual' ? 'manual' : 'agent')}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            ) : (
+                              <div className="text-sm text-muted-foreground italic">No steps defined</div>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </React.Fragment>
+                )
+              })}
             </TableBody>
           </Table>
         </div>
