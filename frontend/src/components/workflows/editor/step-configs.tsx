@@ -31,7 +31,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { TokenBrowser } from '../token-browser'
-import type { WorkflowStep, LoopScope } from './types'
+import type { WorkflowStep, LoopScope, WorkflowStepType } from './types'
 import type { Workflow as ApiWorkflow } from '@/lib/api'
 
 interface StepConfigProps {
@@ -766,7 +766,7 @@ export function InputSourceConfig({
   parseInputPath,
   buildInputPath,
 }: StepConfigProps & {
-  getStepTypeInfo: (stepType?: string) => { icon: any; color: string }
+  getStepTypeInfo: (stepType?: WorkflowStepType) => { icon: any; color: string }
   parseInputPath: (inputPath: string | undefined) => { source: string; path: string }
   buildInputPath: (sourceStepId: string | undefined, path: string) => string
 }) {

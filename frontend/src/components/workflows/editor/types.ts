@@ -6,7 +6,8 @@
 // - foreach: Fan-out loop over collection
 // - join: Fan-in aggregation point
 // - flow: Delegate to another workflow (nested)
-export type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow'
+// - findDocument: Search for documents using semantic search
+export type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow' | 'findDocument'
 
 // Connection between steps (for non-linear flows)
 export interface StepConnection {
