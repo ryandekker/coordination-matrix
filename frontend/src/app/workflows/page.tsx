@@ -503,12 +503,35 @@ export default function WorkflowsPage() {
   // Normalize workflows and add stats
   // Then apply filters
   const workflows = useMemo<WorkflowListItem[]>(() => {
-    let result = (workflowsData?.data || []).map(w => ({
-      ...w,
-      stats: statsMap?.[w._id],
-      // Include loaded steps if available
-      steps: loadedSteps[w._id],
-    }))
+    let result = (workflowsData?.data || []).map(w => {
+      // Handle both brief response (stepCounts) and full response (steps array)
+      // This provides backwards compatibility if backend hasn't been updated yet
+      const briefData = w as BriefWorkflowData
+      const fullData = w as unknown as WorkflowData & { stepCounts?: StepCounts }
+
+      // If stepCounts is missing but steps array exists, compute counts
+      let stepCounts = briefData.stepCounts
+      if (!stepCounts && fullData.steps) {
+        const steps = fullData.steps
+        let agentCount = 0, manualCount = 0, otherCount = 0
+        for (const s of steps) {
+          if (s.stepType === 'agent') agentCount++
+          else if (s.stepType === 'manual') manualCount++
+          else if (s.stepType) otherCount++
+          else if (s.execution === 'manual' || s.type === 'manual') manualCount++
+          else agentCount++
+        }
+        stepCounts = { total: steps.length, agent: agentCount, manual: manualCount, other: otherCount }
+      }
+
+      return {
+        ...w,
+        stepCounts: stepCounts ?? { total: 0, agent: 0, manual: 0, other: 0 },
+        stats: statsMap?.[w._id],
+        // Include loaded steps if available
+        steps: loadedSteps[w._id],
+      }
+    })
 
     // Apply search filter
     if (searchQuery.trim()) {
