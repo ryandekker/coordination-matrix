@@ -667,14 +667,23 @@ export interface WorkflowStep {
   // Input aggregation
   inputPath?: string;                   // JSONPath to extract input from previous steps
 
-  // FindDocument step config - semantic search for documents
+  // FindDocument step config - semantic search for documents or static document reference
   findDocumentConfig?: {
+    // Mode selection: 'static' = specific document, 'dynamic' = runtime search (default)
+    mode?: 'static' | 'dynamic';
+
+    // Static mode: reference a specific document by ID
+    documentId?: string;                // ObjectId of the document to fetch
+
+    // Dynamic mode: search at runtime
     searchPrompt?: string;              // Template for search prompt (e.g., "Find SOPs about {{input.topic}}")
     documentTypes?: DocumentType[];     // Filter by document types
     documentStatus?: DocumentStatus[];  // Filter by status (default: ['approved'])
     tags?: string[];                    // Filter by tags
     limit?: number;                     // Max results (default: 1)
     minScore?: number;                  // Minimum similarity score (default: 0.5)
+
+    // Shared options
     storeAs?: string;                   // Variable name to store result (default: 'document')
     failIfNotFound?: boolean;           // Fail the step if no document found (default: false)
   };

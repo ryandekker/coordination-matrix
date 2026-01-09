@@ -19,6 +19,7 @@ import {
   Workflow as WorkflowIcon,
   MousePointerClick,
   Layers,
+  FileSearch,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -28,7 +29,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { ScrollArea } from '@/components/ui/scroll-area'
 
-type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow'
+type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow' | 'findDocument'
 
 interface StepConnection {
   targetStepId: string
@@ -94,6 +95,7 @@ const STEP_TYPES: { type: WorkflowStepType; label: string; description: string; 
   { type: 'foreach', label: 'ForEach', description: 'Loop over items', icon: Repeat, color: 'text-green-500' },
   { type: 'join', label: 'Join', description: 'Aggregate', icon: Merge, color: 'text-indigo-500' },
   { type: 'flow', label: 'Flow', description: 'Nested workflow', icon: WorkflowIcon, color: 'text-pink-500' },
+  { type: 'findDocument', label: 'Find Document', description: 'Search documents', icon: FileSearch, color: 'text-cyan-500' },
 ]
 
 function detectLoopScopes(steps: WorkflowStep[]): LoopScope[] {
@@ -117,8 +119,8 @@ function detectLoopScopes(steps: WorkflowStep[]): LoopScope[] {
   return scopes
 }
 
-function generateMermaidFromSteps(steps: WorkflowStep[]): string {
-  if (steps.length === 0) return 'flowchart TD\n  Start([Start])'
+function generateMermaidFromSteps(steps: WorkflowStep[], includeStartNode: boolean = true): string {
+  if (steps.length === 0) return 'flowchart TD\n  __start__((" "))'
 
   const lines: string[] = ['flowchart TD']
   const styles: string[] = []
@@ -132,7 +134,14 @@ function generateMermaidFromSteps(steps: WorkflowStep[]): string {
   lines.push('  classDef foreach fill:#10B981,color:#fff,stroke:#059669,stroke-width:2px')
   lines.push('  classDef join fill:#6366F1,color:#fff,stroke:#4F46E5,stroke-width:2px')
   lines.push('  classDef flow fill:#EC4899,color:#fff,stroke:#DB2777,stroke-width:2px')
+  lines.push('  classDef startNode fill:#9CA3AF,color:#fff,stroke:#6B7280,stroke-width:1px')
   lines.push('')
+
+  // Add a Start node before the first step (small circle for visual indication)
+  if (includeStartNode && steps.length > 0) {
+    lines.push('  __start__((\" \"))')
+    styles.push('  class __start__ startNode')
+  }
 
   // Create nodes
   steps.forEach((step, index) => {
@@ -203,11 +212,31 @@ function generateMermaidFromSteps(steps: WorkflowStep[]): string {
   // Only add linear connections if NO nodes have explicit connections defined
   // This preserves nonlinear workflows while supporting legacy linear-only workflows
   if (!hasExplicitConnections) {
+    // Connect start node to first step
+    if (includeStartNode && steps.length > 0) {
+      lines.push(`  __start__ --> ${steps[0].id}`)
+    }
+    // Connect steps sequentially
     steps.forEach((step, index) => {
       if (index < steps.length - 1) {
         lines.push(`  ${step.id} --> ${steps[index + 1].id}`)
       }
     })
+  } else if (includeStartNode && steps.length > 0) {
+    // For explicit connections, find the first step (one with no incoming connections)
+    const stepsWithIncoming = new Set<string>()
+    steps.forEach(step => {
+      step.connections?.forEach(conn => {
+        if (conn.targetStepId) stepsWithIncoming.add(conn.targetStepId)
+      })
+    })
+    const firstSteps = steps.filter(s => !stepsWithIncoming.has(s.id))
+    if (firstSteps.length > 0) {
+      lines.push(`  __start__ --> ${firstSteps[0].id}`)
+    } else if (steps.length > 0) {
+      // Fallback: connect to first step in array
+      lines.push(`  __start__ --> ${steps[0].id}`)
+    }
   }
 
   lines.push('')
@@ -297,7 +326,7 @@ export function IntegratedWorkflowView({
     onStepsChange(newSteps)
   }, [steps, onStepsChange])
 
-  // Add a new step
+  // Add a new step after the specified index (simple append for config panel "Add Step After" button)
   const addStep = useCallback((afterIndex: number, type: WorkflowStepType = 'agent') => {
     const newStep: WorkflowStep = {
       id: `step-${Date.now()}`,
@@ -328,13 +357,88 @@ export function IntegratedWorkflowView({
     updateStep(index, { stepType: type })
   }, [updateStep])
 
-  // Handle adding step after a node (from edge + button)
-  const handleAddAfter = useCallback((afterStepId: string) => {
-    const afterIndex = steps.findIndex(s => s.id === afterStepId)
-    if (afterIndex >= 0) {
-      addStep(afterIndex)
+  // Handle adding step between two nodes (from edge + button)
+  const handleAddAfter = useCallback((sourceStepId: string, targetStepId?: string) => {
+    const newStep: WorkflowStep = {
+      id: `step-${Date.now()}`,
+      name: 'New Agent Step',
+      stepType: 'agent',
     }
-  }, [steps, addStep])
+
+    // Check if this is an explicit connections workflow
+    const hasExplicitConnections = steps.some(s => s.connections && s.connections.length > 0)
+
+    // Special case: inserting before the first step (after the __start__ node)
+    if (sourceStepId === '__start__') {
+      // For explicit connections workflows, connect new step to the original first step
+      if (hasExplicitConnections && steps.length > 0) {
+        // Find the original first step (one with no incoming connections)
+        const stepsWithIncoming = new Set<string>()
+        steps.forEach(step => {
+          step.connections?.forEach(conn => {
+            if (conn.targetStepId) stepsWithIncoming.add(conn.targetStepId)
+          })
+        })
+        const originalFirstStep = steps.find(s => !stepsWithIncoming.has(s.id)) || steps[0]
+        newStep.connections = [{ targetStepId: originalFirstStep.id }]
+      }
+      const newSteps = [newStep, ...steps]
+      onStepsChange(newSteps)
+      setSelectedStepId(newStep.id)
+      setIsPanelCollapsed(false)
+      return
+    }
+
+    const sourceIndex = steps.findIndex(s => s.id === sourceStepId)
+    if (sourceIndex < 0) return
+
+    const newSteps = [...steps]
+    const sourceStep = steps[sourceIndex]
+
+    if (hasExplicitConnections && sourceStep && targetStepId) {
+      // Update the source step's connection that goes to target to now go to new step
+      if (sourceStep.connections && sourceStep.connections.length > 0) {
+        const updatedSourceConnections = sourceStep.connections.map(conn => {
+          if (conn.targetStepId === targetStepId) {
+            // Redirect this connection to the new step
+            return { ...conn, targetStepId: newStep.id }
+          }
+          return conn
+        })
+        newSteps[sourceIndex] = { ...sourceStep, connections: updatedSourceConnections }
+      } else {
+        // Source has no connections, add one to new step
+        newSteps[sourceIndex] = { ...sourceStep, connections: [{ targetStepId: newStep.id }] }
+      }
+
+      // New step connects to the original target
+      newStep.connections = [{ targetStepId }]
+    } else if (hasExplicitConnections && sourceStep) {
+      // No target step specified, but explicit connections - add connection from source to new step
+      if (sourceStep.connections && sourceStep.connections.length > 0) {
+        // Insert new step before the first connection target
+        const firstTarget = sourceStep.connections[0]?.targetStepId
+        if (firstTarget) {
+          const updatedSourceConnections = [
+            { targetStepId: newStep.id },
+            ...sourceStep.connections.slice(1)
+          ]
+          newSteps[sourceIndex] = { ...sourceStep, connections: updatedSourceConnections }
+          newStep.connections = [{ targetStepId: firstTarget }]
+        }
+      } else {
+        newSteps[sourceIndex] = { ...sourceStep, connections: [{ targetStepId: newStep.id }] }
+      }
+    }
+    // For linear workflows (no explicit connections), we just insert in the array
+    // and the diagram will be regenerated based on array order
+
+    // Insert new step after source step in the array
+    newSteps.splice(sourceIndex + 1, 0, newStep)
+    onStepsChange(newSteps)
+    setSelectedStepId(newStep.id)
+    setIsPanelCollapsed(false)
+  }, [steps, onStepsChange])
 
   return (
     <div className={cn('flex gap-2 h-full', className)}>
@@ -410,7 +514,7 @@ export function IntegratedWorkflowView({
             <MermaidInteractive
               chart={mermaidCode}
               selectedNodeId={selectedStepId}
-              stepIds={steps.map(s => s.id)}
+              stepIds={['__start__', ...steps.map(s => s.id)]}
               onNodeClick={handleNodeClick}
               onAddAfter={handleAddAfter}
               className="min-h-[200px]"
@@ -422,7 +526,7 @@ export function IntegratedWorkflowView({
         {steps.length > 0 && (
           <div className="px-3 py-1.5 border-t bg-muted/30 text-xs text-muted-foreground flex items-center gap-1.5 flex-shrink-0">
             <MousePointerClick className="h-3 w-3" />
-            Click node to edit • Hover arrow for +
+            Click node to edit • Hover between nodes to insert step
           </div>
         )}
       </div>

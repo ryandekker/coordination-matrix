@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { ObjectId, Filter, Sort, Document, WithId } from 'mongodb';
+import { ObjectId, Filter, Sort, Document } from 'mongodb';
 import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
 import { ReferenceResolver } from '../services/reference-resolver.js';
@@ -8,158 +8,10 @@ import { publishTaskEvent, computeChanges, getSpecificEventTypes } from '../serv
 import { activityLogService } from '../services/activity-log.js';
 import { workflowExecutionService } from '../services/workflow-execution-service.js';
 
+// Import helpers from tasks module
+import { toObjectId, buildFilter } from './tasks/index.js';
+
 export const tasksRouter = Router();
-
-// Helper to parse ObjectId safely
-function toObjectId(id: string): ObjectId {
-  if (!ObjectId.isValid(id)) {
-    throw createError('Invalid ID format', 400);
-  }
-  return new ObjectId(id);
-}
-
-// Helper to resolve {{currentUserId}} placeholder
-function resolveUserPlaceholder(value: string, currentUserId?: string): string {
-  if (value === '{{currentUserId}}' && currentUserId) {
-    return currentUserId;
-  }
-  return value;
-}
-
-// Helper to build filter from query params
-function buildFilter(query: Record<string, unknown>, currentUserId?: string): Filter<Task> {
-  const filter: Filter<Task> = {};
-  const { search, filters, parentId, rootOnly, status, urgency, assigneeId, tags, includeArchived } = query;
-
-  // By default, exclude archived tasks unless explicitly requested
-  const shouldIncludeArchived = includeArchived === 'true' || includeArchived === true;
-
-  // Text search
-  if (search && typeof search === 'string') {
-    filter.$text = { $search: search };
-  }
-
-  // Check if any filters are active (meaning we should flatten the view)
-  const hasActiveFilters = !!(
-    search ||
-    status ||
-    urgency ||
-    assigneeId ||
-    tags ||
-    (filters && typeof filters === 'object' && Object.keys(filters as object).length > 0)
-  );
-
-  // Parent filter - flow tasks should appear at root level even if they have a parent
-  // When filters are active, skip rootOnly to show all matching tasks (flattened view)
-  if ((rootOnly === 'true' || rootOnly === true) && !hasActiveFilters) {
-    // Show root tasks OR flow tasks (flow tasks appear at both root and under parent)
-    filter.$or = [
-      { parentId: null },
-      { taskType: 'flow', parentId: { $ne: null } }
-    ];
-  } else if (parentId) {
-    filter.parentId = toObjectId(parentId as string);
-  }
-
-  // Status filter
-  if (status) {
-    // Explicit status filter provided - use it as-is
-    if (Array.isArray(status)) {
-      (filter as Record<string, unknown>).status = { $in: status };
-    } else {
-      (filter as Record<string, unknown>).status = status as string;
-    }
-  } else if (!shouldIncludeArchived) {
-    // No explicit status filter - exclude archived by default
-    (filter as Record<string, unknown>).status = { $ne: 'archived' };
-  }
-
-  // Urgency filter
-  if (urgency) {
-    if (Array.isArray(urgency)) {
-      (filter as Record<string, unknown>).urgency = { $in: urgency };
-    } else {
-      (filter as Record<string, unknown>).urgency = urgency as string;
-    }
-  }
-
-  // Assignee filter
-  if (assigneeId) {
-    // Handle special __unassigned__ marker for null values
-    if (assigneeId === '__unassigned__' || (Array.isArray(assigneeId) && assigneeId.includes('__unassigned__'))) {
-      filter.assigneeId = { $eq: null } as unknown as ObjectId;
-    } else if (Array.isArray(assigneeId)) {
-      const resolvedIds = assigneeId
-        .map((id) => resolveUserPlaceholder(id as string, currentUserId))
-        .filter((id) => id !== '{{currentUserId}}')
-        .map((id) => toObjectId(id));
-      if (resolvedIds.length > 0) {
-        filter.assigneeId = { $in: resolvedIds };
-      }
-    } else {
-      const resolvedAssigneeId = resolveUserPlaceholder(assigneeId as string, currentUserId);
-      // Skip if placeholder couldn't be resolved (no current user)
-      if (resolvedAssigneeId !== '{{currentUserId}}') {
-        filter.assigneeId = toObjectId(resolvedAssigneeId);
-      }
-    }
-  }
-
-  // Tags filter
-  if (tags) {
-    const tagArray = Array.isArray(tags) ? tags : [tags];
-    filter.tags = { $in: tagArray };
-  }
-
-  // Custom filters
-  if (filters && typeof filters === 'object') {
-    Object.entries(filters as Record<string, unknown>).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== '') {
-        // Handle special __unassigned__ marker for null values (e.g., assigneeId: ['__unassigned__'])
-        if (Array.isArray(value) && value.includes('__unassigned__')) {
-          (filter as Record<string, unknown>)[key] = { $eq: null };
-        // Handle arrays - convert to $in query for multi-value filters (e.g., status: ['pending', 'in_progress'])
-        } else if (Array.isArray(value)) {
-          (filter as Record<string, unknown>)[key] = { $in: value };
-        // Handle ObjectId fields
-        } else if (key.endsWith('Id') && typeof value === 'string' && ObjectId.isValid(value)) {
-          (filter as Record<string, unknown>)[key] = new ObjectId(value);
-        } else {
-          (filter as Record<string, unknown>)[key] = value;
-        }
-      }
-    });
-  }
-
-  // Final archived exclusion check: if we ended up with a status filter that explicitly
-  // includes 'archived', remove it from the array (unless includeArchived is true)
-  if (!shouldIncludeArchived) {
-    const currentStatusFilter = (filter as Record<string, unknown>).status;
-    if (currentStatusFilter) {
-      // Status filter exists - check if it explicitly includes 'archived'
-      if (typeof currentStatusFilter === 'object' && '$in' in (currentStatusFilter as object)) {
-        const statusValues = (currentStatusFilter as { $in: unknown[] }).$in;
-        if (Array.isArray(statusValues) && statusValues.includes('archived')) {
-          // Remove 'archived' from the array
-          const filteredValues = statusValues.filter(s => s !== 'archived');
-          if (filteredValues.length > 0) {
-            (filter as Record<string, unknown>).status = { $in: filteredValues };
-          } else {
-            // If no values left, use $ne: 'archived' instead
-            (filter as Record<string, unknown>).status = { $ne: 'archived' };
-          }
-        }
-      } else if (currentStatusFilter === 'archived') {
-        // Single status is 'archived' but includeArchived is false - this shouldn't match anything
-        // Use an impossible condition to return no results
-        (filter as Record<string, unknown>).status = { $in: [] };
-      }
-    }
-    // If no status filter at all, lines 71-73 already added $ne: 'archived'
-  }
-
-  return filter;
-}
 
 // GET /api/tasks - List tasks with pagination, filtering, and sorting
 tasksRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
@@ -186,6 +38,7 @@ tasksRouter.get('/', async (req: Request, res: Response, next: NextFunction) => 
     ]);
 
     // Add child count to each task to enable expand/collapse UI
+    // Use a single aggregation query to get counts
     const taskIds = tasks.map(t => t._id);
     const childCounts = await db.collection<Task>('tasks').aggregate([
       { $match: { parentId: { $in: taskIds } } },
@@ -193,11 +46,12 @@ tasksRouter.get('/', async (req: Request, res: Response, next: NextFunction) => 
     ]).toArray();
 
     const childCountMap = new Map(childCounts.map(c => [c._id.toString(), c.count]));
+    // Return childCount as a number instead of creating wasteful placeholder arrays
     const tasksWithChildInfo = tasks.map(task => ({
       ...task,
-      children: childCountMap.get(task._id.toString())
-        ? Array(childCountMap.get(task._id.toString())).fill({})
-        : []
+      childCount: childCountMap.get(task._id.toString()) || 0,
+      // Keep empty children array for backward compatibility (UI expects it)
+      children: []
     }));
 
     let resolvedTasks = tasksWithChildInfo;
@@ -267,25 +121,25 @@ tasksRouter.get('/tree', async (req: Request, res: Response, next: NextFunction)
   }
 });
 
-// Helper to get all descendant IDs recursively
-async function getDescendantIds(db: ReturnType<typeof getDb>, parentId: ObjectId, maxDepth = 10, currentDepth = 0): Promise<ObjectId[]> {
-  if (currentDepth >= maxDepth) return [];
+// Helper to get all descendant IDs using $graphLookup (single query instead of N+1)
+async function getDescendantIds(db: ReturnType<typeof getDb>, parentId: ObjectId, maxDepth = 10): Promise<ObjectId[]> {
+  const result = await db.collection<Task>('tasks').aggregate([
+    { $match: { _id: parentId } },
+    {
+      $graphLookup: {
+        from: 'tasks',
+        startWith: '$_id',
+        connectFromField: '_id',
+        connectToField: 'parentId',
+        as: 'descendants',
+        maxDepth: maxDepth - 1, // graphLookup maxDepth is 0-indexed
+        depthField: 'depth'
+      }
+    },
+    { $project: { descendants: '$descendants._id' } }
+  ]).toArray();
 
-  const children = await db
-    .collection<Task>('tasks')
-    .find({ parentId })
-    .project({ _id: 1 })
-    .toArray();
-
-  const childIds = children.map(c => c._id);
-  const grandchildIds: ObjectId[] = [];
-
-  for (const childId of childIds) {
-    const descendants = await getDescendantIds(db, childId, maxDepth, currentDepth + 1);
-    grandchildIds.push(...descendants);
-  }
-
-  return [...childIds, ...grandchildIds];
+  return result[0]?.descendants || [];
 }
 
 // GET /api/tasks/webhook-attempts - List all tasks with webhook attempts
@@ -621,11 +475,12 @@ tasksRouter.get('/:id/children', async (req: Request, res: Response, next: NextF
     ]).toArray();
 
     const childCountMap = new Map(childCounts.map(c => [c._id.toString(), c.count]));
+    // Return childCount as a number instead of creating wasteful placeholder arrays
     const childrenWithChildInfo = children.map(task => ({
       ...task,
-      children: childCountMap.get(task._id.toString())
-        ? Array(childCountMap.get(task._id.toString())).fill({})
-        : []
+      childCount: childCountMap.get(task._id.toString()) || 0,
+      // Keep empty children array for backward compatibility
+      children: []
     }));
 
     let resolvedChildren = childrenWithChildInfo;
@@ -649,32 +504,38 @@ tasksRouter.get('/:id/children', async (req: Request, res: Response, next: NextF
   }
 });
 
-// GET /api/tasks/:id/ancestors - Get all ancestors of a task (walks up the parent chain)
+// GET /api/tasks/:id/ancestors - Get all ancestors of a task using $graphLookup (single query)
 tasksRouter.get('/:id/ancestors', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
     const { resolveReferences = 'true' } = req.query;
 
     const taskId = toObjectId(req.params.id);
-    const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
 
-    if (!task) {
+    // Use $graphLookup to fetch all ancestors in a single query
+    const result = await db.collection<Task>('tasks').aggregate([
+      { $match: { _id: taskId } },
+      {
+        $graphLookup: {
+          from: 'tasks',
+          startWith: '$parentId',
+          connectFromField: 'parentId',
+          connectToField: '_id',
+          as: 'ancestors',
+          maxDepth: 50, // Reasonable max depth for task hierarchies
+          depthField: 'depth'
+        }
+      }
+    ]).toArray();
+
+    if (result.length === 0) {
       throw createError('Task not found', 404);
     }
 
-    // Walk up the parent chain to find all ancestors
-    const ancestors: Task[] = [];
-    let currentParentId = task.parentId;
-
-    while (currentParentId) {
-      const parent = await db.collection<Task>('tasks').findOne({ _id: currentParentId });
-      if (!parent) break;
-      ancestors.push(parent);
-      currentParentId = parent.parentId;
-    }
-
-    // Reverse so root is first
-    ancestors.reverse();
+    // Sort ancestors by depth descending (root first) and remove depth field
+    const ancestors = (result[0].ancestors || [])
+      .sort((a: Task & { depth: number }, b: Task & { depth: number }) => b.depth - a.depth)
+      .map(({ depth, ...task }: Task & { depth: number }) => task as Task);
 
     let resolvedAncestors = ancestors;
     if (resolveReferences === 'true') {
@@ -1016,20 +877,51 @@ tasksRouter.put('/:id/move', async (req: Request, res: Response, next: NextFunct
     if (newParentId) {
       const parentOid = toObjectId(newParentId);
 
-      // Check for circular reference - walk up the parent chain from the new parent
-      let currentParentId: ObjectId | null = parentOid;
-      while (currentParentId) {
-        if (currentParentId.equals(taskId)) {
-          throw createError('Cannot move task to one of its descendants', 400);
+      // Check for circular reference using $graphLookup (single query instead of N+1)
+      const ancestorCheck = await db.collection<Task>('tasks').aggregate([
+        { $match: { _id: parentOid } },
+        {
+          $graphLookup: {
+            from: 'tasks',
+            startWith: '$parentId',
+            connectFromField: 'parentId',
+            connectToField: '_id',
+            as: 'ancestors',
+            maxDepth: 50
+          }
+        },
+        {
+          $project: {
+            _id: 1,
+            parentId: 1,
+            title: 1,
+            status: 1,
+            urgency: 1,
+            tags: 1,
+            assigneeId: 1,
+            workflowId: 1,
+            workflowRunId: 1,
+            workflowStepId: 1,
+            taskType: 1,
+            createdAt: 1,
+            updatedAt: 1,
+            metadata: 1,
+            isCircular: {
+              $in: [taskId, { $concatArrays: [['$_id'], '$ancestors._id'] }]
+            }
+          }
         }
-        const ancestor: WithId<Task> | null = await db.collection<Task>('tasks').findOne({ _id: currentParentId });
-        currentParentId = ancestor?.parentId || null;
-      }
+      ]).toArray();
 
-      newParent = await db.collection<Task>('tasks').findOne({ _id: parentOid });
-      if (!newParent) {
+      if (ancestorCheck.length === 0) {
         throw createError('New parent task not found', 404);
       }
+
+      if (ancestorCheck[0].isCircular) {
+        throw createError('Cannot move task to one of its descendants', 400);
+      }
+
+      newParent = ancestorCheck[0] as unknown as Task;
     }
 
     // Update the task's parent
