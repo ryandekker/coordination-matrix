@@ -119,7 +119,9 @@ workflowsRouter.get('/stats', async (_req: Request, res: Response, next: NextFun
 
     for (const stat of stats) {
       if (stat._id) {
-        statsMap[stat._id.toString()] = {
+        // Convert ObjectId to string for consistent keying
+        const key = typeof stat._id === 'string' ? stat._id : stat._id.toString();
+        statsMap[key] = {
           runCount: stat.runCount,
           lastRunAt: stat.lastRunAt,
           completedCount: stat.completedCount,
