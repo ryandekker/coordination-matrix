@@ -361,7 +361,8 @@ export default function WorkflowsPage() {
   const { data: statsData } = useQuery({
     queryKey: ['workflow-stats'],
     queryFn: fetchWorkflowStats,
-    staleTime: 30000, // Cache for 30 seconds
+    staleTime: 10000, // Cache for 10 seconds
+    refetchOnWindowFocus: true, // Refetch when user returns to the page
   })
 
   const { data: usersData } = useQuery({
