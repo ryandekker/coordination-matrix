@@ -63,6 +63,55 @@ aiPromptRoutes.get('/ai-prompt-context', async (_req: Request, res: Response, ne
   }
 });
 
+// GET /api/workflows/ai-prompt-multi - Generate AI prompt for multi-workflow editing
+aiPromptRoutes.get('/ai-prompt-multi', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { includeContext = 'true' } = req.query;
+
+    const agents = await db
+      .collection('users')
+      .find({ isAgent: true, isActive: true })
+      .project({ _id: 1, displayName: 1, agentPrompt: 1 })
+      .sort({ displayName: 1 })
+      .toArray();
+
+    const users = await db
+      .collection('users')
+      .find({ isAgent: { $ne: true }, isActive: true })
+      .project({ _id: 1, displayName: 1, email: 1 })
+      .sort({ displayName: 1 })
+      .toArray();
+
+    const workflows = await db
+      .collection<Workflow>('workflows')
+      .find({ isActive: true })
+      .project({ _id: 1, name: 1, description: 1 })
+      .sort({ name: 1 })
+      .toArray();
+
+    const tagResults = await db.collection('tasks').distinct('tags');
+    const tags = (tagResults as string[]).filter(t => t && typeof t === 'string').sort();
+
+    const prompt = buildMultiWorkflowAIPrompt(includeContext === 'true', {
+      agents: agents as ContextData['agents'],
+      users: users as ContextData['users'],
+      workflows: workflows as ContextData['workflows'],
+      tags,
+    });
+
+    res.json({
+      data: {
+        prompt,
+        format: 'multi-mermaid',
+        includeContext: includeContext === 'true'
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/workflows/ai-prompt - Generate a complete AI prompt for workflow generation
 aiPromptRoutes.get('/ai-prompt', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -394,6 +443,150 @@ flowchart TD
       prompt += `\n### Existing Workflows (for flow steps)\n`;
       for (const workflow of context.workflows) {
         prompt += `- **${workflow.name}** (ID: ${workflow._id}): ${workflow.description || 'No description'}\n`;
+      }
+    }
+
+    if (context.tags.length > 0) {
+      prompt += `\n### Available Tags\n`;
+      prompt += context.tags.map(t => `\`${t}\``).join(', ');
+    }
+  }
+
+  return prompt;
+}
+
+function buildMultiWorkflowAIPrompt(includeContext: boolean, context: ContextData): string {
+  let prompt = `# Multi-Workflow Editor Guide for Coordination Matrix
+
+You are editing multiple workflows in a single Mermaid document. Each workflow is defined as a **subgraph** with metadata comments above it.
+
+## Multi-Workflow Format
+
+The multi-workflow format uses subgraphs to contain each workflow:
+
+\`\`\`mermaid
+flowchart TD
+
+    %% @workflow: "First Workflow Name"
+    %% @id: existing_workflow_id_or_(new)
+    %% @description: What this workflow does
+    %% @isActive: true
+    %% @rootTaskTitleTemplate: {{input.title}}
+    subgraph workflow1["First Workflow Name"]
+        direction TB
+        step1["AI Task"]
+        step2("Manual Review")
+        step1 --> step2
+
+        %% @step(step1): {"additionalInstructions":"Instructions here"}
+    end
+
+    %% @workflow: "Second Workflow Name"
+    %% @id: (new)
+    %% @description: Description of second workflow
+    %% @isActive: true
+    subgraph workflow2["Second Workflow Name"]
+        direction TB
+        stepA["Process"]
+        stepB{"Decision?"}
+        stepA --> stepB
+    end
+
+    %% Styling (at end, applies to all workflows)
+    classDef agent fill:#3B82F6,color:#fff
+    classDef manual fill:#8B5CF6,color:#fff
+    classDef external fill:#F97316,color:#fff
+    classDef decision fill:#F59E0B,color:#fff
+    classDef foreach fill:#10B981,color:#fff
+    classDef join fill:#6366F1,color:#fff
+    classDef flow fill:#EC4899,color:#fff
+\`\`\`
+
+## Required Metadata Comments
+
+Each workflow subgraph MUST have these metadata comments directly above it:
+
+| Comment | Required | Description |
+|---------|----------|-------------|
+| \`%% @workflow: "Name"\` | Yes | Workflow display name (quoted) |
+| \`%% @id: id_or_(new)\` | Yes | Existing workflow ID to update, or \`(new)\` to create |
+| \`%% @description: text\` | No | Workflow description |
+| \`%% @isActive: true/false\` | No | Whether workflow is active (default: true) |
+| \`%% @rootTaskTitleTemplate: template\` | No | Dynamic title using \`{{input.field}}\` |
+
+## Step Types and Shapes
+
+| Step Type | Mermaid Shape | Example |
+|-----------|---------------|---------|
+| agent | \`["label"]\` | \`step1["AI Analysis"]\` |
+| manual | \`("label")\` | \`step2("Human Review")\` |
+| external | \`{{"label"}}\` | \`step3{{"API Call"}}\` |
+| decision | \`{"label"}\` | \`step4{"Is Valid?"}\` |
+| foreach | \`[["Each: label"]]\` | \`step5[["Each: Process"]]\` |
+| join | \`[["Join: label"]]\` | \`step6[["Join: Aggregate"]]\` |
+| flow | \`[["Run: label"]]\` | \`step7[["Run: Subprocess"]]\` |
+
+## Step Configuration
+
+Use \`%% @step(nodeId): {json}\` comments inside the subgraph for step-specific config:
+
+\`\`\`mermaid
+subgraph wf1["My Workflow"]
+    direction TB
+    analyze["Analyze Data"]
+    review("Manager Approval")
+    analyze --> review
+
+    %% @step(analyze): {"additionalInstructions":"Extract key metrics from the data"}
+    %% @step(review): {"defaultAssigneeId":"user_id_here"}
+end
+\`\`\`
+
+## Important Rules
+
+1. **Metadata placement**: \`@workflow\`, \`@id\`, \`@description\`, \`@isActive\`, \`@rootTaskTitleTemplate\` go BEFORE the subgraph
+2. **Step config placement**: \`@step(id)\` comments go INSIDE the subgraph
+3. **Always quote labels**: Use \`["Label"]\` not \`[Label]\`
+4. **Use direction TB**: Each subgraph should have \`direction TB\` as first line
+5. **Styling at end**: Put all classDef and class statements after all subgraphs
+6. **Never use inline style**: Don't use \`style nodeId fill:#color\`
+7. **Quote branch labels**: Use \`-->|"Yes"|\` not \`-->|Yes|\`
+8. **Unique node IDs**: Within each subgraph, node IDs must be unique
+
+## Creating vs Updating Workflows
+
+- To **update** an existing workflow: Use the actual workflow ID in \`@id:\`
+- To **create** a new workflow: Use \`@id: (new)\`
+
+## Template Variables
+
+Available in step configurations and titles:
+- \`{{input.field}}\` - Values from input payload
+- \`{{callbackUrl}}\`, \`{{callbackSecret}}\` - For external steps
+- \`{{item}}\`, \`{{_index}}\`, \`{{_total}}\` - Inside ForEach child tasks`;
+
+  if (includeContext) {
+    prompt += `\n\n---\n\n## Available Context\n`;
+
+    if (context.agents.length > 0) {
+      prompt += `\n### Available Agents (for defaultAssigneeId)\n`;
+      for (const agent of context.agents) {
+        prompt += `- **${agent.displayName}** (ID: \`${agent._id}\`)\n`;
+      }
+    }
+
+    if (context.users.length > 0) {
+      prompt += `\n### Available Users (for manual tasks)\n`;
+      for (const user of context.users) {
+        prompt += `- **${user.displayName}** (ID: \`${user._id}\`)\n`;
+      }
+    }
+
+    if (context.workflows.length > 0) {
+      prompt += `\n### Existing Workflows\n`;
+      prompt += `Use these IDs with \`@id:\` to update, or reference in flow steps:\n`;
+      for (const workflow of context.workflows) {
+        prompt += `- **${workflow.name}** (ID: \`${workflow._id}\`): ${workflow.description || 'No description'}\n`;
       }
     }
 
