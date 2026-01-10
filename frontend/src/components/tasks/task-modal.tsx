@@ -1155,7 +1155,7 @@ export function TaskModal({
             )}
           </DialogHeader>
           <div className="flex-1 min-h-0 overflow-y-auto">
-            <FormContent isEditMode={false} />
+            {FormContent({ isEditMode: false })}
           </div>
         </DialogContent>
       </Dialog>
@@ -1606,7 +1606,7 @@ export function TaskModal({
             )}
           />
           <div className="mt-3">
-            <EditableHeader />
+            {EditableHeader()}
           </div>
         </div>
 
@@ -1614,7 +1614,7 @@ export function TaskModal({
         <div className="flex flex-1 min-h-0 overflow-hidden">
           {/* Left column - Form */}
           <div className="flex-1 px-5 py-4 flex flex-col min-h-0 border-r border-border overflow-y-auto">
-            <FormContent isEditMode={true} />
+            {FormContent({ isEditMode: true })}
           </div>
 
           {/* Right column - Tabbed sidebar */}
@@ -1655,7 +1655,7 @@ export function TaskModal({
               </TabsList>
 
               <TabsContent value={TASK_MODAL_TABS.TYPE_CONFIG} className="flex-1 min-h-0 overflow-y-auto mt-0">
-                <TypeConfigContent />
+                {TypeConfigContent()}
               </TabsContent>
 
               <TabsContent value={TASK_MODAL_TABS.SUBTASKS} className="flex-1 min-h-0 overflow-y-auto mt-0">
