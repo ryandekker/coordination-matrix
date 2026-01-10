@@ -36,7 +36,8 @@
       "Bash(npm run cli:*)",
       "mcp__playwright__browser_evaluate",
       "Bash(npx tsc:*)",
-      "Bash(node scripts/task-daemon.mjs:*)"
+      "Bash(node scripts/task-daemon.mjs:*)",
+      "Bash(API_KEY=\"cm_ak_18721ddb090b54af2d889c817740c76497f9a1a2ae2b3a2850f917a7fa88702c\" curl -s \"https://cm.hcizero.com/api/workflow-runs?limit=5\" -H \"X-API-Key: $API_KEY\")"
     ],
     "deny": [],
     "ask": []
