@@ -60,6 +60,7 @@ import {
   ArrowDown,
 } from 'lucide-react'
 import { TokenBrowser } from './token-browser'
+import { WorkflowWebhook } from './workflow-webhook'
 
 // Import types, constants, and utilities from editor module
 import type { WorkflowStep, WorkflowStepType, Workflow, WorkflowEditorProps, LoopScope } from './editor/types'
@@ -609,6 +610,14 @@ export function WorkflowEditor({
                   <p className="text-xs text-muted-foreground mt-2">
                     API: <code className="bg-muted px-1 rounded">GET /api/workflows/ai-prompt-context</code> for structured context data.
                   </p>
+                </div>
+
+                {/* Webhook Trigger Section */}
+                <div className="border-t pt-4 mt-4">
+                  <WorkflowWebhook
+                    workflowId={workflow?._id}
+                    workflowName={watch('name')}
+                  />
                 </div>
               </div>
             </TabsContent>
