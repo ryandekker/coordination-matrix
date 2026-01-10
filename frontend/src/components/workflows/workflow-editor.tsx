@@ -318,26 +318,50 @@ export function WorkflowEditor({
 
   // Export complete workflow as JSON (includes all data for full import)
   const exportWorkflowJson = () => {
-    const workflowData = {
-      name: watch('name') || '',
-      description: watch('description') || '',
-      isActive: watch('isActive'),
-      rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
-      steps,
-      mermaidDiagram: mermaidCode,
-      exportedAt: new Date().toISOString(),
-      version: '1.0',
+    console.log('[Export] Starting workflow export...')
+    try {
+      const workflowData = {
+        name: watch('name') || '',
+        description: watch('description') || '',
+        isActive: watch('isActive'),
+        rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
+        steps,
+        mermaidDiagram: mermaidCode,
+        exportedAt: new Date().toISOString(),
+        version: '1.0',
+      }
+      console.log('[Export] Workflow data prepared:', workflowData.name, 'with', steps.length, 'steps')
+
+      const jsonString = JSON.stringify(workflowData, null, 2)
+      console.log('[Export] JSON size:', jsonString.length, 'bytes')
+
+      const blob = new Blob([jsonString], { type: 'application/json' })
+      console.log('[Export] Blob created, size:', blob.size)
+
+      const url = URL.createObjectURL(blob)
+      console.log('[Export] Blob URL created:', url)
+
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${watch('name') || 'workflow'}.json`
+      console.log('[Export] Download filename:', a.download)
+
+      document.body.appendChild(a)
+      console.log('[Export] Anchor appended to body, triggering click...')
+      a.click()
+      console.log('[Export] Click triggered')
+
+      document.body.removeChild(a)
+      // Delay revoking the URL to ensure the download has started
+      setTimeout(() => {
+        URL.revokeObjectURL(url)
+        console.log('[Export] Blob URL revoked')
+      }, 100)
+
+      console.log('[Export] Export complete')
+    } catch (error) {
+      console.error('[Export] Error during export:', error)
     }
-    const blob = new Blob([JSON.stringify(workflowData, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${watch('name') || 'workflow'}.json`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    // Delay revoking the URL to ensure the download has started
-    setTimeout(() => URL.revokeObjectURL(url), 100)
   }
 
   // Import workflow from file (supports both JSON and Mermaid)
