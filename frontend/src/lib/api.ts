@@ -1314,7 +1314,7 @@ export const webhooksApi = {
 }
 
 // Document Types
-export type DocumentType = 'sop' | 'strategy' | 'plan' | 'template' | 'reference' | 'output' | 'custom'
+export type DocumentType = 'sop' | 'strategy' | 'plan' | 'template' | 'reference' | 'output' | 'custom' | 'workflow-prompt'
 export type DocumentStatus = 'draft' | 'review' | 'approved' | 'archived'
 
 export interface Document {
@@ -1521,5 +1521,19 @@ export const documentsApi = {
       body: JSON.stringify(query),
     })
     return handleResponse(response)
+  },
+
+  // Workflow prompts - convenience method
+  listWorkflowPrompts: async (params?: {
+    status?: DocumentStatus | DocumentStatus[]
+    search?: string
+  }): Promise<PaginatedResponse<Document>> => {
+    return documentsApi.list({
+      type: 'workflow-prompt',
+      status: params?.status,
+      search: params?.search,
+      sortBy: 'title',
+      sortOrder: 'asc',
+    })
   },
 }

@@ -54,6 +54,7 @@ const DOCUMENT_TYPES: { value: DocumentType; label: string; description: string 
   { value: 'reference', label: 'Reference', description: 'Reference materials and style guides' },
   { value: 'output', label: 'Output', description: 'Agent-generated deliverables' },
   { value: 'custom', label: 'Custom', description: 'Other document types' },
+  { value: 'workflow-prompt', label: 'Workflow Prompt', description: 'Reusable prompts for workflow agent steps' },
 ]
 
 const DOCUMENT_STATUSES: { value: DocumentStatus; label: string }[] = [

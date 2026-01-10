@@ -334,7 +334,7 @@ export const schemas = {
   // Document schemas
   DocumentType: {
     type: 'string',
-    enum: ['sop', 'strategy', 'plan', 'template', 'reference', 'output', 'custom'],
+    enum: ['sop', 'strategy', 'plan', 'template', 'reference', 'output', 'custom', 'workflow-prompt'],
     description: 'Type of document',
   },
   DocumentStatus: {

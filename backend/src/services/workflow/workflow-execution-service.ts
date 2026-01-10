@@ -15,6 +15,7 @@ import {
   WorkflowRunEventType,
   StartWorkflowInput,
   TaskEvent,
+  Document,
 } from '../../types/index.js';
 
 import { resolveTemplateVariables, getValueByPath, resolveTitleTemplate, BASE_URL } from './template-utils.js';
@@ -92,6 +93,48 @@ class WorkflowExecutionService {
 
   private get tasks() {
     return getDb().collection<Task>('tasks');
+  }
+
+  private get documents() {
+    return getDb().collection<Document>('documents');
+  }
+
+  // ============================================================================
+  // Prompt Library Helpers
+  // ============================================================================
+
+  /**
+   * Fetch and combine prompt documents for a step.
+   * Returns the combined content of all prompt documents in order.
+   */
+  private async getExpandedPrompt(step: WorkflowStep): Promise<string> {
+    const parts: string[] = [];
+
+    // Fetch prompt documents if specified
+    if (step.promptDocumentIds && step.promptDocumentIds.length > 0) {
+      const promptDocs = await this.documents.find({
+        _id: { $in: step.promptDocumentIds.map(id => new ObjectId(id)) },
+        type: 'workflow-prompt',
+      }).toArray();
+
+      // Sort by the order in promptDocumentIds
+      const orderedDocs = step.promptDocumentIds
+        .map(id => promptDocs.find(doc => doc._id.toString() === id))
+        .filter((doc): doc is Document => doc !== undefined);
+
+      for (const doc of orderedDocs) {
+        if (doc.content) {
+          parts.push(doc.content);
+        }
+      }
+    }
+
+    // Add step-specific additional instructions
+    if (step.additionalInstructions) {
+      parts.push(step.additionalInstructions);
+    }
+
+    return parts.join('\n\n');
   }
 
   // ============================================================================
@@ -430,8 +473,11 @@ class WorkflowExecutionService {
     if (step.description) {
       task.summary = step.description;
     }
-    if (step.additionalInstructions) {
-      task.extraPrompt = step.additionalInstructions;
+
+    // Expand prompt library documents + additional instructions
+    const expandedPrompt = await this.getExpandedPrompt(step);
+    if (expandedPrompt) {
+      task.extraPrompt = expandedPrompt;
     }
 
     if (step.stepType === 'foreach' && step.itemsPath) {

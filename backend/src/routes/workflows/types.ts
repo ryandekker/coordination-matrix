@@ -62,6 +62,7 @@ export interface WorkflowStep {
   // Agent/manual step configuration
   additionalInstructions?: string;  // Extra context for the agent (not required)
   defaultAssigneeId?: string;       // Agent or user to assign to
+  promptDocumentIds?: string[];     // IDs of workflow-prompt documents to prepend
 
   // External step configuration (waits for callback)
   externalConfig?: ExternalConfig;
