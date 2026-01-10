@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { TokenBrowser } from './token-browser'
+import { PromptSelector } from './editor/prompt-selector'
 import { cn } from '@/lib/utils'
 import { Search, X, FileText, Check } from 'lucide-react'
 import {
@@ -95,6 +96,7 @@ interface WorkflowStep {
   connections?: StepConnection[]
   additionalInstructions?: string
   defaultAssigneeId?: string
+  promptDocumentIds?: string[]
   externalConfig?: ExternalConfig
   defaultConnection?: string
   itemsPath?: string
@@ -752,10 +754,16 @@ export function StepConfigPanel({
               </Select>
             </div>
 
+            {/* Prompt Library Selector */}
+            <PromptSelector
+              selectedPromptIds={step.promptDocumentIds || []}
+              onChange={(promptIds) => onUpdate({ promptDocumentIds: promptIds.length > 0 ? promptIds : undefined })}
+            />
+
             <div className="space-y-1">
               <label className="text-sm font-medium flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-amber-500" />
-                Prompt
+                Additional Instructions
               </label>
               <Textarea
                 value={step.additionalInstructions || step.prompt || ''}
