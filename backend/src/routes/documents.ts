@@ -51,7 +51,7 @@ async function logDocumentActivity(
 export const documentsRouter = Router();
 
 // Valid document types and statuses
-const VALID_TYPES: DocumentType[] = ['sop', 'strategy', 'plan', 'template', 'reference', 'output', 'custom'];
+const VALID_TYPES: DocumentType[] = ['sop', 'strategy', 'plan', 'template', 'reference', 'output', 'custom', 'workflow-prompt'];
 const VALID_STATUSES: DocumentStatus[] = ['draft', 'review', 'approved', 'archived'];
 
 // Helper to resolve references
