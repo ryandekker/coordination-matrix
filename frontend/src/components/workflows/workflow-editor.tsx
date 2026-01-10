@@ -336,7 +336,8 @@ export function WorkflowEditor({
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    // Delay revoking the URL to ensure the download has started
+    setTimeout(() => URL.revokeObjectURL(url), 100)
   }
 
   // Import workflow from file (supports both JSON and Mermaid)
