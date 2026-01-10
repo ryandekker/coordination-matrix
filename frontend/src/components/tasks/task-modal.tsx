@@ -597,6 +597,10 @@ export function TaskModal({
                       timeoutMs: 30000,
                     })
                   }
+                  // Immediately save task type changes - don't wait for debounce
+                  if (task) {
+                    updateTask.mutate({ id: task._id, data: { taskType: val } })
+                  }
                 }}
               >
                 <SelectTrigger
