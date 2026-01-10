@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { ObjectId } from 'mongodb';
 
 // Test the filter matching logic that doesn't require database
@@ -200,7 +200,7 @@ describe('WebhookService', () => {
     });
 
     it('should handle task.entered_filter trigger condition', () => {
-      const triggers = ['task.entered_filter'];
+      // Testing with triggers: ['task.entered_filter']
       const eventTypes = ['task.created', 'task.updated', 'task.deleted', 'task.status.changed'];
 
       // Only task.created and task.updated should potentially trigger entered_filter

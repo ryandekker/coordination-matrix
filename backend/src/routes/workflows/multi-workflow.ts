@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { ObjectId } from 'mongodb';
 import { getDb } from '../../db/connection.js';
 import { createError } from '../../middleware/error-handler.js';
-import { Workflow, WorkflowStep, VALID_STEP_TYPES, WorkflowStepType } from './types.js';
+import { Workflow, WorkflowStep, VALID_STEP_TYPES } from './types.js';
 import { parseMermaidToStepsWithWarnings, generateMermaidFromSteps, generateMermaidSubgraphContent } from './mermaid-parser.js';
 
 // Helper to ensure all steps have IDs

@@ -142,10 +142,10 @@ aiPromptRoutes.get('/ai-prompt', async (req: Request, res: Response, next: NextF
     const tagResults = await db.collection('tasks').distinct('tags');
     const tags = (tagResults as string[]).filter(t => t && typeof t === 'string').sort();
 
-    const prompt = buildFullAIPrompt(format as string, includeContext === 'true', {
-      agents,
-      users,
-      workflows,
+    const prompt = buildFullAIPrompt(includeContext === 'true', {
+      agents: agents as ContextData['agents'],
+      users: users as ContextData['users'],
+      workflows: workflows as ContextData['workflows'],
       tags,
     });
 
@@ -304,7 +304,7 @@ interface ContextData {
   tags: string[];
 }
 
-function buildFullAIPrompt(format: string, includeContext: boolean, context: ContextData): string {
+function buildFullAIPrompt(includeContext: boolean, context: ContextData): string {
   let prompt = `# Workflow Generation Guide for Coordination Matrix
 
 You are generating a workflow definition for the Coordination Matrix system. This guide provides complete documentation for all step types, configuration options, and examples.

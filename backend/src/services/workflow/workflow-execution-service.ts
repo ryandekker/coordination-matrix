@@ -1423,7 +1423,7 @@ class WorkflowExecutionService {
 
   private async executeFindDocument(
     run: WorkflowRun,
-    workflow: Workflow,
+    _workflow: Workflow,
     step: WorkflowStep,
     findDocTask: Task,
     inputPayload?: Record<string, unknown>

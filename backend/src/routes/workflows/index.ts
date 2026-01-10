@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { ObjectId } from 'mongodb';
 import { getDb } from '../../db/connection.js';
 import { createError } from '../../middleware/error-handler.js';
-import { Workflow, WorkflowStep, VALID_STEP_TYPES, WorkflowStepType } from './types.js';
+import { Workflow, WorkflowStep, VALID_STEP_TYPES } from './types.js';
 import { parseMermaidToSteps, generateMermaidFromSteps } from './mermaid-parser.js';
 import { handleExportMulti, handleImportMulti } from './multi-workflow.js';
 import { aiPromptRoutes } from './ai-prompts.js';

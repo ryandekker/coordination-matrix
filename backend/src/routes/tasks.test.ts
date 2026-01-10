@@ -72,7 +72,7 @@ describe('Tasks Route Helpers', () => {
 
   describe('buildFilter', () => {
     // Simplified version of buildFilter for testing
-    function buildFilter(query: Record<string, unknown>, currentUserId?: string) {
+    function buildFilter(query: Record<string, unknown>, _currentUserId?: string) {
       const filter: Record<string, unknown> = {};
       const { search, status, urgency, assigneeId, tags, includeArchived, rootOnly, parentId } = query;
 

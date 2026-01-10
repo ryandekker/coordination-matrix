@@ -288,8 +288,8 @@ describe('computeChanges', () => {
   });
 
   it('should detect status changes', () => {
-    const oldTask = { status: 'pending' };
-    const newTask = { status: 'completed' };
+    const oldTask = { status: 'pending' as const };
+    const newTask = { status: 'completed' as const };
 
     const changes = computeChanges(oldTask, newTask);
 
@@ -338,7 +338,7 @@ describe('computeChanges', () => {
   });
 
   it('should return empty array when no changes', () => {
-    const task = { title: 'Same', status: 'pending' };
+    const task = { title: 'Same', status: 'pending' as const };
 
     const changes = computeChanges(task, task);
 
