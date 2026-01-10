@@ -456,6 +456,7 @@ function FindDocumentConfig({
                   <SelectItem value="reference">Reference</SelectItem>
                   <SelectItem value="output">Output</SelectItem>
                   <SelectItem value="custom">Custom</SelectItem>
+                  <SelectItem value="workflow-prompt">Workflow Prompt</SelectItem>
                 </SelectContent>
               </Select>
             </div>

@@ -23,6 +23,7 @@ import { migration as addWaitingStatusLookup } from './2024-12-24-002-add-waitin
 import { migration as addUnassignedView } from './2024-12-24-003-add-unassigned-view.js';
 import { migration as addTaskSortIndexes } from './2025-12-25-001-add-task-sort-indexes.js';
 import { migration as addPerformanceIndexes } from './2026-01-08-001-add-performance-indexes.js';
+import { migration as addWorkflowPromptType } from './2026-01-10-001-add-workflow-prompt-type.js';
 
 // Register all migrations in order
 export const migrations: Migration[] = [
@@ -41,4 +42,5 @@ export const migrations: Migration[] = [
   addUnassignedView,
   addTaskSortIndexes,
   addPerformanceIndexes,
+  addWorkflowPromptType,
 ];

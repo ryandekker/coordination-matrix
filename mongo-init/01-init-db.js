@@ -1019,7 +1019,7 @@ db.createCollection('documents', {
         // Classification
         type: {
           bsonType: 'string',
-          enum: ['sop', 'strategy', 'plan', 'template', 'reference', 'output', 'custom'],
+          enum: ['sop', 'strategy', 'plan', 'template', 'reference', 'output', 'custom', 'workflow-prompt'],
           description: 'Document type - required'
         },
         status: {

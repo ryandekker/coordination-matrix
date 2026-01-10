@@ -50,6 +50,7 @@ const DOCUMENT_TYPES: { value: DocumentType; label: string }[] = [
   { value: 'reference', label: 'Reference' },
   { value: 'output', label: 'Output' },
   { value: 'custom', label: 'Custom' },
+  { value: 'workflow-prompt', label: 'Workflow Prompt' },
 ]
 
 const DOCUMENT_STATUSES: { value: DocumentStatus; label: string; color: string }[] = [

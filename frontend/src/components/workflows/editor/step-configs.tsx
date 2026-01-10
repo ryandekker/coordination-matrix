@@ -31,6 +31,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { TokenBrowser } from '../token-browser'
+import { PromptSelector } from './prompt-selector'
 import type { WorkflowStep, LoopScope, WorkflowStepType } from './types'
 import type { Workflow as ApiWorkflow } from '@/lib/api'
 
@@ -100,6 +101,12 @@ export function AgentStepConfig({
           Tasks created from this step will be assigned to this user by default
         </p>
       </div>
+
+      {/* Prompt Library Selector */}
+      <PromptSelector
+        selectedPromptIds={step.promptDocumentIds || []}
+        onChange={(promptIds) => updateStep(index, { promptDocumentIds: promptIds.length > 0 ? promptIds : undefined })}
+      />
 
       <div className="space-y-1">
         <label className="text-sm font-medium flex items-center gap-2">

@@ -625,6 +625,7 @@ export interface WorkflowStep {
   // Agent/manual step config
   additionalInstructions?: string;
   defaultAssigneeId?: string;
+  promptDocumentIds?: string[];  // IDs of workflow-prompt documents to prepend
 
   // External step config (waits for callback)
   externalConfig?: {
@@ -1014,7 +1015,7 @@ export interface Tag {
 // Document Types (Markdown Documentation)
 // ============================================================================
 
-export type DocumentType = 'sop' | 'strategy' | 'plan' | 'template' | 'reference' | 'output' | 'custom';
+export type DocumentType = 'sop' | 'strategy' | 'plan' | 'template' | 'reference' | 'output' | 'custom' | 'workflow-prompt';
 
 export type DocumentStatus = 'draft' | 'review' | 'approved' | 'archived';
 

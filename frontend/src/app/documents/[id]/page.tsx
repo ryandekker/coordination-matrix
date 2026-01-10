@@ -32,6 +32,7 @@ const DOCUMENT_TYPES: Record<DocumentType, string> = {
   reference: 'Reference',
   output: 'Output',
   custom: 'Custom',
+  'workflow-prompt': 'Workflow Prompt',
 }
 
 const STATUS_COLORS: Record<DocumentStatus, string> = {
