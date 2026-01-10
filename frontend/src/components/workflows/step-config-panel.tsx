@@ -1330,7 +1330,7 @@ export function StepConfigPanel({
                             <div className="flex flex-col min-w-0">
                               <span className="truncate">{wf.name}</span>
                               {wf.description && (
-                                <span className="text-xs text-muted-foreground truncate">
+                                <span className="text-xs opacity-60 truncate">
                                   {wf.description}
                                 </span>
                               )}
