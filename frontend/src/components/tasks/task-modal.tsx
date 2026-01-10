@@ -119,6 +119,12 @@ export function TaskModal({
   const updateTask = useUpdateTask()
   const rerunTask = useRerunTask()
 
+  // Metadata save handler (defined here to follow Rules of Hooks - must be before any conditional returns)
+  const handleMetadataSave = useCallback(async (parsed: Record<string, unknown>) => {
+    if (!taskProp) return
+    await updateTask.mutateAsync({ id: taskProp._id, data: { metadata: parsed } })
+  }, [taskProp, updateTask])
+
   // Fetch fresh task data when modal is open - this ensures data updates after rerun
   const { data: freshTaskData } = useTask(isOpen && taskProp ? taskProp._id : null)
   // Use fresh data from query if available, otherwise fall back to prop
@@ -1574,12 +1580,6 @@ export function TaskModal({
       </div>
     )
   }
-
-  // Metadata save handler
-  const handleMetadataSave = useCallback(async (parsed: Record<string, unknown>) => {
-    if (!task) return
-    await updateTask.mutateAsync({ id: task._id, data: { metadata: parsed } })
-  }, [task, updateTask])
 
   // Edit mode - two column layout with tabbed sidebar
   return (
