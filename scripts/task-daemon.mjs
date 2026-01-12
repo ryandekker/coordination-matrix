@@ -732,7 +732,10 @@ ${COLORS.bold}EXAMPLES${COLORS.reset}
 // ============================================================================
 
 function getHeaders(config) {
-  const headers = { 'Content-Type': 'application/json' };
+  const headers = {
+    'Content-Type': 'application/json',
+    'Connection': 'close',  // Force new connection to avoid stale connection issues
+  };
   if (config.apiKey) {
     headers['X-API-Key'] = config.apiKey;
   }
@@ -808,10 +811,12 @@ async function updateTask(config, taskId, updates) {
   }
 
   try {
+    const bodyStr = JSON.stringify(updates);
+    console.log(`[DEBUG] Update payload size: ${Math.round(bodyStr.length / 1024)}KB`);
     const response = await fetch(`${config.apiUrl}/tasks/${taskId}`, {
       method: 'PATCH',
       headers: getHeaders(config),
-      body: JSON.stringify(updates),
+      body: bodyStr,
     });
 
     if (!response.ok) {
@@ -822,6 +827,10 @@ async function updateTask(config, taskId, updates) {
     return true;
   } catch (error) {
     console.error('Update error:', error.message || error);
+    // Log additional error details for debugging
+    if (error.cause) console.error('  Cause:', error.cause);
+    if (error.code) console.error('  Code:', error.code);
+    if (error.stack) console.error('  Stack:', error.stack.split('\n').slice(0, 3).join('\n'));
     return false;
   }
 }
