@@ -159,7 +159,7 @@ export const EditableCell = memo(function EditableCell({
   // Handle reference fields (user selection) - show popup on click
   if (fieldConfig.fieldType === 'reference' && fieldConfig.referenceCollection === 'users' && isEditing) {
     const filteredUsers = users.filter((user) =>
-      user.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (user.displayName && user.displayName.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (user.email && user.email.toLowerCase().includes(searchQuery.toLowerCase()))
     )
 
