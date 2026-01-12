@@ -154,40 +154,65 @@ export function ExternalStepConfig({
   isInLoop,
   loopScope,
 }: StepConfigProps) {
+  const waitForCallback = step.externalConfig?.waitForCallback !== false
+
   return (
     <div className="space-y-3">
       <div className="bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800 rounded-lg p-3 text-sm">
         <div className="flex items-start gap-2">
           <Globe className="h-4 w-4 text-orange-600 dark:text-orange-400 mt-0.5 flex-shrink-0" />
           <div className="text-orange-800 dark:text-orange-200">
-            <p className="font-medium">External Service Call</p>
+            <p className="font-medium">External HTTP Call</p>
             <p className="text-xs mt-1">
-              This step calls an external API or webhook. Configure the endpoint and request details below.
+              {waitForCallback
+                ? 'Sends request and waits for external system to call back with results.'
+                : 'Sends request and continues immediately (fire-and-forget).'}
             </p>
           </div>
         </div>
       </div>
 
-      {/* Callback URL info for async flows */}
-      <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3 text-sm">
-        <div className="flex items-start gap-2">
-          <Link2 className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
-          <div className="text-blue-800 dark:text-blue-200">
-            <p className="font-medium">Callback URL (for async responses)</p>
-            <p className="text-xs mt-1 mb-2">
-              If the external service needs to send results back asynchronously (e.g., ActivePieces),
-              include these template variables in your payload:
-            </p>
-            <div className="bg-muted/60 rounded p-2 font-mono text-xs space-y-1">
-              <p><span className="text-blue-600">{"{{systemWebhookUrl}}"}</span> - Webhook endpoint URL</p>
-              <p><span className="text-blue-600">{"{{callbackSecret}}"}</span> - Auth token for callback</p>
-              <p><span className="text-blue-600">{"{{workflowRunId}}"}</span> - Current workflow run ID</p>
-              <p><span className="text-blue-600">{"{{stepId}}"}</span> - This step&apos;s ID</p>
-              <p><span className="text-blue-600">{"{{taskId}}"}</span> - Current task ID</p>
+      {/* Wait for callback toggle */}
+      <div className="flex items-center gap-3 py-2 px-3 bg-muted/30 rounded-lg">
+        <input
+          type="checkbox"
+          id={`waitForCallback-${step.id}`}
+          checked={waitForCallback}
+          onChange={(e) => updateStep(index, {
+            externalConfig: { ...step.externalConfig, waitForCallback: e.target.checked }
+          })}
+          className="h-4 w-4 rounded border-gray-300"
+        />
+        <label htmlFor={`waitForCallback-${step.id}`} className="text-sm">
+          <span className="font-medium">Wait for callback</span>
+          <span className="text-muted-foreground ml-2">
+            {waitForCallback ? '(async - workflow pauses until callback)' : '(fire-and-forget - continues immediately)'}
+          </span>
+        </label>
+      </div>
+
+      {/* Callback URL info for async flows - only shown when waitForCallback is true */}
+      {waitForCallback && (
+        <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3 text-sm">
+          <div className="flex items-start gap-2">
+            <Link2 className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+            <div className="text-blue-800 dark:text-blue-200">
+              <p className="font-medium">Callback URL (for async responses)</p>
+              <p className="text-xs mt-1 mb-2">
+                If the external service needs to send results back asynchronously (e.g., ActivePieces),
+                include these template variables in your payload:
+              </p>
+              <div className="bg-muted/60 rounded p-2 font-mono text-xs space-y-1">
+                <p><span className="text-blue-600">{"{{systemWebhookUrl}}"}</span> - Webhook endpoint URL</p>
+                <p><span className="text-blue-600">{"{{callbackSecret}}"}</span> - Auth token for callback</p>
+                <p><span className="text-blue-600">{"{{workflowRunId}}"}</span> - Current workflow run ID</p>
+                <p><span className="text-blue-600">{"{{stepId}}"}</span> - This step&apos;s ID</p>
+                <p><span className="text-blue-600">{"{{taskId}}"}</span> - Current task ID</p>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="grid grid-cols-4 gap-3">
         <div className="space-y-1">
@@ -223,6 +248,29 @@ export function ExternalStepConfig({
         </div>
       </div>
 
+      {/* Headers - shown for both modes */}
+      <div className="space-y-1">
+        <label className="text-sm font-medium">Headers (JSON)</label>
+        <Textarea
+          value={step.externalConfig?.headers ? JSON.stringify(step.externalConfig.headers, null, 2) : ''}
+          onChange={(e) => {
+            try {
+              const headers = e.target.value ? JSON.parse(e.target.value) : {}
+              updateStep(index, {
+                externalConfig: { ...step.externalConfig, headers }
+              })
+            } catch {
+              // Allow invalid JSON while typing
+            }
+          }}
+          placeholder={`{
+  "Content-Type": "application/json",
+  "X-API-Key": "{{_apiKey}}"
+}`}
+          className="min-h-[80px] font-mono text-sm"
+        />
+      </div>
+
       <div className="space-y-1">
         <label className="text-sm font-medium">Payload Template (JSON)</label>
         <Textarea
@@ -230,13 +278,17 @@ export function ExternalStepConfig({
           onChange={(e) => updateStep(index, {
             externalConfig: { ...step.externalConfig, payloadTemplate: e.target.value }
           })}
-          placeholder={`{
+          placeholder={waitForCallback ? `{
   "callbackUrl": "{{systemWebhookUrl}}",
   "callbackSecret": "{{callbackSecret}}",
   "workflowRunId": "{{workflowRunId}}",
   "stepId": "{{stepId}}",
   "taskId": "{{taskId}}",
   "data": "{{input.previousStep.output}}"
+}` : `{
+  "title": "{{output.document.title}}",
+  "content": "{{output.document.content}}",
+  "workflowRunId": "{{_workflowRunId}}"
 }`}
           className="min-h-[100px] font-mono text-sm"
         />
@@ -264,6 +316,27 @@ export function ExternalStepConfig({
           </span>
         </div>
       </div>
+
+      {/* Success status codes - only shown when not waiting for callback */}
+      {!waitForCallback && (
+        <div className="space-y-1">
+          <label className="text-sm font-medium">Success Status Codes</label>
+          <Input
+            value={step.externalConfig?.successStatusCodes?.join(', ') || '200, 201'}
+            onChange={(e) => {
+              const codes = e.target.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n))
+              updateStep(index, {
+                externalConfig: { ...step.externalConfig, successStatusCodes: codes }
+              })
+            }}
+            placeholder="200, 201"
+            className="font-mono text-sm h-9"
+          />
+          <p className="text-xs text-muted-foreground">
+            Comma-separated list of HTTP status codes that indicate success
+          </p>
+        </div>
+      )}
     </div>
   )
 }

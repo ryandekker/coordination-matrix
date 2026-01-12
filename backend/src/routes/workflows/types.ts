@@ -10,7 +10,7 @@ import { ObjectId } from 'mongodb';
 // - foreach: Fan-out loop over collection (spawns subtasks)
 // - join: Fan-in aggregation point (awaits boundary conditions)
 // - flow: Delegate to another workflow (nested)
-export type WorkflowStepType = 'trigger' | 'agent' | 'manual' | 'external' | 'webhook' | 'decision' | 'foreach' | 'join' | 'flow';
+export type WorkflowStepType = 'trigger' | 'agent' | 'manual' | 'external' | 'decision' | 'foreach' | 'join' | 'flow';
 
 // Connection between steps (for non-linear flows)
 export interface StepConnection {
@@ -19,24 +19,18 @@ export interface StepConnection {
   label?: string;             // Display label for the connection
 }
 
-// External service configuration (waits for callback)
+// External service configuration - supports both async callback and fire-and-forget modes
 export interface ExternalConfig {
   endpoint?: string;          // URL to call
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   headers?: Record<string, string>;
   payloadTemplate?: string;   // JSON template with {{variable}} interpolation
   responseMapping?: Record<string, string>;  // Map response fields to output
-}
-
-// Webhook step configuration (outbound HTTP call, does not wait for callback)
-export interface WebhookConfig {
-  url?: string;               // URL to call
-  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-  headers?: Record<string, string>;
-  bodyTemplate?: string;      // JSON template with {{variable}} interpolation
-  maxRetries?: number;        // Max retry attempts (default: 3)
-  timeoutMs?: number;         // Request timeout (default: 30000)
-  successStatusCodes?: number[];  // HTTP status codes considered success
+  // When false, operates in fire-and-forget mode (like webhook)
+  // When true (default), waits for external system to call back
+  waitForCallback?: boolean;
+  // HTTP status codes that indicate success (for fire-and-forget mode)
+  successStatusCodes?: number[];
 }
 
 // Join boundary conditions
@@ -63,11 +57,8 @@ export interface WorkflowStep {
   additionalInstructions?: string;  // Extra context for the agent (not required)
   defaultAssigneeId?: string;       // Agent or user to assign to
 
-  // External step configuration (waits for callback)
+  // External step configuration (waits for callback or fire-and-forget)
   externalConfig?: ExternalConfig;
-
-  // Webhook step configuration (outbound HTTP call)
-  webhookConfig?: WebhookConfig;
 
   // Decision step configuration
   // Uses connections[] with conditions for routing
@@ -116,4 +107,4 @@ export interface Workflow {
 }
 
 // Valid step types for normalization
-export const VALID_STEP_TYPES: WorkflowStepType[] = ['trigger', 'agent', 'manual', 'external', 'webhook', 'decision', 'foreach', 'join', 'flow'];
+export const VALID_STEP_TYPES: WorkflowStepType[] = ['trigger', 'agent', 'manual', 'external', 'decision', 'foreach', 'join', 'flow'];

@@ -626,13 +626,18 @@ export interface WorkflowStep {
   additionalInstructions?: string;
   defaultAssigneeId?: string;
 
-  // External step config (waits for callback)
+  // External step config - supports both async callback and fire-and-forget modes
   externalConfig?: {
     endpoint?: string;
     method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
     headers?: Record<string, string>;
     payloadTemplate?: string;
     responseMapping?: Record<string, string>;
+    // When false, operates in fire-and-forget mode (like webhook)
+    // When true (default), waits for external system to call back
+    waitForCallback?: boolean;
+    // HTTP status codes that indicate success (for fire-and-forget mode)
+    successStatusCodes?: number[];
   };
 
   // Webhook step config (outbound HTTP call)

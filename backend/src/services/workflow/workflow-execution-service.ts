@@ -384,7 +384,7 @@ class WorkflowExecutionService {
     const now = new Date();
 
     const taskType = this.mapStepTypeToTaskType(step.stepType);
-    const executionMode = this.mapStepTypeToExecutionMode(step.stepType);
+    const executionMode = this.mapStepTypeToExecutionMode(step);
 
     let initialStatus: TaskStatus = 'pending';
     if (step.stepType === 'foreach' || step.stepType === 'join') {
@@ -494,12 +494,19 @@ class WorkflowExecutionService {
     return mapping[stepType] || 'agent';
   }
 
-  private mapStepTypeToExecutionMode(stepType: string): ExecutionMode {
+  private mapStepTypeToExecutionMode(step: WorkflowStep): ExecutionMode {
+    // For external steps, check waitForCallback to determine execution mode
+    // When waitForCallback is false, it operates as fire-and-forget (automated)
+    // When waitForCallback is true (default), it waits for callback (external_callback)
+    if (step.stepType === 'external') {
+      const waitForCallback = step.externalConfig?.waitForCallback !== false;
+      return waitForCallback ? 'external_callback' : 'automated';
+    }
+
     const mapping: Record<string, ExecutionMode> = {
       'trigger': 'immediate',
       'agent': 'automated',
       'manual': 'manual',
-      'external': 'external_callback',
       'webhook': 'automated',
       'decision': 'immediate',
       'foreach': 'immediate',
@@ -507,7 +514,7 @@ class WorkflowExecutionService {
       'flow': 'automated',
       'findDocument': 'immediate',
     };
-    return mapping[stepType] || 'automated';
+    return mapping[step.stepType] || 'automated';
   }
 
   // ============================================================================

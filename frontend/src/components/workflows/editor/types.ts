@@ -1,6 +1,6 @@
 // Step types for workflow routing
 // - agent: AI agent task (Claude, GPT, etc.) - optional additional instructions
-// - external: External service/webhook call - no prompting, has endpoint config
+// - external: External HTTP call - can wait for callback or fire-and-forget (controlled by waitForCallback)
 // - manual: Human-in-the-loop task
 // - decision: Routing based on conditions from previous step output
 // - foreach: Fan-out loop over collection
@@ -16,12 +16,17 @@ export interface StepConnection {
   label?: string
 }
 
-// External service configuration
+// External service configuration - supports both async callback and fire-and-forget modes
 export interface ExternalConfig {
   endpoint?: string
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   headers?: Record<string, string>
   payloadTemplate?: string
+  // When false, operates in fire-and-forget mode (like webhook)
+  // When true (default), waits for external system to call back
+  waitForCallback?: boolean
+  // HTTP status codes that indicate success (for fire-and-forget mode)
+  successStatusCodes?: number[]
 }
 
 export interface WorkflowStep {
@@ -40,7 +45,7 @@ export interface WorkflowStep {
   additionalInstructions?: string
   defaultAssigneeId?: string
 
-  // External step configuration
+  // External step configuration (async with callback or fire-and-forget)
   externalConfig?: ExternalConfig
 
   // Decision step configuration

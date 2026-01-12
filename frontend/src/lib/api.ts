@@ -493,7 +493,6 @@ export type TaskType =
   | 'join'
   | 'flow'
   | 'external'
-  | 'webhook'
 
 export type WebhookMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
