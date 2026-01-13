@@ -10,7 +10,8 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "deploy": "[ -f .env.local ] && mv .env.local .env.local.bak; npx @cloudflare/next-on-pages; deploy_status=$?; [ -f .env.local.bak ] && mv .env.local.bak .env.local; exit $deploy_status",
+    "deploy": "[ -f .env.local ] && mv .env.local .env.local.bak; npx @cloudflare/next-on-pages; deploy_status=$?; [ -f .env.local.bak ] && mv .env.local.bak .env.local; [ $deploy_status -eq 0 ] && wrangler pages deploy .vercel/output/static; exit $deploy_status",
+    "deploy:build": "[ -f .env.local ] && mv .env.local .env.local.bak; npx @cloudflare/next-on-pages; deploy_status=$?; [ -f .env.local.bak ] && mv .env.local.bak .env.local; exit $deploy_status",
     "deploy:push": "wrangler pages deploy .vercel/output/static"
   },
   "dependencies": {
