@@ -285,8 +285,8 @@ export function WebhookTaskConfig({
           <div className="space-y-2 pt-2 border-t border-border/50">
             <label className="text-xs font-medium text-muted-foreground">Execution History</label>
             <div className="space-y-1.5 max-h-60 overflow-y-auto">
-              {attempts.map((attempt, index) => (
-                <AttemptRow key={index} attempt={attempt} />
+              {[...attempts].reverse().map((attempt, index) => (
+                <AttemptRow key={attempts.length - 1 - index} attempt={attempt} />
               ))}
             </div>
           </div>
