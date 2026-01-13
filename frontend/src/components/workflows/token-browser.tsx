@@ -480,11 +480,12 @@ export function TokenBrowser({
         </div>
 
         <div className="border-t p-2 bg-muted/30">
-          <p className="text-xs text-muted-foreground">
-            <strong>output</strong> = previous step&apos;s output<br />
-            <strong>steps.id.output</strong> = specific step&apos;s output<br />
-            <strong>trigger</strong> = initial workflow payload<br />
-            <strong>_apiUrl, _apiKey</strong> = system variables for API calls
+          <p className="text-xs text-muted-foreground space-y-0.5">
+            <span className="block"><strong>{`{{output}}`}</strong> = previous step&apos;s result (task.metadata.inputPayload.output)</span>
+            <span className="block"><strong>{`{{response.field}}`}</strong> = previous step&apos;s response data directly</span>
+            <span className="block"><strong>{`{{title}}`}, {`{{status}}`}</strong> = current task&apos;s own fields</span>
+            <span className="block"><strong>{`{{item}}`}</strong> = current loop item (in foreach)</span>
+            <span className="block"><strong>{`{{_apiUrl}}`}, {`{{_apiKey}}`}</strong> = system vars for API calls</span>
           </p>
           {workflowId && sampleData.length === 0 && !loadingSamples && fetchError && (
             <p className="text-xs text-amber-600 mt-1">

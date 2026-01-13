@@ -150,6 +150,17 @@ export function WebhookTaskConfig({
           )}
         </div>
 
+        {/* Template Variables Help */}
+        <div className="text-[10px] bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded px-2 py-1.5 text-blue-800 dark:text-blue-200">
+          <p className="font-medium mb-1">Template Variables (from task.metadata.inputPayload)</p>
+          <div className="space-y-0.5 font-mono opacity-90">
+            <p><span className="text-blue-600 dark:text-blue-300">System:</span> {`{{_apiUrl}}`}, {`{{_apiKey}}`}, {`{{_workflowRunId}}`}</p>
+            <p><span className="text-blue-600 dark:text-blue-300">This task:</span> {`{{title}}`}, {`{{status}}`}, {`{{tags}}`}, {`{{summary}}`}</p>
+            <p><span className="text-blue-600 dark:text-blue-300">Callbacks:</span> {`{{systemWebhookUrl}}`}, {`{{callbackSecret}}`}, {`{{taskId}}`}</p>
+            <p><span className="text-blue-600 dark:text-blue-300">Prev step:</span> {`{{output}}`}, {`{{output.field}}`}, {`{{response.field}}`}</p>
+          </div>
+        </div>
+
         {/* URL and Method */}
         <div className="grid grid-cols-[100px_1fr] gap-2">
           <Select

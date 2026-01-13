@@ -805,10 +805,17 @@ export function StepConfigPanel({
             <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-2 text-xs">
               <div className="flex items-start gap-2">
                 <Link2 className="h-3 w-3 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
-                <div className="text-blue-800 dark:text-blue-200">
-                  <p className="font-medium">Callback Variables</p>
-                  <p className="mt-0.5">
-                    Use {`{{systemWebhookUrl}}`}, {`{{callbackSecret}}`}, {`{{taskId}}`} for async responses.
+                <div className="text-blue-800 dark:text-blue-200 space-y-1.5">
+                  <p className="font-medium">Template Variables (from task.metadata.inputPayload)</p>
+                  <div className="space-y-1 font-mono text-[10px]">
+                    <p><span className="text-blue-600 dark:text-blue-300">System:</span> {`{{_apiUrl}}`}, {`{{_apiKey}}`}, {`{{_workflowRunId}}`}</p>
+                    <p><span className="text-blue-600 dark:text-blue-300">Callbacks:</span> {`{{systemWebhookUrl}}`}, {`{{callbackSecret}}`}, {`{{taskId}}`}</p>
+                    <p><span className="text-blue-600 dark:text-blue-300">This task:</span> {`{{title}}`}, {`{{status}}`}, {`{{tags}}`}, {`{{summary}}`}</p>
+                    <p><span className="text-blue-600 dark:text-blue-300">Prev step:</span> {`{{output}}`}, {`{{output.field}}`}, {`{{response.field}}`}</p>
+                    <p><span className="text-blue-600 dark:text-blue-300">Loop item:</span> {`{{item}}`}, {`{{item.field}}`}, {`{{_index}}`}</p>
+                  </div>
+                  <p className="text-[10px] opacity-75">
+                    Use the Token browser below to see actual data from previous runs.
                   </p>
                 </div>
               </div>

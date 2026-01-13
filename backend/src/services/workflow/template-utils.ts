@@ -103,51 +103,81 @@ export function resolveTemplateVariables(
     result = result.replace(/\{\{_apiKey\}\}/g, context.apiKey);
   }
 
+  // Helper to determine if a match position is inside a quoted string
+  // by checking if there's a quote immediately before (possibly with whitespace)
+  const isInQuotedContext = (str: string, matchIndex: number): boolean => {
+    // Look backwards from the match to find what precedes it
+    let i = matchIndex - 1;
+    // Skip whitespace
+    while (i >= 0 && (str[i] === ' ' || str[i] === '\t' || str[i] === '\n' || str[i] === '\r')) {
+      i--;
+    }
+    // Check if the preceding non-whitespace char is a quote
+    return i >= 0 && str[i] === '"';
+  };
+
+  // Helper to format a value for template output
+  const formatValue = (value: unknown, inQuotedContext: boolean): string => {
+    if (value === undefined || value === null) {
+      // In quoted context ("{{var}}"), return empty string
+      // In raw context ({{var}}), return null for valid JSON
+      return inQuotedContext ? '' : 'null';
+    }
+    if (typeof value === 'object') {
+      return JSON.stringify(value);
+    }
+    const strValue = String(value);
+    // JSON-escape strings with special characters
+    if (strValue.includes('\n') || strValue.includes('\r') || strValue.includes('"') || strValue.includes('\\')) {
+      return JSON.stringify(strValue).slice(1, -1);
+    }
+    return strValue;
+  };
+
   // Replace input payload variables ({{input.path.to.value}})
   if (context.inputPayload) {
-    result = result.replace(/\{\{input\.([^}]+)\}\}/g, (_, path) => {
+    // Use a function that captures match index for context detection
+    const inputPattern = /\{\{input\.([^}]+)\}\}/g;
+    let match;
+    let lastIndex = 0;
+    let newResult = '';
+    while ((match = inputPattern.exec(result)) !== null) {
+      const path = match[1];
       const value = getValueByPath(context.inputPayload!, path);
-      if (value === undefined) return '';
-      if (typeof value === 'object') return JSON.stringify(value);
-      const strValue = String(value);
-      // JSON-escape strings with special characters
-      if (strValue.includes('\n') || strValue.includes('\r') || strValue.includes('"') || strValue.includes('\\')) {
-        return JSON.stringify(strValue).slice(1, -1);
-      }
-      return strValue;
-    });
+      const inQuoted = isInQuotedContext(result, match.index);
+      newResult += result.slice(lastIndex, match.index) + formatValue(value, inQuoted);
+      lastIndex = match.index + match[0].length;
+    }
+    result = newResult + result.slice(lastIndex);
   }
 
   // Replace direct variable references ({{message}}, {{item}}, {{_index}}, etc.)
   // This allows foreach items and other payload properties to be accessed without "input." prefix
   if (context.inputPayload) {
-    result = result.replace(/\{\{([^}]+)\}\}/g, (match, path) => {
-      const trimmedPath = path.trim();
+    const directPattern = /\{\{([^}]+)\}\}/g;
+    let match;
+    let lastIndex = 0;
+    let newResult = '';
+    while ((match = directPattern.exec(result)) !== null) {
+      const trimmedPath = match[1].trim();
       // Skip already-resolved system variables (they start with specific prefixes we've already handled)
       if (['callbackUrl', 'systemWebhookUrl', 'foreachWebhookUrl', 'workflowRunId', 'stepId', 'taskId', 'callbackSecret', '_apiUrl', '_apiKey', '_workflowRunId'].includes(trimmedPath)) {
-        return match;
+        newResult += result.slice(lastIndex, match.index) + match[0];
+        lastIndex = match.index + match[0].length;
+        continue;
       }
       // Skip input. prefix (already handled above)
       if (trimmedPath.startsWith('input.')) {
-        return match;
+        newResult += result.slice(lastIndex, match.index) + match[0];
+        lastIndex = match.index + match[0].length;
+        continue;
       }
       const value = getValueByPath(context.inputPayload!, trimmedPath);
-      if (value !== undefined && value !== null) {
-        if (typeof value === 'object') {
-          return JSON.stringify(value);
-        }
-        // JSON-escape strings that contain special characters (newlines, quotes, etc.)
-        // This ensures they can be safely embedded in JSON templates
-        const strValue = String(value);
-        if (strValue.includes('\n') || strValue.includes('\r') || strValue.includes('"') || strValue.includes('\\')) {
-          // Use JSON.stringify to escape, then remove the surrounding quotes
-          return JSON.stringify(strValue).slice(1, -1);
-        }
-        return strValue;
-      }
-      // Return empty string for unresolved variables (consistent with input.* behavior)
-      return '';
-    });
+      const inQuoted = isInQuotedContext(result, match.index);
+      newResult += result.slice(lastIndex, match.index) + formatValue(value, inQuoted);
+      lastIndex = match.index + match[0].length;
+    }
+    result = newResult + result.slice(lastIndex);
   }
 
   return result;

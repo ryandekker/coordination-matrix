@@ -93,12 +93,46 @@ class WebhookTaskService {
 
     // Build template context for resolving variables
     // For workflow tasks, use workflowRunId; for standalone tasks, use task._id as a fallback
+    //
+    // Data sources for template variables:
+    // - task.metadata.inputPayload: Contains previous step's output (from workflow execution)
+    //   - inputPayload.output = previous task's metadata.response OR metadata
+    //   - inputPayload.response = previous task's metadata.response (if it exists)
+    // - We also inject current task fields for direct access
+    //
+    const baseInputPayload = task.metadata?.inputPayload as Record<string, unknown> | undefined;
+    const enrichedInputPayload: Record<string, unknown> = {
+      // Spread previous step data first (includes 'output' key from workflow execution)
+      ...baseInputPayload,
+      // Then overlay current task fields for direct access ({{title}}, {{status}}, etc.)
+      // These take precedence if there's a naming conflict
+      title: task.title,
+      summary: task.summary,
+      status: task.status,
+      tags: task.tags || [],
+      urgency: task.urgency,
+      // Include the full task object for {{task.fieldName}} access
+      task: {
+        _id: task._id.toString(),
+        title: task.title,
+        summary: task.summary,
+        status: task.status,
+        tags: task.tags || [],
+        taskType: task.taskType,
+        urgency: task.urgency,
+        assigneeId: task.assigneeId?.toString(),
+        parentId: task.parentId?.toString(),
+        workflowRunId: task.workflowRunId?.toString(),
+        workflowStepId: task.workflowStepId,
+      },
+    };
+
     const templateContext: TemplateContext = {
       workflowRunId: task.workflowRunId || task._id,
       stepId: task.workflowStepId || 'standalone',
       taskId: task._id,
       callbackSecret: task.externalConfig?.callbackSecret,
-      inputPayload: task.metadata?.inputPayload as Record<string, unknown> | undefined,
+      inputPayload: enrichedInputPayload,
       apiKey: process.env.MATRIX_API_KEY,
     };
 
