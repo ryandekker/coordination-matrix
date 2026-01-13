@@ -3,9 +3,15 @@ import { ObjectId } from 'mongodb';
 import crypto from 'crypto';
 import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
-import { isAdmin } from '../middleware/authorize.js';
+import { isAdmin, SCOPE_DEFINITIONS } from '../middleware/authorize.js';
 
 export const apiKeysRouter = Router();
+
+// GET /api/auth/api-keys/scopes - List available scopes for API keys
+// Returns all scope definitions with labels and descriptions for UI display.
+apiKeysRouter.get('/scopes', (_req: Request, res: Response): void => {
+  res.json({ data: SCOPE_DEFINITIONS });
+});
 
 /**
  * Helper to check if user can access an API key.

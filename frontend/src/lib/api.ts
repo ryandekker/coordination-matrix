@@ -1190,6 +1190,13 @@ export interface ApiKey {
   isActive: boolean
 }
 
+export interface ScopeDefinition {
+  value: string
+  label: string
+  description: string
+  category: string
+}
+
 // API Keys API
 export const apiKeysApi = {
   list: async (): Promise<ApiResponse<ApiKey[]>> => {
@@ -1217,6 +1224,23 @@ export const apiKeysApi = {
     const response = await authFetch(`${API_BASE}/auth/api-keys/${id}/regenerate`, {
       method: 'POST',
     })
+    return handleResponse(response)
+  },
+
+  update: async (
+    id: string,
+    data: { name?: string; description?: string; scopes?: string[]; expiresAt?: string | null; isActive?: boolean }
+  ): Promise<ApiResponse<ApiKey>> => {
+    const response = await authFetch(`${API_BASE}/auth/api-keys/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  getScopes: async (): Promise<ApiResponse<ScopeDefinition[]>> => {
+    const response = await authFetch(`${API_BASE}/auth/api-keys/scopes`)
     return handleResponse(response)
   },
 }
