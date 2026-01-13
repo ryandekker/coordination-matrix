@@ -295,10 +295,11 @@ print(f"Started workflow run: {result['run']['_id']}")`, [baseUrl, apiKeyPlaceho
 
           {/* Tabs for different sections */}
           <Tabs defaultValue="quickstart" className="w-full">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="quickstart">Quick Start</TabsTrigger>
               <TabsTrigger value="email-routing">Email Routing</TabsTrigger>
               <TabsTrigger value="examples">Code Examples</TabsTrigger>
+              <TabsTrigger value="templates">Templates</TabsTrigger>
               <TabsTrigger value="reference">API Reference</TabsTrigger>
             </TabsList>
 
@@ -398,6 +399,112 @@ print(f"Started workflow run: {result['run']['_id']}")`, [baseUrl, apiKeyPlaceho
                   <CodeBlock code={pythonExample} language="python" />
                 </TabsContent>
               </Tabs>
+            </TabsContent>
+
+            <TabsContent value="templates" className="space-y-4 mt-4">
+              <div className="space-y-2">
+                <h3 className="text-lg font-semibold">Template Variables</h3>
+                <p className="text-sm text-muted-foreground">
+                  Use these variables in external step endpoints, headers, and payloads. Variables are wrapped in double curly braces: <code className="bg-muted px-1 rounded">{"{{variable}}"}</code>
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div className="p-4 bg-emerald-50 dark:bg-emerald-950 border border-emerald-200 dark:border-emerald-800 rounded-lg">
+                  <h4 className="font-medium text-emerald-900 dark:text-emerald-100 mb-3">System Variables</h4>
+                  <p className="text-xs text-emerald-700 dark:text-emerald-300 mb-3">
+                    These require server environment variables to be set (see <code>.env.example</code>)
+                  </p>
+                  <div className="space-y-2 font-mono text-sm">
+                    <div className="flex gap-2">
+                      <code className="text-emerald-600 dark:text-emerald-400 min-w-[160px]">{"{{_apiUrl}}"}</code>
+                      <span className="text-emerald-800 dark:text-emerald-200">Base API URL from <code>BASE_URL</code> env var</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <code className="text-emerald-600 dark:text-emerald-400 min-w-[160px]">{"{{_apiKey}}"}</code>
+                      <span className="text-emerald-800 dark:text-emerald-200">System API key from <code>MATRIX_API_KEY</code> env var</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <code className="text-emerald-600 dark:text-emerald-400 min-w-[160px]">{"{{_workflowRunId}}"}</code>
+                      <span className="text-emerald-800 dark:text-emerald-200">Current workflow run ID</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
+                  <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-3">Callback Variables</h4>
+                  <p className="text-xs text-blue-700 dark:text-blue-300 mb-3">
+                    For external steps that need to receive async callbacks
+                  </p>
+                  <div className="space-y-2 font-mono text-sm">
+                    <div className="flex gap-2">
+                      <code className="text-blue-600 dark:text-blue-400 min-w-[160px]">{"{{systemWebhookUrl}}"}</code>
+                      <span className="text-blue-800 dark:text-blue-200">Callback URL for async responses</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <code className="text-blue-600 dark:text-blue-400 min-w-[160px]">{"{{callbackSecret}}"}</code>
+                      <span className="text-blue-800 dark:text-blue-200">Auth token for callback validation</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <code className="text-blue-600 dark:text-blue-400 min-w-[160px]">{"{{workflowRunId}}"}</code>
+                      <span className="text-blue-800 dark:text-blue-200">Current workflow run ID</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <code className="text-blue-600 dark:text-blue-400 min-w-[160px]">{"{{stepId}}"}</code>
+                      <span className="text-blue-800 dark:text-blue-200">Current step ID</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <code className="text-blue-600 dark:text-blue-400 min-w-[160px]">{"{{taskId}}"}</code>
+                      <span className="text-blue-800 dark:text-blue-200">Current task ID</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-purple-50 dark:bg-purple-950 border border-purple-200 dark:border-purple-800 rounded-lg">
+                  <h4 className="font-medium text-purple-900 dark:text-purple-100 mb-3">Data Variables</h4>
+                  <p className="text-xs text-purple-700 dark:text-purple-300 mb-3">
+                    Access data from previous steps. Use the Token Browser in the step editor to see available paths.
+                  </p>
+                  <div className="space-y-2 font-mono text-sm">
+                    <div className="flex gap-2">
+                      <code className="text-purple-600 dark:text-purple-400 min-w-[160px]">{"{{output.field}}"}</code>
+                      <span className="text-purple-800 dark:text-purple-200">Previous step&apos;s output</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <code className="text-purple-600 dark:text-purple-400 min-w-[160px]">{"{{output.result.data}}"}</code>
+                      <span className="text-purple-800 dark:text-purple-200">Nested output (agent steps wrap in <code>result</code>)</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <code className="text-purple-600 dark:text-purple-400 min-w-[160px]">{"{{input.field}}"}</code>
+                      <span className="text-purple-800 dark:text-purple-200">Initial workflow input payload</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <code className="text-purple-600 dark:text-purple-400 min-w-[160px]">{"{{item}}"}</code>
+                      <span className="text-purple-800 dark:text-purple-200">Current item in foreach loop</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <code className="text-purple-600 dark:text-purple-400 min-w-[160px]">{"{{_index}}"}</code>
+                      <span className="text-purple-800 dark:text-purple-200">Current index in foreach loop</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg">
+                  <h4 className="font-medium text-amber-900 dark:text-amber-100 mb-3">Example: Internal API Call</h4>
+                  <CodeBlock code={`{
+  "endpoint": "{{_apiUrl}}/documents",
+  "headers": {
+    "Content-Type": "application/json",
+    "X-API-Key": "{{_apiKey}}"
+  },
+  "payloadTemplate": {
+    "title": "{{output.result.document.title}}",
+    "content": "{{output.result.document.content}}",
+    "workflowRunId": "{{_workflowRunId}}"
+  }
+}`} language="json" />
+                </div>
+              </div>
             </TabsContent>
 
             <TabsContent value="reference" className="space-y-4 mt-4">

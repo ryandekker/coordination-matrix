@@ -208,7 +208,10 @@ export function TokenBrowser({
     icon: Zap,
     color: 'text-yellow-500',
     tokens: [
-      { path: 'workflowRunId', description: 'Current workflow run ID' },
+      { path: '_apiUrl', description: 'Base API URL (for internal API calls)' },
+      { path: '_apiKey', description: 'System API key (for internal API calls)' },
+      { path: '_workflowRunId', description: 'Current workflow run ID' },
+      { path: 'workflowRunId', description: 'Current workflow run ID (alias)' },
       { path: 'stepId', description: 'Current step ID' },
       { path: 'taskId', description: 'Current task ID' },
       { path: 'systemWebhookUrl', description: 'URL for external callbacks' },
@@ -480,7 +483,8 @@ export function TokenBrowser({
           <p className="text-xs text-muted-foreground">
             <strong>output</strong> = previous step&apos;s output<br />
             <strong>steps.id.output</strong> = specific step&apos;s output<br />
-            <strong>trigger</strong> = initial workflow payload
+            <strong>trigger</strong> = initial workflow payload<br />
+            <strong>_apiUrl, _apiKey</strong> = system variables for API calls
           </p>
           {workflowId && sampleData.length === 0 && !loadingSamples && fetchError && (
             <p className="text-xs text-amber-600 mt-1">
