@@ -214,6 +214,11 @@ tasksRouter.get('/webhook-attempts', async (req: Request, res: Response, next: N
       durationMs?: number;
       startedAt?: string;
       completedAt?: string;
+      // Resolved request details (from execution)
+      requestUrl?: string;
+      requestMethod?: string;
+      requestHeaders?: Record<string, string>;
+      requestBody?: string;
     }
     const webhookAttempts = tasks.flatMap((task) => {
       const attempts: WebhookAttemptData[] = task.webhookConfig?.attempts || [];
@@ -233,6 +238,7 @@ tasksRouter.get('/webhook-attempts', async (req: Request, res: Response, next: N
           durationMs: undefined,
           startedAt: task.createdAt,
           completedAt: undefined,
+          // For pending, show the template values (not yet resolved)
           url: task.webhookConfig?.url,
           method: task.webhookConfig?.method,
           headers: task.webhookConfig?.headers,
@@ -255,10 +261,11 @@ tasksRouter.get('/webhook-attempts', async (req: Request, res: Response, next: N
         durationMs: attempt.durationMs,
         startedAt: attempt.startedAt,
         completedAt: attempt.completedAt,
-        url: task.webhookConfig?.url,
-        method: task.webhookConfig?.method,
-        headers: task.webhookConfig?.headers,
-        requestBody: task.metadata?.requestBody,
+        // Use resolved request values from attempt, fallback to template values for backward compat
+        url: attempt.requestUrl || task.webhookConfig?.url,
+        method: attempt.requestMethod || task.webhookConfig?.method,
+        headers: attempt.requestHeaders || task.webhookConfig?.headers,
+        requestBody: attempt.requestBody || task.metadata?.requestBody,
         maxRetries: task.webhookConfig?.maxRetries,
         nextRetryAt: task.webhookConfig?.nextRetryAt,
       }));
