@@ -544,6 +544,7 @@ const TaskRow = memo(function TaskRow({
   expandAllEnabled,
   onNavigateToFlow,
   isPulsing,
+  pulseType,
   onTriggerPulse,
   inlineCreationParentId,
   onStartInlineCreation,
@@ -568,7 +569,7 @@ const TaskRow = memo(function TaskRow({
   renderCellValue: (task: Task, fc: FieldConfig) => React.ReactNode
   expandedRows: Set<string>
   selectedRows: Set<string>
-  pulsingRows: Set<string>
+  pulsingRows: Map<string, 'pink' | 'subtle'>
   toggleRowExpansion: (taskId: string) => void
   toggleRowSelection: (taskId: string, isShiftKey?: boolean) => void
   handleDeleteTask: (taskId: string) => void
@@ -577,7 +578,8 @@ const TaskRow = memo(function TaskRow({
   expandAllEnabled: boolean
   onNavigateToFlow: (taskId: string) => void
   isPulsing: boolean
-  onTriggerPulse: (taskId: string, shouldScroll?: boolean) => void
+  pulseType: 'pink' | 'subtle' | null
+  onTriggerPulse: (taskId: string, shouldScroll?: boolean, type?: 'pink' | 'subtle') => void
   inlineCreationParentId: string | null
   onStartInlineCreation: (parentId: string) => void
   onCancelInlineCreation: () => void
@@ -664,7 +666,8 @@ const TaskRow = memo(function TaskRow({
       <TableRow
         className={cn(
           depth > 0 && 'bg-muted/30',
-          isPulsing && depth === 0 && 'animate-pulse-bg border-b-2 border-pink-400'
+          isPulsing && depth === 0 && pulseType === 'pink' && 'animate-pulse-bg border-b-2 border-pink-400',
+          isPulsing && depth === 0 && pulseType === 'subtle' && 'animate-pulse-bg-subtle'
         )}
         data-state={isSelected ? 'selected' : undefined}
         data-task-id={task._id}
@@ -806,6 +809,7 @@ const TaskRow = memo(function TaskRow({
             expandAllEnabled={expandAllEnabled}
             onNavigateToFlow={onNavigateToFlow}
             isPulsing={pulsingRows.has(child._id)}
+            pulseType={pulsingRows.get(child._id) || null}
             onTriggerPulse={onTriggerPulse}
             inlineCreationParentId={inlineCreationParentId}
             onStartInlineCreation={onStartInlineCreation}
@@ -893,7 +897,7 @@ export function TaskDataTable({
   const router = useRouter()
   const [expandedRows, setExpandedRows] = useState<Set<string>>(() => new Set(autoExpandIds || []))
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
-  const [pulsingRows, setPulsingRows] = useState<Set<string>>(new Set())
+  const [pulsingRows, setPulsingRows] = useState<Map<string, 'pink' | 'subtle'>>(new Map())
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null)
   // Inline creation state: null = not creating, string = parentId being created under (empty string = root level)
   const [inlineCreationParentId, setInlineCreationParentId] = useState<string | null>(null)
@@ -925,10 +929,11 @@ export function TaskDataTable({
 
   // Highlight a row (clears others, persists until another is clicked)
   // Clear first to restart animation if same row is clicked again
-  const triggerPulse = useCallback((taskId: string, shouldScroll = false) => {
-    setPulsingRows(new Set())
+  // type: 'pink' for subflow highlighting from modal, 'subtle' for general highlighting
+  const triggerPulse = useCallback((taskId: string, shouldScroll = false, type: 'pink' | 'subtle' = 'subtle') => {
+    setPulsingRows(new Map())
     requestAnimationFrame(() => {
-      setPulsingRows(new Set([taskId]))
+      setPulsingRows(new Map([[taskId, type]]))
       if (shouldScroll) {
         setTimeout(() => {
           const row = document.querySelector(`[data-task-id="${taskId}"]`)
@@ -1478,6 +1483,7 @@ export function TaskDataTable({
                   expandAllEnabled={expandAllEnabled}
                   onNavigateToFlow={handleNavigateToFlow}
                   isPulsing={pulsingRows.has(task._id)}
+                  pulseType={pulsingRows.get(task._id) || null}
                   onTriggerPulse={triggerPulse}
                   inlineCreationParentId={inlineCreationParentId}
                   onStartInlineCreation={handleStartInlineCreation}

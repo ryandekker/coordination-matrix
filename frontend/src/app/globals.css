@@ -125,7 +125,7 @@
   @apply border border-primary;
 }
 
-/* Pulse background only animation (3 times) */
+/* Pink pulse background animation (3 times) - for subflow highlighting from modal */
 @keyframes pulse-bg {
   0%, 100% {
     background-color: rgb(253 242 248 / 1); /* bg-pink-50 */
@@ -150,6 +150,33 @@
 
 .dark .animate-pulse-bg {
   animation: pulse-bg-dark 0.4s ease-in-out 3;
+}
+
+/* Subtle pulse background animation - for general task highlighting */
+@keyframes pulse-bg-subtle {
+  0%, 100% {
+    background-color: rgb(243 244 246 / 1); /* bg-gray-100 */
+  }
+  50% {
+    background-color: rgb(243 244 246 / 0.3);
+  }
+}
+
+@keyframes pulse-bg-subtle-dark {
+  0%, 100% {
+    background-color: rgb(63 63 70 / 0.4); /* zinc-700 with opacity */
+  }
+  50% {
+    background-color: rgb(63 63 70 / 0.15);
+  }
+}
+
+.animate-pulse-bg-subtle {
+  animation: pulse-bg-subtle 0.4s ease-in-out 3;
+}
+
+.dark .animate-pulse-bg-subtle {
+  animation: pulse-bg-subtle-dark 0.4s ease-in-out 3;
 }
 
 /* ByteMD Editor Styles */
