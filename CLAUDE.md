@@ -13,8 +13,23 @@ Project context and conventions for Claude Code.
 
 Coordination Matrix is a full-stack AI workflow task management system:
 - **Frontend**: Next.js 14 with React, TanStack Table, shadcn/ui (port 3000)
-- **Backend**: Express.js with TypeScript (port 3001)
+- **Backend**: Express.js with TypeScript (port 3100 local dev, 3001 in Docker)
 - **Database**: MongoDB 7.0 (port 27017)
+
+### Checking Server Status
+
+Before making API calls, verify the servers are running:
+
+```bash
+# Quick health check (preferred method)
+npm run cli status
+
+# Or check backend directly
+curl -s http://localhost:3100/health
+# Returns: {"status":"healthy","timestamp":"..."}
+```
+
+**Port Note:** The backend runs on port **3100** during local development (`npm run dev`). Port 3001 is used in Docker/production mode.
 
 ## Development Setup
 
@@ -79,41 +94,69 @@ npm run cli tasks --status pending --brief
 ## API Documentation
 
 Full API documentation is available at:
-- **Swagger UI**: http://localhost:3001/api-docs (interactive API explorer)
-- **OpenAPI Spec**: http://localhost:3001/api-docs.json
+- **Swagger UI**: http://localhost:3100/api-docs (interactive API explorer)
+- **OpenAPI Spec**: http://localhost:3100/api-docs.json
 - **Reference Doc**: [docs/API-endpoints.md](./docs/API-endpoints.md) (complete endpoint reference)
 
 ### CLI Tool
 
-A CLI tool is available for easy API interaction:
+A CLI tool is available for easy API interaction. **Always prefer the CLI over curl for API testing.**
 
 ```bash
 # Show help
 npm run cli help
 
-# Login and store credentials
+# Check connection and auth status
+npm run cli status
+
+# Login and store credentials (first time setup)
 npm run cli login
 
 # Or use API key
 npm run cli use-key cm_ak_live_xxxxx
+```
 
+**Task Operations:**
+```bash
 # List tasks
 npm run cli tasks --status pending --brief
+
+# Get a specific task (with full details)
+npm run cli task <taskId>
 
 # Create a task
 npm run cli task:create --title "New task" --status pending
 
-# Generic API request
-npm run cli request /api/tasks --method GET
-
-# Test SSE (Server-Sent Events) connection
-npm run cli events --duration 30
-
-# Test SSE while creating a task in another terminal
-npm run cli events --duration 30 --quiet  # Suppress heartbeats
+# Update a task
+npm run cli task:update <taskId> --status completed
+npm run cli task:update <taskId> --status pending --assignee <userId>
 ```
 
-**Note:** Always prefer using the CLI for API testing rather than the browser, as it provides clearer output and avoids authentication complexities.
+**Workflow Debugging:**
+```bash
+# List workflow runs
+npm run cli runs --status running
+
+# Get workflow run details
+npm run cli request /api/workflow-runs/<runId>?includeTasks=true
+
+# List tasks for a workflow run
+npm run cli tasks --workflow-run <runId>
+```
+
+**Generic API Requests:**
+```bash
+# GET request
+npm run cli request /api/tasks/<taskId>
+
+# PATCH request with JSON body
+npm run cli request /api/tasks/<taskId> --method PATCH --body '{"status":"completed"}'
+
+# Test SSE (Server-Sent Events) connection
+npm run cli events --duration 30 --quiet
+```
+
+**Note:** The CLI automatically uses the correct local port (3100) and handles authentication. Always prefer it over manual curl commands.
 
 See `./scripts/matrix-cli.mjs --help` for all commands.
 

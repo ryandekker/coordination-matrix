@@ -516,8 +516,8 @@ const InlineTaskRow = memo(function InlineTaskRow({
   )
 })
 
-// Memoized recursive row component for nested tasks
-const TaskRow = memo(function TaskRow({
+// Recursive row component for nested tasks (temporarily removed memo for debugging)
+function TaskRow({
   task,
   fieldConfigs,
   lookups,
@@ -544,6 +544,7 @@ const TaskRow = memo(function TaskRow({
   expandAllEnabled,
   onNavigateToFlow,
   isPulsing,
+  pulseType,
   onTriggerPulse,
   inlineCreationParentId,
   onStartInlineCreation,
@@ -568,7 +569,7 @@ const TaskRow = memo(function TaskRow({
   renderCellValue: (task: Task, fc: FieldConfig) => React.ReactNode
   expandedRows: Set<string>
   selectedRows: Set<string>
-  pulsingRows: Set<string>
+  pulsingRows: Map<string, 'pink' | 'subtle'>
   toggleRowExpansion: (taskId: string) => void
   toggleRowSelection: (taskId: string, isShiftKey?: boolean) => void
   handleDeleteTask: (taskId: string) => void
@@ -577,7 +578,8 @@ const TaskRow = memo(function TaskRow({
   expandAllEnabled: boolean
   onNavigateToFlow: (taskId: string) => void
   isPulsing: boolean
-  onTriggerPulse: (taskId: string, shouldScroll?: boolean) => void
+  pulseType: 'pink' | 'subtle' | null
+  onTriggerPulse: (taskId: string, shouldScroll?: boolean, type?: 'pink' | 'subtle') => void
   inlineCreationParentId: string | null
   onStartInlineCreation: (parentId: string) => void
   onCancelInlineCreation: () => void
@@ -664,7 +666,8 @@ const TaskRow = memo(function TaskRow({
       <TableRow
         className={cn(
           depth > 0 && 'bg-muted/30',
-          isPulsing && depth === 0 && 'animate-pulse-bg border-b-2 border-pink-400'
+          isPulsing && depth === 0 && pulseType === 'pink' && 'animate-pulse-bg border-b-2 border-pink-400',
+          isPulsing && depth === 0 && pulseType === 'subtle' && 'animate-pulse-bg-subtle'
         )}
         data-state={isSelected ? 'selected' : undefined}
         data-task-id={task._id}
@@ -806,6 +809,7 @@ const TaskRow = memo(function TaskRow({
             expandAllEnabled={expandAllEnabled}
             onNavigateToFlow={onNavigateToFlow}
             isPulsing={pulsingRows.has(child._id)}
+            pulseType={pulsingRows.get(child._id) || null}
             onTriggerPulse={onTriggerPulse}
             inlineCreationParentId={inlineCreationParentId}
             onStartInlineCreation={onStartInlineCreation}
@@ -868,7 +872,7 @@ const TaskRow = memo(function TaskRow({
       )}
     </>
   )
-})
+}
 
 export function TaskDataTable({
   tasks,
@@ -893,7 +897,7 @@ export function TaskDataTable({
   const router = useRouter()
   const [expandedRows, setExpandedRows] = useState<Set<string>>(() => new Set(autoExpandIds || []))
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
-  const [pulsingRows, setPulsingRows] = useState<Set<string>>(new Set())
+  const [pulsingRows, setPulsingRows] = useState<Map<string, 'pink' | 'subtle'>>(new Map())
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null)
   // Inline creation state: null = not creating, string = parentId being created under (empty string = root level)
   const [inlineCreationParentId, setInlineCreationParentId] = useState<string | null>(null)
@@ -925,10 +929,11 @@ export function TaskDataTable({
 
   // Highlight a row (clears others, persists until another is clicked)
   // Clear first to restart animation if same row is clicked again
-  const triggerPulse = useCallback((taskId: string, shouldScroll = false) => {
-    setPulsingRows(new Set())
+  // type: 'pink' for subflow highlighting from modal, 'subtle' for general highlighting
+  const triggerPulse = useCallback((taskId: string, shouldScroll = false, type: 'pink' | 'subtle' = 'subtle') => {
+    setPulsingRows(new Map())
     requestAnimationFrame(() => {
-      setPulsingRows(new Set([taskId]))
+      setPulsingRows(new Map([[taskId, type]]))
       if (shouldScroll) {
         setTimeout(() => {
           const row = document.querySelector(`[data-task-id="${taskId}"]`)
@@ -1257,14 +1262,28 @@ export function TaskDataTable({
       // Try the field path directly first (e.g., assigneeId -> assignee)
       const fieldName = fieldConfig.fieldPath.replace('Id', '')
       // Also try looking up directly by the field path
-      const ref = (task._resolved?.[fieldName as keyof typeof task._resolved] ||
+      let ref = (task._resolved?.[fieldName as keyof typeof task._resolved] ||
         task._resolved?.[fieldConfig.fieldPath as keyof typeof task._resolved]) as
         | User
         | { displayName?: string; name?: string }
         | undefined
 
+      // Check if resolved value matches current value - if not, it's stale from optimistic update
+      // In this case, fall back to looking up from the users prop
+      const currentId = value as string | null
+      const resolvedId = ref && '_id' in ref ? (ref as User)._id : null
+      const isStaleResolved = ref && currentId && resolvedId !== currentId
+
       // For user references, use UserChip
       if (fieldConfig.referenceCollection === 'users') {
+        // If no resolved ref or it's stale, try to find user in users array
+        if ((!ref || isStaleResolved) && currentId) {
+          const foundUser = users.find(u => u._id === currentId)
+          if (foundUser) {
+            ref = foundUser
+          }
+        }
+
         if (ref && '_id' in ref) {
           return (
             <div className="flex justify-center">
@@ -1343,7 +1362,7 @@ export function TaskDataTable({
       return <span>{value?.toString()}</span>
     }
     return <div className="text-center">{value?.toString()}</div>
-  }, [lookups])
+  }, [lookups, users])
 
   if (isLoading) {
     return (
@@ -1478,6 +1497,7 @@ export function TaskDataTable({
                   expandAllEnabled={expandAllEnabled}
                   onNavigateToFlow={handleNavigateToFlow}
                   isPulsing={pulsingRows.has(task._id)}
+                  pulseType={pulsingRows.get(task._id) || null}
                   onTriggerPulse={triggerPulse}
                   inlineCreationParentId={inlineCreationParentId}
                   onStartInlineCreation={handleStartInlineCreation}

@@ -146,8 +146,8 @@ export function requireScope(...requiredScopes: string[]) {
 
     const keyScopes = req.apiKey.scopes || [];
 
-    // Check if the API key has admin scope (grants all access)
-    if (keyScopes.includes(SCOPES.ADMIN)) {
+    // Check if the API key has admin scope or wildcard (grants all access)
+    if (keyScopes.includes(SCOPES.ADMIN) || keyScopes.includes('*')) {
       next();
       return;
     }
@@ -208,7 +208,7 @@ export function requireRoleOrScope(options: {
     if (req.apiKey && options.scopes) {
       const keyScopes = req.apiKey.scopes || [];
 
-      if (keyScopes.includes(SCOPES.ADMIN)) {
+      if (keyScopes.includes(SCOPES.ADMIN) || keyScopes.includes('*')) {
         next();
         return;
       }

@@ -398,7 +398,6 @@ export function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string):
     if (step.inputPath) metadata.inputPath = step.inputPath;
     if (step.additionalInstructions) metadata.additionalInstructions = step.additionalInstructions;
     if (step.externalConfig) metadata.externalConfig = step.externalConfig;
-    if (step.webhookConfig) metadata.webhookConfig = step.webhookConfig;
     if (step.defaultConnection) metadata.defaultConnection = step.defaultConnection;
     if (step.itemsPath) metadata.itemsPath = step.itemsPath;
     if (step.itemVariable) metadata.itemVariable = step.itemVariable;
@@ -564,7 +563,6 @@ export function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId
     if (step.inputPath) metadata.inputPath = step.inputPath;
     if (step.additionalInstructions) metadata.additionalInstructions = step.additionalInstructions;
     if (step.externalConfig) metadata.externalConfig = step.externalConfig;
-    if (step.webhookConfig) metadata.webhookConfig = step.webhookConfig;
     if (step.defaultConnection) metadata.defaultConnection = step.defaultConnection;
     if (step.itemsPath) metadata.itemsPath = step.itemsPath;
     if (step.itemVariable) metadata.itemVariable = step.itemVariable;
@@ -588,7 +586,6 @@ export function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId
         nodeClass = 'agent';
         break;
       case 'external':
-      case 'webhook':
         nodeShape = `${nodeId}{{"${nodeName}"}}`;
         nodeClass = 'external';
         break;

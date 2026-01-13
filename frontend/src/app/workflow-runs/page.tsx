@@ -90,7 +90,7 @@ const TASK_STATUS_CONFIG: Record<string, { color: string; bgColor: string }> = {
   cancelled: { color: 'text-gray-400', bgColor: 'bg-gray-50 dark:bg-gray-800/50' },
 }
 
-type TaskType = 'flow' | 'agent' | 'decision' | 'foreach' | 'join' | 'external' | 'trigger' | 'manual' | 'webhook'
+type TaskType = 'flow' | 'agent' | 'decision' | 'foreach' | 'join' | 'external' | 'trigger' | 'manual'
 
 const TASK_TYPE_CONFIG: Record<TaskType, { icon: React.ElementType; color: string; label: string }> = {
   flow: { icon: WorkflowIcon, color: 'text-pink-500', label: 'Flow' },
@@ -101,7 +101,6 @@ const TASK_TYPE_CONFIG: Record<TaskType, { icon: React.ElementType; color: strin
   external: { icon: Globe, color: 'text-orange-500', label: 'External' },
   trigger: { icon: Bot, color: 'text-yellow-500', label: 'Trigger' },
   manual: { icon: User, color: 'text-purple-500', label: 'Manual' },
-  webhook: { icon: Globe, color: 'text-purple-500', label: 'Webhook' },
 }
 
 function formatDate(dateString: string | null | undefined): string {

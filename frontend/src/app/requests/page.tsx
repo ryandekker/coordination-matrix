@@ -1585,7 +1585,13 @@ function RequestsList() {
                           <span>HTTP {request.statusCode}</span>
                         )}
                         {isWebhookTask && request.method && request.url && (
-                          <span className="font-mono text-xs">{request.method} {new URL(request.url).hostname}</span>
+                          <span className="font-mono text-xs">{request.method} {(() => {
+                            try {
+                              return new URL(request.url).hostname;
+                            } catch {
+                              return request.url;
+                            }
+                          })()}</span>
                         )}
                         {isWebhookTask && request.httpStatus && (
                           <span>HTTP {request.httpStatus}</span>

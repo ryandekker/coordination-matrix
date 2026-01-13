@@ -28,7 +28,6 @@
       "mcp__playwright__browser_console_messages",
       "mcp__playwright__browser_hover",
       "Bash(npx ts-node:*)",
-      "Bash(node /Users/ryandekker/src/coordination-matrix/scripts/task-daemon.mjs:*)",
       "mcp__playwright__browser_fill_form",
       "mcp__playwright__browser_wait_for",
       "Bash(npm view:*)",
@@ -37,7 +36,8 @@
       "mcp__playwright__browser_evaluate",
       "Bash(npx tsc:*)",
       "Bash(node scripts/task-daemon.mjs:*)",
-      "Bash(API_KEY=\"cm_ak_18721ddb090b54af2d889c817740c76497f9a1a2ae2b3a2850f917a7fa88702c\" curl -s \"https://cm.hcizero.com/api/workflow-runs?limit=5\" -H \"X-API-Key: $API_KEY\")"
+      "Bash(MATRIX_API_URL=http://localhost:3100 npm run cli:*)",
+      "Bash(docker info:*)"
     ],
     "deny": [],
     "ask": []

@@ -1,0 +1,74 @@
+{
+  "name": "Document Creation",
+  "description": "Create a document with AI assistance. Gathers requirements, creates a draft, reviews, finalizes, and saves to the document system.",
+  "isActive": true,
+  "rootTaskTitleTemplate": "Create Document: {{input.documentTitle}}",
+  "steps": [
+    {
+      "id": "start",
+      "name": "Start",
+      "description": "Workflow entry point",
+      "stepType": "trigger",
+      "connections": [
+        { "targetStepId": "gather-requirements" }
+      ]
+    },
+    {
+      "id": "gather-requirements",
+      "name": "Gather Requirements",
+      "description": "Analyze the request and gather document requirements",
+      "stepType": "agent",
+      "additionalInstructions": "You are gathering requirements for a document creation task.\n\nAnalyze the input and extract:\n1. Document type (must be one of: sop, strategy, plan, template, reference, output, custom)\n2. Target audience\n3. Key topics to cover\n4. Tone and style preferences\n5. Any specific sections or structure required\n6. Length/depth expectations\n\nYour output.requirements object MUST include:\n- documentType: one of 'sop', 'strategy', 'plan', 'template', 'reference', 'output', 'custom'\n- targetAudience: string\n- topics: array of strings\n- tone: string\n- sections: array of strings\n- lengthExpectation: string",
+      "connections": [
+        { "targetStepId": "create-draft" }
+      ]
+    },
+    {
+      "id": "create-draft",
+      "name": "Create Draft",
+      "description": "Generate the initial document draft based on requirements",
+      "stepType": "agent",
+      "additionalInstructions": "You are creating a document draft based on the gathered requirements.\n\nUsing the requirements from the previous step:\n1. Create a well-structured document\n2. Include all required sections\n3. Match the specified tone and style\n4. Ensure appropriate depth and length\n5. Use clear headings and formatting (markdown)\n\nYour output object MUST include:\n- draft: the complete document content in markdown format\n- summary: a 1-2 sentence summary of the document",
+      "connections": [
+        { "targetStepId": "review-draft" }
+      ]
+    },
+    {
+      "id": "review-draft",
+      "name": "Review Draft",
+      "description": "Human review of the generated draft",
+      "stepType": "manual",
+      "additionalInstructions": "Please review the generated document draft.\n\nCheck for:\n- Accuracy of information\n- Appropriate tone and style\n- Completeness of required sections\n- Any necessary corrections or additions\n\nAdd your feedback in the task notes before completing. Your feedback will be used to finalize the document.",
+      "connections": [
+        { "targetStepId": "finalize-document" }
+      ]
+    },
+    {
+      "id": "finalize-document",
+      "name": "Finalize Document",
+      "description": "Incorporate feedback and produce final version for saving",
+      "stepType": "agent",
+      "additionalInstructions": "You are finalizing the document based on review feedback.\n\n1. Read the review feedback from the previous step\n2. Incorporate all suggested changes\n3. Polish the language and formatting\n4. Ensure consistency throughout\n5. Add any final touches\n\nIMPORTANT: Your output object MUST include a 'document' object with these exact fields for saving to the document system:\n- title: the document title (string)\n- content: the complete finalized document in markdown format (string)\n- summary: a brief 1-2 sentence summary (string)\n- type: the document type from requirements - must be one of: 'sop', 'strategy', 'plan', 'template', 'reference', 'output', 'custom'\n- tags: array of relevant tags (strings)\n- status: 'draft' (documents start as drafts)\n\nAlso include:\n- changesSummary: brief summary of what changes were made from the draft",
+      "connections": [
+        { "targetStepId": "save-document" }
+      ]
+    },
+    {
+      "id": "save-document",
+      "name": "Save Document",
+      "description": "Save the finalized document to the document system",
+      "stepType": "webhook",
+      "webhookConfig": {
+        "url": "{{_apiUrl}}/documents",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json",
+          "X-API-Key": "{{_apiKey}}"
+        },
+        "bodyTemplate": "{\"title\": \"{{output.document.title}}\", \"content\": \"{{output.document.content}}\", \"summary\": \"{{output.document.summary}}\", \"type\": \"{{output.document.type}}\", \"tags\": {{output.document.tags}}, \"status\": \"{{output.document.status}}\", \"workflowRunId\": \"{{_workflowRunId}}\"}",
+        "successStatusCodes": [200, 201]
+      }
+    }
+  ],
+  "mermaidDiagram": "graph TD\n    A[trigger: Start] --> B[agent: Gather Requirements]\n    B --> C[agent: Create Draft]\n    C --> D[manual: Review Draft]\n    D --> E[agent: Finalize Document]\n    E --> F[webhook: Save Document]"
+}

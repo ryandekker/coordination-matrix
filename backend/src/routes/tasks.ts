@@ -819,12 +819,17 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
         };
 
         // Start the workflow with this task as the trigger
+        // Include title and summary in inputPayload so they're available to workflow steps
         const { run } = await workflowExecutionService.startWorkflow(
           {
             workflowId: triggerWorkflowId.toString(),
             triggerTaskId: taskId.toString(),
             triggerContext,
-            inputPayload: result.metadata || {},
+            inputPayload: {
+              title: result.title,
+              summary: result.summary,
+              ...(result.metadata || {}),
+            },
           },
           actorId
         );

@@ -89,7 +89,7 @@ interface IntegratedWorkflowViewProps {
 
 const STEP_TYPES: { type: WorkflowStepType; label: string; description: string; icon: React.ElementType; color: string }[] = [
   { type: 'agent', label: 'Agent', description: 'AI agent task', icon: Bot, color: 'text-blue-500' },
-  { type: 'external', label: 'External', description: 'API/webhook', icon: Globe, color: 'text-orange-500' },
+  { type: 'external', label: 'External', description: 'External API call', icon: Globe, color: 'text-orange-500' },
   { type: 'manual', label: 'Manual', description: 'Human task', icon: User, color: 'text-purple-500' },
   { type: 'decision', label: 'Decision', description: 'Route by condition', icon: GitBranch, color: 'text-amber-500' },
   { type: 'foreach', label: 'ForEach', description: 'Loop over items', icon: Repeat, color: 'text-green-500' },

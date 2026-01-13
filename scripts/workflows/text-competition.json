@@ -1,0 +1,69 @@
+{
+  "name": "Text Generation Competition",
+  "description": "Generate 3 different versions of text with different styles, audit each for quality, then select the best one.",
+  "isActive": true,
+  "rootTaskTitleTemplate": "Text Competition: {{input.topic}}",
+  "steps": [
+    {
+      "id": "start",
+      "name": "Start",
+      "description": "Workflow entry point - receives the prompt/topic",
+      "stepType": "trigger",
+      "connections": [
+        { "targetStepId": "fan-out-versions" }
+      ]
+    },
+    {
+      "id": "fan-out-versions",
+      "name": "Create Version Tasks",
+      "description": "Fan out to 3 parallel version generation tasks",
+      "stepType": "foreach",
+      "itemsPath": "versions",
+      "itemVariable": "version",
+      "maxItems": 3,
+      "connections": [
+        { "targetStepId": "generate-text" }
+      ]
+    },
+    {
+      "id": "generate-text",
+      "name": "Generate Text Version",
+      "description": "Generate text in a specific style",
+      "stepType": "agent",
+      "additionalInstructions": "You are generating text for a competition between different writing styles.\n\nYour assigned style: {{version.style}}\nStyle description: {{version.description}}\n\nTopic/Prompt: {{input.prompt}}\n\nGuidelines:\n1. Write in the specified style consistently\n2. Be creative and engaging\n3. Keep the content focused on the topic\n4. Aim for approximately {{input.targetLength}} words (or reasonable length if not specified)\n\nReturn your generated text along with a brief note about your stylistic choices.",
+      "connections": [
+        { "targetStepId": "audit-text" }
+      ]
+    },
+    {
+      "id": "audit-text",
+      "name": "Audit Text Quality",
+      "description": "Evaluate the generated text for quality",
+      "stepType": "agent",
+      "additionalInstructions": "You are auditing a generated text for quality.\n\nEvaluate the text on these criteria (score 1-10 for each):\n1. **Clarity**: Is the writing clear and easy to understand?\n2. **Engagement**: Does it capture and hold attention?\n3. **Style Consistency**: Does it maintain its stated style throughout?\n4. **Creativity**: Is it original and interesting?\n5. **Relevance**: Does it address the topic effectively?\n6. **Grammar & Flow**: Is it well-written technically?\n\nProvide:\n- Individual scores for each criterion\n- Overall score (average)\n- Brief strengths (2-3 bullet points)\n- Brief weaknesses (2-3 bullet points)\n- One-sentence summary\n\nReturn a structured audit report."
+    },
+    {
+      "id": "collect-results",
+      "name": "Collect All Versions",
+      "description": "Wait for all versions to be generated and audited",
+      "stepType": "join",
+      "awaitStepId": "fan-out-versions",
+      "joinBoundary": {
+        "minPercent": 100,
+        "maxWaitMs": 600000,
+        "failOnTimeout": false
+      },
+      "connections": [
+        { "targetStepId": "select-best" }
+      ]
+    },
+    {
+      "id": "select-best",
+      "name": "Select Best Version",
+      "description": "Compare all versions and select the winner",
+      "stepType": "agent",
+      "additionalInstructions": "You are the final judge in a text generation competition.\n\nYou have received 3 versions of text, each with its own audit report.\n\nYour task:\n1. Review all 3 versions and their audit scores\n2. Consider the original prompt/topic requirements\n3. Weigh the audit criteria appropriately for this use case\n4. Select the best overall version\n\nProvide:\n- **Winner**: Which version (1, 2, or 3) is best\n- **Reasoning**: Why this version won (3-5 sentences)\n- **Runner-up**: Second place and brief note on why\n- **Comparison Summary**: Key differentiators between versions\n- **Recommended Improvements**: If the winner could be even better, how?\n\nReturn a structured selection report with the winning text included."
+    }
+  ],
+  "mermaidDiagram": "graph TD\n    A[trigger: Start] --> B[[foreach: Create Version Tasks]]\n    B --> C[agent: Generate Text Version]\n    C --> D[agent: Audit Text Quality]\n    D --> E[[join: Collect All Versions]]\n    E --> F[agent: Select Best Version]"
+}

@@ -58,7 +58,7 @@ interface EditableCellProps {
   isTitle?: boolean
 }
 
-export const EditableCell = memo(function EditableCell({
+export function EditableCell({
   value,
   fieldConfig,
   lookups,
@@ -87,6 +87,7 @@ export const EditableCell = memo(function EditableCell({
   useEffect(() => {
     setEditValue(value)
   }, [value])
+
 
   const handleSave = useCallback(() => {
     onSave(editValue)
@@ -156,16 +157,39 @@ export const EditableCell = memo(function EditableCell({
 
   const inputClassName = 'h-[20px] text-sm border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:outline-none px-0 rounded-none w-full truncate'
 
-  // Handle reference fields (user selection) - show popup on click
-  if (fieldConfig.fieldType === 'reference' && fieldConfig.referenceCollection === 'users' && isEditing) {
+  // Handle reference fields (user selection)
+  // In non-editing state, use children from renderCellValue (which uses _resolved)
+  // In editing state, show the user selection dropdown
+  if (fieldConfig.fieldType === 'reference' && fieldConfig.referenceCollection === 'users') {
+    if (!isEditing) {
+      return (
+        <div
+          className="cursor-pointer hover:bg-muted/50 py-0.5 rounded transition-colors"
+          onClick={() => setIsEditing(true)}
+        >
+          {children}
+        </div>
+      )
+    }
+
+    // Editing state: show the dropdown
+    // For display while editing, look up the current user from value prop
+    const currentUserId = value as string | null
+    const currentUser = currentUserId ? users.find(u => u._id === currentUserId) : null
+    const displayContent = (
+      <div className="flex justify-center">
+        <UserChip user={currentUser || null} size="sm" />
+      </div>
+    )
+
     const filteredUsers = users.filter((user) =>
-      user.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (user.displayName && user.displayName.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (user.email && user.email.toLowerCase().includes(searchQuery.toLowerCase()))
     )
 
     return (
       <div className="relative w-full">
-        <div className="cursor-pointer py-0.5">{children}</div>
+        <div className="cursor-pointer py-0.5">{displayContent}</div>
         <div ref={containerRef} className="absolute left-0 top-0 z-50 bg-popover border rounded-md shadow-lg min-w-[220px]">
           <Command>
             <CommandInput
@@ -180,9 +204,9 @@ export const EditableCell = memo(function EditableCell({
                 <CommandItem
                   value="_unassigned"
                   onSelect={() => {
-                    onSave(null)
-                    setIsEditing(false)
                     setSearchQuery('')
+                    setIsEditing(false)
+                    onSave(null)
                   }}
                 >
                   <UserChip user={null} size="sm" />
@@ -192,15 +216,15 @@ export const EditableCell = memo(function EditableCell({
                     key={user._id}
                     value={user._id}
                     onSelect={() => {
-                      onSave(user._id)
-                      setIsEditing(false)
                       setSearchQuery('')
+                      setIsEditing(false)
+                      onSave(user._id)
                     }}
                   >
                     <Check
                       className={cn(
                         'mr-2 h-4 w-4',
-                        editValue === user._id ? 'opacity-100' : 'opacity-0'
+                        currentUserId === user._id ? 'opacity-100' : 'opacity-0'
                       )}
                     />
                     <div className="flex flex-col">
@@ -503,7 +527,7 @@ export const EditableCell = memo(function EditableCell({
         </div>
       )
   }
-})
+}
 
 // Memoized Parent Task Selector Component with debounced search
 const ParentTaskSelector = memo(function ParentTaskSelector({
