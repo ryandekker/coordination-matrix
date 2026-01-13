@@ -599,7 +599,7 @@ export function TaskModal({
                   }
                   // Immediately save task type changes - don't wait for debounce
                   if (task) {
-                    updateTask.mutate({ id: task._id, data: { taskType: val } })
+                    updateTask.mutate({ id: task._id, data: { taskType: val as TaskType } })
                   }
                 }}
               >
