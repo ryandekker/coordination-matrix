@@ -1,7 +1,11 @@
 import { ObjectId } from 'mongodb';
 
 // Environment config for webhook URLs
-export const BASE_URL = process.env.BASE_URL || 'http://localhost:3001';
+// Set BASE_URL in .env for your environment (see .env.example)
+// Note: Using a getter function because ES modules load before dotenv.config() runs
+export function getBaseUrl(): string {
+  return process.env.BASE_URL || 'http://localhost:3001';
+}
 
 /**
  * Static version of getValueByPath for use outside the class
@@ -30,6 +34,7 @@ export interface TemplateContext {
   callbackSecret?: string;
   inputPayload?: Record<string, unknown>;
   nextForeachStepId?: string;
+  apiKey?: string; // For external API calls
 }
 
 /**
@@ -57,7 +62,7 @@ export function resolveTemplateVariables(
   let result = template;
 
   // Unified callback URL - same endpoint handles all callback types
-  const callbackUrl = `${BASE_URL}/api/workflow-runs/${context.workflowRunId}/callback/${context.stepId}`;
+  const callbackUrl = `${getBaseUrl()}/api/workflow-runs/${context.workflowRunId}/callback/${context.stepId}`;
 
   // {{callbackUrl}} - the primary/preferred variable
   result = result.replace(/\{\{callbackUrl\}\}/g, callbackUrl);
@@ -65,7 +70,7 @@ export function resolveTemplateVariables(
   // {{systemWebhookUrl}} - smart callback URL that routes to foreach step when available
   // This enables the common pattern: external trigger -> streaming items to foreach
   if (context.nextForeachStepId) {
-    const smartCallbackUrl = `${BASE_URL}/api/workflow-runs/${context.workflowRunId}/callback/${context.nextForeachStepId}`;
+    const smartCallbackUrl = `${getBaseUrl()}/api/workflow-runs/${context.workflowRunId}/callback/${context.nextForeachStepId}`;
     result = result.replace(/\{\{systemWebhookUrl\}\}/g, smartCallbackUrl);
   } else {
     result = result.replace(/\{\{systemWebhookUrl\}\}/g, callbackUrl);
@@ -74,7 +79,7 @@ export function resolveTemplateVariables(
   // {{foreachWebhookUrl}} - backward compatibility (points to same unified endpoint)
   // If there's a next foreach step, use that step's callback URL
   if (context.nextForeachStepId) {
-    const nextStepCallbackUrl = `${BASE_URL}/api/workflow-runs/${context.workflowRunId}/callback/${context.nextForeachStepId}`;
+    const nextStepCallbackUrl = `${getBaseUrl()}/api/workflow-runs/${context.workflowRunId}/callback/${context.nextForeachStepId}`;
     result = result.replace(/\{\{foreachWebhookUrl\}\}/g, nextStepCallbackUrl);
   } else {
     // Fall back to current step's callback URL
@@ -91,11 +96,25 @@ export function resolveTemplateVariables(
     result = result.replace(/\{\{callbackSecret\}\}/g, context.callbackSecret);
   }
 
+  // Replace underscore-prefixed system variables ({{_apiUrl}}, {{_apiKey}}, {{_workflowRunId}})
+  result = result.replace(/\{\{_apiUrl\}\}/g, getBaseUrl());
+  result = result.replace(/\{\{_workflowRunId\}\}/g, context.workflowRunId.toString());
+  if (context.apiKey) {
+    result = result.replace(/\{\{_apiKey\}\}/g, context.apiKey);
+  }
+
   // Replace input payload variables ({{input.path.to.value}})
   if (context.inputPayload) {
     result = result.replace(/\{\{input\.([^}]+)\}\}/g, (_, path) => {
       const value = getValueByPath(context.inputPayload!, path);
-      return value !== undefined ? String(value) : '';
+      if (value === undefined) return '';
+      if (typeof value === 'object') return JSON.stringify(value);
+      const strValue = String(value);
+      // JSON-escape strings with special characters
+      if (strValue.includes('\n') || strValue.includes('\r') || strValue.includes('"') || strValue.includes('\\')) {
+        return JSON.stringify(strValue).slice(1, -1);
+      }
+      return strValue;
     });
   }
 
@@ -105,7 +124,7 @@ export function resolveTemplateVariables(
     result = result.replace(/\{\{([^}]+)\}\}/g, (match, path) => {
       const trimmedPath = path.trim();
       // Skip already-resolved system variables (they start with specific prefixes we've already handled)
-      if (['callbackUrl', 'systemWebhookUrl', 'foreachWebhookUrl', 'workflowRunId', 'stepId', 'taskId', 'callbackSecret'].includes(trimmedPath)) {
+      if (['callbackUrl', 'systemWebhookUrl', 'foreachWebhookUrl', 'workflowRunId', 'stepId', 'taskId', 'callbackSecret', '_apiUrl', '_apiKey', '_workflowRunId'].includes(trimmedPath)) {
         return match;
       }
       // Skip input. prefix (already handled above)
@@ -117,7 +136,14 @@ export function resolveTemplateVariables(
         if (typeof value === 'object') {
           return JSON.stringify(value);
         }
-        return String(value);
+        // JSON-escape strings that contain special characters (newlines, quotes, etc.)
+        // This ensures they can be safely embedded in JSON templates
+        const strValue = String(value);
+        if (strValue.includes('\n') || strValue.includes('\r') || strValue.includes('"') || strValue.includes('\\')) {
+          // Use JSON.stringify to escape, then remove the surrounding quotes
+          return JSON.stringify(strValue).slice(1, -1);
+        }
+        return strValue;
       }
       // Return empty string for unresolved variables (consistent with input.* behavior)
       return '';
