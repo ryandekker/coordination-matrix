@@ -1880,9 +1880,13 @@ class WorkflowExecutionService {
     }
 
     const taskMetadata = completedTask.metadata || {};
+    // Build outputPayload for the next step:
+    // - Spread taskMetadata at root for direct access to fields
+    // - Set 'output' to the actual output data (not the entire metadata to avoid recursive nesting)
+    //   Priority: response (external API) > existing output > empty object
     const outputPayload: Record<string, unknown> = {
       ...taskMetadata,
-      output: taskMetadata.response || taskMetadata,
+      output: taskMetadata.response || taskMetadata.output || {},
     };
 
     for (const nextStepId of nextStepIds) {
