@@ -196,6 +196,7 @@
   left: 0 !important;
   right: 0 !important;
   bottom: 0 !important;
+  height: auto !important; /* Override default 300px height */
   border: none !important;
   display: flex !important;
   flex-direction: column !important;
@@ -210,7 +211,7 @@
 .bytemd-container .bytemd-body {
   flex: 1 1 0 !important;
   min-height: 0 !important;
-  max-height: none !important;
+  height: 100% !important;
   overflow: hidden !important;
   display: flex !important;
   position: relative !important;
@@ -223,6 +224,15 @@
   max-height: 100% !important;
   overflow: auto !important;
   position: relative !important;
+  height: 100% !important;
+}
+
+/* Ensure single visible panel fills the container in code-only or preview-only mode */
+.bytemd-container .bytemd-body > .bytemd-editor:not(.bytemd-hidden),
+.bytemd-container .bytemd-body > .bytemd-preview:not(.bytemd-hidden) {
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .bytemd-container .bytemd-split {
