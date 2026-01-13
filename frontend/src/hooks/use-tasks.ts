@@ -96,11 +96,32 @@ export function useUpdateTask() {
       const previousTask = queryClient.getQueryData(['task', id])
       const previousTasks = queryClient.getQueriesData({ queryKey: ['tasks'] })
 
+      // Build resolved references for the optimistic update
+      // This ensures UI displays correctly without waiting for server response
+      let resolvedUpdates: Record<string, unknown> = {}
+      // Note: fieldPath is 'assigneeId' but _resolved uses 'assignee'
+      if ('assigneeId' in data) {
+        // Look up user from cache to get full user object for _resolved
+        const usersCache = queryClient.getQueryData(['users']) as { data: { _id: string; displayName?: string; email?: string; isAgent?: boolean; botColor?: string; profilePicture?: string }[] } | undefined
+        const assigneeId = (data as { assigneeId?: string }).assigneeId
+        const user = assigneeId ? usersCache?.data?.find(u => u._id === assigneeId) : null
+        resolvedUpdates.assignee = user || null
+      }
+
+      // Helper to apply both data and resolved updates to a task
+      const applyUpdates = (task: Task): Task => {
+        const updated = { ...task, ...data }
+        if (Object.keys(resolvedUpdates).length > 0) {
+          updated._resolved = { ...task._resolved, ...resolvedUpdates }
+        }
+        return updated
+      }
+
       // Optimistically update the specific task
       queryClient.setQueryData(['task', id], (old: unknown) => {
         if (!old) return old
         const oldData = old as { data: Task }
-        return { ...oldData, data: { ...oldData.data, ...data } }
+        return { ...oldData, data: applyUpdates(oldData.data) }
       })
 
       // Optimistically update task in lists
@@ -110,7 +131,7 @@ export function useUpdateTask() {
         return {
           ...oldData,
           data: oldData.data.map((task: Task) =>
-            task._id === id ? { ...task, ...data } : task
+            task._id === id ? applyUpdates(task) : task
           )
         }
       })
@@ -121,7 +142,7 @@ export function useUpdateTask() {
         const oldData = old as { data: Task[] }
         return {
           ...oldData,
-          data: updateTaskInTree(oldData.data, id, data)
+          data: updateTaskInTreeWithResolver(oldData.data, id, applyUpdates)
         }
       })
 
@@ -132,7 +153,7 @@ export function useUpdateTask() {
         return {
           ...oldData,
           data: oldData.data.map((task: Task) =>
-            task._id === id ? { ...task, ...data } : task
+            task._id === id ? applyUpdates(task) : task
           )
         }
       })
@@ -168,6 +189,22 @@ function updateTaskInTree(tasks: Task[], taskId: string, updates: Partial<Task>)
       return {
         ...task,
         children: updateTaskInTree(task.children, taskId, updates)
+      }
+    }
+    return task
+  })
+}
+
+// Helper to recursively update a task in a tree using a resolver function
+function updateTaskInTreeWithResolver(tasks: Task[], taskId: string, resolver: (task: Task) => Task): Task[] {
+  return tasks.map(task => {
+    if (task._id === taskId) {
+      return resolver(task)
+    }
+    if (task.children && task.children.length > 0) {
+      return {
+        ...task,
+        children: updateTaskInTreeWithResolver(task.children, taskId, resolver)
       }
     }
     return task

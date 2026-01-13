@@ -516,8 +516,8 @@ const InlineTaskRow = memo(function InlineTaskRow({
   )
 })
 
-// Memoized recursive row component for nested tasks
-const TaskRow = memo(function TaskRow({
+// Recursive row component for nested tasks (temporarily removed memo for debugging)
+function TaskRow({
   task,
   fieldConfigs,
   lookups,
@@ -872,7 +872,7 @@ const TaskRow = memo(function TaskRow({
       )}
     </>
   )
-})
+}
 
 export function TaskDataTable({
   tasks,
@@ -1262,14 +1262,28 @@ export function TaskDataTable({
       // Try the field path directly first (e.g., assigneeId -> assignee)
       const fieldName = fieldConfig.fieldPath.replace('Id', '')
       // Also try looking up directly by the field path
-      const ref = (task._resolved?.[fieldName as keyof typeof task._resolved] ||
+      let ref = (task._resolved?.[fieldName as keyof typeof task._resolved] ||
         task._resolved?.[fieldConfig.fieldPath as keyof typeof task._resolved]) as
         | User
         | { displayName?: string; name?: string }
         | undefined
 
+      // Check if resolved value matches current value - if not, it's stale from optimistic update
+      // In this case, fall back to looking up from the users prop
+      const currentId = value as string | null
+      const resolvedId = ref && '_id' in ref ? (ref as User)._id : null
+      const isStaleResolved = ref && currentId && resolvedId !== currentId
+
       // For user references, use UserChip
       if (fieldConfig.referenceCollection === 'users') {
+        // If no resolved ref or it's stale, try to find user in users array
+        if ((!ref || isStaleResolved) && currentId) {
+          const foundUser = users.find(u => u._id === currentId)
+          if (foundUser) {
+            ref = foundUser
+          }
+        }
+
         if (ref && '_id' in ref) {
           return (
             <div className="flex justify-center">
@@ -1348,7 +1362,7 @@ export function TaskDataTable({
       return <span>{value?.toString()}</span>
     }
     return <div className="text-center">{value?.toString()}</div>
-  }, [lookups])
+  }, [lookups, users])
 
   if (isLoading) {
     return (

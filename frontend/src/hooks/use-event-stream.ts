@@ -533,15 +533,61 @@ export function useEventStream(options?: {
         break
 
       case 'task.assignee.changed':
-        // Assignee changes need refetch to get resolved user data
-        // Only invalidate the specific task and mark lists as stale (don't force refetch)
-        queryClient.invalidateQueries({ queryKey: ['task', event.taskId] })
-        queryClient.invalidateQueries({ queryKey: ['tasks'], refetchType: 'none' })
-        queryClient.invalidateQueries({ queryKey: ['task-tree'], refetchType: 'none' })
-        // For task-children, only invalidate if we know the parent
-        if (event.task?.parentId) {
-          queryClient.invalidateQueries({ queryKey: ['task-children', event.task.parentId], refetchType: 'active' })
+        // Assignee changes - optimistically update the assigneeId in cache
+        // The renderCellValue function will fall back to the users array to display the correct name
+        if (event.task) {
+          // Update individual task cache
+          queryClient.setQueryData(['task', event.taskId], (old: unknown) => {
+            if (!old || !event.task) return old
+            const oldData = old as { data: Task }
+            return {
+              ...oldData,
+              data: { ...oldData.data, ...event.task }
+            }
+          })
+
+          // Update task in list caches
+          queryClient.setQueriesData({ queryKey: ['tasks'] }, (old: unknown) => {
+            if (!old || !event.task) return old
+            const oldData = old as { data: Task[]; pagination: unknown }
+            return {
+              ...oldData,
+              data: oldData.data.map((task: Task) =>
+                task._id === event.taskId ? { ...task, ...event.task } : task
+              )
+            }
+          })
+
+          // Update task tree caches
+          queryClient.setQueriesData({ queryKey: ['task-tree'] }, (old: unknown) => {
+            if (!old) return old
+            const oldData = old as { data: Task[] }
+            return {
+              ...oldData,
+              data: updateTaskInTree(oldData.data, event.taskId, event.task as Partial<Task>)
+            }
+          })
+
+          // For child tasks, also update task-children cache
+          if (event.task.parentId) {
+            queryClient.setQueriesData(
+              { predicate: (query) => Array.isArray(query.queryKey) && query.queryKey[0] === 'task-children' },
+              (old: unknown) => {
+                if (!old) return old
+                const oldData = old as { data: Task[]; pagination?: unknown }
+                const updatedData = oldData.data.map((task: Task) =>
+                  task._id === event.taskId ? { ...task, ...event.task } : task
+                )
+                if (updatedData.some((t, i) => t !== oldData.data[i])) {
+                  return { ...oldData, data: updatedData }
+                }
+                return old
+              }
+            )
+          }
         }
+        // Also invalidate to eventually get the full resolved reference
+        queryClient.invalidateQueries({ queryKey: ['task', event.taskId], refetchType: 'none' })
         break
 
       case 'task.deleted':
