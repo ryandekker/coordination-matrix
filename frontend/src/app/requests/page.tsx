@@ -16,6 +16,7 @@ import {
   Ban,
   ArrowLeftRight,
   Eye,
+  EyeOff,
   Loader2,
   AlertTriangle,
   ThumbsUp,
@@ -27,10 +28,20 @@ import {
   Send,
   Filter,
   Phone,
+  Copy,
+  Check,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import {
   Select,
   SelectContent,
@@ -56,14 +67,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
@@ -809,6 +812,80 @@ function WebhookDeliveryDetail({ deliveryId }: { deliveryId: string }) {
 }
 
 // ============================================================================
+// Helper: Sensitive header detection
+// ============================================================================
+const SENSITIVE_HEADERS = ['authorization', 'x-api-key', 'api-key', 'x-auth-token', 'cookie', 'x-csrf-token']
+
+function isSensitiveHeader(key: string): boolean {
+  return SENSITIVE_HEADERS.includes(key.toLowerCase())
+}
+
+// ============================================================================
+// Helper: Copy to clipboard button
+// ============================================================================
+function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      console.error('Failed to copy:', err)
+    }
+  }
+
+  return (
+    <Button variant="outline" size="sm" onClick={handleCopy} className="h-7 px-2 text-xs">
+      {copied ? (
+        <>
+          <Check className="h-3 w-3 mr-1" />
+          Copied
+        </>
+      ) : (
+        <>
+          <Copy className="h-3 w-3 mr-1" />
+          {label}
+        </>
+      )}
+    </Button>
+  )
+}
+
+// ============================================================================
+// Helper: Header value display with show/hide for sensitive values
+// ============================================================================
+function HeaderValue({ headerKey, value }: { headerKey: string; value: string }) {
+  const [showValue, setShowValue] = useState(false)
+  const isSensitive = isSensitiveHeader(headerKey)
+
+  if (!isSensitive) {
+    return <span className="break-all">{value}</span>
+  }
+
+  return (
+    <span className="flex items-center gap-1">
+      <span className="break-all font-mono">
+        {showValue ? value : '••••••••••••••••'}
+      </span>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-5 w-5 p-0 hover:bg-transparent"
+        onClick={() => setShowValue(!showValue)}
+      >
+        {showValue ? (
+          <EyeOff className="h-3 w-3 text-muted-foreground" />
+        ) : (
+          <Eye className="h-3 w-3 text-muted-foreground" />
+        )}
+      </Button>
+    </span>
+  )
+}
+
+// ============================================================================
 // Webhook Task Attempt Detail View
 // ============================================================================
 function WebhookTaskDetail({ attemptId }: { attemptId: string }) {
@@ -858,6 +935,20 @@ function WebhookTaskDetail({ attemptId }: { attemptId: string }) {
   const StatusIcon = statusConfig.icon
   const isActive = attempt.status === 'pending'
 
+  // Build copyable request/response data
+  const requestData = {
+    method: attempt.method,
+    url: attempt.url,
+    headers: attempt.headers,
+    body: attempt.requestBody,
+  }
+  const responseData = {
+    status: attempt.httpStatus,
+    body: attempt.responseBody,
+    error: attempt.errorMessage,
+  }
+  const fullData = { request: requestData, response: responseData }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -888,10 +979,13 @@ function WebhookTaskDetail({ attemptId }: { attemptId: string }) {
           </div>
         </div>
 
-        <Button variant="outline" size="sm" onClick={() => refetch()}>
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <CopyButton text={JSON.stringify(fullData, null, 2)} label="Copy All" />
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Stats grid */}
@@ -916,7 +1010,10 @@ function WebhookTaskDetail({ attemptId }: { attemptId: string }) {
 
       {/* Request details */}
       <div className="rounded-lg border bg-card p-4">
-        <h2 className="font-semibold mb-2">Request</h2>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="font-semibold">Request</h2>
+          <CopyButton text={JSON.stringify(requestData, null, 2)} label="Copy Request" />
+        </div>
         <div className="flex items-center gap-2 text-sm mb-3">
           <Badge variant="secondary">{attempt.method}</Badge>
           <span className="font-mono break-all">{attempt.url}</span>
@@ -928,9 +1025,9 @@ function WebhookTaskDetail({ attemptId }: { attemptId: string }) {
             <h3 className="text-sm font-medium mb-2 text-muted-foreground">Headers</h3>
             <div className="space-y-1">
               {Object.entries(attempt.headers).map(([key, value]) => (
-                <div key={key} className="flex text-xs font-mono">
+                <div key={key} className="flex text-xs font-mono items-center">
                   <span className="text-muted-foreground min-w-[150px]">{key}:</span>
-                  <span className="break-all">{value}</span>
+                  <HeaderValue headerKey={key} value={value} />
                 </div>
               ))}
             </div>
@@ -969,14 +1066,14 @@ function WebhookTaskDetail({ attemptId }: { attemptId: string }) {
         </div>
       )}
 
-      {/* Error info */}
+      {/* Error info - improved dark mode styling */}
       {attempt.errorMessage && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
+        <div className="rounded-lg border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/30 p-4">
           <div className="flex items-start gap-2">
-            <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="font-medium text-destructive">Error</p>
-              <p className="text-sm text-destructive/80 mt-1">{attempt.errorMessage}</p>
+            <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="font-medium text-red-700 dark:text-red-300">Error</p>
+              <p className="text-sm text-red-600 dark:text-red-400 mt-1 break-words whitespace-pre-wrap">{attempt.errorMessage}</p>
             </div>
           </div>
         </div>
@@ -985,7 +1082,13 @@ function WebhookTaskDetail({ attemptId }: { attemptId: string }) {
       {/* Response Body */}
       {attempt.responseBody !== undefined && attempt.responseBody !== null && (
         <div className="rounded-lg border bg-card p-4">
-          <h2 className="font-semibold mb-2">Response Body</h2>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="font-semibold">Response Body</h2>
+            <CopyButton
+              text={typeof attempt.responseBody === 'string' ? attempt.responseBody : JSON.stringify(attempt.responseBody, null, 2)}
+              label="Copy Response"
+            />
+          </div>
           <pre className="text-sm bg-muted rounded p-3 overflow-auto max-h-64">
             {typeof attempt.responseBody === 'string'
               ? attempt.responseBody
@@ -1501,157 +1604,149 @@ function RequestsList() {
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {unifiedRequests.map((request) => {
-            const statusConfig = STATUS_CONFIG[request.status] || STATUS_CONFIG.pending
-            const StatusIcon = statusConfig.icon
-            const isActive = request.status === 'pending' || request.status === 'processing' || request.status === 'awaiting_responses' || request.status === 'retrying' || request.status === 'in_progress' || request.status === 'waiting'
-            const needsReview = request.status === 'manual_review'
-            const isBatch = request.type === 'batch'
-            const isExternal = request.type === 'external'
-            const isWebhookDelivery = request.type === 'webhook_delivery'
-            const isWebhookTask = request.type === 'webhook_task'
-            const isWorkflowCallback = request.type === 'workflow_callback'
-            const batchJob = isBatch ? request.original as BatchJob : null
-            const workflowCallback = isWorkflowCallback ? request.original as WorkflowCallback : null
-            const progressPercent = batchJob && batchJob.expectedCount > 0
-              ? Math.round((batchJob.processedCount / batchJob.expectedCount) * 100)
-              : 0
+        <div className="rounded-lg border bg-card overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/50">
+                <TableHead className="w-[100px]">Type</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead className="w-[100px]">Status</TableHead>
+                <TableHead className="w-[180px]">Date</TableHead>
+                <TableHead>Details</TableHead>
+                <TableHead className="w-[80px]"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {unifiedRequests.map((request) => {
+                const statusConfig = STATUS_CONFIG[request.status] || STATUS_CONFIG.pending
+                const StatusIcon = statusConfig.icon
+                const isActive = request.status === 'pending' || request.status === 'processing' || request.status === 'awaiting_responses' || request.status === 'retrying' || request.status === 'in_progress' || request.status === 'waiting'
+                const needsReview = request.status === 'manual_review'
+                const isBatch = request.type === 'batch'
+                const isExternal = request.type === 'external'
+                const isWebhookDelivery = request.type === 'webhook_delivery'
+                const isWebhookTask = request.type === 'webhook_task'
+                const isWorkflowCallback = request.type === 'workflow_callback'
+                const batchJob = isBatch ? request.original as BatchJob : null
+                const workflowCallback = isWorkflowCallback ? request.original as WorkflowCallback : null
 
-            // Get type badge content
-            const getTypeBadge = () => {
-              if (isBatch) return <><Layers className="h-3 w-3 mr-1" />Batch</>
-              if (isExternal) return <><Globe className="h-3 w-3 mr-1" />External</>
-              if (isWebhookDelivery) return <><Send className="h-3 w-3 mr-1" />Webhook</>
-              if (isWebhookTask) return <><ArrowLeftRight className="h-3 w-3 mr-1" />Task Webhook</>
-              if (isWorkflowCallback) return <><Phone className="h-3 w-3 mr-1" />Callback</>
-              return null
-            }
+                // Get type icon and label
+                const getTypeInfo = () => {
+                  if (isBatch) return { icon: Layers, label: 'Batch' }
+                  if (isExternal) return { icon: Globe, label: 'External' }
+                  if (isWebhookDelivery) return { icon: Send, label: 'Webhook' }
+                  if (isWebhookTask) return { icon: ArrowLeftRight, label: 'Task' }
+                  if (isWorkflowCallback) return { icon: Phone, label: 'Callback' }
+                  return { icon: ArrowLeftRight, label: 'Unknown' }
+                }
+                const typeInfo = getTypeInfo()
+                const TypeIcon = typeInfo.icon
 
-            return (
-              <div
-                key={`${request.type}-${request._id}`}
-                className={cn(
-                  'rounded-lg border bg-card p-4 transition-colors hover:bg-muted/50',
-                  isActive && 'border-blue-300',
-                  needsReview && 'border-purple-300'
-                )}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className={cn('p-2 rounded-lg', statusConfig.bgColor)}>
-                      <StatusIcon className={cn('h-5 w-5', statusConfig.color, (request.status === 'processing' || request.status === 'retrying') && 'animate-spin')} />
-                    </div>
+                // Build details string
+                const getDetails = () => {
+                  const parts: string[] = []
+                  if (isWebhookTask && request.method && request.url) {
+                    try {
+                      parts.push(`${request.method} ${new URL(request.url).hostname}`)
+                    } catch {
+                      parts.push(`${request.method} ${request.url}`)
+                    }
+                  }
+                  if (isWebhookTask && request.httpStatus) {
+                    parts.push(`HTTP ${request.httpStatus}`)
+                  }
+                  if (isWebhookTask && request.durationMs !== undefined) {
+                    parts.push(`${request.durationMs}ms`)
+                  }
+                  if (isExternal && request.attempts !== undefined) {
+                    parts.push(`${request.attempts}/${request.maxAttempts} attempts`)
+                  }
+                  if (isWebhookDelivery && request.eventType) {
+                    parts.push(`Event: ${request.eventType}`)
+                  }
+                  if (isWebhookDelivery && request.statusCode) {
+                    parts.push(`HTTP ${request.statusCode}`)
+                  }
+                  if (isBatch && batchJob) {
+                    parts.push(`${batchJob.processedCount}/${batchJob.expectedCount}`)
+                  }
+                  if (isWorkflowCallback && workflowCallback) {
+                    parts.push(workflowCallback.taskType)
+                  }
+                  if (request.error) {
+                    parts.push(request.error.substring(0, 50) + (request.error.length > 50 ? '...' : ''))
+                  }
+                  return parts.join(' • ')
+                }
 
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Badge variant="outline" className="text-xs">
-                          {getTypeBadge()}
-                        </Badge>
-                        <Link
-                          href={`/requests?type=${request.type}&id=${request._id}`}
-                          className="font-medium hover:underline"
-                        >
-                          {request.name}
-                        </Link>
-                        <Badge variant="outline" className={cn('text-xs', statusConfig.color)}>
-                          {statusConfig.label}
-                        </Badge>
-                        {needsReview && (
-                          <Badge variant="outline" className="text-xs text-purple-600 border-purple-300">
-                            <AlertTriangle className="h-3 w-3 mr-1" />
-                            Needs Review
-                          </Badge>
-                        )}
+                return (
+                  <TableRow
+                    key={`${request.type}-${request._id}`}
+                    className={cn(
+                      'hover:bg-muted/50',
+                      isActive && 'bg-blue-50/50 dark:bg-blue-950/20',
+                      needsReview && 'bg-purple-50/50 dark:bg-purple-950/20'
+                    )}
+                  >
+                    <TableCell>
+                      <div className="flex items-center gap-1.5">
+                        <TypeIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="text-xs text-muted-foreground">{typeInfo.label}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Link
+                        href={`/requests?type=${request.type}&id=${request._id}`}
+                        className="font-medium hover:underline text-sm"
+                      >
+                        {request.name}
+                      </Link>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1.5">
+                        <StatusIcon className={cn('h-3.5 w-3.5', statusConfig.color, (request.status === 'processing' || request.status === 'retrying') && 'animate-spin')} />
+                        <span className={cn('text-xs', statusConfig.color)}>{statusConfig.label}</span>
                         {isActive && (
-                          <span className="relative flex h-2 w-2">
-                            <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-blue-400 opacity-75" />
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                          <span className="relative flex h-1.5 w-1.5 ml-1">
+                            <span className="animate-ping absolute inline-flex h-1.5 w-1.5 rounded-full bg-blue-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1 flex-wrap">
-                        <span>{formatRelativeTime(request.createdAt)}</span>
-                        {isBatch && batchJob?.workflowId && (
-                          <span>Workflow: {getWorkflowName(batchJob.workflowId)}</span>
-                        )}
-                        {isExternal && request.attempts !== undefined && (
-                          <span>Attempts: {request.attempts}/{request.maxAttempts}</span>
-                        )}
-                        {isWebhookDelivery && request.eventType && (
-                          <span>Event: {request.eventType}</span>
-                        )}
-                        {isWebhookDelivery && request.statusCode && (
-                          <span>HTTP {request.statusCode}</span>
-                        )}
-                        {isWebhookTask && request.method && request.url && (
-                          <span className="font-mono text-xs">{request.method} {(() => {
-                            try {
-                              return new URL(request.url).hostname;
-                            } catch {
-                              return request.url;
-                            }
-                          })()}</span>
-                        )}
-                        {isWebhookTask && request.httpStatus && (
-                          <span>HTTP {request.httpStatus}</span>
-                        )}
-                        {isWebhookTask && request.durationMs !== undefined && (
-                          <span>{request.durationMs}ms</span>
-                        )}
-                        {isWorkflowCallback && workflowCallback && (
-                          <>
-                            <span className="font-mono text-xs truncate max-w-[300px]">{workflowCallback.url}</span>
-                            <span className="text-xs">{workflowCallback.taskType}</span>
-                          </>
-                        )}
-                        {request.error && (
-                          <span className="text-destructive truncate max-w-[200px]" title={request.error}>
-                            {request.error}
-                          </span>
-                        )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-xs">
+                        <div className="text-foreground">{formatDate(request.createdAt)}</div>
+                        <div className="text-muted-foreground">{formatRelativeTime(request.createdAt)}</div>
                       </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {isBatch && isActive && (
-                      <Button variant="outline" size="sm" onClick={() => setCancelConfirm(batchJob)}>
-                        <Ban className="h-4 w-4 mr-1" />
-                        Cancel
-                      </Button>
-                    )}
-
-                    <Link href={`/requests?type=${request.type}&id=${request._id}`}>
-                      <Button variant="ghost" size="sm">
-                        View
-                        <ChevronRight className="h-4 w-4 ml-1" />
-                      </Button>
-                    </Link>
-                  </div>
-                </div>
-
-                {/* Progress bar for batch jobs */}
-                {isBatch && batchJob && (
-                  <div className="mt-3 pt-3 border-t">
-                    <div className="flex items-center justify-between text-sm mb-1">
-                      <span className="text-muted-foreground">
-                        {batchJob.processedCount} / {batchJob.expectedCount} responses
+                    </TableCell>
+                    <TableCell>
+                      <span className={cn(
+                        'text-xs font-mono',
+                        request.error ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'
+                      )} title={request.error || getDetails()}>
+                        {getDetails()}
                       </span>
-                      <span className="text-muted-foreground">{progressPercent}%</span>
-                    </div>
-                    <Progress value={progressPercent} className="h-1.5" />
-                    {batchJob.failedCount > 0 && (
-                      <p className="text-sm text-destructive mt-1">
-                        {batchJob.failedCount} failed
-                      </p>
-                    )}
-                  </div>
-                )}
-
-              </div>
-            )
-          })}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        {isBatch && isActive && (
+                          <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setCancelConfirm(batchJob)}>
+                            <Ban className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        <Link href={`/requests?type=${request.type}&id=${request._id}`}>
+                          <Button variant="ghost" size="sm" className="h-7 px-2">
+                            <ChevronRight className="h-3.5 w-3.5" />
+                          </Button>
+                        </Link>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
         </div>
       )}
 

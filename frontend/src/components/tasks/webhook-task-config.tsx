@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceToNow } from 'date-fns'
+import Link from 'next/link'
+import { ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -286,7 +288,12 @@ export function WebhookTaskConfig({
             <label className="text-xs font-medium text-muted-foreground">Execution History</label>
             <div className="space-y-1.5 max-h-60 overflow-y-auto">
               {[...attempts].reverse().map((attempt, index) => (
-                <AttemptRow key={attempts.length - 1 - index} attempt={attempt} />
+                <AttemptRow
+                  key={attempts.length - 1 - index}
+                  attempt={attempt}
+                  taskId={task?._id}
+                  attemptIndex={attempts.length - 1 - index}
+                />
               ))}
             </div>
           </div>
@@ -340,7 +347,7 @@ export function WebhookTaskConfig({
   return null
 }
 
-function AttemptRow({ attempt }: { attempt: WebhookAttempt }) {
+function AttemptRow({ attempt, taskId, attemptIndex }: { attempt: WebhookAttempt; taskId?: string; attemptIndex: number }) {
   const [expanded, setExpanded] = useState(false)
 
   const statusColors = {
@@ -348,6 +355,9 @@ function AttemptRow({ attempt }: { attempt: WebhookAttempt }) {
     failed: 'bg-red-500/20 text-red-600',
     pending: 'bg-yellow-500/20 text-yellow-600',
   }
+
+  // Build the request page URL using the composite ID format: taskId-attemptIndex
+  const requestPageUrl = taskId ? `/requests?type=webhook_task&id=${taskId}-${attemptIndex}` : null
 
   return (
     <div className="text-xs bg-muted/30 rounded border p-2 space-y-1">
@@ -364,15 +374,26 @@ function AttemptRow({ attempt }: { attempt: WebhookAttempt }) {
             <span className="text-muted-foreground">{attempt.durationMs}ms</span>
           )}
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-5 px-1 text-[10px]"
-          onClick={() => setExpanded(!expanded)}
-        >
-          {expanded ? 'Hide' : 'Details'}
-        </Button>
+        <div className="flex items-center gap-1">
+          {requestPageUrl && (
+            <Link
+              href={requestPageUrl}
+              className="h-5 px-1 text-[10px] text-primary hover:underline flex items-center gap-0.5"
+            >
+              <ExternalLink className="h-2.5 w-2.5" />
+              View
+            </Link>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-5 px-1 text-[10px]"
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? 'Hide' : 'Details'}
+          </Button>
+        </div>
       </div>
       <div className="text-muted-foreground">
         {format(new Date(attempt.startedAt), 'MMM d, HH:mm:ss')}
@@ -412,8 +433,8 @@ function AttemptRow({ attempt }: { attempt: WebhookAttempt }) {
           {/* Error Message */}
           {attempt.errorMessage && (
             <div className="space-y-1">
-              <div className="text-[10px] font-medium text-red-500 uppercase">Error</div>
-              <div className="p-1.5 bg-red-500/10 rounded text-red-600 break-all">
+              <div className="text-[10px] font-medium text-red-500 dark:text-red-400 uppercase">Error</div>
+              <div className="p-1.5 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded text-red-600 dark:text-red-400 break-all">
                 {attempt.errorMessage}
               </div>
             </div>
