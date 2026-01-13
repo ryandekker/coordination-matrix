@@ -18,7 +18,7 @@ import {
   Document,
 } from '../../types/index.js';
 
-import { resolveTemplateVariables, getValueByPath, resolveTitleTemplate, BASE_URL } from './template-utils.js';
+import { resolveTemplateVariables, getValueByPath, resolveTitleTemplate, getBaseUrl } from './template-utils.js';
 import { stripUndefined } from './mongo-utils.js';
 import { searchDocuments } from '../embedding-service.js';
 
@@ -622,7 +622,7 @@ class WorkflowExecutionService {
       requestBody = {
         ...inputPayload,
         _callback: {
-          url: `${BASE_URL}/api/workflows/callback`,
+          url: `${getBaseUrl()}/api/workflows/callback`,
           workflowRunId: run._id.toString(),
           stepId: step.id,
           secret: callbackSecret,

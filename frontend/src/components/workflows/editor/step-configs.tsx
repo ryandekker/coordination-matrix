@@ -221,6 +221,30 @@ export function ExternalStepConfig({
         </div>
       )}
 
+      {/* API Token Info - shown for fire-and-forget mode */}
+      {!waitForCallback && (
+        <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg p-3 text-sm">
+          <div className="flex items-start gap-2">
+            <Zap className="h-4 w-4 text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
+            <div className="text-emerald-800 dark:text-emerald-200">
+              <p className="font-medium">System Variables</p>
+              <p className="text-xs mt-1 mb-2">
+                Use these tokens for calling internal APIs or referencing previous step outputs:
+              </p>
+              <div className="bg-muted/60 rounded p-2 font-mono text-xs space-y-1">
+                <p><span className="text-emerald-600">{"{{_apiUrl}}"}</span> - Base API URL (e.g., http://localhost:3001)</p>
+                <p><span className="text-emerald-600">{"{{_apiKey}}"}</span> - System API key for authentication</p>
+                <p><span className="text-emerald-600">{"{{_workflowRunId}}"}</span> - Current workflow run ID</p>
+                <p><span className="text-emerald-600">{"{{output.field}}"}</span> - Previous step&apos;s output (use Token Browser for paths)</p>
+              </div>
+              <p className="text-xs mt-2 text-emerald-700 dark:text-emerald-300">
+                <strong>Note:</strong> {"{{_apiKey}}"} requires MATRIX_API_KEY env var on the server.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-4 gap-3">
         <div className="space-y-1">
           <label className="text-sm font-medium">Method</label>

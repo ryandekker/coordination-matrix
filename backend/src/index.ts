@@ -3,17 +3,24 @@ import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-// Load .env.local first (for multi-worktree dev), then .env as fallback
+// Load env files in order of precedence (first found value wins):
+// 1. backend/.env.local (auto-generated for multi-worktree dev)
+// 2. backend/.env (backend-specific overrides)
+// 3. .env (monorepo root - shared config)
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const rootDir = join(__dirname, '..');
-const envLocalPath = join(rootDir, '.env.local');
-const envPath = join(rootDir, '.env');
+const backendDir = join(__dirname, '..');
+const monorepoRoot = join(backendDir, '..');
 
-if (existsSync(envLocalPath)) {
-  dotenv.config({ path: envLocalPath });
-}
-if (existsSync(envPath)) {
-  dotenv.config({ path: envPath }); // Won't override existing vars
+const envFiles = [
+  join(backendDir, '.env.local'),
+  join(backendDir, '.env'),
+  join(monorepoRoot, '.env'),
+];
+
+for (const envFile of envFiles) {
+  if (existsSync(envFile)) {
+    dotenv.config({ path: envFile }); // Won't override existing vars
+  }
 }
 import express from 'express';
 import cors from 'cors';

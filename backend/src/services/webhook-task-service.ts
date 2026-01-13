@@ -2,6 +2,7 @@ import { ObjectId, Collection } from 'mongodb';
 import { getDb } from '../db/connection.js';
 import { Task, WebhookAttempt, TaskStatus } from '../types/index.js';
 import { eventBus, publishTaskEvent } from './event-bus.js';
+import { resolveTemplateVariables, TemplateContext } from './workflow/template-utils.js';
 
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_DELAY_MS = 1000;
@@ -40,13 +41,21 @@ class WebhookTaskService {
       }
     });
 
-    // Also check for pending retries on status changes
+    // Also check for pending retries or reruns on status changes
     eventBus.subscribe('task.status.changed', async (event) => {
       const task = event.task;
       if (task.taskType === 'external' && task.webhookConfig && task.status === 'pending') {
-        // Check if there's a scheduled retry
         const config = task.webhookConfig;
-        if (config.nextRetryAt && new Date(config.nextRetryAt) <= new Date()) {
+        const attempts = config.attempts || [];
+
+        // Execute webhook if:
+        // 1. It's a scheduled retry that's due, OR
+        // 2. Attempts array is empty (task was rerun and reset)
+        const isScheduledRetryDue = config.nextRetryAt && new Date(config.nextRetryAt) <= new Date();
+        const isRerun = attempts.length === 0 && !config.nextRetryAt;
+
+        if (isScheduledRetryDue || isRerun) {
+          console.log(`[WebhookTaskService] Executing webhook for task ${task._id} (rerun=${isRerun}, scheduledRetry=${isScheduledRetryDue})`);
           await this.executeWebhook(task._id);
         }
       }
@@ -82,21 +91,45 @@ class WebhookTaskService {
     const attemptNumber = attempts.length + 1;
     const maxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
 
-    // Build headers
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...config.headers,
+    // Build template context for resolving variables
+    // For workflow tasks, use workflowRunId; for standalone tasks, use task._id as a fallback
+    const templateContext: TemplateContext = {
+      workflowRunId: task.workflowRunId || task._id,
+      stepId: task.workflowStepId || 'standalone',
+      taskId: task._id,
+      callbackSecret: task.externalConfig?.callbackSecret,
+      inputPayload: task.metadata?.inputPayload as Record<string, unknown> | undefined,
+      apiKey: process.env.MATRIX_API_KEY,
     };
 
-    // Create new attempt record with request details
+    // Resolve template variables in URL
+    const resolvedUrl = resolveTemplateVariables(config.url, templateContext);
+
+    // Resolve template variables in headers
+    const resolvedHeaders: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (config.headers) {
+      for (const [key, value] of Object.entries(config.headers)) {
+        resolvedHeaders[key] = resolveTemplateVariables(value, templateContext);
+      }
+    }
+
+    // Resolve template variables in body
+    let resolvedBody: string | undefined;
+    if (config.body && config.method !== 'GET') {
+      resolvedBody = resolveTemplateVariables(config.body, templateContext);
+    }
+
+    // Create new attempt record with resolved request details
     const attempt: WebhookAttempt = {
       attemptNumber,
       startedAt: new Date(),
       status: 'pending',
-      requestUrl: config.url,
+      requestUrl: resolvedUrl,
       requestMethod: config.method,
-      requestHeaders: headers,
-      requestBody: config.body && config.method !== 'GET' ? config.body : undefined,
+      requestHeaders: resolvedHeaders,
+      requestBody: resolvedBody,
     };
 
     // Update task to in_progress
