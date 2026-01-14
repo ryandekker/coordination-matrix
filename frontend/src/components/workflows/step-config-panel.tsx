@@ -16,8 +16,21 @@ import {
 } from '@/components/ui/select'
 import { TokenBrowser } from './token-browser'
 import { PromptSelector } from './editor/prompt-selector'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command'
 import { cn } from '@/lib/utils'
-import { Search, X, FileText, Check } from 'lucide-react'
+import { Search, X, FileText, Check, ChevronsUpDown } from 'lucide-react'
 import {
   Bot,
   User,
@@ -125,6 +138,12 @@ interface LoopScope {
   joinStep: WorkflowStep
 }
 
+interface AvailableWorkflow {
+  _id: string
+  name: string
+  description?: string
+}
+
 interface StepConfigPanelProps {
   step: WorkflowStep
   stepIndex: number
@@ -133,6 +152,8 @@ interface StepConfigPanelProps {
   users: { _id: string; displayName: string }[]
   loopScope?: LoopScope | null
   isInLoop: boolean
+  availableWorkflows?: AvailableWorkflow[]
+  loadingWorkflows?: boolean
   onUpdate: (updates: Partial<WorkflowStep>) => void
   onDelete: () => void
   onMoveUp: () => void
@@ -586,6 +607,8 @@ export function StepConfigPanel({
   users,
   loopScope,
   isInLoop,
+  availableWorkflows,
+  loadingWorkflows,
   onUpdate,
   onDelete,
   onMoveUp,
@@ -593,6 +616,7 @@ export function StepConfigPanel({
   onAddStepAfter,
   onChangeType,
 }: StepConfigPanelProps) {
+  const [flowSelectorOpen, setFlowSelectorOpen] = useState(false)
   const typeInfo = getStepTypeInfo(step.stepType)
   const TypeIcon = typeInfo.icon
 
@@ -1245,13 +1269,72 @@ export function StepConfigPanel({
             </div>
 
             <div className="space-y-1">
-              <label className="text-sm font-medium">Flow ID</label>
-              <Input
-                value={step.flowId || ''}
-                onChange={(e) => onUpdate({ flowId: e.target.value })}
-                placeholder="workflow-id"
-                className="font-mono text-sm"
-              />
+              <label className="text-sm font-medium">Target Workflow</label>
+              <Popover open={flowSelectorOpen} onOpenChange={setFlowSelectorOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={flowSelectorOpen}
+                    className="w-full h-9 justify-between font-normal"
+                    disabled={loadingWorkflows}
+                  >
+                    {loadingWorkflows ? (
+                      <span className="text-muted-foreground">Loading...</span>
+                    ) : step.flowId ? (
+                      <span className="flex items-center gap-2 truncate">
+                        <WorkflowIcon className="h-4 w-4 text-pink-500 flex-shrink-0" />
+                        <span className="truncate">
+                          {availableWorkflows?.find(wf => wf._id === step.flowId)?.name || step.flowId}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">Select a workflow...</span>
+                    )}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search workflows..." />
+                    <CommandList>
+                      <CommandEmpty>
+                        {loadingWorkflows ? 'Loading workflows...' : 'No workflow found.'}
+                      </CommandEmpty>
+                      <CommandGroup>
+                        {availableWorkflows?.map((wf) => (
+                          <CommandItem
+                            key={wf._id}
+                            value={wf.name}
+                            onSelect={() => {
+                              onUpdate({ flowId: wf._id })
+                              setFlowSelectorOpen(false)
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                'mr-2 h-4 w-4',
+                                step.flowId === wf._id ? 'opacity-100' : 'opacity-0'
+                              )}
+                            />
+                            <div className="flex flex-col min-w-0">
+                              <span className="truncate">{wf.name}</span>
+                              {wf.description && (
+                                <span className="text-xs opacity-60 truncate">
+                                  {wf.description}
+                                </span>
+                              )}
+                            </div>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+              <p className="text-xs text-muted-foreground">
+                The workflow to delegate execution to.
+              </p>
             </div>
           </div>
         )}
