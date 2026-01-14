@@ -217,4 +217,153 @@ export const taskPaths = {
       },
     },
   },
+  '/api/tasks/{id}/documents': {
+    get: {
+      tags: ['Tasks', 'Documents'],
+      summary: 'List documents attached to a task',
+      description: 'Returns all documents that are linked to this task via the relatedTaskIds field.',
+      parameters: [
+        { name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Task ID' },
+      ],
+      responses: {
+        200: {
+          description: 'List of attached documents',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  data: {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/Document' },
+                  },
+                },
+              },
+            },
+          },
+        },
+        404: { description: 'Task not found' },
+      },
+    },
+    post: {
+      tags: ['Tasks', 'Documents'],
+      summary: 'Attach a document to a task',
+      description: 'Supports two modes: (1) Link an existing document by ID, or (2) Create a new document with inline content. Useful for AI agents to attach output documents to tasks.',
+      parameters: [
+        { name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Task ID' },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {
+                documentId: {
+                  type: 'string',
+                  description: 'ID of existing document to link (mutually exclusive with title/content)',
+                },
+                title: {
+                  type: 'string',
+                  description: 'Title for new document (required if creating)',
+                },
+                content: {
+                  type: 'string',
+                  description: 'Markdown content for new document (required if creating)',
+                },
+                type: {
+                  type: 'string',
+                  enum: ['sop', 'strategy', 'plan', 'template', 'reference', 'output', 'custom', 'workflow-prompt'],
+                  default: 'output',
+                  description: 'Document type',
+                },
+                status: {
+                  type: 'string',
+                  enum: ['draft', 'review', 'approved', 'archived'],
+                  default: 'draft',
+                  description: 'Document status',
+                },
+                summary: {
+                  type: 'string',
+                  description: 'Optional summary',
+                },
+                tags: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'Optional tags',
+                },
+                metadata: {
+                  type: 'object',
+                  description: 'Optional metadata',
+                },
+              },
+            },
+            examples: {
+              linkExisting: {
+                summary: 'Link existing document',
+                value: { documentId: '507f1f77bcf86cd799439011' },
+              },
+              createNew: {
+                summary: 'Create new document',
+                value: {
+                  title: 'Analysis Report',
+                  content: '# Analysis\n\nThis is the analysis result...',
+                  type: 'output',
+                  status: 'review',
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        201: {
+          description: 'Document attached or created',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  success: { type: 'boolean' },
+                  message: { type: 'string' },
+                  document: { $ref: '#/components/schemas/Document' },
+                },
+              },
+            },
+          },
+        },
+        400: { description: 'Invalid request (missing required fields or document already attached)' },
+        404: { description: 'Task or document not found' },
+      },
+    },
+  },
+  '/api/tasks/{id}/documents/{documentId}': {
+    delete: {
+      tags: ['Tasks', 'Documents'],
+      summary: 'Detach a document from a task',
+      description: 'Removes the task-document link. The document is not deleted, only unlinked from this task.',
+      parameters: [
+        { name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Task ID' },
+        { name: 'documentId', in: 'path', required: true, schema: { type: 'string' }, description: 'Document ID' },
+      ],
+      responses: {
+        200: {
+          description: 'Document detached',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  success: { type: 'boolean' },
+                  message: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        400: { description: 'Document is not attached to this task' },
+        404: { description: 'Task or document not found' },
+      },
+    },
+  },
 };

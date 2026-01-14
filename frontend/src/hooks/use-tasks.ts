@@ -468,3 +468,49 @@ export function useWorkflows() {
     staleTime: 5 * 60 * 1000, // 5 minutes
   })
 }
+
+// Task Documents
+export function useTaskDocuments(taskId: string | null) {
+  return useQuery({
+    queryKey: ['task-documents', taskId],
+    queryFn: () => (taskId ? tasksApi.getDocuments(taskId) : null),
+    enabled: !!taskId,
+    staleTime: 30 * 1000, // 30 seconds
+  })
+}
+
+export function useAttachDocument() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ taskId, data }: {
+      taskId: string
+      data: { documentId: string } | {
+        title: string
+        content: string
+        type?: string
+        status?: string
+        summary?: string
+        tags?: string[]
+        metadata?: Record<string, unknown>
+      }
+    }) => tasksApi.attachDocument(taskId, data as Parameters<typeof tasksApi.attachDocument>[1]),
+    onSuccess: (_data, { taskId }) => {
+      queryClient.invalidateQueries({ queryKey: ['task-documents', taskId] })
+      queryClient.invalidateQueries({ queryKey: ['documents'] })
+    },
+  })
+}
+
+export function useDetachDocument() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ taskId, documentId }: { taskId: string; documentId: string }) =>
+      tasksApi.detachDocument(taskId, documentId),
+    onSuccess: (_data, { taskId }) => {
+      queryClient.invalidateQueries({ queryKey: ['task-documents', taskId] })
+      queryClient.invalidateQueries({ queryKey: ['documents'] })
+    },
+  })
+}

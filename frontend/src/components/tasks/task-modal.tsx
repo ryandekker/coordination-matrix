@@ -28,7 +28,7 @@ import {
 } from '@/components/ui/tabs'
 import { Task, FieldConfig, LookupValue, TaskType, WebhookConfig } from '@/lib/api'
 import { toast } from 'sonner'
-import { useCreateTask, useUpdateTask, useRerunTask, useUsers, useWorkflows, useTasks, useTask, useTaskChildren } from '@/hooks/use-tasks'
+import { useCreateTask, useUpdateTask, useRerunTask, useUsers, useWorkflows, useTasks, useTask, useTaskChildren, useTaskDocuments, useDetachDocument } from '@/hooks/use-tasks'
 import { cn } from '@/lib/utils'
 import { TaskActivity } from './task-activity'
 import { WebhookTaskConfig } from './webhook-task-config'
@@ -42,7 +42,7 @@ import {
   DEFAULT_TASK_MODAL_TAB,
   type TaskModalTab,
 } from '@/lib/task-type-config'
-import { Settings2, Database, Activity, Workflow, ExternalLink, ArrowUpRight, ListTree, RotateCcw } from 'lucide-react'
+import { Settings2, Database, Activity, Workflow, ExternalLink, ArrowUpRight, ListTree, RotateCcw, FileText } from 'lucide-react'
 import {
   Tooltip,
   TooltipContent,
@@ -55,6 +55,7 @@ import { UserChip, UserAvatar } from '@/components/ui/user-chip'
 import { TagInput } from '@/components/ui/tag-input'
 import { SubtasksList } from './task-modal/subtasks-list'
 import { MetadataEditor } from './task-modal/metadata-editor'
+import { AttachedDocuments } from './task-modal/attached-documents'
 
 interface TaskModalProps {
   task: Task | null
@@ -146,10 +147,17 @@ export function TaskModal({
     isOpen && task ? task._id : null
   )
 
+  // Fetch documents attached to the current task
+  const { data: documentsData, isLoading: isLoadingDocuments } = useTaskDocuments(
+    isOpen && task ? task._id : null
+  )
+  const detachDocument = useDetachDocument()
+
   const users = usersData?.data || []
   const workflows = workflowsData?.data || []
   const allTasks = tasksData?.data || []
   const subtasks = childrenData?.data || []
+  const attachedDocuments = documentsData?.data || []
 
   const statusOptions = lookups['task_status'] || []
   const urgencyOptions = lookups['urgency'] || []
@@ -568,6 +576,22 @@ export function TaskModal({
     router.push(`/tasks?taskId=${subtaskId}`, { scroll: false })
   }, [router])
 
+  // Handle detaching a document from the task
+  const handleDetachDocument = useCallback((documentId: string) => {
+    if (!task) return
+    detachDocument.mutate(
+      { taskId: task._id, documentId },
+      {
+        onSuccess: () => {
+          toast.success('Document detached')
+        },
+        onError: (error) => {
+          toast.error('Failed to detach document: ' + error.message)
+        },
+      }
+    )
+  }, [task, detachDocument])
+
   // Editable header with key fields for existing tasks
   const EditableHeader = () => {
     if (!task) return null
@@ -599,7 +623,7 @@ export function TaskModal({
                   }
                   // Immediately save task type changes - don't wait for debounce
                   if (task) {
-                    updateTask.mutate({ id: task._id, data: { taskType: val } })
+                    updateTask.mutate({ id: task._id, data: { taskType: val as TaskType } })
                   }
                 }}
               >
@@ -1643,6 +1667,16 @@ export function TaskModal({
                   )}
                 </TabsTrigger>
                 <TabsTrigger
+                  value={TASK_MODAL_TABS.DOCUMENTS}
+                  className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent py-2.5"
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  <span className="text-xs">Docs</span>
+                  {attachedDocuments.length > 0 && (
+                    <span className="ml-0.5 text-[10px] bg-muted px-1 rounded">{attachedDocuments.length}</span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger
                   value={TASK_MODAL_TABS.METADATA}
                   className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent py-2.5"
                 >
@@ -1674,6 +1708,16 @@ export function TaskModal({
                   onSubtaskInputKeyDown={handleSubtaskInputKeyDown}
                   isCreatingSubtask={isCreatingSubtask}
                   subtaskInputRef={subtaskInputRef}
+                />
+              </TabsContent>
+
+              <TabsContent value={TASK_MODAL_TABS.DOCUMENTS} className="flex-1 min-h-0 overflow-y-auto mt-0">
+                <AttachedDocuments
+                  taskId={task._id}
+                  documents={attachedDocuments}
+                  isLoading={isLoadingDocuments}
+                  onDetach={handleDetachDocument}
+                  isDetaching={detachDocument.isPending}
                 />
               </TabsContent>
 

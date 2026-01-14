@@ -226,6 +226,39 @@ export const tasksApi = {
     const response = await authFetch(`${API_BASE}/tasks/workflow-callbacks?${searchParams}`)
     return handleResponse(response)
   },
+
+  // Document attachment operations
+  getDocuments: async (taskId: string): Promise<ApiResponse<Document[]>> => {
+    const response = await authFetch(`${API_BASE}/tasks/${taskId}/documents`)
+    return handleResponse(response)
+  },
+
+  attachDocument: async (
+    taskId: string,
+    data: { documentId: string } | {
+      title: string
+      content: string
+      type?: DocumentType
+      status?: DocumentStatus
+      summary?: string
+      tags?: string[]
+      metadata?: Record<string, unknown>
+    }
+  ): Promise<ApiResponse<Document>> => {
+    const response = await authFetch(`${API_BASE}/tasks/${taskId}/documents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  detachDocument: async (taskId: string, documentId: string): Promise<ApiResponse<void>> => {
+    const response = await authFetch(`${API_BASE}/tasks/${taskId}/documents/${documentId}`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
 }
 
 // Lookups API

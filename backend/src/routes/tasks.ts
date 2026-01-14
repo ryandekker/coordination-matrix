@@ -3,7 +3,7 @@ import { ObjectId, Filter, Sort, Document } from 'mongodb';
 import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
 import { ReferenceResolver } from '../services/reference-resolver.js';
-import { Task, TaskWithChildren, PaginatedResponse } from '../types/index.js';
+import { Task, TaskWithChildren, PaginatedResponse, Document as AppDocument } from '../types/index.js';
 import { publishTaskEvent, computeChanges, getSpecificEventTypes } from '../services/event-bus.js';
 import { activityLogService } from '../services/activity-log.js';
 import { workflowExecutionService } from '../services/workflow-execution-service.js';
@@ -1420,6 +1420,233 @@ tasksRouter.post('/bulk', async (req: Request, res: Response, next: NextFunction
     }
 
     res.json({ success: true, result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================================
+// Task Documents Endpoints
+// ============================================================================
+
+// GET /api/tasks/:id/documents - List documents attached to a task
+tasksRouter.get('/:id/documents', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+
+    if (!ObjectId.isValid(req.params.id)) {
+      throw createError('Invalid task ID', 400);
+    }
+
+    const taskId = new ObjectId(req.params.id);
+
+    // Verify task exists
+    const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
+    if (!task) {
+      throw createError('Task not found', 404);
+    }
+
+    // Find documents that have this task in relatedTaskIds
+    const documents = await db.collection<AppDocument>('documents')
+      .find({ relatedTaskIds: taskId })
+      .sort({ updatedAt: -1 })
+      .toArray();
+
+    // Resolve creator references
+    const resolvedDocuments = await Promise.all(
+      documents.map(async (doc) => {
+        const resolved: Record<string, unknown> = {};
+
+        if (doc.createdById) {
+          const user = await db.collection('users').findOne(
+            { _id: new ObjectId(doc.createdById) },
+            { projection: { displayName: 1 } }
+          );
+          if (user) {
+            resolved.createdBy = { _id: doc.createdById.toString(), displayName: user.displayName };
+          }
+        }
+
+        return {
+          ...doc,
+          _resolved: Object.keys(resolved).length > 0 ? resolved : undefined,
+        };
+      })
+    );
+
+    res.json({ data: resolvedDocuments });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/tasks/:id/documents - Attach a document to a task
+// Supports two modes:
+// 1. Link existing document: { documentId: "existing-doc-id" }
+// 2. Create new document: { title: "...", content: "...", type?: "output", status?: "draft" }
+tasksRouter.post('/:id/documents', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+
+    if (!ObjectId.isValid(req.params.id)) {
+      throw createError('Invalid task ID', 400);
+    }
+
+    const taskId = new ObjectId(req.params.id);
+
+    // Verify task exists
+    const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
+    if (!task) {
+      throw createError('Task not found', 404);
+    }
+
+    const { documentId, title, content, type = 'output', status = 'draft', summary, tags, metadata } = req.body;
+
+    let document: AppDocument;
+
+    if (documentId) {
+      // Mode 1: Link existing document
+      if (!ObjectId.isValid(documentId)) {
+        throw createError('Invalid document ID', 400);
+      }
+
+      const docId = new ObjectId(documentId);
+      const existingDoc = await db.collection<AppDocument>('documents').findOne({ _id: docId });
+
+      if (!existingDoc) {
+        throw createError('Document not found', 404);
+      }
+
+      // Check if already linked
+      if (existingDoc.relatedTaskIds?.some(id => id.toString() === taskId.toString())) {
+        throw createError('Document is already attached to this task', 400);
+      }
+
+      // Add task to document's relatedTaskIds
+      await db.collection<AppDocument>('documents').updateOne(
+        { _id: docId },
+        {
+          $addToSet: { relatedTaskIds: taskId },
+          $set: { updatedAt: new Date() },
+        }
+      );
+
+      document = { ...existingDoc, relatedTaskIds: [...(existingDoc.relatedTaskIds || []), taskId] };
+    } else {
+      // Mode 2: Create new document
+      if (!title) {
+        throw createError('Title is required when creating a new document', 400);
+      }
+      if (!content) {
+        throw createError('Content is required when creating a new document', 400);
+      }
+
+      const validTypes = ['sop', 'strategy', 'plan', 'template', 'reference', 'output', 'custom', 'workflow-prompt'];
+      const validStatuses = ['draft', 'review', 'approved', 'archived'];
+
+      if (!validTypes.includes(type)) {
+        throw createError(`Invalid document type. Valid types: ${validTypes.join(', ')}`, 400);
+      }
+      if (!validStatuses.includes(status)) {
+        throw createError(`Invalid document status. Valid statuses: ${validStatuses.join(', ')}`, 400);
+      }
+
+      const now = new Date();
+      const userId = req.user?.userId ? new ObjectId(req.user.userId) : null;
+
+      const newDocument: Omit<AppDocument, '_id'> = {
+        title,
+        content,
+        summary: summary || undefined,
+        type: type as AppDocument['type'],
+        status: status as AppDocument['status'],
+        tags: tags || [],
+        createdById: userId,
+        lastModifiedById: userId,
+        relatedTaskIds: [taskId],
+        workflowRunId: task.workflowRunId || null,
+        version: 1,
+        metadata: metadata || {},
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const result = await db.collection<AppDocument>('documents').insertOne(newDocument as AppDocument);
+      document = { ...newDocument, _id: result.insertedId } as AppDocument;
+    }
+
+    // Publish event for real-time updates (activity logging happens via event bus subscription)
+    await publishTaskEvent('task.updated', task, {
+      actorId: req.user?.userId ? new ObjectId(req.user.userId) : null,
+      actorType: req.user ? 'user' : 'system',
+      metadata: {
+        documentAttached: document._id.toString(),
+        documentTitle: document.title,
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      message: documentId ? 'Document linked to task' : 'Document created and attached to task',
+      document,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// DELETE /api/tasks/:id/documents/:documentId - Detach a document from a task
+tasksRouter.delete('/:id/documents/:documentId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+
+    if (!ObjectId.isValid(req.params.id)) {
+      throw createError('Invalid task ID', 400);
+    }
+    if (!ObjectId.isValid(req.params.documentId)) {
+      throw createError('Invalid document ID', 400);
+    }
+
+    const taskId = new ObjectId(req.params.id);
+    const documentId = new ObjectId(req.params.documentId);
+
+    // Verify task exists
+    const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
+    if (!task) {
+      throw createError('Task not found', 404);
+    }
+
+    // Verify document exists and is linked to this task
+    const document = await db.collection<AppDocument>('documents').findOne({ _id: documentId });
+    if (!document) {
+      throw createError('Document not found', 404);
+    }
+
+    if (!document.relatedTaskIds?.some(id => id.toString() === taskId.toString())) {
+      throw createError('Document is not attached to this task', 400);
+    }
+
+    // Remove task from document's relatedTaskIds
+    await db.collection<AppDocument>('documents').updateOne(
+      { _id: documentId },
+      {
+        $pull: { relatedTaskIds: taskId },
+        $set: { updatedAt: new Date() },
+      }
+    );
+
+    // Publish event for real-time updates (activity logging happens via event bus subscription)
+    const userId = req.user?.userId ? new ObjectId(req.user.userId) : null;
+    await publishTaskEvent('task.updated', task, {
+      actorId: userId,
+      actorType: req.user ? 'user' : 'system',
+      metadata: {
+        documentDetached: documentId.toString(),
+        documentTitle: document.title,
+      },
+    });
+
+    res.json({ success: true, message: 'Document detached from task' });
   } catch (error) {
     next(error);
   }
