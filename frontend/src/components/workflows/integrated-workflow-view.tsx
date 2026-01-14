@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { MermaidInteractive } from '@/components/ui/mermaid-interactive'
 import { StepConfigPanel } from './step-config-panel'
+import { workflowsApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
@@ -245,6 +246,12 @@ function generateMermaidFromSteps(steps: WorkflowStep[], includeStartNode: boole
   return lines.join('\n')
 }
 
+interface AvailableWorkflow {
+  _id: string
+  name: string
+  description?: string
+}
+
 export function IntegratedWorkflowView({
   steps,
   workflowId,
@@ -257,6 +264,31 @@ export function IntegratedWorkflowView({
   )
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false)
   const [isQuickSelectExpanded, setIsQuickSelectExpanded] = useState(false)
+  const [availableWorkflows, setAvailableWorkflows] = useState<AvailableWorkflow[]>([])
+  const [loadingWorkflows, setLoadingWorkflows] = useState(false)
+
+  // Fetch available workflows for Flow step type (nested workflows)
+  useEffect(() => {
+    if (availableWorkflows.length === 0 && !loadingWorkflows) {
+      setLoadingWorkflows(true)
+      workflowsApi.list()
+        .then(response => {
+          if (response.data) {
+            // Exclude the current workflow from the list to prevent self-reference
+            const filtered = response.data
+              .filter(w => w._id !== workflowId)
+              .map(w => ({ _id: w._id, name: w.name, description: w.description }))
+            setAvailableWorkflows(filtered)
+          }
+        })
+        .catch(err => {
+          console.error('Failed to fetch workflows:', err)
+        })
+        .finally(() => {
+          setLoadingWorkflows(false)
+        })
+    }
+  }, [workflowId])
 
   // Generate Mermaid diagram from steps
   const mermaidCode = useMemo(() => generateMermaidFromSteps(steps), [steps])
@@ -544,6 +576,8 @@ export function IntegratedWorkflowView({
               users={users}
               loopScope={loopScope}
               isInLoop={isInLoop}
+              availableWorkflows={availableWorkflows}
+              loadingWorkflows={loadingWorkflows}
               onUpdate={(updates) => updateStep(selectedStepIndex, updates)}
               onDelete={() => deleteStep(selectedStepIndex)}
               onMoveUp={() => moveStepUp(selectedStepIndex)}
