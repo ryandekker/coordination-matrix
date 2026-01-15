@@ -251,9 +251,8 @@ export function AttachedDocuments({
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button
-                              variant="outline"
+                              variant="secondary"
                               size="sm"
-                              className="border-destructive/50 text-destructive hover:text-destructive-foreground hover:bg-destructive"
                               onClick={e => {
                                 e.stopPropagation()
                                 setDetachDocId(doc._id)
