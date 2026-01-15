@@ -599,6 +599,273 @@ function FindDocumentConfig({
   )
 }
 
+// Flow step configuration component (extracted to match step-configs.tsx)
+function FlowStepConfigPanel({
+  step,
+  stepIndex,
+  workflowId,
+  previousSteps,
+  isInLoop,
+  loopScope,
+  availableWorkflows,
+  loadingWorkflows,
+  flowSelectorOpen,
+  setFlowSelectorOpen,
+  onUpdate,
+}: {
+  step: WorkflowStep
+  stepIndex: number
+  workflowId?: string
+  previousSteps: { id: string; name: string; stepType?: WorkflowStepType; itemVariable?: string }[]
+  isInLoop: boolean
+  loopScope?: LoopScope | null
+  availableWorkflows?: AvailableWorkflow[]
+  loadingWorkflows?: boolean
+  flowSelectorOpen: boolean
+  setFlowSelectorOpen: (open: boolean) => void
+  onUpdate: (updates: Partial<WorkflowStep>) => void
+}) {
+  // Initialize inputMapping if it doesn't exist
+  const inputMapping = step.inputMapping || {}
+  const mappingEntries = Object.entries(inputMapping)
+
+  const addMapping = () => {
+    const newMapping = { ...inputMapping, '': '' }
+    onUpdate({ inputMapping: newMapping })
+  }
+
+  const updateMappingKey = (oldKey: string, newKey: string) => {
+    const entries = Object.entries(inputMapping)
+    const newMapping: Record<string, string> = {}
+    for (const [k, v] of entries) {
+      if (k === oldKey) {
+        newMapping[newKey] = v
+      } else {
+        newMapping[k] = v
+      }
+    }
+    onUpdate({ inputMapping: newMapping })
+  }
+
+  const updateMappingValue = (key: string, value: string) => {
+    onUpdate({ inputMapping: { ...inputMapping, [key]: value } })
+  }
+
+  const removeMapping = (key: string) => {
+    const newMapping = { ...inputMapping }
+    delete newMapping[key]
+    onUpdate({ inputMapping: newMapping })
+  }
+
+  return (
+    <div className="space-y-3 border-t pt-3">
+      <div className="bg-pink-50 dark:bg-pink-950/30 border border-pink-200 dark:border-pink-800 rounded-lg p-3 text-sm">
+        <div className="flex items-start gap-2">
+          <WorkflowIcon className="h-4 w-4 text-pink-600 dark:text-pink-400 mt-0.5 flex-shrink-0" />
+          <div className="text-pink-800 dark:text-pink-200">
+            <p className="font-medium">Nested Workflow</p>
+            <p className="text-xs mt-1">
+              Delegates execution to another workflow. Input data is mapped from previous steps
+              and results are returned when the subflow completes.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <label className="text-sm font-medium">Target Workflow</label>
+        <Popover open={flowSelectorOpen} onOpenChange={setFlowSelectorOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              role="combobox"
+              aria-expanded={flowSelectorOpen}
+              className="w-full h-9 justify-between font-normal"
+              disabled={loadingWorkflows}
+            >
+              {loadingWorkflows ? (
+                <span className="text-muted-foreground">Loading...</span>
+              ) : step.flowId ? (
+                <span className="flex items-center gap-2 truncate">
+                  <WorkflowIcon className="h-4 w-4 text-pink-500 flex-shrink-0" />
+                  <span className="truncate">
+                    {availableWorkflows?.find(wf => wf._id === step.flowId)?.name || step.flowId}
+                  </span>
+                </span>
+              ) : (
+                <span className="text-muted-foreground">Select a workflow...</span>
+              )}
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+            <Command>
+              <CommandInput placeholder="Search workflows..." />
+              <CommandList>
+                <CommandEmpty>
+                  {loadingWorkflows ? 'Loading workflows...' : 'No workflow found.'}
+                </CommandEmpty>
+                <CommandGroup>
+                  {availableWorkflows?.map((wf) => (
+                    <CommandItem
+                      key={wf._id}
+                      value={wf.name}
+                      onSelect={() => {
+                        onUpdate({ flowId: wf._id })
+                        setFlowSelectorOpen(false)
+                      }}
+                    >
+                      <Check
+                        className={cn(
+                          'mr-2 h-4 w-4',
+                          step.flowId === wf._id ? 'opacity-100' : 'opacity-0'
+                        )}
+                      />
+                      <div className="flex flex-col min-w-0">
+                        <span className="truncate">{wf.name}</span>
+                        {wf.description && (
+                          <span className="text-xs opacity-60 truncate">
+                            {wf.description}
+                          </span>
+                        )}
+                      </div>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+        <p className="text-xs text-muted-foreground">
+          The workflow to delegate execution to.
+        </p>
+      </div>
+
+      {/* Input Mapping Section */}
+      <div className="space-y-2 border-t pt-3 mt-3">
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium flex items-center gap-2">
+            <Database className="h-4 w-4 text-muted-foreground" />
+            Input Mapping
+          </label>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={addMapping}
+            className="h-7 text-xs"
+          >
+            <Plus className="h-3 w-3 mr-1" />
+            Add Field
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Map data from previous steps to the subflow&apos;s input. Each field becomes available
+          in the subflow as <code className="bg-muted px-1 rounded">{"{{inputPayload.fieldName}}"}</code>
+        </p>
+
+        {mappingEntries.length === 0 ? (
+          <div className="bg-muted/30 rounded-lg p-3 text-sm text-muted-foreground text-center">
+            No input mappings defined. The subflow will receive the full input from the previous step.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {mappingEntries.map(([key, value], mappingIdx) => (
+              <div key={mappingIdx} className="flex items-center gap-2">
+                <Input
+                  value={key}
+                  onChange={(e) => updateMappingKey(key, e.target.value)}
+                  placeholder="fieldName"
+                  className="w-[140px] font-mono text-sm h-9"
+                />
+                <ArrowRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                <div className="flex-1 flex gap-1">
+                  <Input
+                    value={value}
+                    onChange={(e) => updateMappingValue(key, e.target.value)}
+                    placeholder="{{output.data}} or {{item.field}}"
+                    className="font-mono text-sm h-9"
+                  />
+                  <TokenBrowser
+                    workflowId={workflowId}
+                    previousSteps={previousSteps}
+                    currentStepIndex={stepIndex}
+                    loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
+                    onSelectToken={(token) => updateMappingValue(key, token)}
+                    variant="icon"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 w-9 p-0 text-destructive"
+                  onClick={() => removeMapping(key)}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Quick add common mappings */}
+        <div className="flex flex-wrap gap-1 mt-2">
+          <span className="text-xs text-muted-foreground">Quick add:</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 text-xs px-2"
+            onClick={() => onUpdate({
+              inputMapping: { ...inputMapping, 'data': '{{output}}' }
+            })}
+          >
+            output
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 text-xs px-2"
+            onClick={() => onUpdate({
+              inputMapping: { ...inputMapping, 'title': '{{output.title}}' }
+            })}
+          >
+            output.title
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 text-xs px-2"
+            onClick={() => onUpdate({
+              inputMapping: { ...inputMapping, 'item': '{{item}}' }
+            })}
+          >
+            item (loop)
+          </Button>
+        </div>
+      </div>
+
+      {/* Info about output extraction */}
+      <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-2 text-sm mt-3">
+        <div className="flex items-start gap-2">
+          <Info className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+          <div className="text-blue-800 dark:text-blue-200 text-xs">
+            <p className="font-medium">Output from Subflow</p>
+            <p className="mt-0.5">
+              When the subflow completes, its output will be available to subsequent steps
+              via <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">{"{{output}}"}</code> containing
+              the aggregated results from all subflow steps.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function StepConfigPanel({
   step,
   stepIndex,
@@ -1255,88 +1522,19 @@ export function StepConfigPanel({
 
         {/* Flow configuration */}
         {step.stepType === 'flow' && (
-          <div className="space-y-3 border-t pt-3">
-            <div className="bg-pink-50 dark:bg-pink-950/30 border border-pink-200 dark:border-pink-800 rounded-lg p-3 text-sm">
-              <div className="flex items-start gap-2">
-                <WorkflowIcon className="h-4 w-4 text-pink-600 dark:text-pink-400 mt-0.5 flex-shrink-0" />
-                <div className="text-pink-800 dark:text-pink-200">
-                  <p className="font-medium">Nested Workflow</p>
-                  <p className="text-xs mt-1">
-                    Delegates to another workflow.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-sm font-medium">Target Workflow</label>
-              <Popover open={flowSelectorOpen} onOpenChange={setFlowSelectorOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={flowSelectorOpen}
-                    className="w-full h-9 justify-between font-normal"
-                    disabled={loadingWorkflows}
-                  >
-                    {loadingWorkflows ? (
-                      <span className="text-muted-foreground">Loading...</span>
-                    ) : step.flowId ? (
-                      <span className="flex items-center gap-2 truncate">
-                        <WorkflowIcon className="h-4 w-4 text-pink-500 flex-shrink-0" />
-                        <span className="truncate">
-                          {availableWorkflows?.find(wf => wf._id === step.flowId)?.name || step.flowId}
-                        </span>
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">Select a workflow...</span>
-                    )}
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-                  <Command>
-                    <CommandInput placeholder="Search workflows..." />
-                    <CommandList>
-                      <CommandEmpty>
-                        {loadingWorkflows ? 'Loading workflows...' : 'No workflow found.'}
-                      </CommandEmpty>
-                      <CommandGroup>
-                        {availableWorkflows?.map((wf) => (
-                          <CommandItem
-                            key={wf._id}
-                            value={wf.name}
-                            onSelect={() => {
-                              onUpdate({ flowId: wf._id })
-                              setFlowSelectorOpen(false)
-                            }}
-                          >
-                            <Check
-                              className={cn(
-                                'mr-2 h-4 w-4',
-                                step.flowId === wf._id ? 'opacity-100' : 'opacity-0'
-                              )}
-                            />
-                            <div className="flex flex-col min-w-0">
-                              <span className="truncate">{wf.name}</span>
-                              {wf.description && (
-                                <span className="text-xs opacity-60 truncate">
-                                  {wf.description}
-                                </span>
-                              )}
-                            </div>
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-              <p className="text-xs text-muted-foreground">
-                The workflow to delegate execution to.
-              </p>
-            </div>
-          </div>
+          <FlowStepConfigPanel
+            step={step}
+            stepIndex={stepIndex}
+            workflowId={workflowId}
+            previousSteps={previousSteps}
+            isInLoop={isInLoop}
+            loopScope={loopScope}
+            availableWorkflows={availableWorkflows}
+            loadingWorkflows={loadingWorkflows}
+            flowSelectorOpen={flowSelectorOpen}
+            setFlowSelectorOpen={setFlowSelectorOpen}
+            onUpdate={onUpdate}
+          />
         )}
 
         {/* FindDocument configuration */}
