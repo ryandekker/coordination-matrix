@@ -5,6 +5,7 @@ import type {
   WebhookDelivery,
   WebhookTaskAttempt,
   WorkflowCallback,
+  WorkflowRequest,
 } from '@/lib/api'
 import {
   Clock,
@@ -18,7 +19,7 @@ import {
 } from 'lucide-react'
 
 // Unified request type for the list
-export type RequestType = 'external' | 'batch' | 'webhook_delivery' | 'webhook_task' | 'workflow_callback'
+export type RequestType = 'external' | 'batch' | 'webhook_delivery' | 'webhook_task' | 'workflow_callback' | 'workflow_request'
 export type RequestStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'awaiting_responses' | 'manual_review' | 'success' | 'retrying' | 'in_progress' | 'waiting'
 
 export interface UnifiedRequest {
@@ -59,7 +60,13 @@ export interface UnifiedRequest {
   // Workflow callback fields (inbound requests)
   workflowRunId?: string
   workflowStepId?: string
-  original: ExternalJob | BatchJob | WebhookDelivery | WebhookTaskAttempt | WorkflowCallback
+  // Workflow request fields (logged requests)
+  workflowName?: string
+  rootTaskId?: string
+  actorType?: string
+  source?: string
+  externalId?: string
+  original: ExternalJob | BatchJob | WebhookDelivery | WebhookTaskAttempt | WorkflowCallback | WorkflowRequest
 }
 
 // Status configurations
@@ -216,5 +223,36 @@ export function toWorkflowCallbackUnifiedRequest(callback: WorkflowCallback): Un
     requestHeaders: callback.headers,
     requestBody: callback.body,
     original: callback,
+  }
+}
+
+export function toWorkflowRequestUnifiedRequest(request: WorkflowRequest): UnifiedRequest {
+  // Generate a display name based on request type
+  const displayName = request.type === 'workflow_start'
+    ? `Start: ${request.workflowName || 'Workflow'}`
+    : `Callback: ${request.method} ${request.url}`;
+
+  return {
+    _id: request._id,
+    type: 'workflow_request',
+    name: displayName,
+    status: request.status as RequestStatus,
+    createdAt: request.receivedAt,
+    completedAt: request.processedAt,
+    workflowId: request.workflowId,
+    workflowName: request.workflowName,
+    workflowRunId: request.workflowRunId,
+    workflowStepId: request.stepId,
+    rootTaskId: request.rootTaskId,
+    taskId: request.taskId,
+    url: request.url,
+    method: request.method,
+    requestHeaders: request.headers,
+    requestBody: request.body,
+    error: request.error,
+    actorType: request.actorType,
+    source: request.source,
+    externalId: request.externalId,
+    original: request,
   }
 }

@@ -1110,3 +1110,48 @@ export interface DocumentSearchResult {
   score: number;                     // Similarity score (0-1)
   highlights?: string[];             // Relevant text snippets
 }
+
+// ============================================================================
+// Workflow Request Types (Inbound Request Logging)
+// ============================================================================
+
+export type WorkflowRequestType = 'workflow_start' | 'workflow_callback';
+
+export type WorkflowRequestActorType = 'user' | 'api_key' | 'anonymous' | 'system';
+
+export interface WorkflowRequest {
+  _id: ObjectId;
+
+  // Request type
+  type: WorkflowRequestType;
+
+  // HTTP request details
+  method: string;
+  url: string;
+  headers?: Record<string, string>;
+  body?: Record<string, unknown>;
+
+  // Processing status
+  status: 'success' | 'failed';
+  error?: string;
+
+  // Workflow correlation
+  workflowId?: ObjectId | null;
+  workflowName?: string;
+  workflowRunId?: ObjectId | null;
+  rootTaskId?: ObjectId | null;
+
+  // For callback requests
+  stepId?: string;
+  taskId?: ObjectId | null;
+
+  // Actor info
+  actorId?: ObjectId | null;
+  actorType: WorkflowRequestActorType;
+  source?: string;
+  externalId?: string;
+
+  // Timestamps
+  receivedAt: Date;
+  processedAt?: Date | null;
+}

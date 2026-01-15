@@ -170,6 +170,9 @@ See `./scripts/matrix-cli.mjs --help` for all commands.
 | PUT | `/:id/move` | Move to new parent |
 | DELETE | `/:id` | Delete task |
 | POST | `/bulk` | Bulk operations |
+| GET | `/:id/documents` | List attached documents |
+| POST | `/:id/documents` | Attach document (create or link existing) |
+| DELETE | `/:id/documents/:docId` | Detach a document |
 
 **List Tasks Query Parameters:**
 | Parameter | Type | Description |
@@ -237,6 +240,47 @@ See `./scripts/matrix-cli.mjs --help` for all commands.
   }
 }
 ```
+
+#### Task Document Attachments
+
+Attach markdown documents to tasks for context, outputs, or human review. Particularly useful for review-type tasks where manual intervention is required.
+
+**List Attached Documents:**
+```bash
+curl http://localhost:3001/api/tasks/:id/documents \
+  -H "X-API-Key: cm_ak_live_xxxxx"
+```
+
+**Attach Existing Document:**
+```json
+{
+  "documentId": "507f1f77bcf86cd799439011"
+}
+```
+
+**Create and Attach New Document:**
+```json
+{
+  "title": "Analysis Report",
+  "content": "# Analysis\n\n## Summary\n\nThis is the analysis result...",
+  "type": "output",
+  "status": "review",
+  "summary": "Brief summary for the document",
+  "tags": ["analysis", "report"]
+}
+```
+
+**Document Types:** `sop`, `strategy`, `plan`, `template`, `reference`, `output`, `custom`, `workflow-prompt`
+
+**Document Statuses:** `draft`, `review`, `approved`, `archived`
+
+**Detach Document:**
+```bash
+curl -X DELETE http://localhost:3001/api/tasks/:taskId/documents/:docId \
+  -H "X-API-Key: cm_ak_live_xxxxx"
+```
+
+Note: Detaching a document removes the link but does not delete the document itself.
 
 ---
 

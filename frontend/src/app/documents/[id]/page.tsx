@@ -2,7 +2,7 @@
 
 export const runtime = 'edge'
 
-import { use, useState } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useDocument, useDocumentVersions } from '@/hooks/use-documents'
 import { DocumentStatus, DocumentType } from '@/lib/api'
@@ -18,6 +18,8 @@ import {
   User,
   Tag,
   FileType,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { formatDistanceToNow, format } from 'date-fns'
 import { DocumentModal } from '@/components/documents/document-modal'
@@ -45,12 +47,13 @@ const STATUS_COLORS: Record<DocumentStatus, string> = {
 export default function DocumentViewPage({
   params,
 }: {
-  params: Promise<{ id: string }>
+  params: { id: string }
 }) {
-  const { id } = use(params)
+  const { id } = params
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<'content' | 'history'>('content')
   const [editModalOpen, setEditModalOpen] = useState(false)
+  const [headerExpanded, setHeaderExpanded] = useState(false)
 
   const { data: documentData, isLoading, error } = useDocument(id, true)
   const { data: versionsData } = useDocumentVersions(id)
@@ -79,21 +82,33 @@ export default function DocumentViewPage({
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col -m-6">
       {/* Header */}
-      <div className="flex items-center justify-between border-b px-6 py-4">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => router.push('/documents')}>
+      <div className="flex items-center justify-between gap-4 border-b px-6 py-3">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <Button variant="ghost" size="icon" className="shrink-0" onClick={() => router.push('/documents')}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <div>
-            <h1 className="text-2xl font-semibold">{document.title}</h1>
-            {document.summary && (
-              <p className="text-muted-foreground mt-1">{document.summary}</p>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <h1 className={`text-lg font-semibold ${headerExpanded ? '' : 'truncate'}`}>{document.title}</h1>
+              {(document.title.length > 50 || document.summary) && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="shrink-0 h-6 w-6"
+                  onClick={() => setHeaderExpanded(!headerExpanded)}
+                >
+                  {headerExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </Button>
+              )}
+            </div>
+            {headerExpanded && document.summary && (
+              <p className="text-sm text-muted-foreground mt-1">{document.summary}</p>
             )}
           </div>
         </div>
-        <Button onClick={() => setEditModalOpen(true)}>
+        <Button className="shrink-0" onClick={() => setEditModalOpen(true)}>
           <FileEdit className="mr-2 h-4 w-4" />
           Edit
         </Button>

@@ -1,8 +1,26 @@
 import { Router, Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
 import { workflowExecutionService } from '../services/workflow-execution-service.js';
-import { StartWorkflowInput, WorkflowRunStatus } from '../types/index.js';
+import { StartWorkflowInput, WorkflowRunStatus, WorkflowRequest, WorkflowRequestActorType } from '../types/index.js';
 import { requireAuth } from '../middleware/auth.js';
+import { getDb } from '../db/connection.js';
+
+// Helper to filter sensitive headers
+const filterSensitiveHeaders = (headers: Record<string, string | string[] | undefined>): Record<string, string> => {
+  const sensitiveHeaders = ['authorization', 'x-api-key', 'x-workflow-secret', 'cookie', 'x-csrf-token'];
+  return Object.fromEntries(
+    Object.entries(headers)
+      .filter(([key]) => !sensitiveHeaders.includes(key.toLowerCase()))
+      .map(([key, value]) => [key, Array.isArray(value) ? value.join(', ') : String(value || '')])
+  );
+};
+
+// Helper to determine actor type from request
+const getActorType = (req: Request): WorkflowRequestActorType => {
+  if (req.user?.userId) return 'user';
+  if (req.headers['x-api-key']) return 'api_key';
+  return 'anonymous';
+};
 
 const router = Router();
 
@@ -12,17 +30,68 @@ const router = Router();
 // Requires authentication (JWT or API key) to prevent spam
 // ============================================================================
 router.post('/', requireAuth, async (req: Request, res: Response): Promise<void> => {
-  try {
-    const input: StartWorkflowInput = req.body;
+  const db = getDb();
+  const receivedAt = new Date();
+  const input: StartWorkflowInput = req.body;
 
+  // Helper to log the request
+  const logRequest = async (
+    status: 'success' | 'failed',
+    options: {
+      workflowId?: ObjectId | null;
+      workflowName?: string;
+      workflowRunId?: ObjectId | null;
+      rootTaskId?: ObjectId | null;
+      error?: string;
+    } = {}
+  ) => {
+    try {
+      const workflowRequest: Omit<WorkflowRequest, '_id'> = {
+        type: 'workflow_start',
+        method: req.method,
+        url: req.originalUrl,
+        headers: filterSensitiveHeaders(req.headers as Record<string, string | string[] | undefined>),
+        body: input as unknown as Record<string, unknown>,
+        status,
+        error: options.error,
+        workflowId: options.workflowId,
+        workflowName: options.workflowName,
+        workflowRunId: options.workflowRunId,
+        rootTaskId: options.rootTaskId,
+        actorId: req.user?.userId ? new ObjectId(req.user.userId) : null,
+        actorType: getActorType(req),
+        source: input.source,
+        externalId: input.externalId,
+        receivedAt,
+        processedAt: new Date(),
+      };
+
+      await db.collection('workflow_requests').insertOne(workflowRequest);
+    } catch (logError) {
+      console.error('[WorkflowRuns] Failed to log request:', logError);
+    }
+  };
+
+  try {
     if (!input.workflowId) {
+      await logRequest('failed', { error: 'workflowId is required' });
       res.status(400).json({ error: 'workflowId is required' });
       return;
     }
 
     if (!ObjectId.isValid(input.workflowId)) {
+      await logRequest('failed', { error: 'Invalid workflowId' });
       res.status(400).json({ error: 'Invalid workflowId' });
       return;
+    }
+
+    // Get workflow name for logging
+    let workflowName: string | undefined;
+    try {
+      const workflow = await db.collection('workflows').findOne({ _id: new ObjectId(input.workflowId) });
+      workflowName = workflow?.name as string | undefined;
+    } catch {
+      // Ignore - workflow name is optional for logging
     }
 
     // Get actor ID from authenticated user (via JWT token)
@@ -32,6 +101,14 @@ router.post('/', requireAuth, async (req: Request, res: Response): Promise<void>
 
     const { run, rootTask } = await workflowExecutionService.startWorkflow(input, actorId);
 
+    // Log successful request
+    await logRequest('success', {
+      workflowId: new ObjectId(input.workflowId),
+      workflowName,
+      workflowRunId: run._id,
+      rootTaskId: rootTask._id,
+    });
+
     res.status(201).json({
       run,
       rootTask,
@@ -40,6 +117,13 @@ router.post('/', requireAuth, async (req: Request, res: Response): Promise<void>
   } catch (error: unknown) {
     console.error('[WorkflowRuns] Start error:', error);
     const message = error instanceof Error ? error.message : 'Failed to start workflow';
+
+    // Log failed request
+    await logRequest('failed', {
+      workflowId: input.workflowId && ObjectId.isValid(input.workflowId) ? new ObjectId(input.workflowId) : null,
+      error: message,
+    });
+
     res.status(400).json({ error: message });
   }
 });
@@ -226,16 +310,56 @@ router.post('/:id/cancel', requireAuth, async (req: Request, res: Response): Pro
 //   - workflowUpdate.total: number - Set/update expected item count
 // ============================================================================
 router.post('/:id/callback/:stepId', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { id, stepId } = req.params;
+  const db = getDb();
+  const receivedAt = new Date();
+  const { id, stepId } = req.params;
 
+  // Helper to log callback request
+  const logCallbackRequest = async (
+    status: 'success' | 'failed',
+    options: {
+      workflowRunId?: ObjectId | null;
+      taskId?: ObjectId | null;
+      error?: string;
+    } = {}
+  ) => {
+    try {
+      const workflowRequest: Omit<WorkflowRequest, '_id'> = {
+        type: 'workflow_callback',
+        method: req.method,
+        url: req.originalUrl,
+        headers: filterSensitiveHeaders(req.headers as Record<string, string | string[] | undefined>),
+        body: req.body as Record<string, unknown>,
+        status,
+        error: options.error,
+        workflowRunId: options.workflowRunId,
+        stepId,
+        taskId: options.taskId,
+        actorId: null,
+        actorType: 'anonymous', // Callbacks are typically anonymous
+        receivedAt,
+        processedAt: new Date(),
+      };
+
+      await db.collection('workflow_requests').insertOne(workflowRequest);
+    } catch (logError) {
+      console.error('[WorkflowRuns] Failed to log callback request:', logError);
+    }
+  };
+
+  try {
     if (!ObjectId.isValid(id)) {
+      await logCallbackRequest('failed', { error: 'Invalid workflow run ID' });
       res.status(400).json({ error: 'Invalid workflow run ID' });
       return;
     }
 
     const secret = req.headers['x-workflow-secret'] as string;
     if (!secret) {
+      await logCallbackRequest('failed', {
+        workflowRunId: new ObjectId(id),
+        error: 'Missing X-Workflow-Secret header',
+      });
       res.status(401).json({ error: 'Missing X-Workflow-Secret header' });
       return;
     }
@@ -258,7 +382,7 @@ router.post('/:id/callback/:stepId', async (req: Request, res: Response): Promis
       };
     }
 
-    // Build request info for logging
+    // Build request info for logging (to task.metadata.callbackRequests)
     const requestInfo = {
       url: req.originalUrl,
       method: req.method,
@@ -267,15 +391,27 @@ router.post('/:id/callback/:stepId', async (req: Request, res: Response): Promis
           .filter(([key]) => !['x-workflow-secret', 'authorization'].includes(key.toLowerCase()))
           .map(([key, value]) => [key, String(value)])
       ),
-      receivedAt: new Date(),
+      receivedAt,
     };
 
     const result = await workflowExecutionService.handleCallback(id, stepId, payload, secret, requestInfo);
+
+    // Log successful callback
+    await logCallbackRequest('success', {
+      workflowRunId: new ObjectId(id),
+      taskId: result.taskId ? new ObjectId(result.taskId) : null,
+    });
 
     res.json(result);
   } catch (error: unknown) {
     console.error('[WorkflowRuns] Callback error:', error);
     const message = error instanceof Error ? error.message : 'Failed to process callback';
+
+    // Log failed callback
+    await logCallbackRequest('failed', {
+      workflowRunId: ObjectId.isValid(id) ? new ObjectId(id) : null,
+      error: message,
+    });
 
     if (message.includes('Invalid callback secret') || message.includes('secret')) {
       res.status(401).json({ error: message });
@@ -296,16 +432,56 @@ router.post('/:id/callback/:stepId', async (req: Request, res: Response): Promis
 // Kept for backward compatibility - internally redirects to unified handler
 // ============================================================================
 router.post('/:id/foreach/:stepId/item', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { id, stepId } = req.params;
+  const db = getDb();
+  const receivedAt = new Date();
+  const { id, stepId } = req.params;
 
+  // Helper to log callback request
+  const logCallbackRequest = async (
+    status: 'success' | 'failed',
+    options: {
+      workflowRunId?: ObjectId | null;
+      taskId?: ObjectId | null;
+      error?: string;
+    } = {}
+  ) => {
+    try {
+      const workflowRequest: Omit<WorkflowRequest, '_id'> = {
+        type: 'workflow_callback',
+        method: req.method,
+        url: req.originalUrl,
+        headers: filterSensitiveHeaders(req.headers as Record<string, string | string[] | undefined>),
+        body: req.body as Record<string, unknown>,
+        status,
+        error: options.error,
+        workflowRunId: options.workflowRunId,
+        stepId,
+        taskId: options.taskId,
+        actorId: null,
+        actorType: 'anonymous',
+        receivedAt,
+        processedAt: new Date(),
+      };
+
+      await db.collection('workflow_requests').insertOne(workflowRequest);
+    } catch (logError) {
+      console.error('[WorkflowRuns] Failed to log callback request:', logError);
+    }
+  };
+
+  try {
     if (!ObjectId.isValid(id)) {
+      await logCallbackRequest('failed', { error: 'Invalid workflow run ID' });
       res.status(400).json({ error: 'Invalid workflow run ID' });
       return;
     }
 
     const secret = req.headers['x-workflow-secret'] as string;
     if (!secret) {
+      await logCallbackRequest('failed', {
+        workflowRunId: new ObjectId(id),
+        error: 'Missing X-Workflow-Secret header',
+      });
       res.status(401).json({ error: 'Missing X-Workflow-Secret header' });
       return;
     }
@@ -324,7 +500,7 @@ router.post('/:id/foreach/:stepId/item', async (req: Request, res: Response): Pr
       };
     }
 
-    // Build request info for logging
+    // Build request info for logging (to task.metadata.callbackRequests)
     const requestInfo = {
       url: req.originalUrl,
       method: req.method,
@@ -333,10 +509,16 @@ router.post('/:id/foreach/:stepId/item', async (req: Request, res: Response): Pr
           .filter(([key]) => !['x-workflow-secret', 'authorization'].includes(key.toLowerCase()))
           .map(([key, value]) => [key, String(value)])
       ),
-      receivedAt: new Date(),
+      receivedAt,
     };
 
     const result = await workflowExecutionService.handleCallback(id, stepId, unifiedPayload, secret, requestInfo);
+
+    // Log successful callback
+    await logCallbackRequest('success', {
+      workflowRunId: new ObjectId(id),
+      taskId: result.taskId ? new ObjectId(result.taskId) : null,
+    });
 
     // Return legacy response format for backward compatibility
     res.json({
@@ -351,6 +533,12 @@ router.post('/:id/foreach/:stepId/item', async (req: Request, res: Response): Pr
     console.error('[WorkflowRuns] Foreach item callback error:', error);
     const message = error instanceof Error ? error.message : 'Failed to process foreach item';
 
+    // Log failed callback
+    await logCallbackRequest('failed', {
+      workflowRunId: ObjectId.isValid(id) ? new ObjectId(id) : null,
+      error: message,
+    });
+
     if (message.includes('Invalid callback secret') || message.includes('secret')) {
       res.status(401).json({ error: message });
       return;
@@ -361,6 +549,99 @@ router.post('/:id/foreach/:stepId/item', async (req: Request, res: Response): Pr
     }
 
     res.status(500).json({ error: message });
+  }
+});
+
+// ============================================================================
+// List Workflow Requests (Inbound Request Log)
+// GET /api/workflow-runs/requests
+// Returns logged inbound requests that trigger or interact with workflows
+// ============================================================================
+router.get('/requests', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const db = getDb();
+    const {
+      type,           // 'workflow_start' | 'workflow_callback'
+      status,         // 'success' | 'failed'
+      workflowId,
+      workflowRunId,
+      limit = '50',
+      offset = '0',
+    } = req.query;
+
+    // Build filter
+    const filter: Record<string, unknown> = {};
+
+    if (type) {
+      filter.type = type;
+    }
+    if (status) {
+      filter.status = status;
+    }
+    if (workflowId && ObjectId.isValid(workflowId as string)) {
+      filter.workflowId = new ObjectId(workflowId as string);
+    }
+    if (workflowRunId && ObjectId.isValid(workflowRunId as string)) {
+      filter.workflowRunId = new ObjectId(workflowRunId as string);
+    }
+
+    const limitNum = Math.min(parseInt(limit as string, 10) || 50, 200);
+    const offsetNum = parseInt(offset as string, 10) || 0;
+
+    // Get total count
+    const total = await db.collection('workflow_requests').countDocuments(filter);
+
+    // Get requests
+    const requests = await db
+      .collection('workflow_requests')
+      .find(filter)
+      .sort({ receivedAt: -1 })
+      .skip(offsetNum)
+      .limit(limitNum)
+      .toArray();
+
+    res.json({
+      data: requests,
+      pagination: {
+        limit: limitNum,
+        offset: offsetNum,
+        total,
+      },
+    });
+  } catch (error) {
+    console.error('[WorkflowRuns] List requests error:', error);
+    res.status(500).json({ error: 'Failed to list workflow requests' });
+  }
+});
+
+// ============================================================================
+// Get Single Workflow Request
+// GET /api/workflow-runs/requests/:requestId
+// Returns details of a specific workflow request
+// ============================================================================
+router.get('/requests/:requestId', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const db = getDb();
+    const { requestId } = req.params;
+
+    if (!ObjectId.isValid(requestId)) {
+      res.status(400).json({ error: 'Invalid request ID' });
+      return;
+    }
+
+    const request = await db
+      .collection('workflow_requests')
+      .findOne({ _id: new ObjectId(requestId) });
+
+    if (!request) {
+      res.status(404).json({ error: 'Workflow request not found' });
+      return;
+    }
+
+    res.json({ data: request });
+  } catch (error) {
+    console.error('[WorkflowRuns] Get request error:', error);
+    res.status(500).json({ error: 'Failed to get workflow request' });
   }
 });
 

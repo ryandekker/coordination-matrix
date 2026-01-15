@@ -1107,6 +1107,7 @@ db.documents.createIndex({ tags: 1 });
 db.documents.createIndex({ createdById: 1 });
 db.documents.createIndex({ parentDocumentId: 1 });
 db.documents.createIndex({ workflowRunId: 1 });
+db.documents.createIndex({ relatedTaskIds: 1 });  // For task->document lookups
 db.documents.createIndex({ createdAt: -1 });
 db.documents.createIndex({ updatedAt: -1 });
 // Full-text search on title, content, and summary

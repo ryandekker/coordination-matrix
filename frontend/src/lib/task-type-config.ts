@@ -207,6 +207,7 @@ export const TASK_MODAL_TAB_KEY = 'task-modal-last-tab'
 export const TASK_MODAL_TABS = {
   TYPE_CONFIG: 'type-config',
   SUBTASKS: 'subtasks',
+  DOCUMENTS: 'documents',
   METADATA: 'metadata',
   ACTIVITY: 'activity',
 } as const

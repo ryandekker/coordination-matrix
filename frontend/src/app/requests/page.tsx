@@ -30,6 +30,7 @@ import {
   Phone,
   Copy,
   Check,
+  Zap,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -76,6 +77,7 @@ import {
   batchJobsApi,
   externalJobsApi,
   workflowsApi,
+  workflowRunsApi,
   webhooksApi,
   tasksApi,
   lookupsApi,
@@ -90,6 +92,7 @@ import {
   WebhookDelivery,
   WebhookTaskAttempt,
   WorkflowCallback,
+  WorkflowRequest,
   LookupValue,
   User,
 } from '@/lib/api'
@@ -109,6 +112,7 @@ import {
   toWebhookDeliveryUnifiedRequest,
   toWebhookTaskUnifiedRequest,
   toWorkflowCallbackUnifiedRequest,
+  toWorkflowRequestUnifiedRequest,
 } from './components/types'
 
 // ============================================================================
@@ -1276,11 +1280,185 @@ function WorkflowCallbackDetail({ callbackId }: { callbackId: string }) {
 }
 
 // ============================================================================
+// Workflow Request Detail View (Logged Inbound Requests)
+// ============================================================================
+function WorkflowRequestDetail({ requestId }: { requestId: string }) {
+  const router = useRouter()
+
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['workflow-request', requestId],
+    queryFn: () => workflowRunsApi.getRequest(requestId),
+  })
+
+  const request = data?.data
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    )
+  }
+
+  if (error || !request) {
+    return (
+      <div className="space-y-4">
+        <Button variant="ghost" onClick={() => router.push('/requests')}>
+          <ChevronLeft className="h-4 w-4 mr-2" />
+          Back to List
+        </Button>
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-8 text-center">
+          <p className="text-destructive">Failed to load workflow request</p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>
+            Retry
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  const statusConfig = STATUS_CONFIG[request.status] || STATUS_CONFIG.pending
+  const StatusIcon = statusConfig.icon
+  const isStart = request.type === 'workflow_start'
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" onClick={() => router.push('/requests')}>
+            <ChevronLeft className="h-4 w-4 mr-2" />
+            Back
+          </Button>
+          <div>
+            <div className="flex items-center gap-3">
+              <Badge variant="outline" className="text-xs">
+                <Zap className="h-3 w-3 mr-1" />
+                {isStart ? 'Workflow Start' : 'Workflow Callback'}
+              </Badge>
+              <h1 className="text-2xl font-bold">
+                {request.workflowName || (isStart ? 'Workflow Trigger' : 'Workflow Callback')}
+              </h1>
+              <Badge variant="outline" className={cn('text-sm', statusConfig.color)}>
+                <StatusIcon className="h-4 w-4 mr-1" />
+                {statusConfig.label}
+              </Badge>
+            </div>
+            <p className="text-sm text-muted-foreground mt-1">
+              {request.method} {request.url}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Error */}
+      {request.error && (
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-5 w-5 text-destructive mt-0.5 flex-shrink-0" />
+            <div className="text-sm">
+              <span className="font-medium text-destructive">Error: </span>
+              <span className="text-destructive/90">{request.error}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Request Info */}
+      <div className="rounded-lg border bg-card p-4">
+        <h2 className="font-semibold mb-4">Request Details</h2>
+        <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
+          <div>
+            <span className="text-muted-foreground">Type:</span>
+            <span className="ml-2">{isStart ? 'Start Workflow' : 'Callback'}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Actor Type:</span>
+            <span className="ml-2">{request.actorType}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Received:</span>
+            <span className="ml-2">{formatDate(request.receivedAt)}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Processed:</span>
+            <span className="ml-2">{formatDate(request.processedAt)}</span>
+          </div>
+          {request.source && (
+            <div>
+              <span className="text-muted-foreground">Source:</span>
+              <span className="ml-2">{request.source}</span>
+            </div>
+          )}
+          {request.externalId && (
+            <div>
+              <span className="text-muted-foreground">External ID:</span>
+              <span className="ml-2 font-mono text-xs">{request.externalId}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Workflow Run Link */}
+      {request.workflowRunId && (
+        <div className="rounded-lg border bg-card p-4">
+          <h2 className="font-semibold mb-2">Created Workflow Run</h2>
+          <div className="flex items-center justify-between">
+            <code className="text-sm font-mono text-muted-foreground">{request.workflowRunId}</code>
+            <Link
+              href={`/workflows?runId=${request.workflowRunId}`}
+              className="text-primary hover:underline flex items-center gap-1"
+            >
+              View Workflow Run <ExternalLink className="h-3 w-3" />
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Root Task Link */}
+      {request.rootTaskId && (
+        <div className="rounded-lg border bg-card p-4">
+          <h2 className="font-semibold mb-2">Root Task</h2>
+          <div className="flex items-center justify-between">
+            <code className="text-sm font-mono text-muted-foreground">{request.rootTaskId}</code>
+            <Link
+              href={`/tasks?taskId=${request.rootTaskId}`}
+              className="text-primary hover:underline flex items-center gap-1"
+            >
+              View Task <ExternalLink className="h-3 w-3" />
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Headers */}
+      {request.headers && Object.keys(request.headers).length > 0 && (
+        <div className="rounded-lg border bg-card p-4">
+          <h2 className="font-semibold mb-2">Request Headers</h2>
+          <pre className="text-sm bg-muted p-3 rounded-md overflow-x-auto">
+            {JSON.stringify(request.headers, null, 2)}
+          </pre>
+        </div>
+      )}
+
+      {/* Body */}
+      {request.body && Object.keys(request.body).length > 0 && (
+        <div className="rounded-lg border bg-card p-4">
+          <h2 className="font-semibold mb-2">Request Body</h2>
+          <pre className="text-sm bg-muted p-3 rounded-md overflow-x-auto max-h-96">
+            {JSON.stringify(request.body, null, 2)}
+          </pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ============================================================================
 // Unified Request List
 // ============================================================================
 function RequestsList() {
   const queryClient = useQueryClient()
-  const [typeFilter, setTypeFilter] = useState<'all' | 'external' | 'batch' | 'webhook_delivery' | 'webhook_task' | 'workflow_callback'>('all')
+  const [typeFilter, setTypeFilter] = useState<'all' | 'external' | 'batch' | 'webhook_delivery' | 'webhook_task' | 'workflow_callback' | 'workflow_request'>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [taskStatusFilter, setTaskStatusFilter] = useState<string>('all')
   const [taskTypeFilter, setTaskTypeFilter] = useState<string>('all')
@@ -1294,6 +1472,7 @@ function RequestsList() {
     queryClient.invalidateQueries({ queryKey: ['batch-jobs-list'] })
     queryClient.invalidateQueries({ queryKey: ['workflow-callbacks-list'] })
     queryClient.invalidateQueries({ queryKey: ['webhook-attempts-list'] })
+    queryClient.invalidateQueries({ queryKey: ['workflow-requests-list'] })
   }, [queryClient])
 
   useEventStream({ onEvent: handleEvent })
@@ -1373,6 +1552,14 @@ function RequestsList() {
     enabled: typeFilter === 'all' || typeFilter === 'workflow_callback',
   })
 
+  // Fetch workflow requests (logged inbound requests)
+  const { data: workflowRequestsData, isLoading: workflowRequestsLoading, refetch: refetchWorkflowRequests } = useQuery({
+    queryKey: ['workflow-requests-list'],
+    queryFn: () => workflowRunsApi.listRequests({ limit: 100 }),
+    refetchInterval: 30000, // Fallback polling - SSE handles real-time
+    enabled: typeFilter === 'all' || typeFilter === 'workflow_request',
+  })
+
   // Fetch workflows for batch job names
   const { data: workflowsData } = useQuery({
     queryKey: ['workflows'],
@@ -1424,6 +1611,11 @@ function RequestsList() {
       requests.push(...workflowCallbacksData.data.map(toWorkflowCallbackUnifiedRequest))
     }
 
+    // Add workflow requests (logged inbound requests)
+    if ((typeFilter === 'all' || typeFilter === 'workflow_request') && workflowRequestsData?.data) {
+      requests.push(...workflowRequestsData.data.map(toWorkflowRequestUnifiedRequest))
+    }
+
     // Filter by status
     let filtered = requests
     if (statusFilter !== 'all') {
@@ -1432,9 +1624,9 @@ function RequestsList() {
 
     // Sort by createdAt descending
     return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-  }, [externalJobsData, batchJobsData, webhookDeliveriesData, webhookAttemptsData, workflowCallbacksData, typeFilter, statusFilter])
+  }, [externalJobsData, batchJobsData, webhookDeliveriesData, webhookAttemptsData, workflowCallbacksData, workflowRequestsData, typeFilter, statusFilter])
 
-  const isLoading = externalLoading || batchLoading || deliveriesLoading || attemptsLoading || callbacksLoading
+  const isLoading = externalLoading || batchLoading || deliveriesLoading || attemptsLoading || callbacksLoading || workflowRequestsLoading
 
   const handleRefresh = () => {
     refetchExternal()
@@ -1442,6 +1634,7 @@ function RequestsList() {
     refetchDeliveries()
     refetchAttempts()
     refetchCallbacks()
+    refetchWorkflowRequests()
   }
 
   // Count active requests
@@ -1507,6 +1700,12 @@ function RequestsList() {
                 <div className="flex items-center gap-2">
                   <Phone className="h-4 w-4" />
                   Workflow Callbacks
+                </div>
+              </SelectItem>
+              <SelectItem value="workflow_request">
+                <div className="flex items-center gap-2">
+                  <Zap className="h-4 w-4" />
+                  Workflow Triggers
                 </div>
               </SelectItem>
             </SelectContent>
@@ -1627,8 +1826,10 @@ function RequestsList() {
                 const isWebhookDelivery = request.type === 'webhook_delivery'
                 const isWebhookTask = request.type === 'webhook_task'
                 const isWorkflowCallback = request.type === 'workflow_callback'
+                const isWorkflowRequest = request.type === 'workflow_request'
                 const batchJob = isBatch ? request.original as BatchJob : null
                 const workflowCallback = isWorkflowCallback ? request.original as WorkflowCallback : null
+                const workflowRequest = isWorkflowRequest ? request.original as WorkflowRequest : null
 
                 // Get type icon and label
                 const getTypeInfo = () => {
@@ -1637,6 +1838,7 @@ function RequestsList() {
                   if (isWebhookDelivery) return { icon: Send, label: 'Webhook' }
                   if (isWebhookTask) return { icon: ArrowLeftRight, label: 'Task' }
                   if (isWorkflowCallback) return { icon: Phone, label: 'Callback' }
+                  if (isWorkflowRequest) return { icon: Zap, label: 'Trigger' }
                   return { icon: ArrowLeftRight, label: 'Unknown' }
                 }
                 const typeInfo = getTypeInfo()
@@ -1672,6 +1874,16 @@ function RequestsList() {
                   }
                   if (isWorkflowCallback && workflowCallback) {
                     parts.push(workflowCallback.taskType)
+                  }
+                  if (isWorkflowRequest && workflowRequest) {
+                    if (workflowRequest.type === 'workflow_start') {
+                      parts.push('Start workflow')
+                    } else {
+                      parts.push('Callback')
+                    }
+                    if (workflowRequest.actorType && workflowRequest.actorType !== 'anonymous') {
+                      parts.push(`via ${workflowRequest.actorType}`)
+                    }
                   }
                   if (request.error) {
                     parts.push(request.error.substring(0, 50) + (request.error.length > 50 ? '...' : ''))
@@ -1794,6 +2006,9 @@ function RequestsContent() {
     }
     if (requestType === 'workflow_callback') {
       return <WorkflowCallbackDetail callbackId={requestId} />
+    }
+    if (requestType === 'workflow_request') {
+      return <WorkflowRequestDetail requestId={requestId} />
     }
     // Default to batch
     return <BatchJobDetail requestId={requestId} />
