@@ -82,7 +82,7 @@ export default function DocumentViewPage({
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col -m-6">
       {/* Header */}
       <div className="flex items-center justify-between gap-4 border-b px-6 py-3">
         <div className="flex items-center gap-3 min-w-0 flex-1">
