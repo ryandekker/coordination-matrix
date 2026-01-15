@@ -81,19 +81,19 @@ export default function DocumentViewPage({
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between border-b px-6 py-4">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => router.push('/documents')}>
+      <div className="flex items-start justify-between gap-4 border-b px-6 py-4">
+        <div className="flex items-start gap-4 min-w-0 flex-1">
+          <Button variant="ghost" size="icon" className="shrink-0 mt-1" onClick={() => router.push('/documents')}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <div>
-            <h1 className="text-2xl font-semibold">{document.title}</h1>
+          <div className="min-w-0">
+            <h1 className="text-xl font-semibold line-clamp-2">{document.title}</h1>
             {document.summary && (
-              <p className="text-muted-foreground mt-1">{document.summary}</p>
+              <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{document.summary}</p>
             )}
           </div>
         </div>
-        <Button onClick={() => setEditModalOpen(true)}>
+        <Button className="shrink-0" onClick={() => setEditModalOpen(true)}>
           <FileEdit className="mr-2 h-4 w-4" />
           Edit
         </Button>
