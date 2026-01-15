@@ -2,7 +2,7 @@
 
 export const runtime = 'edge'
 
-import { use, useState } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useDocument, useDocumentVersions } from '@/hooks/use-documents'
 import { DocumentStatus, DocumentType } from '@/lib/api'
@@ -45,9 +45,9 @@ const STATUS_COLORS: Record<DocumentStatus, string> = {
 export default function DocumentViewPage({
   params,
 }: {
-  params: Promise<{ id: string }>
+  params: { id: string }
 }) {
-  const { id } = use(params)
+  const { id } = params
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<'content' | 'history'>('content')
   const [editModalOpen, setEditModalOpen] = useState(false)
