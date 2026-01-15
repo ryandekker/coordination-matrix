@@ -2,3 +2,8 @@
 export * from './types'
 export { SubtasksList } from './subtasks-list'
 export { MetadataEditor } from './metadata-editor'
+export { MetadataTab } from './metadata-tab'
+export { AttachedDocuments } from './attached-documents'
+export { StatusPanel } from './status-panel'
+export { OutputTab } from './output-tab'
+export { DetailsTab } from './details-tab'

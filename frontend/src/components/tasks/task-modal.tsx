@@ -32,30 +32,27 @@ import { useCreateTask, useUpdateTask, useRerunTask, useUsers, useWorkflows, use
 import { cn } from '@/lib/utils'
 import { TaskActivity } from './task-activity'
 import { WebhookTaskConfig } from './webhook-task-config'
-import { WorkflowTrigger } from './workflow-trigger'
-import { JsonViewer } from '@/components/ui/json-viewer'
 import {
   TASK_TYPE_CONFIG,
   getTaskTypeConfig,
   TASK_MODAL_TAB_KEY,
   TASK_MODAL_TABS,
-  DEFAULT_TASK_MODAL_TAB,
+  getSmartDefaultTab,
   type TaskModalTab,
 } from '@/lib/task-type-config'
-import { Settings2, Database, Activity, Workflow, ExternalLink, ArrowUpRight, ListTree, RotateCcw, FileText } from 'lucide-react'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
+import { Activity, Workflow, ExternalLink, ListTree, FileText, FileOutput, Settings, Braces } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { UserChip, UserAvatar } from '@/components/ui/user-chip'
+import { UserChip } from '@/components/ui/user-chip'
 import { TagInput } from '@/components/ui/tag-input'
-import { SubtasksList } from './task-modal/subtasks-list'
-import { MetadataEditor } from './task-modal/metadata-editor'
-import { AttachedDocuments } from './task-modal/attached-documents'
+import {
+  SubtasksList,
+  AttachedDocuments,
+  StatusPanel,
+  OutputTab,
+  DetailsTab,
+  MetadataTab,
+} from './task-modal/index'
 
 interface TaskModalProps {
   task: Task | null
@@ -78,76 +75,52 @@ export function TaskModal({
   const queryClient = useQueryClient()
   const prevIsOpenRef = useRef(false)
   const titleInputRef = useRef<HTMLInputElement | null>(null)
-  const [isMetadataEditMode, setIsMetadataEditMode] = useState(false)
-  const [metadataError, setMetadataError] = useState<string | null>(null)
   const [webhookConfig, setWebhookConfig] = useState<WebhookConfig | undefined>(undefined)
-  const metadataTextareaRef = useRef<HTMLTextAreaElement>(null)
-  const savedMetadataValueRef = useRef<string>('') // Track last saved value for reset
-  const currentMetadataValueRef = useRef<string>('') // Track current textarea value to restore after re-renders
 
-  // Subtask creation state (at parent level to maintain focus across re-renders)
+  // Subtask creation state
   const subtaskInputRef = useRef<HTMLInputElement>(null)
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
   const [isCreatingSubtask, setIsCreatingSubtask] = useState(false)
 
-  // Right sidebar tab state - persisted to localStorage
-  const [activeTab, setActiveTab] = useState<TaskModalTab>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem(TASK_MODAL_TAB_KEY)
-      if (stored && Object.values(TASK_MODAL_TABS).includes(stored as TaskModalTab)) {
-        return stored as TaskModalTab
-      }
-    }
-    return DEFAULT_TASK_MODAL_TAB
-  })
+  // Webhook execution state
+  const [isExecutingWebhook, setIsExecutingWebhook] = useState(false)
+  const [isRetryingWebhook, setIsRetryingWebhook] = useState(false)
 
-  // Persist tab selection to localStorage
-  const handleTabChange = useCallback((value: string) => {
-    const tab = value as TaskModalTab
-    setActiveTab(tab)
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(TASK_MODAL_TAB_KEY, tab)
-    }
-  }, [])
-
-  // Auto-save refs (using refs to avoid re-renders during typing)
+  // Auto-save refs
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastSavedDataRef = useRef<string>('')
-  const pendingChangesRef = useRef<Record<string, unknown> | null>(null)
   const webhookSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const createTask = useCreateTask()
   const updateTask = useUpdateTask()
   const rerunTask = useRerunTask()
 
-  // Metadata save handler (defined here to follow Rules of Hooks - must be before any conditional returns)
+  // Metadata save handler
   const handleMetadataSave = useCallback(async (parsed: Record<string, unknown>) => {
     if (!taskProp) return
     await updateTask.mutateAsync({ id: taskProp._id, data: { metadata: parsed } })
   }, [taskProp, updateTask])
 
-  // Fetch fresh task data when modal is open - this ensures data updates after rerun
+  // Fetch fresh task data when modal is open
   const { data: freshTaskData } = useTask(isOpen && taskProp ? taskProp._id : null)
-  // Use fresh data from query if available, otherwise fall back to prop
   const task = freshTaskData?.data || taskProp
 
-  // Only fetch users and workflows when modal is open
+  // Fetch users and workflows
   const { data: usersData } = useUsers()
   const { data: workflowsData } = useWorkflows()
 
-  // Only fetch tasks list for parent task selector when editing (not creating)
-  // This significantly reduces unnecessary data fetching
+  // Fetch tasks for parent selector (only in edit mode)
   const { data: tasksData } = useTasks({
     limit: 50,
-    enabled: isOpen && !!task // Only fetch when editing an existing task
+    enabled: isOpen && !!task
   })
 
-  // Fetch subtasks for the current task
+  // Fetch subtasks
   const { data: childrenData, isLoading: isLoadingChildren } = useTaskChildren(
     isOpen && task ? task._id : null
   )
 
-  // Fetch documents attached to the current task
+  // Fetch documents
   const { data: documentsData, isLoading: isLoadingDocuments } = useTaskDocuments(
     isOpen && task ? task._id : null
   )
@@ -162,7 +135,31 @@ export function TaskModal({
   const statusOptions = lookups['task_status'] || []
   const urgencyOptions = lookups['urgency'] || []
 
-  // Invalidate activity cache when modal opens to ensure fresh data
+  // Right sidebar tab state - smart default based on task status and content
+  const [activeTab, setActiveTab] = useState<TaskModalTab>(() => {
+    if (task) {
+      return getSmartDefaultTab(task)
+    }
+    return TASK_MODAL_TABS.ACTIVITY
+  })
+
+  // Update tab when task changes
+  useEffect(() => {
+    if (isOpen && task && !prevIsOpenRef.current) {
+      setActiveTab(getSmartDefaultTab(task))
+    }
+  }, [isOpen, task])
+
+  // Persist tab selection
+  const handleTabChange = useCallback((value: string) => {
+    const tab = value as TaskModalTab
+    setActiveTab(tab)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(TASK_MODAL_TAB_KEY, tab)
+    }
+  }, [])
+
+  // Invalidate activity cache when modal opens
   useEffect(() => {
     if (isOpen && !prevIsOpenRef.current && task?._id) {
       queryClient.invalidateQueries({ queryKey: ['activity-logs', 'task', task._id] })
@@ -170,10 +167,9 @@ export function TaskModal({
     prevIsOpenRef.current = isOpen
   }, [isOpen, task?._id, queryClient])
 
-  // Auto-focus title input when creating a new task
+  // Auto-focus title input when creating
   useEffect(() => {
     if (isOpen && !task) {
-      // Small delay to ensure the dialog is rendered
       const timer = setTimeout(() => {
         titleInputRef.current?.focus()
         titleInputRef.current?.select()
@@ -188,7 +184,7 @@ export function TaskModal({
       .sort((a, b) => a.displayOrder - b.displayOrder)
   }, [fieldConfigs])
 
-  // Core fields that must always be in the form, regardless of field configs
+  // Core default values
   const coreDefaultValues: Record<string, unknown> = {
     title: '',
     summary: '',
@@ -201,13 +197,11 @@ export function TaskModal({
     dueAt: null,
     tags: [] as string[],
     taskType: 'agent',
+    parentId: null,
   }
 
   const defaultValues = useMemo(() => {
-    // Start with core defaults to ensure form always works
     const values: Record<string, unknown> = { ...coreDefaultValues }
-
-    // Override with field config values if available
     editableFields.forEach((fc) => {
       if (fc.defaultValue !== undefined) {
         values[fc.fieldPath] = fc.defaultValue
@@ -259,27 +253,23 @@ export function TaskModal({
   const selectedWorkflowId = watch('workflowId') as string | null
   const currentTaskType = watch('taskType') as string
 
-  // Memoize workflow lookup to prevent unnecessary recalculations
   const selectedWorkflow = useMemo(
     () => workflows.find(w => w._id === selectedWorkflowId),
     [workflows, selectedWorkflowId]
   )
 
-  // Support both 'steps' (new format) and 'stages' (legacy format)
   const workflowStages = useMemo(
     () => selectedWorkflow?.steps?.map(s => s.name) || selectedWorkflow?.stages || [],
     [selectedWorkflow]
   )
 
+  // Reset form when task changes
   useEffect(() => {
     if (task) {
       const values: Record<string, unknown> = {}
-
-      // First, load core fields from the task (like taskType)
       Object.keys(coreDefaultValues).forEach((field) => {
         const value = (task as unknown as Record<string, unknown>)[field]
         if (field === 'tags') {
-          // Keep tags as array
           values[field] = Array.isArray(value) ? value : []
         } else if (field === 'dueAt' && value) {
           values[field] = new Date(value as string).toISOString().slice(0, 16)
@@ -287,12 +277,9 @@ export function TaskModal({
           values[field] = value ?? coreDefaultValues[field]
         }
       })
-
-      // Then load editable fields (may override some core fields)
       editableFields.forEach((fc) => {
         const value = (task as unknown as Record<string, unknown>)[fc.fieldPath]
         if (fc.fieldType === 'tags') {
-          // Keep tags as array
           values[fc.fieldPath] = Array.isArray(value) ? value : []
         } else if (fc.fieldType === 'datetime' && value) {
           values[fc.fieldPath] = new Date(value as string).toISOString().slice(0, 16)
@@ -303,9 +290,7 @@ export function TaskModal({
         }
       })
       reset(values)
-      // Initialize last saved data ref when task loads
       lastSavedDataRef.current = JSON.stringify(values)
-      // Initialize webhook config from task
       setWebhookConfig(task.webhookConfig)
     } else {
       const values = { ...defaultValues }
@@ -318,34 +303,26 @@ export function TaskModal({
     }
   }, [task, parentTask, reset, editableFields, defaultValues])
 
-  // Build task data from form values (shared between auto-save and submit)
+  // Build task data from form values
   const buildTaskData = useCallback((data: Record<string, unknown>): Partial<Task> => {
     const taskData: Partial<Task> = {}
-
-    // Process core fields first (header fields like status, urgency, assigneeId)
     const coreFields = Object.keys(coreDefaultValues)
     coreFields.forEach((field) => {
       const value = data[field]
       if (field === 'tags') {
-        // Tags are now stored as array directly
         taskData[field as keyof Task] = (Array.isArray(value) ? value : []) as never
       } else if (field === 'dueAt') {
         taskData[field as keyof Task] = (value ? new Date(value as string).toISOString() : null) as never
-      } else if (field === 'workflowId' || field === 'assigneeId') {
+      } else if (field === 'workflowId' || field === 'assigneeId' || field === 'parentId') {
         taskData[field as keyof Task] = (value || null) as never
       } else {
         taskData[field as keyof Task] = value as never
       }
     })
-
-    // Then process additional fields from field configs (skip if already handled)
     editableFields.forEach((fc) => {
       if (coreFields.includes(fc.fieldPath)) return
-
       const value = data[fc.fieldPath]
-
       if (fc.fieldType === 'tags') {
-        // Tags are now stored as array directly
         taskData[fc.fieldPath as keyof Task] = (Array.isArray(value) ? value : []) as never
       } else if (fc.fieldType === 'datetime' && value) {
         taskData[fc.fieldPath as keyof Task] = new Date(value as string).toISOString() as never
@@ -361,49 +338,41 @@ export function TaskModal({
         taskData[fc.fieldPath as keyof Task] = value as never
       }
     })
-
     return taskData
   }, [editableFields])
 
-  // Auto-save function (called on blur of fields)
+  // Auto-save function
   const performAutoSave = useCallback(async () => {
     if (!task) return
-
     const data = getValues()
     const currentDataStr = JSON.stringify(data)
     if (currentDataStr === lastSavedDataRef.current) return
-
     try {
       const taskData = buildTaskData(data)
-      // Note: metadata is saved separately via its own Save button
       await updateTask.mutateAsync({ id: task._id, data: taskData })
       lastSavedDataRef.current = currentDataStr
     } catch {
-      // Silently fail - user can retry
+      // Silently fail
     }
   }, [task, buildTaskData, updateTask, getValues])
 
   // Schedule auto-save (debounced)
   const scheduleAutoSave = useCallback(() => {
     if (!task) return
-
     if (autoSaveTimeoutRef.current) {
       clearTimeout(autoSaveTimeoutRef.current)
     }
-
     autoSaveTimeoutRef.current = setTimeout(() => {
       performAutoSave()
     }, 800)
   }, [task, performAutoSave])
 
-  // Use subscription-based watch to trigger auto-save without re-renders
+  // Watch for changes
   useEffect(() => {
     if (!task || !isOpen) return
-
     const subscription = watch(() => {
       scheduleAutoSave()
     })
-
     return () => {
       subscription.unsubscribe()
       if (autoSaveTimeoutRef.current) {
@@ -412,104 +381,37 @@ export function TaskModal({
     }
   }, [watch, task, isOpen, scheduleAutoSave])
 
-  // Validate metadata JSON and return parsed value or null if invalid
-  const parseMetadataJson = useCallback((value: string): { valid: boolean; parsed: unknown; error: string | null } => {
-    const trimmed = value.trim()
-    if (!trimmed) {
-      return { valid: true, parsed: {}, error: null }
-    }
-
-    try {
-      const parsed = JSON.parse(trimmed)
-      return { valid: true, parsed, error: null }
-    } catch {
-      return { valid: false, parsed: null, error: 'Invalid JSON' }
-    }
-  }, [])
-
-
-  // Cleanup on close - perform pending save instead of cancelling it
+  // Cleanup on close
   useEffect(() => {
     if (!isOpen) {
       if (autoSaveTimeoutRef.current) {
         clearTimeout(autoSaveTimeoutRef.current)
-        // Perform the pending save immediately instead of cancelling
         performAutoSave()
       }
       if (webhookSaveTimeoutRef.current) {
         clearTimeout(webhookSaveTimeoutRef.current)
       }
-      setMetadataError(null)
-      setIsMetadataEditMode(false)
-      // Reset subtask input
       setNewSubtaskTitle('')
       setIsCreatingSubtask(false)
     }
   }, [isOpen, performAutoSave])
 
+  // Form submission
   const onSubmit = async (data: Record<string, unknown>) => {
-    // Validate title is required for create
     const title = data.title as string
     if (!task && (!title || !title.trim())) {
-      // Title is required for new tasks - don't submit
       return
     }
 
-    // Build task data from form values
-    // Always include core fields, then process field config fields
-    const taskData: Partial<Task> = {}
-
-    // Process core fields first (these always exist in the form)
-    const coreFields = Object.keys(coreDefaultValues)
-    coreFields.forEach((field) => {
-      const value = data[field]
-      if (field === 'tags') {
-        // Tags are now stored as array directly
-        taskData[field as keyof Task] = (Array.isArray(value) ? value : []) as never
-      } else if (field === 'dueAt') {
-        taskData[field as keyof Task] = (value ? new Date(value as string).toISOString() : null) as never
-      } else if (field === 'workflowId' || field === 'assigneeId') {
-        taskData[field as keyof Task] = (value || null) as never
-      } else {
-        taskData[field as keyof Task] = value as never
-      }
-    })
-
-    // Then process any additional fields from field configs
-    editableFields.forEach((fc) => {
-      // Skip if already handled as a core field
-      if (coreFields.includes(fc.fieldPath)) return
-
-      const value = data[fc.fieldPath]
-
-      if (fc.fieldType === 'tags') {
-        // Tags are now stored as array directly
-        taskData[fc.fieldPath as keyof Task] = (Array.isArray(value) ? value : []) as never
-      } else if (fc.fieldType === 'datetime' && value) {
-        taskData[fc.fieldPath as keyof Task] = new Date(value as string).toISOString() as never
-      } else if (fc.fieldType === 'datetime' && !value) {
-        taskData[fc.fieldPath as keyof Task] = null as never
-      } else if (fc.fieldType === 'reference') {
-        taskData[fc.fieldPath as keyof Task] = (value || null) as never
-      } else if (fc.fieldType === 'number' && value !== '') {
-        taskData[fc.fieldPath as keyof Task] = Number(value) as never
-      } else if (fc.fieldType === 'boolean') {
-        taskData[fc.fieldPath as keyof Task] = Boolean(value) as never
-      } else {
-        taskData[fc.fieldPath as keyof Task] = value as never
-      }
-    })
+    const taskData = buildTaskData(data)
 
     if (!task && parentTask) {
       taskData.parentId = parentTask._id
     }
 
-    // Include webhookConfig if taskType is external
     if (taskData.taskType === 'external' && webhookConfig) {
       taskData.webhookConfig = webhookConfig
     }
-
-    // Note: metadata is saved separately via its own Save button
 
     if (task) {
       await updateTask.mutateAsync({ id: task._id, data: taskData })
@@ -520,7 +422,7 @@ export function TaskModal({
     onClose()
   }
 
-  // Get current selected values for header display
+  // Current selected values
   const currentStatus = watch('status') as string
   const currentUrgency = watch('urgency') as string
   const currentAssigneeId = watch('assigneeId') as string | null
@@ -529,7 +431,7 @@ export function TaskModal({
   const currentUrgencyOption = urgencyOptions.find(u => u.code === currentUrgency)
   const currentAssignee = users.find(u => u._id === currentAssigneeId)
 
-  // Handle title blur - save on blur
+  // Handle title blur
   const handleTitleBlur = useCallback(() => {
     if (!task) return
     const title = getValues('title')
@@ -538,13 +440,9 @@ export function TaskModal({
     }
   }, [task, getValues, performAutoSave])
 
-  // Get task type config for current type
-  const currentTypeConfig = getTaskTypeConfig(currentTaskType)
-
-  // Handle creating a new subtask (defined here before early return to satisfy hooks rules)
+  // Subtask handlers
   const handleCreateSubtask = useCallback(async () => {
     if (!newSubtaskTitle.trim() || !task) return
-
     setIsCreatingSubtask(true)
     try {
       await createTask.mutateAsync({
@@ -556,14 +454,12 @@ export function TaskModal({
       setNewSubtaskTitle('')
     } finally {
       setIsCreatingSubtask(false)
-      // Refocus input after React finishes re-rendering
       setTimeout(() => {
         subtaskInputRef.current?.focus()
       }, 0)
     }
   }, [newSubtaskTitle, task, createTask])
 
-  // Handle keydown in subtask input
   const handleSubtaskInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -571,12 +467,11 @@ export function TaskModal({
     }
   }, [handleCreateSubtask])
 
-  // Handle clicking on a subtask to navigate to it
   const handleSubtaskClick = useCallback((subtaskId: string) => {
     router.push(`/tasks?taskId=${subtaskId}`, { scroll: false })
   }, [router])
 
-  // Handle detaching a document from the task
+  // Document handler
   const handleDetachDocument = useCallback((documentId: string) => {
     if (!task) return
     detachDocument.mutate(
@@ -592,580 +487,62 @@ export function TaskModal({
     )
   }, [task, detachDocument])
 
-  // Editable header with key fields for existing tasks
-  const EditableHeader = () => {
-    if (!task) return null
+  // Rerun handler
+  const handleRerun = useCallback(async () => {
+    if (!task) return
+    try {
+      await rerunTask.mutateAsync({ id: task._id })
+      toast.success('Task rerun started')
+    } catch (error) {
+      toast.error('Failed to rerun task')
+    }
+  }, [task, rerunTask])
 
-    return (
-      <>
-      <div className="flex flex-wrap items-center gap-2 pb-3 border-b border-border/50">
-        {/* Task Type - inline select with icon */}
-        <Controller
-          name="taskType"
-          control={control}
-          render={({ field }) => {
-            const typeConfig = getTaskTypeConfig(field.value as string)
-            const TypeIcon = typeConfig.icon
-            return (
-              <Select
-                value={field.value as string || 'agent'}
-                onValueChange={(val) => {
-                  field.onChange(val)
-                  // Initialize webhook config when switching to external type
-                  if (val === 'external' && !webhookConfig) {
-                    setWebhookConfig({
-                      url: '',
-                      method: 'POST',
-                      maxRetries: 3,
-                      retryDelayMs: 1000,
-                      timeoutMs: 30000,
-                    })
-                  }
-                  // Immediately save task type changes - don't wait for debounce
-                  if (task) {
-                    updateTask.mutate({ id: task._id, data: { taskType: val as TaskType } })
-                  }
-                }}
-              >
-                <SelectTrigger
-                  className="h-7 w-auto gap-1.5 px-2 text-xs border-0 hover:bg-muted"
-                  style={{
-                    backgroundColor: `${typeConfig.hexColor}15`,
-                    color: typeConfig.hexColor,
-                  }}
-                >
-                  <TypeIcon className="h-3.5 w-3.5" />
-                  <span>{typeConfig.label}</span>
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(TASK_TYPE_CONFIG)
-                    .filter(([key]) => !['webhook', 'trigger'].includes(key)) // Filter out legacy/internal types
-                    .map(([key, config]) => {
-                      const Icon = config.icon
-                      return (
-                        <SelectItem key={key} value={key}>
-                          <div className="flex items-center gap-2">
-                            <Icon className={cn('h-4 w-4', config.color)} />
-                            <span>{config.label}</span>
-                          </div>
-                        </SelectItem>
-                      )
-                    })}
-                </SelectContent>
-              </Select>
-            )
-          }}
-        />
+  // Webhook execution handlers
+  const handleExecuteWebhook = useCallback(async () => {
+    if (!task?._id || !webhookConfig) return
+    setIsExecutingWebhook(true)
+    try {
+      const { tasksApi } = await import('@/lib/api')
+      await tasksApi.executeWebhook(task._id)
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task', task._id] })
+      toast.success('Webhook executed')
+    } catch (error) {
+      toast.error('Failed to execute webhook')
+    } finally {
+      setIsExecutingWebhook(false)
+    }
+  }, [task, webhookConfig, queryClient])
 
-        {/* Status - inline select with immediate save */}
-        <Controller
-          name="status"
-          control={control}
-          render={({ field }) => (
-            <Select value={field.value as string || ''} onValueChange={(value) => {
-              field.onChange(value)
-              // Immediately save status changes - don't wait for debounce
-              if (task) {
-                updateTask.mutate({ id: task._id, data: { status: value } })
-              }
-            }}>
-              <SelectTrigger
-                className="h-7 w-auto gap-1.5 px-2 text-xs border-0 bg-transparent hover:bg-muted"
-                style={currentStatusOption?.color ? {
-                  backgroundColor: `${currentStatusOption.color}20`,
-                  color: currentStatusOption.color,
-                } : undefined}
-              >
-                <span
-                  className="h-2 w-2 rounded-full flex-shrink-0"
-                  style={{ backgroundColor: currentStatusOption?.color || '#888' }}
-                />
-                <span>{currentStatusOption?.displayName || 'Status'}</span>
-              </SelectTrigger>
-              <SelectContent>
-                {statusOptions.map((opt) => (
-                  <SelectItem key={opt.code} value={opt.code}>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="h-2 w-2 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: opt.color }}
-                      />
-                      {opt.displayName}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        />
+  const handleRetryWebhook = useCallback(async () => {
+    if (!task?._id || !webhookConfig) return
+    setIsRetryingWebhook(true)
+    try {
+      const { tasksApi } = await import('@/lib/api')
+      await tasksApi.retryWebhook(task._id)
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task', task._id] })
+      toast.success('Webhook retried')
+    } catch (error) {
+      toast.error('Failed to retry webhook')
+    } finally {
+      setIsRetryingWebhook(false)
+    }
+  }, [task, webhookConfig, queryClient])
 
-        {/* Urgency - inline select with immediate save */}
-        <Controller
-          name="urgency"
-          control={control}
-          render={({ field }) => (
-            <Select value={field.value as string || ''} onValueChange={(value) => {
-              field.onChange(value)
-              // Immediately save urgency changes - don't wait for debounce
-              if (task) {
-                updateTask.mutate({ id: task._id, data: { urgency: value } })
-              }
-            }}>
-              <SelectTrigger
-                className="h-7 w-auto gap-1.5 px-2 text-xs border-0 bg-transparent hover:bg-muted"
-                style={currentUrgencyOption?.color ? {
-                  backgroundColor: `${currentUrgencyOption.color}20`,
-                  color: currentUrgencyOption.color,
-                } : undefined}
-              >
-                <span
-                  className="h-2 w-2 rounded-full flex-shrink-0"
-                  style={{ backgroundColor: currentUrgencyOption?.color || '#888' }}
-                />
-                <span>{currentUrgencyOption?.displayName || 'Urgency'}</span>
-              </SelectTrigger>
-              <SelectContent>
-                {urgencyOptions.map((opt) => (
-                  <SelectItem key={opt.code} value={opt.code}>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="h-2 w-2 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: opt.color }}
-                      />
-                      {opt.displayName}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        />
-
-        {/* Assignee - inline select with immediate save */}
-        <Controller
-          name="assigneeId"
-          control={control}
-          render={({ field }) => (
-            <Select
-              value={field.value as string || '_unassigned'}
-              onValueChange={(val) => {
-                const newValue = val === '_unassigned' ? null : val
-                field.onChange(newValue)
-                // Immediately save assignee changes - don't wait for debounce
-                if (task) {
-                  updateTask.mutate({ id: task._id, data: { assigneeId: newValue } })
-                }
-              }}
-            >
-              <SelectTrigger className="h-7 w-auto gap-0 px-0.5 text-xs border-0 bg-transparent hover:bg-muted">
-                <UserChip user={currentAssignee} size="sm" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="_unassigned">
-                  <UserChip user={null} size="sm" />
-                </SelectItem>
-                {users
-                  .filter((user) => user._id && user.isActive)
-                  .map((user) => (
-                    <SelectItem key={user._id} value={user._id}>
-                      <UserChip user={user} size="sm" />
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-          )}
-        />
-
-        {/* Workflow Run Link - show when task is part of a workflow run */}
-        {task.workflowRunId && (
-          <Link
-            href={`/workflow-runs?id=${task.workflowRunId}`}
-            className="flex items-center gap-1.5 px-2 h-7 text-xs rounded-md bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors"
-          >
-            <Workflow className="h-3.5 w-3.5" />
-            <span>Workflow Run</span>
-            <ExternalLink className="h-3 w-3 opacity-60" />
-          </Link>
-        )}
-
-        {/* Parent Task Link - show when task has a parent */}
-        {task._resolved?.parent && (
-          <button
-            type="button"
-            onClick={() => {
-              onClose()
-              router.push(`/tasks?parentId=${task._resolved!.parent!._id}`)
-            }}
-            className="flex items-center gap-1.5 px-2 h-7 text-xs rounded-md bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors max-w-[200px]"
-          >
-            <ArrowUpRight className="h-3.5 w-3.5 flex-shrink-0" />
-            <span className="truncate">Parent: {task._resolved.parent.title}</span>
-          </button>
-        )}
-
-        {/* Spacer */}
-        <div className="flex-1" />
-
-        {/* Timestamps - read only */}
-        <div className="flex gap-3 text-[11px] text-muted-foreground">
-          <span title={format(new Date(task.createdAt), 'PPpp')}>
-            Created {formatDistanceToNow(new Date(task.createdAt), { addSuffix: true })}
-          </span>
-          <span title={format(new Date(task.updatedAt), 'PPpp')}>
-            Updated {formatDistanceToNow(new Date(task.updatedAt), { addSuffix: true })}
-          </span>
-        </div>
-      </div>
-
-      {/* Waiting indicator with reason (shown below header when task is waiting) */}
-      {currentStatus === 'waiting' && (
-        <div className="mt-2 px-3 py-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md">
-          <div className="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-300">
-            <span className="font-medium">Waiting</span>
-            {(task as any).metadata?.waitingReason && (
-              <>
-                <span className="text-amber-400">•</span>
-                <span>{(task as any).metadata.waitingReason}</span>
-              </>
-            )}
-            {(task as any).taskType === 'foreach' && (task as any).batchCounters && (
-              <span className="ml-auto font-mono text-xs">
-                {(task as any).batchCounters.processedCount || 0}/{(task as any).batchCounters.expectedCount || '?'} processed
-                {(task as any).batchCounters.failedCount > 0 && (
-                  <span className="text-red-600 dark:text-red-400 ml-1">
-                    ({(task as any).batchCounters.failedCount} failed)
-                  </span>
-                )}
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-      </>
-    )
-  }
-
-  // Form content - without the fields that are now in the header
-  const FormContent = ({ isEditMode = false }: { isEditMode?: boolean }) => (
-    <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col h-full">
-      <div className="flex-1 space-y-3 overflow-y-auto pr-1">
-        {/* Title - only show in create mode (edit mode has title in header) */}
-        {!isEditMode && (
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Title *</label>
-            <Input
-              {...register('title')}
-              ref={(e) => {
-                register('title').ref(e)
-                titleInputRef.current = e
-              }}
-              placeholder="Task title"
-              className="h-8 text-sm"
-            />
-          </div>
-        )}
-
-        {/* Summary */}
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Summary</label>
-          <textarea
-            {...register('summary')}
-            placeholder="Brief description..."
-            rows={2}
-            className={cn(
-              'flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm',
-              'placeholder:text-muted-foreground resize-none transition-colors',
-              'focus-visible:outline-none focus-visible:border-primary'
-            )}
-          />
-        </div>
-
-        {/* Extra Prompt - only for agent tasks in create mode (edit mode shows in sidebar) */}
-        {!isEditMode && currentTaskType === 'agent' && (
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Extra Prompt</label>
-            <textarea
-              {...register('extraPrompt')}
-              placeholder="Additional prompt context..."
-              rows={2}
-              className={cn(
-                'flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm',
-                'placeholder:text-muted-foreground resize-none transition-colors',
-                'focus-visible:outline-none focus-visible:border-primary'
-              )}
-            />
-          </div>
-        )}
-
-
-        {/* Status & Urgency - only show in create mode */}
-        {!isEditMode && (
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Status</label>
-              <Controller
-                name="status"
-                control={control}
-                render={({ field }) => (
-                  <Select value={field.value as string || ''} onValueChange={field.onChange}>
-                    <SelectTrigger className="h-8 text-sm">
-                      <SelectValue placeholder="Select status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {statusOptions.map((opt) => (
-                        <SelectItem key={opt.code} value={opt.code}>
-                          <div className="flex items-center gap-2">
-                            <span
-                              className="h-2 w-2 rounded-full flex-shrink-0"
-                              style={{ backgroundColor: opt.color }}
-                            />
-                            {opt.displayName}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Urgency</label>
-              <Controller
-                name="urgency"
-                control={control}
-                render={({ field }) => (
-                  <Select value={field.value as string || ''} onValueChange={field.onChange}>
-                    <SelectTrigger className="h-8 text-sm">
-                      <SelectValue placeholder="Select urgency" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {urgencyOptions.map((opt) => (
-                        <SelectItem key={opt.code} value={opt.code}>
-                          <div className="flex items-center gap-2">
-                            <span
-                              className="h-2 w-2 rounded-full flex-shrink-0"
-                              style={{ backgroundColor: opt.color }}
-                            />
-                            {opt.displayName}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Workflow & Stage */}
-        <div className="grid grid-cols-2 gap-2">
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Workflow</label>
-            <Controller
-              name="workflowId"
-              control={control}
-              render={({ field }) => (
-                <Select
-                  value={field.value as string || '_none'}
-                  onValueChange={(val) => {
-                    field.onChange(val === '_none' ? null : val)
-                    if (val === '_none') {
-                      setValue('workflowStage', '')
-                    }
-                  }}
-                >
-                  <SelectTrigger className="h-8 text-sm">
-                    <SelectValue placeholder="Select workflow" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="_none">None</SelectItem>
-                    {workflows
-                      .filter((wf) => wf.isActive)
-                      .map((wf) => (
-                        <SelectItem key={wf._id} value={wf._id}>
-                          {wf.name}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-              )}
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Stage</label>
-            <Controller
-              name="workflowStage"
-              control={control}
-              render={({ field }) => (
-                <Select
-                  value={field.value as string || '_none'}
-                  onValueChange={(val) => field.onChange(val === '_none' ? '' : val)}
-                  disabled={!selectedWorkflowId || workflowStages.length === 0}
-                >
-                  <SelectTrigger className="h-8 text-sm">
-                    <SelectValue placeholder={selectedWorkflowId ? 'Select stage' : 'Select workflow first'} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="_none">None</SelectItem>
-                    {workflowStages.map((stage) => (
-                      <SelectItem key={stage} value={stage}>
-                        {stage}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            />
-          </div>
-        </div>
-
-        {/* Assignee & Due Date - only show assignee in create mode */}
-        <div className="grid grid-cols-2 gap-2">
-          {!isEditMode && (
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Assignee</label>
-              <Controller
-                name="assigneeId"
-                control={control}
-                render={({ field }) => (
-                  <Select
-                    value={field.value as string || '_unassigned'}
-                    onValueChange={(val) => field.onChange(val === '_unassigned' ? null : val)}
-                  >
-                    <SelectTrigger className="h-8 text-sm">
-                      <SelectValue placeholder="Unassigned" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="_unassigned">
-                        <UserChip user={null} size="sm" />
-                      </SelectItem>
-                      {users
-                        .filter((user) => user._id && user.isActive)
-                        .map((user) => (
-                          <SelectItem key={user._id} value={user._id}>
-                            <UserChip user={user} size="sm" />
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-            </div>
-          )}
-
-          <div className={cn('space-y-1', isEditMode && 'col-span-2')}>
-            <label className="text-xs font-medium text-muted-foreground">Due Date</label>
-            <Input
-              type="datetime-local"
-              {...register('dueAt')}
-              className="h-8 text-sm"
-            />
-          </div>
-        </div>
-
-        {/* Tags */}
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Tags</label>
-          <Controller
-            name="tags"
-            control={control}
-            render={({ field }) => (
-              <TagInput
-                value={Array.isArray(field.value) ? field.value : []}
-                onChange={field.onChange}
-                placeholder="Add tags..."
-              />
-            )}
-          />
-        </div>
-
-        {/* Task Type selector - only show in create mode (edit mode has it in header) */}
-        {!isEditMode && (
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Task Type</label>
-            <Controller
-              name="taskType"
-              control={control}
-              render={({ field }) => (
-                <Select
-                  value={field.value as string || 'agent'}
-                  onValueChange={(val) => {
-                    field.onChange(val)
-                    // Initialize webhook config when switching to external type
-                    if (val === 'external' && !webhookConfig) {
-                      setWebhookConfig({
-                        url: '',
-                        method: 'POST',
-                        maxRetries: 3,
-                        retryDelayMs: 1000,
-                        timeoutMs: 30000,
-                      })
-                    }
-                  }}
-                >
-                  <SelectTrigger className="h-8 text-sm">
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(TASK_TYPE_CONFIG)
-                      .filter(([key]) => !['webhook', 'trigger'].includes(key)) // Filter out legacy/internal types
-                      .map(([key, config]) => {
-                        const Icon = config.icon
-                        return (
-                          <SelectItem key={key} value={key}>
-                            <div className="flex items-center gap-2">
-                              <Icon className={cn('h-4 w-4', config.color)} />
-                              <span>{config.label}</span>
-                            </div>
-                          </SelectItem>
-                        )
-                      })}
-                  </SelectContent>
-                </Select>
-              )}
-            />
-          </div>
-        )}
-
-        {/* Webhook Configuration - only in create mode (edit mode moves to sidebar) */}
-        {currentTaskType === 'external' && !isEditMode && (
-          <WebhookTaskConfig
-            task={task}
-            isEditMode={isEditMode}
-            webhookConfig={webhookConfig}
-            onConfigChange={(config, _options) => {
-              setWebhookConfig(config)
-            }}
-          />
-        )}
-
-        {/* Parent Task (for subtask creation) */}
-        {!task && parentTask && (
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Parent Task</label>
-            <div className="px-3 py-1.5 text-sm bg-muted rounded-md border">
-              {parentTask.title}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Footer - only show in create mode */}
-      {!isEditMode && (
-        <DialogFooter className="pt-3 mt-3 border-t flex-shrink-0">
-          <Button type="button" variant="outline" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" size="sm" disabled={isSubmitting}>
-            {isSubmitting ? 'Creating...' : 'Create'}
-          </Button>
-        </DialogFooter>
-      )}
-    </form>
-  )
+  // Webhook config change handler
+  const handleWebhookConfigChange = useCallback((config: WebhookConfig, options?: { skipSave?: boolean }) => {
+    setWebhookConfig(config)
+    if (!options?.skipSave && task) {
+      if (webhookSaveTimeoutRef.current) {
+        clearTimeout(webhookSaveTimeoutRef.current)
+      }
+      webhookSaveTimeoutRef.current = setTimeout(() => {
+        updateTask.mutate({ id: task._id, data: { webhookConfig: config } })
+      }, 800)
+    }
+  }, [task, updateTask])
 
   // Create mode - single column, compact
   if (!task) {
@@ -1182,450 +559,243 @@ export function TaskModal({
               </p>
             )}
           </DialogHeader>
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            {FormContent({ isEditMode: false })}
-          </div>
+          <form onSubmit={handleSubmit(onSubmit)} className="flex-1 min-h-0 overflow-y-auto">
+            <div className="space-y-3 pb-4">
+              {/* Title */}
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Title *</label>
+                <Input
+                  {...register('title', { required: true })}
+                  ref={(e) => {
+                    register('title').ref(e)
+                    titleInputRef.current = e
+                  }}
+                  placeholder="Task title..."
+                  className="h-9"
+                />
+              </div>
+
+              {/* Summary */}
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Summary</label>
+                <textarea
+                  {...register('summary')}
+                  placeholder="Brief description..."
+                  rows={2}
+                  className={cn(
+                    'flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm',
+                    'placeholder:text-muted-foreground resize-y',
+                    'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+                  )}
+                />
+              </div>
+
+              {/* Status & Urgency */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Status</label>
+                  <Controller
+                    name="status"
+                    control={control}
+                    render={({ field }) => (
+                      <Select value={field.value as string || ''} onValueChange={field.onChange}>
+                        <SelectTrigger className="h-8 text-sm">
+                          <SelectValue placeholder="Select status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {statusOptions.map((opt) => (
+                            <SelectItem key={opt.code} value={opt.code}>
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className="h-2 w-2 rounded-full flex-shrink-0"
+                                  style={{ backgroundColor: opt.color }}
+                                />
+                                {opt.displayName}
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Urgency</label>
+                  <Controller
+                    name="urgency"
+                    control={control}
+                    render={({ field }) => (
+                      <Select value={field.value as string || ''} onValueChange={field.onChange}>
+                        <SelectTrigger className="h-8 text-sm">
+                          <SelectValue placeholder="Select urgency" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {urgencyOptions.map((opt) => (
+                            <SelectItem key={opt.code} value={opt.code}>
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className="h-2 w-2 rounded-full flex-shrink-0"
+                                  style={{ backgroundColor: opt.color }}
+                                />
+                                {opt.displayName}
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                </div>
+              </div>
+
+              {/* Task Type */}
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Task Type</label>
+                <Controller
+                  name="taskType"
+                  control={control}
+                  render={({ field }) => (
+                    <Select
+                      value={field.value as string || 'agent'}
+                      onValueChange={(val) => {
+                        field.onChange(val)
+                        if (val === 'external' && !webhookConfig) {
+                          setWebhookConfig({
+                            url: '',
+                            method: 'POST',
+                            maxRetries: 3,
+                            retryDelayMs: 1000,
+                            timeoutMs: 30000,
+                          })
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-sm">
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(TASK_TYPE_CONFIG)
+                          .filter(([key]) => !['webhook', 'trigger'].includes(key))
+                          .map(([key, config]) => {
+                            const Icon = config.icon
+                            return (
+                              <SelectItem key={key} value={key}>
+                                <div className="flex items-center gap-2">
+                                  <Icon className={cn('h-4 w-4', config.color)} />
+                                  <span>{config.label}</span>
+                                </div>
+                              </SelectItem>
+                            )
+                          })}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              </div>
+
+              {/* Webhook Configuration for external type */}
+              {currentTaskType === 'external' && (
+                <WebhookTaskConfig
+                  task={null}
+                  isEditMode={false}
+                  webhookConfig={webhookConfig}
+                  onConfigChange={(config) => setWebhookConfig(config)}
+                />
+              )}
+
+              {/* Assignee */}
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Assignee</label>
+                <Controller
+                  name="assigneeId"
+                  control={control}
+                  render={({ field }) => (
+                    <Select
+                      value={field.value as string || '_unassigned'}
+                      onValueChange={(val) => field.onChange(val === '_unassigned' ? null : val)}
+                    >
+                      <SelectTrigger className="h-8 text-sm">
+                        <SelectValue placeholder="Unassigned" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="_unassigned">
+                          <UserChip user={null} size="sm" />
+                        </SelectItem>
+                        {users
+                          .filter((user) => user._id && user.isActive)
+                          .map((user) => (
+                            <SelectItem key={user._id} value={user._id}>
+                              <UserChip user={user} size="sm" />
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              </div>
+
+              {/* Tags */}
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Tags</label>
+                <Controller
+                  name="tags"
+                  control={control}
+                  render={({ field }) => (
+                    <TagInput
+                      value={Array.isArray(field.value) ? field.value : []}
+                      onChange={field.onChange}
+                      placeholder="Add tags..."
+                    />
+                  )}
+                />
+              </div>
+
+              {/* Parent Task info */}
+              {parentTask && (
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Parent Task</label>
+                  <div className="px-3 py-1.5 text-sm bg-muted rounded-md border">
+                    {parentTask.title}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <DialogFooter className="pt-3 mt-3 border-t flex-shrink-0">
+              <Button type="button" variant="outline" size="sm" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={isSubmitting}>
+                {isSubmitting ? 'Creating...' : 'Create'}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     )
   }
 
-  // Type-specific configuration content for sidebar
-  const TypeConfigContent = () => {
-    const typeConfig = getTaskTypeConfig(currentTaskType)
-    const TypeIcon = typeConfig.icon
+  // Edit mode - new single-column layout
+  const typeConfig = getTaskTypeConfig(currentTaskType)
+  const TypeIcon = typeConfig.icon
 
-    // Can rerun if task has completed, failed, or is part of a workflow run
-    const canRerun = task && (
-      task.status === 'completed' ||
-      task.status === 'failed' ||
-      task.status === 'cancelled' ||
-      task.workflowRunId
-    )
-
-    const handleRerun = async () => {
-      if (!task) return
-      try {
-        const result = await rerunTask.mutateAsync({ id: task._id }) as { message?: string; error?: string; debug?: Record<string, unknown> }
-
-        // Show toast notification
-        if (result.error) {
-          toast.error('Rerun Failed', { description: result.error })
-        } else if (result.message) {
-          toast.success('Task Rerun', { description: result.message })
-        }
-
-        // Invalidate task-specific queries to trigger refetch
-        queryClient.invalidateQueries({ queryKey: ['task', task._id] })
-        queryClient.invalidateQueries({ queryKey: ['tasks'] })
-
-        console.log('Rerun result:', result.message || result.error, result.debug)
-      } catch (error) {
-        console.error('Failed to rerun task:', error)
-        toast.error('Rerun Failed', { description: error instanceof Error ? error.message : 'Unknown error' })
-      }
-    }
-
-    return (
-      <div className="p-4 space-y-4">
-        {/* Task type display (selector is in header) */}
-        <div className="space-y-2">
-          <label className="text-xs font-medium text-muted-foreground">Task Type</label>
-          <div
-            className="flex items-center gap-2 px-3 py-2 rounded-md border"
-            style={{
-              backgroundColor: `${typeConfig.hexColor}10`,
-              borderColor: `${typeConfig.hexColor}30`,
-            }}
-          >
-            <TypeIcon className="h-4 w-4" style={{ color: typeConfig.hexColor }} />
-            <span className="text-sm font-medium" style={{ color: typeConfig.hexColor }}>{typeConfig.label}</span>
-          </div>
-          <p className="text-xs text-muted-foreground">{typeConfig.description}</p>
-        </div>
-
-        {/* Webhook Configuration - show when taskType is external */}
-        {currentTaskType === 'external' && (
-          <WebhookTaskConfig
-            task={task}
-            isEditMode={true}
-            webhookConfig={webhookConfig}
-            onConfigChange={(config, options) => {
-              setWebhookConfig(config)
-              // Skip save if explicitly requested (e.g., after execute/retry)
-              if (options?.skipSave) return
-              // Debounce auto-save webhook config changes for existing tasks
-              if (task) {
-                if (webhookSaveTimeoutRef.current) {
-                  clearTimeout(webhookSaveTimeoutRef.current)
-                }
-                webhookSaveTimeoutRef.current = setTimeout(() => {
-                  updateTask.mutateAsync({
-                    id: task._id,
-                    data: { webhookConfig: config },
-                  })
-                }, 800)
-              }
-            }}
-          />
-        )}
-
-        {/* ForEach Configuration - show when taskType is foreach */}
-        {currentTaskType === 'foreach' && task && (
-          <div className="space-y-2 p-3 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg">
-            <label className="text-xs font-medium text-green-800 dark:text-green-200">Batch Progress</label>
-            <div className="space-y-2">
-              <div className="space-y-1">
-                <label className="text-[10px] text-muted-foreground">Expected Subtasks</label>
-                <Input
-                  type="number"
-                  min="0"
-                  className="h-7 text-sm"
-                  defaultValue={(task as any).batchCounters?.expectedCount || 0}
-                  onBlur={(e) => {
-                    const newValue = parseInt(e.target.value, 10) || 0
-                    const currentCounters = (task as any).batchCounters || {}
-                    if (newValue !== currentCounters.expectedCount) {
-                      updateTask.mutateAsync({
-                        id: task._id,
-                        data: {
-                          batchCounters: {
-                            ...currentCounters,
-                            expectedCount: newValue,
-                          },
-                        },
-                      })
-                    }
-                  }}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground">Processed</label>
-                  <div className="h-7 px-3 py-1 text-sm bg-muted rounded-md border flex items-center">
-                    {(task as any).batchCounters?.processedCount || 0}
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground">Failed</label>
-                  <div className={cn(
-                    "h-7 px-3 py-1 text-sm rounded-md border flex items-center",
-                    ((task as any).batchCounters?.failedCount || 0) > 0
-                      ? "bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400"
-                      : "bg-muted"
-                  )}>
-                    {(task as any).batchCounters?.failedCount || 0}
-                  </div>
-                </div>
-              </div>
-            </div>
-            <p className="text-[10px] text-muted-foreground">
-              Waiting for {(task as any).batchCounters?.expectedCount || '?'} subtasks to complete.
-            </p>
-          </div>
-        )}
-
-        {/* Agent task - extra prompt field */}
-        {currentTaskType === 'agent' && (
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground italic">
-              Agent tasks are executed by AI agents using the extra prompt.
-            </p>
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Extra Prompt</label>
-              <textarea
-                {...register('extraPrompt')}
-                placeholder="Additional prompt context for AI agent..."
-                rows={4}
-                className={cn(
-                  'flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm',
-                  'placeholder:text-muted-foreground resize-none transition-colors',
-                  'focus-visible:outline-none focus-visible:border-primary'
-                )}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Flow task - workflow parent */}
-        {currentTaskType === 'flow' && (
-          <p className="text-xs text-muted-foreground italic">
-            Flow tasks are workflow parent tasks that contain workflow steps.
-          </p>
-        )}
-
-        {/* Manual task - human review */}
-        {currentTaskType === 'manual' && (
-          <p className="text-xs text-muted-foreground italic">
-            Manual tasks require human review and action to complete.
-          </p>
-        )}
-
-        {/* Decision task */}
-        {currentTaskType === 'decision' && (
-          <p className="text-xs text-muted-foreground italic">
-            Decision tasks route based on conditions from previous step output.
-          </p>
-        )}
-
-        {/* Join task configuration */}
-        {currentTaskType === 'join' && task && (
-          <div className="space-y-3 p-3 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-lg">
-            <label className="text-xs font-medium text-indigo-800 dark:text-indigo-200">Join Configuration</label>
-            <p className="text-[10px] text-muted-foreground">
-              Aggregates results from multiple parallel tasks.
-            </p>
-
-            {/* Join progress display */}
-            {task.metadata && (
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground">Success Count</label>
-                  <div className="h-7 px-3 py-1 text-sm bg-muted rounded-md border flex items-center">
-                    {(task.metadata as any).successCount ?? '-'} / {(task.metadata as any).expectedCount ?? '?'}
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground">Success %</label>
-                  <div className={cn(
-                    "h-7 px-3 py-1 text-sm rounded-md border flex items-center",
-                    ((task.metadata as any).successPercent ?? 100) >= ((task.metadata as any).requiredPercent ?? 100)
-                      ? "bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400"
-                      : "bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400"
-                  )}>
-                    {((task.metadata as any).successPercent ?? 0).toFixed(1)}% / {(task.metadata as any).requiredPercent ?? 100}%
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Editable join configuration */}
-            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-indigo-200 dark:border-indigo-700">
-              <div className="space-y-1">
-                <label className="text-[10px] text-muted-foreground">Expected Count</label>
-                <Input
-                  type="number"
-                  min="0"
-                  className="h-7 text-sm"
-                  defaultValue={(task as any).joinConfig?.expectedCount ?? ''}
-                  placeholder="Auto"
-                  onBlur={(e) => {
-                    const newValue = e.target.value ? parseInt(e.target.value, 10) : undefined
-                    const currentConfig = (task as any).joinConfig || {}
-                    updateTask.mutateAsync({
-                      id: task._id,
-                      data: {
-                        taskType: 'join',
-                        joinConfig: {
-                          ...currentConfig,
-                          expectedCount: newValue,
-                        },
-                      },
-                    })
-                  }}
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] text-muted-foreground">Max Wait (ms)</label>
-                <Input
-                  type="number"
-                  min="0"
-                  className="h-7 text-sm"
-                  defaultValue={(task as any).joinConfig?.boundary?.maxWaitMs ?? ''}
-                  placeholder="No timeout"
-                  onBlur={(e) => {
-                    const newValue = e.target.value ? parseInt(e.target.value, 10) : undefined
-                    const currentConfig = (task as any).joinConfig || {}
-                    updateTask.mutateAsync({
-                      id: task._id,
-                      data: {
-                        taskType: 'join',
-                        joinConfig: {
-                          ...currentConfig,
-                          boundary: {
-                            ...currentConfig.boundary,
-                            maxWaitMs: newValue,
-                          },
-                        },
-                      },
-                    })
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Input Path for aggregation */}
-            <div className="space-y-1">
-              <label className="text-[10px] text-muted-foreground">Input Path</label>
-              <Input
-                className="h-7 text-sm font-mono"
-                defaultValue={(task as any).joinConfig?.inputPath ?? ''}
-                placeholder="e.g., output.analysis"
-                onBlur={(e) => {
-                  const newValue = e.target.value || undefined
-                  const currentConfig = (task as any).joinConfig || {}
-                  updateTask.mutateAsync({
-                    id: task._id,
-                    data: {
-                      taskType: 'join',
-                      joinConfig: {
-                        ...currentConfig,
-                        inputPath: newValue,
-                      },
-                    },
-                  })
-                }}
-              />
-              <p className="text-[10px] text-muted-foreground">
-                JSONPath to extract from each completed task's output.
-              </p>
-            </div>
-
-            {/* Min thresholds only shown when expected count AND max wait are set */}
-            {(task as any).joinConfig?.expectedCount != null && (task as any).joinConfig?.boundary?.maxWaitMs != null && (
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground">Min Success %</label>
-                  <Input
-                    type="number"
-                    min="0"
-                    max="100"
-                    className="h-7 text-sm"
-                    defaultValue={(task as any).joinConfig?.minSuccessPercent ?? (task as any).joinConfig?.boundary?.minPercent ?? ''}
-                    placeholder="100"
-                    onBlur={(e) => {
-                      const newValue = e.target.value ? parseInt(e.target.value, 10) : undefined
-                      const currentConfig = (task as any).joinConfig || {}
-                      updateTask.mutateAsync({
-                        id: task._id,
-                        data: {
-                          taskType: 'join',
-                          joinConfig: {
-                            ...currentConfig,
-                            minSuccessPercent: newValue,
-                            boundary: {
-                              ...currentConfig.boundary,
-                              minPercent: newValue,
-                            },
-                          },
-                        },
-                      })
-                    }}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground">Min Count</label>
-                  <Input
-                    type="number"
-                    min="0"
-                    className="h-7 text-sm"
-                    defaultValue={(task as any).joinConfig?.boundary?.minCount ?? ''}
-                    placeholder="All"
-                    onBlur={(e) => {
-                      const newValue = e.target.value ? parseInt(e.target.value, 10) : undefined
-                      const currentConfig = (task as any).joinConfig || {}
-                      updateTask.mutateAsync({
-                        id: task._id,
-                        data: {
-                          taskType: 'join',
-                          joinConfig: {
-                            ...currentConfig,
-                            boundary: {
-                              ...currentConfig.boundary,
-                              minCount: newValue,
-                            },
-                          },
-                        },
-                      })
-                    }}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Force Complete button - only show for non-completed join tasks */}
-            {task.status !== 'completed' && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="w-full mt-2"
-                onClick={async () => {
-                  if (!task._id) return
-                  if (!confirm('Force complete this join with available results? This cannot be undone.')) return
-
-                  try {
-                    const response = await fetch(`/api/tasks/${task._id}/force-complete-join`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                    })
-                    if (!response.ok) {
-                      const error = await response.json()
-                      throw new Error(error.message || 'Failed to force complete join')
-                    }
-                    queryClient.invalidateQueries({ queryKey: ['tasks'] })
-                    queryClient.invalidateQueries({ queryKey: ['task', task._id] })
-                  } catch (err) {
-                    console.error('Force complete join error:', err)
-                    alert(err instanceof Error ? err.message : 'Failed to force complete join')
-                  }
-                }}
-              >
-                Force Complete Join
-              </Button>
-            )}
-          </div>
-        )}
-
-        {/* Join task simple display (when not a join task but task doesn't exist) */}
-        {currentTaskType === 'join' && !task && (
-          <p className="text-xs text-muted-foreground italic">
-            Join tasks aggregate results from multiple parallel tasks.
-          </p>
-        )}
-
-        {/* Rerun button - show for tasks that can be rerun, placed at bottom */}
-        {canRerun && (
-          <div className="pt-4 mt-auto border-t border-border">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="w-full gap-2"
-              onClick={handleRerun}
-              disabled={rerunTask.isPending || task?.status === 'pending'}
-            >
-              <RotateCcw className={cn("h-4 w-4", rerunTask.isPending && "animate-spin")} />
-              {rerunTask.isPending ? 'Rerunning...' : 'Rerun Task'}
-            </Button>
-          </div>
-        )}
-
-        {/* Workflow Trigger - available for all existing tasks */}
-        {task && (
-          <WorkflowTrigger task={task} />
-        )}
-      </div>
-    )
-  }
-
-  // Edit mode - two column layout with tabbed sidebar
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-6xl h-[90vh] p-0 gap-0 flex flex-col overflow-hidden">
+      <DialogContent className="max-w-4xl h-[90vh] p-0 gap-0 flex flex-col overflow-hidden">
         {/* Accessibility: visually hidden title */}
         <span className="sr-only">Edit Task</span>
 
-        {/* Header - fixed, with border that connects to columns */}
-        <div className="px-5 pt-5 pb-3 flex-shrink-0 border-b border-border">
-          {/* Editable title with underline style */}
+        {/* Header */}
+        <div className="px-5 pt-5 pb-4 flex-shrink-0 border-b border-border">
+          {/* Editable title */}
           <input
             {...register('title', {
               onBlur: handleTitleBlur,
             })}
             placeholder="Task title..."
             className={cn(
-              'w-full text-lg font-semibold bg-transparent pr-8',
+              'w-full text-lg font-semibold bg-transparent',
               'border-0 border-b-2 border-transparent rounded-none',
               'hover:border-muted-foreground/30 focus:border-primary',
               'focus:outline-none focus:ring-0',
@@ -1633,115 +803,345 @@ export function TaskModal({
               'placeholder:text-muted-foreground/50'
             )}
           />
-          <div className="mt-3">
-            {EditableHeader()}
+
+          {/* Inline controls */}
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            {/* Task Type */}
+            <Controller
+              name="taskType"
+              control={control}
+              render={({ field }) => {
+                const config = getTaskTypeConfig(field.value as string)
+                const Icon = config.icon
+                return (
+                  <Select
+                    value={field.value as string || 'agent'}
+                    onValueChange={(val) => {
+                      field.onChange(val)
+                      if (val === 'external' && !webhookConfig) {
+                        setWebhookConfig({
+                          url: '',
+                          method: 'POST',
+                          maxRetries: 3,
+                          retryDelayMs: 1000,
+                          timeoutMs: 30000,
+                        })
+                      }
+                      updateTask.mutate({ id: task._id, data: { taskType: val as TaskType } })
+                    }}
+                  >
+                    <SelectTrigger
+                      className="h-7 w-auto gap-1.5 px-2 text-xs border-0 hover:bg-muted"
+                      style={{
+                        backgroundColor: `${config.hexColor}15`,
+                        color: config.hexColor,
+                      }}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      <span>{config.label}</span>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(TASK_TYPE_CONFIG)
+                        .filter(([key]) => !['webhook', 'trigger'].includes(key))
+                        .map(([key, config]) => {
+                          const Icon = config.icon
+                          return (
+                            <SelectItem key={key} value={key}>
+                              <div className="flex items-center gap-2">
+                                <Icon className={cn('h-4 w-4', config.color)} />
+                                <span>{config.label}</span>
+                              </div>
+                            </SelectItem>
+                          )
+                        })}
+                    </SelectContent>
+                  </Select>
+                )
+              }}
+            />
+
+            {/* Status */}
+            <Controller
+              name="status"
+              control={control}
+              render={({ field }) => (
+                <Select
+                  value={field.value as string || ''}
+                  onValueChange={(value) => {
+                    field.onChange(value)
+                    updateTask.mutate({ id: task._id, data: { status: value } })
+                  }}
+                >
+                  <SelectTrigger
+                    className="h-7 w-auto gap-1.5 px-2 text-xs border-0 bg-transparent hover:bg-muted"
+                    style={currentStatusOption?.color ? {
+                      backgroundColor: `${currentStatusOption.color}20`,
+                      color: currentStatusOption.color,
+                    } : undefined}
+                  >
+                    <span
+                      className="h-2 w-2 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: currentStatusOption?.color || '#888' }}
+                    />
+                    <span>{currentStatusOption?.displayName || 'Status'}</span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {statusOptions.map((opt) => (
+                      <SelectItem key={opt.code} value={opt.code}>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="h-2 w-2 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: opt.color }}
+                          />
+                          {opt.displayName}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+
+            {/* Urgency */}
+            <Controller
+              name="urgency"
+              control={control}
+              render={({ field }) => (
+                <Select
+                  value={field.value as string || ''}
+                  onValueChange={(value) => {
+                    field.onChange(value)
+                    updateTask.mutate({ id: task._id, data: { urgency: value } })
+                  }}
+                >
+                  <SelectTrigger
+                    className="h-7 w-auto gap-1.5 px-2 text-xs border-0 bg-transparent hover:bg-muted"
+                    style={currentUrgencyOption?.color ? {
+                      backgroundColor: `${currentUrgencyOption.color}20`,
+                      color: currentUrgencyOption.color,
+                    } : undefined}
+                  >
+                    <span
+                      className="h-2 w-2 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: currentUrgencyOption?.color || '#888' }}
+                    />
+                    <span>{currentUrgencyOption?.displayName || 'Urgency'}</span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {urgencyOptions.map((opt) => (
+                      <SelectItem key={opt.code} value={opt.code}>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="h-2 w-2 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: opt.color }}
+                          />
+                          {opt.displayName}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+
+            {/* Assignee */}
+            <Controller
+              name="assigneeId"
+              control={control}
+              render={({ field }) => (
+                <Select
+                  value={field.value as string || '_unassigned'}
+                  onValueChange={(val) => {
+                    const newValue = val === '_unassigned' ? null : val
+                    field.onChange(newValue)
+                    updateTask.mutate({ id: task._id, data: { assigneeId: newValue } })
+                  }}
+                >
+                  <SelectTrigger className="h-7 w-auto gap-0 px-0.5 text-xs border-0 bg-transparent hover:bg-muted">
+                    <UserChip user={currentAssignee} size="sm" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_unassigned">
+                      <UserChip user={null} size="sm" />
+                    </SelectItem>
+                    {users
+                      .filter((user) => user._id && user.isActive)
+                      .map((user) => (
+                        <SelectItem key={user._id} value={user._id}>
+                          <UserChip user={user} size="sm" />
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+
+            {/* Workflow Run Link */}
+            {task.workflowRunId && (
+              <Link
+                href={`/workflow-runs?id=${task.workflowRunId}`}
+                className="flex items-center gap-1.5 px-2 h-7 text-xs rounded-md bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors"
+              >
+                <Workflow className="h-3.5 w-3.5" />
+                <span>Workflow Run</span>
+                <ExternalLink className="h-3 w-3 opacity-60" />
+              </Link>
+            )}
+
+            {/* Parent Task Link */}
+            {task._resolved?.parent && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose()
+                  router.push(`/tasks?taskId=${task._resolved!.parent!._id}`)
+                }}
+                className="flex items-center gap-1.5 px-2 h-7 text-xs rounded-md bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors max-w-[200px]"
+              >
+                <span className="truncate">{task._resolved.parent.title}</span>
+                <ExternalLink className="h-3 w-3 opacity-60 flex-shrink-0" />
+              </button>
+            )}
+
+            {/* Timestamps */}
+            <div className="ml-auto text-[10px] text-muted-foreground">
+              Created {formatDistanceToNow(new Date(task.createdAt), { addSuffix: true })}
+              {task.updatedAt !== task.createdAt && (
+                <span className="ml-2">
+                  Updated {formatDistanceToNow(new Date(task.updatedAt), { addSuffix: true })}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Two-column content - flush with header border */}
-        <div className="flex flex-1 min-h-0 overflow-hidden">
-          {/* Left column - Form */}
-          <div className="flex-1 px-5 py-4 flex flex-col min-h-0 border-r border-border overflow-y-auto">
-            {FormContent({ isEditMode: true })}
+        {/* Main content - single scrollable area */}
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="flex-1 min-h-0 flex flex-col">
+          {/* Status Panel + Tab List (fixed) */}
+          <div className="flex-shrink-0">
+            {/* Status Panel */}
+            <div className="px-5 py-4 border-b border-border">
+              <StatusPanel
+                task={task}
+                statusOptions={statusOptions}
+                onRerun={handleRerun}
+                onExecuteWebhook={handleExecuteWebhook}
+                onRetryWebhook={handleRetryWebhook}
+                isRerunning={rerunTask.isPending}
+                isExecuting={isExecutingWebhook}
+                isRetrying={isRetryingWebhook}
+              />
+            </div>
+
+            {/* Tab List */}
+            <TabsList className="w-full justify-start px-5 pt-2 pb-0 rounded-none border-b border-border bg-transparent h-auto">
+              <TabsTrigger
+                value={TASK_MODAL_TABS.OUTPUT}
+                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+              >
+                <FileOutput className="h-3.5 w-3.5" />
+                <span className="text-xs">Output</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value={TASK_MODAL_TABS.SUBTASKS}
+                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+              >
+                <ListTree className="h-3.5 w-3.5" />
+                <span className="text-xs">Subtasks</span>
+                {subtasks.length > 0 && (
+                  <span className="ml-0.5 text-[10px] bg-muted px-1 rounded">{subtasks.length}</span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger
+                value={TASK_MODAL_TABS.DOCUMENTS}
+                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+              >
+                <FileText className="h-3.5 w-3.5" />
+                <span className="text-xs">Documents</span>
+                {attachedDocuments.length > 0 && (
+                  <span className="ml-0.5 text-[10px] bg-muted px-1 rounded">{attachedDocuments.length}</span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger
+                value={TASK_MODAL_TABS.ACTIVITY}
+                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+              >
+                <Activity className="h-3.5 w-3.5" />
+                <span className="text-xs">Activity</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value={TASK_MODAL_TABS.METADATA}
+                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+              >
+                <Braces className="h-3.5 w-3.5" />
+                <span className="text-xs">Metadata</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value={TASK_MODAL_TABS.DETAILS}
+                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+              >
+                <Settings className="h-3.5 w-3.5" />
+                <span className="text-xs">Details</span>
+              </TabsTrigger>
+            </TabsList>
           </div>
 
-          {/* Right column - Tabbed sidebar */}
-          <div className="w-[420px] flex-shrink-0 flex flex-col min-h-0 bg-muted/20">
-            <Tabs value={activeTab} onValueChange={handleTabChange} className="flex flex-col h-full">
-              <TabsList className="flex-shrink-0 w-full justify-start rounded-none border-b border-border bg-background/50 p-0 h-auto">
-                <TabsTrigger
-                  value={TASK_MODAL_TABS.TYPE_CONFIG}
-                  className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent py-2.5"
-                >
-                  <Settings2 className="h-3.5 w-3.5" />
-                  <span className="text-xs">Config</span>
-                </TabsTrigger>
-                <TabsTrigger
-                  value={TASK_MODAL_TABS.SUBTASKS}
-                  className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent py-2.5"
-                >
-                  <ListTree className="h-3.5 w-3.5" />
-                  <span className="text-xs">Subtasks</span>
-                  {subtasks.length > 0 && (
-                    <span className="ml-0.5 text-[10px] bg-muted px-1 rounded">{subtasks.length}</span>
-                  )}
-                </TabsTrigger>
-                <TabsTrigger
-                  value={TASK_MODAL_TABS.DOCUMENTS}
-                  className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent py-2.5"
-                >
-                  <FileText className="h-3.5 w-3.5" />
-                  <span className="text-xs">Docs</span>
-                  {attachedDocuments.length > 0 && (
-                    <span className="ml-0.5 text-[10px] bg-muted px-1 rounded">{attachedDocuments.length}</span>
-                  )}
-                </TabsTrigger>
-                <TabsTrigger
-                  value={TASK_MODAL_TABS.METADATA}
-                  className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent py-2.5"
-                >
-                  <Database className="h-3.5 w-3.5" />
-                  <span className="text-xs">Metadata</span>
-                </TabsTrigger>
-                <TabsTrigger
-                  value={TASK_MODAL_TABS.ACTIVITY}
-                  className="flex-1 gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent py-2.5"
-                >
-                  <Activity className="h-3.5 w-3.5" />
-                  <span className="text-xs">Activity</span>
-                </TabsTrigger>
-              </TabsList>
+          {/* Tab Content - scrollable */}
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <TabsContent value={TASK_MODAL_TABS.OUTPUT} className="mt-0">
+              <OutputTab task={task} />
+            </TabsContent>
 
-              <TabsContent value={TASK_MODAL_TABS.TYPE_CONFIG} className="flex-1 min-h-0 overflow-y-auto mt-0">
-                {TypeConfigContent()}
-              </TabsContent>
+            <TabsContent value={TASK_MODAL_TABS.SUBTASKS} className="mt-0">
+              <SubtasksList
+                subtasks={subtasks}
+                isLoading={isLoadingChildren}
+                statusOptions={statusOptions}
+                users={users}
+                onSubtaskClick={handleSubtaskClick}
+                newSubtaskTitle={newSubtaskTitle}
+                setNewSubtaskTitle={setNewSubtaskTitle}
+                onSubtaskInputKeyDown={handleSubtaskInputKeyDown}
+                isCreatingSubtask={isCreatingSubtask}
+                subtaskInputRef={subtaskInputRef}
+              />
+            </TabsContent>
 
-              <TabsContent value={TASK_MODAL_TABS.SUBTASKS} className="flex-1 min-h-0 overflow-y-auto mt-0">
-                <SubtasksList
-                  subtasks={subtasks}
-                  isLoading={isLoadingChildren}
-                  statusOptions={statusOptions}
-                  users={users}
-                  onSubtaskClick={handleSubtaskClick}
-                  newSubtaskTitle={newSubtaskTitle}
-                  setNewSubtaskTitle={setNewSubtaskTitle}
-                  onSubtaskInputKeyDown={handleSubtaskInputKeyDown}
-                  isCreatingSubtask={isCreatingSubtask}
-                  subtaskInputRef={subtaskInputRef}
-                />
-              </TabsContent>
+            <TabsContent value={TASK_MODAL_TABS.DOCUMENTS} className="mt-0">
+              <AttachedDocuments
+                taskId={task._id}
+                documents={attachedDocuments}
+                isLoading={isLoadingDocuments}
+                onDetach={handleDetachDocument}
+                isDetaching={detachDocument.isPending}
+              />
+            </TabsContent>
 
-              <TabsContent value={TASK_MODAL_TABS.DOCUMENTS} className="flex-1 min-h-0 overflow-y-auto mt-0">
-                <AttachedDocuments
-                  taskId={task._id}
-                  documents={attachedDocuments}
-                  isLoading={isLoadingDocuments}
-                  onDetach={handleDetachDocument}
-                  isDetaching={detachDocument.isPending}
-                />
-              </TabsContent>
+            <TabsContent value={TASK_MODAL_TABS.ACTIVITY} className="mt-0">
+              <TaskActivity taskId={task._id} className="p-4" compact />
+            </TabsContent>
 
-              <TabsContent value={TASK_MODAL_TABS.METADATA} className="flex-1 min-h-0 overflow-y-auto mt-0">
-                <MetadataEditor
-                  task={task}
-                  isEditMode={isMetadataEditMode}
-                  setIsEditMode={setIsMetadataEditMode}
-                  metadataError={metadataError}
-                  setMetadataError={setMetadataError}
-                  metadataTextareaRef={metadataTextareaRef}
-                  savedMetadataValueRef={savedMetadataValueRef}
-                  currentMetadataValueRef={currentMetadataValueRef}
-                  onSave={handleMetadataSave}
-                  parseMetadataJson={parseMetadataJson}
-                />
-              </TabsContent>
+            <TabsContent value={TASK_MODAL_TABS.METADATA} className="mt-0">
+              <MetadataTab task={task} onSave={handleMetadataSave} />
+            </TabsContent>
 
-              <TabsContent value={TASK_MODAL_TABS.ACTIVITY} className="flex-1 min-h-0 overflow-y-auto mt-0">
-                <TaskActivity taskId={task._id} className="h-full" compact />
-              </TabsContent>
-            </Tabs>
+            <TabsContent value={TASK_MODAL_TABS.DETAILS} className="mt-0">
+              <DetailsTab
+                task={task}
+                control={control}
+                register={register}
+                setValue={setValue}
+                watch={watch}
+                workflows={workflows}
+                users={users}
+                allTasks={allTasks}
+                webhookConfig={webhookConfig}
+                onWebhookConfigChange={handleWebhookConfigChange}
+                updateTask={updateTask}
+              />
+            </TabsContent>
           </div>
-        </div>
+        </Tabs>
       </DialogContent>
     </Dialog>
   )
