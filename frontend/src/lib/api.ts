@@ -878,6 +878,31 @@ export const workflowRunsApi = {
     })
     return handleResponse(response)
   },
+
+  // Workflow request logging
+  listRequests: async (params?: {
+    type?: WorkflowRequestType
+    status?: 'success' | 'failed'
+    workflowId?: string
+    workflowRunId?: string
+    limit?: number
+    offset?: number
+  }): Promise<{ data: WorkflowRequest[]; pagination: { limit: number; offset: number; total: number } }> => {
+    const searchParams = new URLSearchParams()
+    if (params?.type) searchParams.append('type', params.type)
+    if (params?.status) searchParams.append('status', params.status)
+    if (params?.workflowId) searchParams.append('workflowId', params.workflowId)
+    if (params?.workflowRunId) searchParams.append('workflowRunId', params.workflowRunId)
+    if (params?.limit) searchParams.append('limit', String(params.limit))
+    if (params?.offset) searchParams.append('offset', String(params.offset))
+    const response = await authFetch(`${API_BASE}/workflow-runs/requests?${searchParams}`)
+    return handleResponse(response)
+  },
+
+  getRequest: async (requestId: string): Promise<ApiResponse<WorkflowRequest>> => {
+    const response = await authFetch(`${API_BASE}/workflow-runs/requests/${requestId}`)
+    return handleResponse(response)
+  },
 }
 
 // Webhook Types
@@ -955,6 +980,40 @@ export interface WorkflowCallback {
   error?: string
   // Created tasks from this callback
   createdTaskIds?: string[]
+}
+
+// Workflow request (logged inbound requests that trigger or interact with workflows)
+export type WorkflowRequestType = 'workflow_start' | 'workflow_callback'
+export type WorkflowRequestActorType = 'user' | 'api_key' | 'anonymous' | 'system'
+
+export interface WorkflowRequest {
+  _id: string
+  // Request type
+  type: WorkflowRequestType
+  // HTTP request details
+  method: string
+  url: string
+  headers?: Record<string, string>
+  body?: Record<string, unknown>
+  // Processing status
+  status: 'success' | 'failed'
+  error?: string
+  // Workflow correlation
+  workflowId?: string
+  workflowName?: string
+  workflowRunId?: string
+  rootTaskId?: string
+  // For callback requests
+  stepId?: string
+  taskId?: string
+  // Actor info
+  actorId?: string
+  actorType: WorkflowRequestActorType
+  source?: string
+  externalId?: string
+  // Timestamps
+  receivedAt: string
+  processedAt?: string
 }
 
 // Activity Logs API
