@@ -18,6 +18,8 @@ import {
   User,
   Tag,
   FileType,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { formatDistanceToNow, format } from 'date-fns'
 import { DocumentModal } from '@/components/documents/document-modal'
@@ -51,6 +53,7 @@ export default function DocumentViewPage({
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<'content' | 'history'>('content')
   const [editModalOpen, setEditModalOpen] = useState(false)
+  const [headerExpanded, setHeaderExpanded] = useState(false)
 
   const { data: documentData, isLoading, error } = useDocument(id, true)
   const { data: versionsData } = useDocumentVersions(id)
@@ -81,15 +84,27 @@ export default function DocumentViewPage({
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 border-b px-6 py-4">
-        <div className="flex items-start gap-4 min-w-0 flex-1">
-          <Button variant="ghost" size="icon" className="shrink-0 mt-1" onClick={() => router.push('/documents')}>
+      <div className="flex items-center justify-between gap-4 border-b px-6 py-3">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <Button variant="ghost" size="icon" className="shrink-0" onClick={() => router.push('/documents')}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <div className="min-w-0">
-            <h1 className="text-xl font-semibold line-clamp-2">{document.title}</h1>
-            {document.summary && (
-              <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{document.summary}</p>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <h1 className={`text-lg font-semibold ${headerExpanded ? '' : 'truncate'}`}>{document.title}</h1>
+              {(document.title.length > 50 || document.summary) && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="shrink-0 h-6 w-6"
+                  onClick={() => setHeaderExpanded(!headerExpanded)}
+                >
+                  {headerExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </Button>
+              )}
+            </div>
+            {headerExpanded && document.summary && (
+              <p className="text-sm text-muted-foreground mt-1">{document.summary}</p>
             )}
           </div>
         </div>
