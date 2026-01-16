@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { Mermaid } from './mermaid'
 import { Button } from './button'
+import { ResizablePanels } from './resizable-panels'
 import { cn } from '@/lib/utils'
 import {
   Download,
@@ -291,12 +292,9 @@ export function MermaidLiveEditor({
 
       {/* Main content area */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Code editor */}
-        {(layout === 'code' || layout === 'split') && (
-          <div className={cn(
-            'flex flex-col overflow-hidden border-r bg-muted/20',
-            layout === 'split' ? 'w-1/2' : 'w-full'
-          )}>
+        {/* Code only mode */}
+        {layout === 'code' && (
+          <div className="flex flex-col overflow-hidden w-full bg-muted/20">
             <div className="flex items-center justify-between px-3 py-1.5 border-b bg-muted/30">
               <span className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
                 <Code2 className="h-3.5 w-3.5" />
@@ -334,12 +332,9 @@ export function MermaidLiveEditor({
           </div>
         )}
 
-        {/* Preview panel */}
-        {(layout === 'preview' || layout === 'split') && (
-          <div className={cn(
-            'flex flex-col overflow-hidden',
-            layout === 'split' ? 'w-1/2' : 'w-full'
-          )}>
+        {/* Preview only mode */}
+        {layout === 'preview' && (
+          <div className="flex flex-col overflow-hidden w-full">
             <div className="flex items-center justify-between px-3 py-1.5 border-b bg-muted/30">
               <span className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
                 <Eye className="h-3.5 w-3.5" />
@@ -368,6 +363,85 @@ export function MermaidLiveEditor({
               )}
             </div>
           </div>
+        )}
+
+        {/* Split mode with resizable panels */}
+        {layout === 'split' && (
+          <ResizablePanels
+            defaultLeftWidth={50}
+            minLeftWidth={25}
+            maxLeftWidth={75}
+            className="w-full"
+          >
+            {/* Code editor panel */}
+            <div className="flex flex-col overflow-hidden h-full bg-muted/20 border-r">
+              <div className="flex items-center justify-between px-3 py-1.5 border-b bg-muted/30">
+                <span className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                  <Code2 className="h-3.5 w-3.5" />
+                  Mermaid Code
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {value.split('\n').length} lines • Drag divider to resize
+                </span>
+              </div>
+              <div className="flex-1 flex overflow-hidden">
+                {/* Line numbers */}
+                <div className="flex-shrink-0 py-2 px-2 text-right bg-muted/30 border-r select-none">
+                  {getLineNumbers().map(num => (
+                    <div key={num} className="text-xs text-muted-foreground h-[21px] leading-[21px]">
+                      {num}
+                    </div>
+                  ))}
+                </div>
+                {/* Textarea */}
+                <textarea
+                  ref={textareaRef}
+                  value={value}
+                  onChange={(e) => handleChange(e.target.value)}
+                  placeholder={placeholder}
+                  spellCheck={false}
+                  className={cn(
+                    'flex-1 resize-none py-2 px-3 text-sm font-mono leading-[21px]',
+                    'bg-transparent border-0 outline-none',
+                    'placeholder:text-muted-foreground/50',
+                    'focus:ring-0 focus:outline-none'
+                  )}
+                  style={{ tabSize: 2 }}
+                />
+              </div>
+            </div>
+
+            {/* Preview panel */}
+            <div className="flex flex-col overflow-hidden h-full">
+              <div className="flex items-center justify-between px-3 py-1.5 border-b bg-muted/30">
+                <span className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                  <Eye className="h-3.5 w-3.5" />
+                  Preview
+                </span>
+                {error && (
+                  <span className="text-xs text-destructive">Syntax error</span>
+                )}
+              </div>
+              <div
+                className="flex-1 overflow-auto p-4 bg-background flex items-center justify-center"
+                style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'center center' }}
+              >
+                {value ? (
+                  <Mermaid
+                    chart={value}
+                    className="mermaid-preview-centered"
+                    onError={handleError}
+                  />
+                ) : (
+                  <div className="text-center text-muted-foreground p-8">
+                    <Code2 className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                    <p className="text-sm">Enter Mermaid code to see preview</p>
+                    <p className="text-xs mt-1">Supports flowcharts, sequences, and more</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </ResizablePanels>
         )}
       </div>
 
