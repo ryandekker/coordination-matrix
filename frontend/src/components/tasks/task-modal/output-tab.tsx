@@ -69,7 +69,7 @@ export function OutputTab({ task, onRollback }: OutputTabProps) {
     }
   }, [task, updateTask])
 
-  // For decision tasks, always show the DecisionOptionsPanel
+  // For decision tasks, show the DecisionOptionsPanel
   if (taskType === 'decision') {
     return (
       <div className="p-4 space-y-4">

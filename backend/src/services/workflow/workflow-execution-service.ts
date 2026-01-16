@@ -497,6 +497,9 @@ class WorkflowExecutionService {
     if (step.defaultConnection) {
       config.defaultConnection = step.defaultConnection;
     }
+    if (step.decisionField) {
+      config.decisionField = step.decisionField;
+    }
 
     // Flow step config (nested workflow)
     if (step.flowId) {
@@ -1607,7 +1610,7 @@ class WorkflowExecutionService {
   ): Promise<void> {
     let selectedConnection = step.connections?.find(conn => {
       if (!conn.condition) return false;
-      return this.evaluateCondition(conn.condition, inputPayload);
+      return this.evaluateCondition(conn.condition, inputPayload, step.decisionField);
     });
 
     if (!selectedConnection && step.defaultConnection) {
@@ -1632,14 +1635,24 @@ class WorkflowExecutionService {
       return;
     }
 
+    // Determine the matched value for display
+    // If using decisionField, the condition IS the matched value
+    // Otherwise, extract the value part from "field:value" format
+    let matchedValue = selectedConnection.condition || '';
+    if (!step.decisionField && matchedValue.includes(':')) {
+      matchedValue = matchedValue.split(':').slice(1).join(':');
+    }
+
     await this.tasks.updateOne(
       { _id: decisionTask._id },
       {
         $set: {
           status: 'completed' as TaskStatus,
-          decisionResult: selectedConnection.targetStepId,
+          decisionResult: matchedValue || selectedConnection.targetStepId,
           'metadata.selectedPath': selectedConnection.targetStepId,
           'metadata.condition': selectedConnection.condition,
+          'metadata.matchedValue': matchedValue,
+          'metadata.decisionField': step.decisionField,
         },
       }
     );
@@ -1653,10 +1666,24 @@ class WorkflowExecutionService {
     }
   }
 
-  private evaluateCondition(condition: string, payload?: Record<string, unknown>): boolean {
+  private evaluateCondition(condition: string, payload?: Record<string, unknown>, decisionField?: string): boolean {
     if (!condition || !payload) return false;
 
-    const [field, values] = condition.split(':');
+    let field: string;
+    let values: string;
+
+    // If decisionField is set, condition is just the value(s) to match
+    // Otherwise, condition must be in "field:value" format
+    if (decisionField) {
+      field = decisionField;
+      values = condition;
+    } else {
+      const parts = condition.split(':');
+      if (parts.length < 2) return false;
+      field = parts[0];
+      values = parts.slice(1).join(':'); // Handle values that might contain colons
+    }
+
     if (!field || !values) return false;
 
     const actualValue = getValueByPath(payload, field);

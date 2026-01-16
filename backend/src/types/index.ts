@@ -207,6 +207,7 @@ export interface TaskStepConfig {
   // Decision step config
   connections?: StepConnection[];
   defaultConnection?: string;
+  decisionField?: string;
 
   // Flow step config (nested workflow)
   flowId?: string;
@@ -814,6 +815,7 @@ export interface WorkflowStep {
 
   // Decision step config
   defaultConnection?: string;
+  decisionField?: string;                // Field path to evaluate (e.g., "output.route") - conditions then just specify values
 
   // Foreach step config
   itemsPath?: string;                   // JSONPath to items array in previous output
