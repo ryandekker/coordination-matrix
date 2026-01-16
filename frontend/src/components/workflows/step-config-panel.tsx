@@ -112,6 +112,7 @@ interface WorkflowStep {
   promptDocumentIds?: string[]
   externalConfig?: ExternalConfig
   defaultConnection?: string
+  decisionField?: string
   itemsPath?: string
   itemVariable?: string
   maxItems?: number
@@ -871,14 +872,21 @@ function DecisionStepConfig({
   step,
   stepIndex,
   allSteps,
+  workflowId,
+  previousSteps,
+  loopVariable,
   onUpdate,
 }: {
   step: WorkflowStep
   stepIndex: number
   allSteps: WorkflowStep[]
+  workflowId?: string
+  previousSteps: Array<{ id: string; name: string; stepType?: string; itemVariable?: string }>
+  loopVariable?: string
   onUpdate: (updates: Partial<WorkflowStep>) => void
 }) {
   const [showDocs, setShowDocs] = useState(false)
+  const hasDecisionField = !!step.decisionField
 
   return (
     <div className="space-y-3 border-t pt-3">
@@ -888,10 +896,37 @@ function DecisionStepConfig({
           <div className="text-amber-800 dark:text-amber-200">
             <p className="font-medium">Decision / Router</p>
             <p className="text-xs mt-1">
-              Routes to different branches based on conditions evaluated against the input payload.
+              Routes to different branches based on a field value from the input payload.
             </p>
           </div>
         </div>
+      </div>
+
+      {/* Decision Field - the path to evaluate */}
+      <div className="space-y-1">
+        <label className="text-sm font-medium flex items-center gap-2">
+          <Database className="h-4 w-4 text-muted-foreground" />
+          Decision Field
+        </label>
+        <div className="flex gap-1">
+          <Input
+            value={step.decisionField || ''}
+            onChange={(e) => onUpdate({ decisionField: e.target.value })}
+            placeholder="e.g., output.route or status"
+            className="font-mono text-sm"
+          />
+          <TokenBrowser
+            workflowId={workflowId}
+            previousSteps={previousSteps}
+            currentStepIndex={stepIndex}
+            loopVariable={loopVariable}
+            onSelectToken={(token) => onUpdate({ decisionField: token })}
+            wrapInBraces={false}
+          />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Path to the field in the input payload to evaluate. Branches then just specify the values to match.
+        </p>
       </div>
 
       {/* Collapsible documentation */}
@@ -903,7 +938,7 @@ function DecisionStepConfig({
         >
           <span className="flex items-center gap-2 font-medium">
             <Info className="h-4 w-4 text-muted-foreground" />
-            Condition Format & Examples
+            Help & Examples
           </span>
           {showDocs ? (
             <ChevronUp className="h-4 w-4 text-muted-foreground" />
@@ -914,55 +949,56 @@ function DecisionStepConfig({
         {showDocs && (
           <div className="p-3 text-xs space-y-3 bg-background border-t">
             <div>
-              <p className="font-medium text-sm mb-1">Condition Format</p>
+              <p className="font-medium text-sm mb-1">How It Works</p>
               <p className="text-muted-foreground">
-                Conditions use the format <code className="bg-muted px-1 rounded">field:value1,value2</code> where:
+                {hasDecisionField ? (
+                  <>Set the <strong>Decision Field</strong> above, then each branch just needs the value(s) to match.</>
+                ) : (
+                  <>Set a <strong>Decision Field</strong> to simplify branches to just values, or use full <code className="bg-muted px-1 rounded">field:value</code> format per branch.</>
+                )}
               </p>
-              <ul className="list-disc list-inside mt-1 text-muted-foreground space-y-0.5">
-                <li><strong>field</strong> — path to the value in the input payload (supports nested paths with dots)</li>
-                <li><strong>value1,value2</strong> — comma-separated list of values to match (case-insensitive)</li>
-              </ul>
             </div>
 
             <div>
               <p className="font-medium text-sm mb-1">Examples</p>
               <div className="space-y-2 font-mono">
-                <div className="bg-muted/50 p-2 rounded">
-                  <p className="text-amber-600 dark:text-amber-400">route:Review</p>
-                  <p className="text-muted-foreground text-[10px] mt-0.5">
-                    Matches when <code>{"{ route: \"Review\" }"}</code>
-                  </p>
-                </div>
-                <div className="bg-muted/50 p-2 rounded">
-                  <p className="text-amber-600 dark:text-amber-400">status:approved,pending</p>
-                  <p className="text-muted-foreground text-[10px] mt-0.5">
-                    Matches when status is either "approved" OR "pending"
-                  </p>
-                </div>
-                <div className="bg-muted/50 p-2 rounded">
-                  <p className="text-amber-600 dark:text-amber-400">output.category:urgent</p>
-                  <p className="text-muted-foreground text-[10px] mt-0.5">
-                    Nested path — matches <code>{"{ output: { category: \"urgent\" } }"}</code>
-                  </p>
-                </div>
-                <div className="bg-muted/50 p-2 rounded">
-                  <p className="text-amber-600 dark:text-amber-400">result.data.type:A,B,C</p>
-                  <p className="text-muted-foreground text-[10px] mt-0.5">
-                    Deep nesting with multiple values
-                  </p>
-                </div>
+                {hasDecisionField ? (
+                  <>
+                    <div className="bg-muted/50 p-2 rounded">
+                      <p className="text-muted-foreground text-[10px]">Decision Field: <code>{step.decisionField}</code></p>
+                      <p className="text-amber-600 dark:text-amber-400 mt-1">Review</p>
+                      <p className="text-muted-foreground text-[10px] mt-0.5">
+                        Matches when <code>{step.decisionField} = "Review"</code>
+                      </p>
+                    </div>
+                    <div className="bg-muted/50 p-2 rounded">
+                      <p className="text-amber-600 dark:text-amber-400">approved,pending</p>
+                      <p className="text-muted-foreground text-[10px] mt-0.5">
+                        Matches when value is "approved" OR "pending" (comma-separated)
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="bg-muted/50 p-2 rounded">
+                      <p className="text-amber-600 dark:text-amber-400">route:Review</p>
+                      <p className="text-muted-foreground text-[10px] mt-0.5">
+                        Full format: field:value
+                      </p>
+                    </div>
+                    <div className="bg-muted/50 p-2 rounded">
+                      <p className="text-amber-600 dark:text-amber-400">output.status:approved,pending</p>
+                      <p className="text-muted-foreground text-[10px] mt-0.5">
+                        Nested path with multiple values
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
-            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded p-2">
-              <p className="flex items-center gap-1.5 font-medium text-amber-800 dark:text-amber-200">
-                <AlertCircle className="h-3 w-3" />
-                Common Mistake
-              </p>
-              <p className="text-muted-foreground mt-1">
-                <span className="line-through text-red-500">Review</span> — Missing field name!<br/>
-                <span className="text-green-600">route:Review</span> — Correct format
-              </p>
+            <div className="text-muted-foreground">
+              <p>Matching is <strong>case-insensitive</strong>.</p>
             </div>
           </div>
         )}
@@ -983,7 +1019,7 @@ function DecisionStepConfig({
                 newConns[connIdx] = { ...newConns[connIdx], condition: e.target.value, label: e.target.value }
                 onUpdate({ connections: newConns })
               }}
-              placeholder="field:value (e.g., route:Review)"
+              placeholder={hasDecisionField ? "value (e.g., Review)" : "field:value (e.g., route:Review)"}
               className="font-mono text-sm flex-1"
             />
             <ArrowRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -1395,6 +1431,9 @@ export function StepConfigPanel({
             step={step}
             stepIndex={stepIndex}
             allSteps={allSteps}
+            workflowId={workflowId}
+            previousSteps={previousSteps}
+            loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
             onUpdate={onUpdate}
           />
         )}

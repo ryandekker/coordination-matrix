@@ -45,30 +45,42 @@ interface ConditionEvaluation {
 
 /**
  * Evaluates a condition string against a payload
- * Condition format: "field.path:value1,value2,value3"
+ * If decisionField is provided, condition is just the value(s) to match
+ * Otherwise, condition format is: "field.path:value1,value2,value3"
  */
 function evaluateCondition(
   condition: string | null | undefined,
-  payload: Record<string, unknown> | undefined
+  payload: Record<string, unknown> | undefined,
+  decisionField?: string
 ): { result: boolean | null; actualValue: unknown; expectedValues: string[]; fieldPath: string; formatError?: string } {
   if (!condition) {
     return { result: null, actualValue: undefined, expectedValues: [], fieldPath: '' }
   }
 
-  const colonIndex = condition.indexOf(':')
-  if (colonIndex === -1) {
-    // Condition doesn't have the required format "field:value"
-    return {
-      result: null,
-      actualValue: undefined,
-      expectedValues: [],
-      fieldPath: '',
-      formatError: `Invalid condition format "${condition}". Expected format: "field:value1,value2" (e.g., "route:Review" or "status:approved,pending")`
-    }
-  }
+  let field: string
+  let values: string
 
-  const field = condition.substring(0, colonIndex)
-  const values = condition.substring(colonIndex + 1)
+  // If decisionField is set, condition is just the value(s) to match
+  // Otherwise, condition must be in "field:value" format
+  if (decisionField) {
+    field = decisionField
+    values = condition
+  } else {
+    const colonIndex = condition.indexOf(':')
+    if (colonIndex === -1) {
+      // Condition doesn't have the required format "field:value"
+      return {
+        result: null,
+        actualValue: undefined,
+        expectedValues: [],
+        fieldPath: '',
+        formatError: `Invalid condition format "${condition}". Expected format: "field:value1,value2" (e.g., "route:Review" or "status:approved,pending")`
+      }
+    }
+
+    field = condition.substring(0, colonIndex)
+    values = condition.substring(colonIndex + 1)
+  }
 
   if (!field) {
     return {
@@ -128,28 +140,44 @@ export function DecisionOptionsPanel({ task, className }: DecisionOptionsPanelPr
   const stepConfig = task.stepConfig
   const connections = stepConfig?.connections || []
   const defaultConnection = stepConfig?.defaultConnection
+  // Read decisionField from stepConfig or metadata (for older tasks)
+  const taskMetadata = task.metadata as Record<string, unknown> | undefined
+
+  // Determine decisionField - check stepConfig first, then metadata
+  // Also infer it if conditions don't have colons but the decision succeeded
+  const explicitDecisionField = (stepConfig as Record<string, unknown> | undefined)?.decisionField as string | undefined
+    || taskMetadata?.decisionField as string | undefined
+
+  // If no explicit decisionField but task completed and conditions don't have colons,
+  // it means decisionField was used (we just don't have it stored for older tasks)
+  const hasConditionsWithoutColons = connections.some(c => c.condition && !c.condition.includes(':'))
+  const taskSucceeded = task.status === 'completed' && taskMetadata?.selectedPath
+  const inferredDecisionField = !explicitDecisionField && hasConditionsWithoutColons && taskSucceeded
+
+  const decisionField = explicitDecisionField
 
   // Get the input payload that was evaluated
   const inputPayload = useMemo(() => {
-    const metadata = task.metadata as Record<string, unknown> | undefined
-    return metadata?.inputPayload as Record<string, unknown> | undefined
-  }, [task.metadata])
+    return taskMetadata?.inputPayload as Record<string, unknown> | undefined
+  }, [taskMetadata])
 
   // Evaluate all conditions
   const evaluations = useMemo((): ConditionEvaluation[] => {
     return connections.map(conn => {
-      const evaluation = evaluateCondition(conn.condition, inputPayload)
+      const evaluation = evaluateCondition(conn.condition, inputPayload, decisionField)
       return {
         connection: conn,
         ...evaluation,
       }
     })
-  }, [connections, inputPayload])
+  }, [connections, inputPayload, decisionField])
 
   // Find which option was selected (if any)
-  const selectedPath = task.decisionResult || (task.metadata as Record<string, unknown> | undefined)?.selectedPath as string | undefined
-  const evaluatedCondition = (task.metadata as Record<string, unknown> | undefined)?.condition as string | undefined
-  const errorMessage = (task.metadata as Record<string, unknown> | undefined)?.error as string | undefined
+  const metadata = task.metadata as Record<string, unknown> | undefined
+  const selectedPath = metadata?.selectedPath as string | undefined
+  const matchedValue = task.decisionResult || metadata?.matchedValue as string | undefined
+  const evaluatedCondition = metadata?.condition as string | undefined
+  const errorMessage = metadata?.error as string | undefined
 
   // Handle force decision
   const handleForceDecision = async () => {
@@ -228,7 +256,7 @@ export function DecisionOptionsPanel({ task, className }: DecisionOptionsPanelPr
         </div>
       )}
 
-      {/* Input Payload Viewer */}
+      {/* Input Payload */}
       {inputPayload && (
         <div className="border rounded-lg overflow-hidden">
           <button
@@ -238,7 +266,7 @@ export function DecisionOptionsPanel({ task, className }: DecisionOptionsPanelPr
           >
             <div className="flex items-center gap-2">
               {showInputPayload ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-              <span>Input Payload (evaluated data)</span>
+              <span>Input Payload</span>
             </div>
           </button>
           {showInputPayload && (
@@ -256,9 +284,24 @@ export function DecisionOptionsPanel({ task, className }: DecisionOptionsPanelPr
       {/* Decision Options */}
       {connections.length > 0 && (
         <div className="space-y-2">
-          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Available Branches ({connections.length})
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Available Branches ({connections.length})
+            </div>
           </div>
+
+          {/* Show which field is being compared - use decisionField or get from first evaluation with a fieldPath */}
+          {(() => {
+            const fieldToShow = decisionField || evaluations.find(e => e.fieldPath)?.fieldPath
+            if (fieldToShow && inputPayload) {
+              return (
+                <div className="text-xs text-muted-foreground">
+                  Comparing <code className="bg-muted px-1 py-0.5 rounded font-mono">{fieldToShow}</code> = <code className="bg-muted px-1 py-0.5 rounded font-mono text-amber-600 dark:text-amber-400">{JSON.stringify(getValueByPath(inputPayload, fieldToShow))}</code>
+                </div>
+              )
+            }
+            return null
+          })()}
 
           <div className="space-y-2">
             {evaluations.map((evalResult, idx) => {
@@ -292,24 +335,19 @@ export function DecisionOptionsPanel({ task, className }: DecisionOptionsPanelPr
                         <GitBranch className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                       )}
 
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium truncate">
-                            {conn.label || conn.targetStepId}
-                          </span>
-                          {isDefaultRoute && (
-                            <Badge variant="secondary" className="text-[10px] h-4">Default</Badge>
-                          )}
-                          {isSelected && (
-                            <Badge variant="default" className="text-[10px] h-4 bg-green-600">Selected</Badge>
-                          )}
-                          {conditionMatched && !isSelected && (
-                            <Badge variant="outline" className="text-[10px] h-4 text-amber-600">Would Match</Badge>
-                          )}
-                        </div>
-                        <div className="text-xs text-muted-foreground truncate">
-                          → {conn.targetStepId}
-                        </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium truncate">
+                          {conn.label || conn.targetStepId}
+                        </span>
+                        {isDefaultRoute && (
+                          <Badge variant="secondary" className="text-[10px] h-4">Default</Badge>
+                        )}
+                        {isSelected && (
+                          <Badge variant="default" className="text-[10px] h-4 bg-green-600">Selected</Badge>
+                        )}
+                        {conditionMatched && !isSelected && (
+                          <Badge variant="outline" className="text-[10px] h-4 text-amber-600">Would Match</Badge>
+                        )}
                       </div>
                     </div>
 
@@ -334,17 +372,18 @@ export function DecisionOptionsPanel({ task, className }: DecisionOptionsPanelPr
                   {hasCondition && (
                     <div className="px-3 py-2 border-t bg-background text-xs space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className="text-muted-foreground">Condition:</span>
+                        <span className="text-muted-foreground">{(decisionField || inferredDecisionField) ? 'Match Value:' : 'Condition:'}</span>
                         <code className={cn(
                           'px-1.5 py-0.5 rounded font-mono text-[10px]',
-                          evalResult.formatError ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300' : 'bg-muted'
+                          // Only show error styling if there's a format error AND no decisionField (explicit or inferred)
+                          evalResult.formatError && !decisionField && !inferredDecisionField ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300' : 'bg-muted'
                         )}>
                           {conn.condition}
                         </code>
                       </div>
 
-                      {/* Show format error if condition is invalid */}
-                      {evalResult.formatError && (
+                      {/* Show format error if condition is invalid (only when no decisionField - explicit or inferred) */}
+                      {evalResult.formatError && !decisionField && !inferredDecisionField && (
                         <div className="mt-2 p-2 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded text-red-700 dark:text-red-300">
                           <div className="flex items-start gap-2">
                             <AlertCircle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
@@ -356,13 +395,16 @@ export function DecisionOptionsPanel({ task, className }: DecisionOptionsPanelPr
                         </div>
                       )}
 
-                      {/* Show evaluation details when format is valid */}
-                      {!evalResult.formatError && evalResult.fieldPath && inputPayload && (
+                      {/* Show evaluation details when we have valid evaluation data */}
+                      {evalResult.fieldPath && inputPayload && (
                         <div className="mt-2 p-2 bg-muted/50 rounded space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-muted-foreground">Field:</span>
-                            <code className="font-mono text-[10px]">{evalResult.fieldPath}</code>
-                          </div>
+                          {/* Only show field path if not using decisionField (since it's shown at the top) */}
+                          {!decisionField && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-muted-foreground">Field:</span>
+                              <code className="font-mono text-[10px]">{evalResult.fieldPath}</code>
+                            </div>
+                          )}
                           <div className="flex items-center gap-2">
                             <span className="text-muted-foreground">Actual Value:</span>
                             <code className={cn(
@@ -380,7 +422,7 @@ export function DecisionOptionsPanel({ task, className }: DecisionOptionsPanelPr
                                   key={i}
                                   className={cn(
                                     'font-mono text-[10px] px-1 py-0.5 rounded',
-                                    String(evalResult.actualValue) === v
+                                    String(evalResult.actualValue).toLowerCase() === v.toLowerCase()
                                       ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300'
                                       : 'bg-muted'
                                   )}
