@@ -18,6 +18,7 @@ import {
   TASK_TYPE_CONFIG,
   getTaskTypeConfig,
 } from '@/lib/task-type-config'
+import { StatusPanel } from './status-panel'
 
 interface DetailsTabProps {
   task: Task
@@ -31,6 +32,14 @@ interface DetailsTabProps {
   webhookConfig?: WebhookConfig
   onWebhookConfigChange: (config: WebhookConfig, options?: { skipSave?: boolean }) => void
   updateTask: { mutate: (args: { id: string; data: Partial<Task> }) => void }
+  // StatusPanel props
+  statusOptions: LookupValue[]
+  onRerun?: () => void
+  onExecuteWebhook?: () => void
+  onRetryWebhook?: () => void
+  isRerunning?: boolean
+  isExecuting?: boolean
+  isRetrying?: boolean
 }
 
 export function DetailsTab({
@@ -45,6 +54,13 @@ export function DetailsTab({
   webhookConfig,
   onWebhookConfigChange,
   updateTask,
+  statusOptions,
+  onRerun,
+  onExecuteWebhook,
+  onRetryWebhook,
+  isRerunning,
+  isExecuting,
+  isRetrying,
 }: DetailsTabProps) {
   const selectedWorkflowId = watch('workflowId')
   const currentTaskType = watch('taskType') || 'agent'
@@ -59,6 +75,18 @@ export function DetailsTab({
 
   return (
     <div className="p-4 space-y-6">
+      {/* Status */}
+      <StatusPanel
+        task={task}
+        statusOptions={statusOptions}
+        onRerun={onRerun}
+        onExecuteWebhook={onExecuteWebhook}
+        onRetryWebhook={onRetryWebhook}
+        isRerunning={isRerunning}
+        isExecuting={isExecuting}
+        isRetrying={isRetrying}
+      />
+
       {/* Summary */}
       <div className="space-y-2">
         <label className="text-sm font-medium">Summary</label>

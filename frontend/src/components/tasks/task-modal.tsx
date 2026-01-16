@@ -1018,23 +1018,8 @@ export function TaskModal({
 
         {/* Main content - single scrollable area */}
         <Tabs value={activeTab} onValueChange={handleTabChange} className="flex-1 min-h-0 flex flex-col">
-          {/* Status Panel + Tab List (fixed) */}
+          {/* Tab List (fixed) */}
           <div className="flex-shrink-0">
-            {/* Status Panel */}
-            <div className="px-5 py-4 border-b border-border">
-              <StatusPanel
-                task={task}
-                statusOptions={statusOptions}
-                onRerun={handleRerun}
-                onExecuteWebhook={handleExecuteWebhook}
-                onRetryWebhook={handleRetryWebhook}
-                isRerunning={rerunTask.isPending}
-                isExecuting={isExecutingWebhook}
-                isRetrying={isRetryingWebhook}
-              />
-            </div>
-
-            {/* Tab List */}
             <TabsList className="w-full justify-start px-5 pt-2 pb-0 rounded-none border-b border-border bg-transparent h-auto">
               <TabsTrigger
                 value={TASK_MODAL_TABS.OUTPUT}
@@ -1162,6 +1147,13 @@ export function TaskModal({
                 webhookConfig={webhookConfig}
                 onWebhookConfigChange={handleWebhookConfigChange}
                 updateTask={updateTask}
+                statusOptions={statusOptions}
+                onRerun={handleRerun}
+                onExecuteWebhook={handleExecuteWebhook}
+                onRetryWebhook={handleRetryWebhook}
+                isRerunning={rerunTask.isPending}
+                isExecuting={isExecutingWebhook}
+                isRetrying={isRetryingWebhook}
               />
             </TabsContent>
           </div>
