@@ -203,16 +203,49 @@ export function getStepTypeConfig(stepType?: string): TaskTypeConfig {
 // LocalStorage key for persisting the last opened tab
 export const TASK_MODAL_TAB_KEY = 'task-modal-last-tab'
 
-// Available tabs in the task modal right sidebar
+// Available tabs in the task modal (new single-column layout)
 export const TASK_MODAL_TABS = {
-  TYPE_CONFIG: 'type-config',
+  OUTPUT: 'output',
   SUBTASKS: 'subtasks',
   DOCUMENTS: 'documents',
-  METADATA: 'metadata',
   ACTIVITY: 'activity',
+  METADATA: 'metadata',
+  DETAILS: 'details',
 } as const
 
 export type TaskModalTab = typeof TASK_MODAL_TABS[keyof typeof TASK_MODAL_TABS]
 
 // Default tab when no preference is stored
 export const DEFAULT_TASK_MODAL_TAB: TaskModalTab = TASK_MODAL_TABS.ACTIVITY
+
+// Helper to check if a task has output data
+export function taskHasOutput(task: { metadata?: Record<string, unknown>; webhookConfig?: { attempts?: Array<{ responseBody?: unknown }> } }): boolean {
+  const metadata = task.metadata
+  const attempts = task.webhookConfig?.attempts || []
+  const lastAttempt = attempts[attempts.length - 1]
+
+  // Check for daemon-style output
+  if (metadata?.output !== undefined) return true
+  // Check for webhook response
+  if (lastAttempt?.responseBody !== undefined) return true
+  // Check for result field
+  if (metadata?.result !== undefined) return true
+
+  return false
+}
+
+// Smart default tab based on task status and content
+export function getSmartDefaultTab(task: { status: string; metadata?: Record<string, unknown>; webhookConfig?: { attempts?: Array<{ responseBody?: unknown }> } }): TaskModalTab {
+  // For completed/failed tasks with output, show output first
+  if (['completed', 'failed'].includes(task.status) && taskHasOutput(task)) {
+    return TASK_MODAL_TABS.OUTPUT
+  }
+  // For other statuses, check localStorage or use activity
+  if (typeof window !== 'undefined') {
+    const stored = localStorage.getItem(TASK_MODAL_TAB_KEY)
+    if (stored && Object.values(TASK_MODAL_TABS).includes(stored as TaskModalTab)) {
+      return stored as TaskModalTab
+    }
+  }
+  return DEFAULT_TASK_MODAL_TAB
+}
