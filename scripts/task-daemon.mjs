@@ -38,7 +38,7 @@
 
 import { parseArgs } from 'node:util';
 import { execSync, spawn } from 'node:child_process';
-import { writeFileSync, unlinkSync, readFileSync, existsSync, mkdirSync, createWriteStream, readdirSync, statSync } from 'node:fs';
+import { writeFileSync, unlinkSync, readFileSync, existsSync, mkdirSync, createWriteStream, readdirSync, statSync, openSync, closeSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1722,8 +1722,8 @@ function startSingleJob(config) {
   if (config.once) args.push('--once');
 
   // Open log file for appending - use file descriptors for proper detachment
-  const logFd = require('fs').openSync(logFile, 'a');
-  require('fs').writeSync(logFd, `\n--- Started at ${new Date().toISOString()} ---\n`);
+  const logFd = openSync(logFile, 'a');
+  writeFileSync(logFd, `\n--- Started at ${new Date().toISOString()} ---\n`);
 
   const child = spawn('node', [__filename, ...args], {
     detached: true,
@@ -1734,7 +1734,7 @@ function startSingleJob(config) {
   savePid(jobName, child.pid);
 
   // Close our copy of the file descriptor and unref the child
-  require('fs').closeSync(logFd);
+  closeSync(logFd);
   child.unref();
 
   console.log(`\n  ✓ Started ${jobName} (PID ${child.pid})`);
@@ -1789,8 +1789,8 @@ function startAllJobs(config) {
     if (config.once) args.push('--once');
 
     // Open log file for appending - use file descriptors for proper detachment
-    const logFd = require('fs').openSync(logFile, 'a');
-    require('fs').writeSync(logFd, `\n--- Started at ${new Date().toISOString()} ---\n`);
+    const logFd = openSync(logFile, 'a');
+    writeFileSync(logFd, `\n--- Started at ${new Date().toISOString()} ---\n`);
 
     const child = spawn('node', [__filename, '--config', configPath, ...args], {
       detached: true,
@@ -1801,7 +1801,7 @@ function startAllJobs(config) {
     savePid(job.name, child.pid);
 
     // Close our copy of the file descriptor and unref the child
-    require('fs').closeSync(logFd);
+    closeSync(logFd);
     child.unref();
 
     console.log(`  ✓ ${job.name} (PID ${child.pid})`);
