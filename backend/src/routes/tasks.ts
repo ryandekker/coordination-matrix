@@ -3,7 +3,7 @@ import { ObjectId, Filter, Sort, Document } from 'mongodb';
 import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
 import { ReferenceResolver } from '../services/reference-resolver.js';
-import { Task, TaskWithChildren, PaginatedResponse, Document as AppDocument } from '../types/index.js';
+import { Task, TaskWithChildren, PaginatedResponse, Document as AppDocument, ChildStatusSummary } from '../types/index.js';
 import { publishTaskEvent, computeChanges, getSpecificEventTypes } from '../services/event-bus.js';
 import { activityLogService } from '../services/activity-log.js';
 import { workflowExecutionService } from '../services/workflow-execution-service.js';
@@ -37,22 +37,51 @@ tasksRouter.get('/', async (req: Request, res: Response, next: NextFunction) => 
       db.collection<Task>('tasks').countDocuments(filter),
     ]);
 
-    // Add child count to each task to enable expand/collapse UI
-    // Use a single aggregation query to get counts
+    // Add child count and status summary to each task to enable expand/collapse UI
+    // Use a single aggregation query to get counts and status breakdowns
     const taskIds = tasks.map(t => t._id);
-    const childCounts = await db.collection<Task>('tasks').aggregate([
+    const childStats = await db.collection<Task>('tasks').aggregate([
       { $match: { parentId: { $in: taskIds } } },
-      { $group: { _id: '$parentId', count: { $sum: 1 } } }
+      {
+        $group: {
+          _id: '$parentId',
+          count: { $sum: 1 },
+          pending: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } },
+          in_progress: { $sum: { $cond: [{ $eq: ['$status', 'in_progress'] }, 1, 0] } },
+          waiting: { $sum: { $cond: [{ $eq: ['$status', 'waiting'] }, 1, 0] } },
+          on_hold: { $sum: { $cond: [{ $eq: ['$status', 'on_hold'] }, 1, 0] } },
+          completed: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
+          failed: { $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] } },
+          cancelled: { $sum: { $cond: [{ $eq: ['$status', 'cancelled'] }, 1, 0] } },
+        }
+      }
     ]).toArray();
 
-    const childCountMap = new Map(childCounts.map(c => [c._id.toString(), c.count]));
-    // Return childCount as a number instead of creating wasteful placeholder arrays
-    const tasksWithChildInfo = tasks.map(task => ({
-      ...task,
-      childCount: childCountMap.get(task._id.toString()) || 0,
-      // Keep empty children array for backward compatibility (UI expects it)
-      children: []
-    }));
+    const childStatsMap = new Map(childStats.map(c => [c._id.toString(), c]));
+    // Return childCount and childStatusSummary for parent tasks
+    const tasksWithChildInfo = tasks.map(task => {
+      const stats = childStatsMap.get(task._id.toString());
+      const childCount = stats?.count || 0;
+      return {
+        ...task,
+        childCount,
+        // Keep empty children array for backward compatibility (UI expects it)
+        children: [],
+        // Include status summary only if there are children
+        ...(childCount > 0 && stats ? {
+          childStatusSummary: {
+            total: stats.count,
+            pending: stats.pending,
+            in_progress: stats.in_progress,
+            waiting: stats.waiting,
+            on_hold: stats.on_hold,
+            completed: stats.completed,
+            failed: stats.failed,
+            cancelled: stats.cancelled,
+          } as ChildStatusSummary
+        } : {})
+      };
+    });
 
     let resolvedTasks = tasksWithChildInfo;
     if (resolveReferences === 'true') {
@@ -406,6 +435,41 @@ tasksRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) 
     }
 
     let result: Task | TaskWithChildren = task;
+
+    // Get child count and status summary
+    const childStats = await db.collection<Task>('tasks').aggregate([
+      { $match: { parentId: taskId } },
+      {
+        $group: {
+          _id: null,
+          count: { $sum: 1 },
+          pending: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } },
+          in_progress: { $sum: { $cond: [{ $eq: ['$status', 'in_progress'] }, 1, 0] } },
+          waiting: { $sum: { $cond: [{ $eq: ['$status', 'waiting'] }, 1, 0] } },
+          on_hold: { $sum: { $cond: [{ $eq: ['$status', 'on_hold'] }, 1, 0] } },
+          completed: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
+          failed: { $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] } },
+          cancelled: { $sum: { $cond: [{ $eq: ['$status', 'cancelled'] }, 1, 0] } },
+        }
+      }
+    ]).toArray();
+
+    const stats = childStats[0];
+    if (stats) {
+      (result as TaskWithChildren).childCount = stats.count;
+      (result as TaskWithChildren).childStatusSummary = {
+        total: stats.count,
+        pending: stats.pending,
+        in_progress: stats.in_progress,
+        waiting: stats.waiting,
+        on_hold: stats.on_hold,
+        completed: stats.completed,
+        failed: stats.failed,
+        cancelled: stats.cancelled,
+      };
+    } else {
+      (result as TaskWithChildren).childCount = 0;
+    }
 
     // Optionally include children
     if (includeChildren === 'true') {

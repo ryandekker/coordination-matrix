@@ -3326,6 +3326,14 @@ class WorkflowExecutionService {
 
     console.log(`[WorkflowExecutionService] Cancelled workflow run ${runId}: ${cancelResult.modifiedCount} tasks marked as cancelled`);
 
+    // Also update the root task if it exists and isn't already in a terminal state
+    if (result.rootTaskId) {
+      await this.tasks.updateOne(
+        { _id: result.rootTaskId, status: { $nin: ['completed', 'failed', 'cancelled'] } },
+        { $set: { status: 'cancelled' as TaskStatus, updatedAt: now } }
+      );
+    }
+
     await this.publish({
       id: this.generateEventId(),
       type: 'workflow.run.cancelled',

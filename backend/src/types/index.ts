@@ -374,8 +374,22 @@ export interface Task {
 // Review decision for manual workflow steps
 export type ManualReviewDecision = 'approved' | 'request_changes' | 'approved_with_notes';
 
+// Summary of child task statuses for parent tasks
+export interface ChildStatusSummary {
+  total: number;
+  pending: number;
+  in_progress: number;
+  waiting: number;
+  on_hold: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+}
+
 export interface TaskWithChildren extends Task {
   children?: TaskWithChildren[];
+  childCount?: number;
+  childStatusSummary?: ChildStatusSummary;
 }
 
 export interface TaskWithResolved extends Task {

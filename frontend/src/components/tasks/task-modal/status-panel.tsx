@@ -14,9 +14,10 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { Task, LookupValue, WebhookAttempt } from '@/lib/api'
+import { Task, LookupValue } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { getTaskTypeConfig } from '@/lib/task-type-config'
+import { ListTree } from 'lucide-react'
 
 interface StatusPanelProps {
   task: Task
@@ -389,9 +390,65 @@ export function StatusPanel({
     }
   }, [status])
 
+  // Render child status summary if task has children
+  const renderChildStatusSummary = () => {
+    const summary = task.childStatusSummary
+    if (!summary || summary.total === 0) return null
+
+    // Determine the "effective" status based on children
+    const hasFailures = summary.failed > 0
+    const hasActive = summary.in_progress > 0 || summary.waiting > 0 || summary.pending > 0
+    const allCompleted = summary.completed === summary.total
+
+    let summaryStatus: 'success' | 'warning' | 'error' | 'neutral' = 'neutral'
+    if (hasFailures) summaryStatus = 'error'
+    else if (allCompleted) summaryStatus = 'success'
+    else if (hasActive) summaryStatus = 'warning'
+
+    const summaryBgClass = {
+      success: 'bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800',
+      warning: 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800',
+      error: 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800',
+      neutral: 'bg-muted/50 border-border',
+    }[summaryStatus]
+
+    // Non-zero statuses to show
+    const stats = [
+      { key: 'completed', label: 'Completed', count: summary.completed, color: 'text-green-600 dark:text-green-400' },
+      { key: 'failed', label: 'Failed', count: summary.failed, color: 'text-red-600 dark:text-red-400' },
+      { key: 'in_progress', label: 'In Progress', count: summary.in_progress, color: 'text-blue-600 dark:text-blue-400' },
+      { key: 'pending', label: 'Pending', count: summary.pending, color: 'text-yellow-600 dark:text-yellow-400' },
+      { key: 'waiting', label: 'Waiting', count: summary.waiting, color: 'text-blue-500 dark:text-blue-300' },
+      { key: 'on_hold', label: 'On Hold', count: summary.on_hold, color: 'text-amber-600 dark:text-amber-400' },
+      { key: 'cancelled', label: 'Cancelled', count: summary.cancelled, color: 'text-gray-500 dark:text-gray-400' },
+    ].filter(s => s.count > 0)
+
+    const completedPercent = summary.total > 0 ? (summary.completed / summary.total) * 100 : 0
+
+    return (
+      <div className={cn('mt-3 rounded-lg border p-3', summaryBgClass)}>
+        <div className="flex items-center gap-2 mb-2">
+          <ListTree className="h-4 w-4 text-muted-foreground" />
+          <span className="text-xs font-medium text-muted-foreground">
+            Subtasks ({summary.total})
+          </span>
+        </div>
+        <Progress value={completedPercent} className="h-1.5 mb-2" />
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+          {stats.map(s => (
+            <span key={s.key} className={cn('font-medium', s.color)}>
+              {s.count} {s.label.toLowerCase()}
+            </span>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className={cn('rounded-lg border p-4', panelBgClass)}>
       {renderContent()}
+      {renderChildStatusSummary()}
     </div>
   )
 }
