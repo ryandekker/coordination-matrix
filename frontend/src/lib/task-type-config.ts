@@ -210,6 +210,7 @@ export const TASK_MODAL_TABS = {
   DOCUMENTS: 'documents',
   ACTIVITY: 'activity',
   METADATA: 'metadata',
+  STEP_CONFIG: 'step-config',
   DETAILS: 'details',
 } as const
 

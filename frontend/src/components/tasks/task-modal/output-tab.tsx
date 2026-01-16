@@ -1,25 +1,116 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useCallback } from 'react'
 import { Copy, Check, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { JsonViewer } from '@/components/ui/json-viewer'
-import { Task, WebhookAttempt } from '@/lib/api'
+import { Task, WebhookAttempt, ManualReviewDecision } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { format, formatDistanceToNow } from 'date-fns'
 import Link from 'next/link'
+import { TaskResultDisplay } from '../task-result-display'
+import { DecisionOptionsPanel } from '../decision-options-panel'
+import { ManualReviewPanel } from './manual-review-panel'
+import { useUpdateTask } from '@/hooks/use-tasks'
+import { toast } from 'sonner'
 
 interface OutputTabProps {
   task: Task
+  onRollback?: () => Promise<void>
 }
 
-export function OutputTab({ task }: OutputTabProps) {
+export function OutputTab({ task, onRollback }: OutputTabProps) {
   const [copied, setCopied] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const updateTask = useUpdateTask()
   const taskType = task.taskType || 'agent'
   const metadata = task.metadata as Record<string, unknown> | undefined
   const webhookConfig = task.webhookConfig
   const attempts = webhookConfig?.attempts || []
   const lastAttempt = attempts[attempts.length - 1]
+
+  // Check if this is a manual task requiring review
+  const isManualTask = taskType === 'manual'
+  const needsReview = isManualTask && ['pending', 'in_progress'].includes(task.status)
+  const hasBeenReviewed = isManualTask && task.reviewDecision
+
+  // Handle manual review submission
+  const handleReview = useCallback(async (decision: ManualReviewDecision, comment: string) => {
+    setIsSubmitting(true)
+    try {
+      // Update the task with review decision and complete it
+      await updateTask.mutateAsync({
+        id: task._id,
+        data: {
+          reviewDecision: decision,
+          reviewComment: comment || undefined,
+          reviewedAt: new Date().toISOString(),
+          // Mark as completed for 'approved' or 'approved_with_notes'
+          // 'request_changes' will be handled by rollback
+          status: decision === 'request_changes' ? 'on_hold' : 'completed',
+          // Add review notes to metadata for the next step
+          metadata: {
+            ...task.metadata,
+            reviewNotes: comment || undefined,
+            reviewDecision: decision,
+          },
+        } as Partial<Task>,
+      })
+      toast.success(
+        decision === 'approved' ? 'Task approved' :
+        decision === 'approved_with_notes' ? 'Task approved with notes' :
+        'Changes requested'
+      )
+    } catch (error) {
+      toast.error('Failed to submit review')
+      throw error
+    } finally {
+      setIsSubmitting(false)
+    }
+  }, [task, updateTask])
+
+  // For decision tasks, always show the DecisionOptionsPanel
+  if (taskType === 'decision') {
+    return (
+      <div className="p-4 space-y-4">
+        <DecisionOptionsPanel task={task} />
+        {/* Also show task result if available */}
+        {task.taskResult?.current && (
+          <div className="pt-4 border-t">
+            <TaskResultDisplay
+              taskResult={task.taskResult}
+              taskType={task.taskType}
+            />
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // For manual tasks pending review, show the review panel
+  if (needsReview || hasBeenReviewed) {
+    return (
+      <ManualReviewPanel
+        task={task}
+        previousStepOutput={metadata as Record<string, unknown> | null}
+        onReview={handleReview}
+        onRollback={onRollback}
+        isSubmitting={isSubmitting}
+      />
+    )
+  }
+
+  // If task has structured taskResult, show TaskResultDisplay
+  if (task.taskResult?.current) {
+    return (
+      <div className="p-4">
+        <TaskResultDisplay
+          taskResult={task.taskResult}
+          taskType={task.taskType}
+        />
+      </div>
+    )
+  }
 
   // Extract output based on task type
   const output = useMemo(() => {

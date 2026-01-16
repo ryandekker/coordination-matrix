@@ -1016,91 +1016,263 @@ tasksRouter.delete('/:id/webhook/retry', async (req: Request, res: Response, nex
   }
 });
 
-// POST /api/tasks/:id/rerun - Rerun a task (reset to pending and clear output)
+// POST /api/tasks/:id/rerun - Rerun a task with step-type-specific behavior
 tasksRouter.post('/:id/rerun', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
     const taskId = toObjectId(req.params.id);
-    const { clearMetadata = false, preserveInput = true } = req.body;
+    const {
+      clearMetadata = false,
+      preserveInput = true,
+      rerunChildren = true,  // For foreach tasks: also rerun child tasks
+      refreshInput = true,   // Refresh input from previous step
+    } = req.body;
 
     const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
     if (!task) {
       throw createError('Task not found', 404);
     }
 
-    // Special handling for join tasks: just re-aggregate, don't reset
-    if (task.taskType === 'join') {
-      console.log(`[Tasks] Rerun: re-aggregating join task ${taskId}`);
-      const rerunResult = await workflowExecutionService.rerunJoinTask(taskId);
-
-      // Fetch the updated task after re-aggregation
-      const updatedTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
-      if (updatedTask) {
-        if (rerunResult.error) {
-          res.json({
-            data: updatedTask,
-            message: `Re-aggregation failed: ${rerunResult.error}`,
-            error: rerunResult.error,
-            debug: rerunResult.debug
-          });
-        } else {
-          res.json({
-            data: updatedTask,
-            message: rerunResult.success
-              ? 'Join task re-aggregated successfully'
-              : 'Join task is waiting for child tasks to complete',
-            debug: rerunResult.debug
-          });
-        }
-        return;
-      }
-    }
-
     const now = new Date();
+    const actorId = req.user?.userId ? toObjectId(req.user.userId) : null;
+    const MAX_RESULT_HISTORY = 10;
 
-    // For workflow tasks, refresh inputPayload from the previous step
-    let refreshedInput: Record<string, unknown> | undefined;
-    if (task.workflowRunId && task.workflowStepId) {
+    // Helper: Archive current taskResult to history
+    const archiveCurrentResult = async (taskToUpdate: Task) => {
+      if (taskToUpdate.taskResult?.current) {
+        const history = taskToUpdate.taskResult.history || [];
+        history.unshift(taskToUpdate.taskResult.current);
+        // Keep only last N results
+        const trimmedHistory = history.slice(0, MAX_RESULT_HISTORY);
+        await db.collection('tasks').updateOne(
+          { _id: taskToUpdate._id },
+          {
+            $set: { 'taskResult.history': trimmedHistory },
+            $unset: { 'taskResult.current': '' }
+          }
+        );
+      }
+    };
+
+    // Helper: Refresh input from previous step
+    const getRefreshedInput = async (t: Task): Promise<Record<string, unknown> | undefined> => {
+      if (!refreshInput || !t.workflowRunId || !t.workflowStepId) return undefined;
+
       try {
-        // Get the workflow to find the previous step
-        const workflow = task.workflowId
-          ? await db.collection('workflows').findOne({ _id: task.workflowId })
+        const workflow = t.workflowId
+          ? await db.collection('workflows').findOne({ _id: t.workflowId })
           : null;
 
         if (workflow?.steps) {
-          const currentStepIndex = workflow.steps.findIndex((s: { id: string }) => s.id === task.workflowStepId);
+          const currentStepIndex = workflow.steps.findIndex((s: { id: string }) => s.id === t.workflowStepId);
           if (currentStepIndex > 0) {
             const prevStep = workflow.steps[currentStepIndex - 1];
-
-            // Find the previous step's completed task
             const prevTask = await db.collection<Task>('tasks').findOne({
-              workflowRunId: task.workflowRunId,
+              workflowRunId: t.workflowRunId,
               workflowStepId: prevStep.id,
               status: 'completed'
             });
 
             if (prevTask?.metadata) {
-              // Build input payload from previous step's output
-              // For join tasks, use aggregatedResults; for others, use output or metadata
-              const prevOutput = prevTask.metadata.aggregatedResults
+              const prevOutput = prevTask.taskResult?.current?.output
+                || prevTask.metadata.aggregatedResults
                 || prevTask.metadata.output
                 || prevTask.metadata;
 
-              refreshedInput = {
-                ...task.metadata?.inputPayload as Record<string, unknown>,
+              return {
+                ...t.metadata?.inputPayload as Record<string, unknown>,
                 output: prevOutput,
                 _refreshedFrom: prevTask._id.toString(),
                 _refreshedAt: now.toISOString(),
               };
-
-              console.log(`[Tasks] Rerun: refreshed input for task ${taskId} from previous step ${prevStep.id}`);
             }
           }
         }
       } catch (err) {
-        console.error('[Tasks] Rerun: failed to refresh input from previous step:', err);
+        console.error('[Tasks] Rerun: failed to refresh input:', err);
+      }
+      return undefined;
+    };
+
+    // Helper: Clear output-related metadata
+    const clearOutputMetadata = async (t: Task) => {
+      const outputFields = [
+        'output', 'result', 'error', 'aggregatedResults',
+        'successCount', 'failedCount', 'successPercent',
+        'statusReason', 'completedAt'
+      ];
+      const $unset: Record<string, string> = {};
+      for (const field of outputFields) {
+        if (t.metadata?.[field] !== undefined) {
+          $unset[`metadata.${field}`] = '';
+        }
+      }
+      if (Object.keys($unset).length > 0) {
+        await db.collection('tasks').updateOne({ _id: t._id }, { $unset });
+      }
+    };
+
+    // =========================================================================
+    // Step-type-specific rerun logic
+    // =========================================================================
+
+    // JOIN: Re-aggregate without resetting children
+    if (task.taskType === 'join') {
+      console.log(`[Tasks] Rerun: re-aggregating join task ${taskId}`);
+      await archiveCurrentResult(task);
+      const rerunResult = await workflowExecutionService.rerunJoinTask(taskId);
+      const updatedTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
+
+      if (updatedTask) {
+        res.json({
+          data: updatedTask,
+          message: rerunResult.error
+            ? `Re-aggregation failed: ${rerunResult.error}`
+            : rerunResult.success
+              ? 'Join task re-aggregated successfully'
+              : 'Join task is waiting for child tasks to complete',
+          error: rerunResult.error || undefined,
+          debug: rerunResult.debug
+        });
+        return;
       }
     }
+
+    // FOREACH: Reset and optionally rerun children
+    if (task.taskType === 'foreach') {
+      console.log(`[Tasks] Rerun: resetting foreach task ${taskId}, rerunChildren=${rerunChildren}`);
+      await archiveCurrentResult(task);
+
+      if (rerunChildren) {
+        // Find and rerun all child tasks
+        const childTasks = await db.collection<Task>('tasks')
+          .find({ parentId: taskId })
+          .toArray();
+
+        for (const child of childTasks) {
+          await archiveCurrentResult(child);
+          await clearOutputMetadata(child);
+          const childInput = await getRefreshedInput(child);
+          await db.collection('tasks').updateOne(
+            { _id: child._id },
+            {
+              $set: {
+                status: 'pending',
+                updatedAt: now,
+                ...(childInput && { 'metadata.inputPayload': childInput }),
+              }
+            }
+          );
+          await publishTaskEvent('task.status.changed', { ...child, status: 'pending' } as Task, {
+            changes: [{ field: 'status', oldValue: child.status, newValue: 'pending' }],
+            actorId,
+            actorType: 'user',
+          });
+        }
+
+        console.log(`[Tasks] Rerun: reset ${childTasks.length} child tasks`);
+      }
+
+      // Reset foreach counters
+      const updateFields: Record<string, unknown> = {
+        status: 'waiting',
+        updatedAt: now,
+        'batchCounters.processedCount': 0,
+        'batchCounters.failedCount': 0,
+      };
+
+      const result = await db.collection<Task>('tasks').findOneAndUpdate(
+        { _id: taskId },
+        { $set: updateFields },
+        { returnDocument: 'after' }
+      );
+
+      await publishTaskEvent('task.status.changed', result as Task, {
+        changes: [{ field: 'status', oldValue: task.status, newValue: 'waiting' }],
+        actorId,
+        actorType: 'user',
+      });
+
+      res.json({
+        data: result,
+        message: rerunChildren
+          ? `Foreach task reset to waiting, ${(await db.collection<Task>('tasks').countDocuments({ parentId: taskId }))} child tasks rerun`
+          : 'Foreach task reset to waiting'
+      });
+      return;
+    }
+
+    // WEBHOOK/EXTERNAL: Clear attempts and re-execute
+    if (task.taskType === 'webhook' || (task.taskType === 'external' && task.webhookConfig?.url)) {
+      console.log(`[Tasks] Rerun: re-executing webhook task ${taskId}`);
+      await archiveCurrentResult(task);
+
+      // Clear attempts and reset status
+      await db.collection('tasks').updateOne(
+        { _id: taskId },
+        {
+          $set: {
+            status: 'pending',
+            updatedAt: now,
+            'webhookConfig.attempts': [],
+            'webhookConfig.lastAttemptAt': null,
+            'webhookConfig.nextRetryAt': null,
+          }
+        }
+      );
+
+      // Publish event to trigger webhook execution
+      const updatedTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
+      await publishTaskEvent('task.status.changed', updatedTask as Task, {
+        changes: [{ field: 'status', oldValue: task.status, newValue: 'pending' }],
+        actorId,
+        actorType: 'user',
+      });
+
+      res.json({
+        data: updatedTask,
+        message: 'Webhook task reset and queued for re-execution'
+      });
+      return;
+    }
+
+    // EXTERNAL (callback mode): Reset for new callback
+    if (task.taskType === 'external') {
+      console.log(`[Tasks] Rerun: resetting external task ${taskId} for callback`);
+      await archiveCurrentResult(task);
+
+      const result = await db.collection<Task>('tasks').findOneAndUpdate(
+        { _id: taskId },
+        {
+          $set: {
+            status: 'in_progress',
+            updatedAt: now,
+          }
+        },
+        { returnDocument: 'after' }
+      );
+
+      await publishTaskEvent('task.status.changed', result as Task, {
+        changes: [{ field: 'status', oldValue: task.status, newValue: 'in_progress' }],
+        actorId,
+        actorType: 'user',
+      });
+
+      res.json({
+        data: result,
+        message: 'External task reset to in_progress, waiting for callback'
+      });
+      return;
+    }
+
+    // =========================================================================
+    // Default rerun: agent, manual, decision, findDocument, flow, trigger
+    // =========================================================================
+    console.log(`[Tasks] Rerun: resetting ${task.taskType || 'standard'} task ${taskId}`);
+    await archiveCurrentResult(task);
+
+    // Refresh input if available
+    const refreshedInput = await getRefreshedInput(task);
 
     // Build the update object
     const updateFields: Record<string, unknown> = {
@@ -1108,25 +1280,10 @@ tasksRouter.post('/:id/rerun', async (req: Request, res: Response, next: NextFun
       updatedAt: now,
     };
 
-    // Clear webhook attempts if task has webhook config
-    if (task.webhookConfig) {
-      updateFields['webhookConfig.attempts'] = [];
-      updateFields['webhookConfig.lastAttemptAt'] = null;
-      updateFields['webhookConfig.nextRetryAt'] = null;
-    }
-
-    // Clear batch counters for foreach tasks
-    if (task.taskType === 'foreach' && task.batchCounters) {
-      updateFields['batchCounters.processedCount'] = 0;
-      updateFields['batchCounters.failedCount'] = 0;
-      updateFields['batchCounters.receivedCount'] = 0;
-    }
-
     // Clear or preserve metadata based on options
     if (clearMetadata) {
-      // Clear all metadata except input-related fields if preserveInput is true
       if (preserveInput && task.metadata) {
-        const inputFields = ['input', 'inputPayload', 'triggerPayload'];
+        const inputFields = ['input', 'inputPayload', 'triggerPayload', 'stepId', 'stepType'];
         const preservedMetadata: Record<string, unknown> = {};
         for (const field of inputFields) {
           if (task.metadata[field] !== undefined) {
@@ -1138,27 +1295,10 @@ tasksRouter.post('/:id/rerun', async (req: Request, res: Response, next: NextFun
         updateFields.metadata = {};
       }
     } else {
-      // Clear only output-related metadata fields
-      const outputFields = [
-        'output', 'result', 'error', 'aggregatedResults',
-        'successCount', 'failedCount', 'successPercent',
-        'statusReason', 'completedAt'
-      ];
-      const $unset: Record<string, string> = {};
-      for (const field of outputFields) {
-        if (task.metadata?.[field] !== undefined) {
-          $unset[`metadata.${field}`] = '';
-        }
-      }
-      if (Object.keys($unset).length > 0) {
-        await db.collection('tasks').updateOne(
-          { _id: taskId },
-          { $unset }
-        );
-      }
+      await clearOutputMetadata(task);
     }
 
-    // Apply refreshed input from previous step if available
+    // Apply refreshed input
     if (refreshedInput) {
       updateFields['metadata.inputPayload'] = refreshedInput;
     }
@@ -1173,10 +1313,6 @@ tasksRouter.post('/:id/rerun', async (req: Request, res: Response, next: NextFun
       throw createError('Task not found', 404);
     }
 
-    // Get actor from request
-    const actorId = req.user?.userId ? toObjectId(req.user.userId) : null;
-
-    // Publish task.status.changed event
     await publishTaskEvent('task.status.changed', result, {
       changes: [{ field: 'status', oldValue: task.status, newValue: 'pending' }],
       actorId,
@@ -1251,6 +1387,105 @@ tasksRouter.delete('/:id', async (req: Request, res: Response, next: NextFunctio
     }
 
     res.json({ success: true, message: 'Task deleted successfully' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/tasks/:id/force-decision - Force a decision task to a specific branch
+tasksRouter.post('/:id/force-decision', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const taskId = toObjectId(req.params.id);
+    const { targetStepId } = req.body;
+
+    if (!targetStepId) {
+      throw createError('targetStepId is required', 400);
+    }
+
+    // Get the decision task
+    const decisionTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
+    if (!decisionTask) {
+      throw createError('Task not found', 404);
+    }
+
+    if (decisionTask.taskType !== 'decision') {
+      throw createError('Task is not a decision task', 400);
+    }
+
+    // Verify the target is a valid option
+    const stepConfig = decisionTask.stepConfig;
+    const connections = stepConfig?.connections || [];
+    const defaultConnection = stepConfig?.defaultConnection;
+
+    const validTargets = connections.map(c => c.targetStepId);
+    if (defaultConnection && !validTargets.includes(defaultConnection)) {
+      validTargets.push(defaultConnection);
+    }
+
+    if (!validTargets.includes(targetStepId)) {
+      throw createError(
+        `Invalid targetStepId. Valid options: ${validTargets.join(', ')}`,
+        400
+      );
+    }
+
+    const selectedConnection = connections.find(c => c.targetStepId === targetStepId) ||
+      { targetStepId, condition: null, label: undefined };
+
+    const now = new Date();
+    const actorId = req.user?.userId ? toObjectId(req.user.userId) : null;
+
+    // Update the decision task
+    await db.collection('tasks').updateOne(
+      { _id: taskId },
+      {
+        $set: {
+          status: 'completed',
+          decisionResult: targetStepId,
+          updatedAt: now,
+          'metadata.selectedPath': targetStepId,
+          'metadata.condition': selectedConnection.condition || 'forced',
+          'metadata.forcedDecision': true,
+          'metadata.forcedAt': now,
+          'metadata.forcedBy': actorId?.toString() || 'unknown',
+        },
+        $unset: {
+          'metadata.error': '',
+        },
+      }
+    );
+
+    // Get the updated task
+    const updatedTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
+
+    // Publish event
+    await publishTaskEvent('task.status.changed', updatedTask!, {
+      actorId,
+      actorType: 'user',
+      changes: [{ field: 'status', oldValue: decisionTask.status, newValue: 'completed' }],
+    });
+
+    // If this is part of a workflow, we need to advance to the next step
+    if (decisionTask.workflowRunId && decisionTask.workflowStepId) {
+      try {
+        // Use the workflow execution service to continue the workflow
+        await workflowExecutionService.advanceFromForcedDecision(
+          decisionTask.workflowRunId,
+          taskId,
+          targetStepId
+        );
+      } catch (workflowError) {
+        console.error('[Tasks] Failed to advance workflow after forced decision:', workflowError);
+        // Don't fail the request, the decision was still forced successfully
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Decision forced to: ${selectedConnection.label || targetStepId}`,
+      task: updatedTask,
+    });
   } catch (error) {
     next(error);
   }
@@ -1647,6 +1882,59 @@ tasksRouter.delete('/:id/documents/:documentId', async (req: Request, res: Respo
     });
 
     res.json({ success: true, message: 'Document detached from task' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/tasks/:id/rollback - Rollback a manual review task to the previous step
+tasksRouter.post('/:id/rollback', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const taskId = toObjectId(req.params.id);
+    const { comment } = req.body as { comment?: string };
+
+    const db = getDb();
+    const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
+
+    if (!task) {
+      throw createError('Task not found', 404);
+    }
+
+    if (task.taskType !== 'manual') {
+      throw createError('Only manual tasks can be rolled back', 400);
+    }
+
+    if (!task.workflowRunId || !task.workflowStepId) {
+      throw createError('Task is not part of a workflow', 400);
+    }
+
+    // Call the workflow execution service to perform the rollback
+    const result = await workflowExecutionService.rollbackToPreviousStep(
+      taskId.toString(),
+      comment
+    );
+
+    if (!result.success) {
+      throw createError(result.error || 'Failed to rollback task', 400);
+    }
+
+    // Publish event for real-time updates
+    const userId = req.user?.userId ? new ObjectId(req.user.userId) : null;
+    await publishTaskEvent('task.updated', task, {
+      actorId: userId,
+      actorType: req.user ? 'user' : 'system',
+      metadata: {
+        action: 'rollback',
+        reviewComment: comment,
+        newTaskId: result.newTaskId,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: 'Task rolled back to previous step',
+      newTaskId: result.newTaskId,
+    });
   } catch (error) {
     next(error);
   }

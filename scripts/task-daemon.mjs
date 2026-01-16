@@ -38,7 +38,7 @@
 
 import { parseArgs } from 'node:util';
 import { execSync, spawn } from 'node:child_process';
-import { writeFileSync, unlinkSync, readFileSync, existsSync, mkdirSync, createWriteStream, readdirSync, statSync } from 'node:fs';
+import { writeFileSync, unlinkSync, readFileSync, existsSync, mkdirSync, createWriteStream, readdirSync, statSync, openSync, closeSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1687,8 +1687,14 @@ async function runDaemon(config) {
 
       if (!hadTask) {
         log.debug(`No tasks available, waiting ${config.interval}ms...`);
-        await new Promise((resolve) => setTimeout(resolve, config.interval));
+      } else {
+        // After processing a task, wait before checking for the next one
+        // This gives time for workflow transitions to complete and new tasks to appear
+        log.debug(`Task processed, waiting ${config.interval}ms before next check...`);
       }
+
+      // Always wait between iterations to avoid tight loops and give the system time
+      await new Promise((resolve) => setTimeout(resolve, config.interval));
     }
     log.info('Shutdown complete.');
   }
@@ -1710,25 +1716,25 @@ function startSingleJob(config) {
     process.exit(1);
   }
 
-  // Spawn background process
+  // Spawn background process with output redirected to log file
   const logFile = getLogFile(jobName);
   const args = ['--config', configPath, '--job', jobName, '--foreground'];
   if (config.once) args.push('--once');
 
+  // Open log file for appending - use file descriptors for proper detachment
+  const logFd = openSync(logFile, 'a');
+  writeFileSync(logFd, `\n--- Started at ${new Date().toISOString()} ---\n`);
+
   const child = spawn('node', [__filename, ...args], {
     detached: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', logFd, logFd],  // Redirect stdout/stderr directly to file descriptor
   });
 
   // Save PID
   savePid(jobName, child.pid);
 
-  // Pipe output to log file
-  const logStream = createWriteStream(logFile, { flags: 'a' });
-  logStream.write(`\n--- Started at ${new Date().toISOString()} ---\n`);
-  child.stdout.pipe(logStream);
-  child.stderr.pipe(logStream);
-
+  // Close our copy of the file descriptor and unref the child
+  closeSync(logFd);
   child.unref();
 
   console.log(`\n  ✓ Started ${jobName} (PID ${child.pid})`);
@@ -1777,25 +1783,25 @@ function startAllJobs(config) {
       continue;
     }
 
-    // Spawn background process for this job
+    // Spawn background process for this job with output redirected to log file
     const logFile = getLogFile(job.name);
     const args = ['--job', job.name, '--foreground'];
     if (config.once) args.push('--once');
 
+    // Open log file for appending - use file descriptors for proper detachment
+    const logFd = openSync(logFile, 'a');
+    writeFileSync(logFd, `\n--- Started at ${new Date().toISOString()} ---\n`);
+
     const child = spawn('node', [__filename, '--config', configPath, ...args], {
       detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['ignore', logFd, logFd],  // Redirect stdout/stderr directly to file descriptor
     });
 
     // Save PID
     savePid(job.name, child.pid);
 
-    // Pipe output to log file
-    const logStream = createWriteStream(logFile, { flags: 'a' });
-    logStream.write(`\n--- Started at ${new Date().toISOString()} ---\n`);
-    child.stdout.pipe(logStream);
-    child.stderr.pipe(logStream);
-
+    // Close our copy of the file descriptor and unref the child
+    closeSync(logFd);
     child.unref();
 
     console.log(`  ✓ ${job.name} (PID ${child.pid})`);
@@ -1808,6 +1814,23 @@ function startAllJobs(config) {
   console.log(`Use --stop to stop all jobs`);
   console.log(`Logs: ${PID_DIR}/*.log`);
 }
+
+// ============================================================================
+// Global Error Handlers - Prevent daemon from crashing on unhandled errors
+// ============================================================================
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error(`${COLORS.red}[FATAL] Unhandled Promise Rejection:${COLORS.reset}`, reason);
+  console.error('Promise:', promise);
+  // Don't exit - let the daemon continue running
+});
+
+process.on('uncaughtException', (error) => {
+  console.error(`${COLORS.red}[FATAL] Uncaught Exception:${COLORS.reset}`, error);
+  // For uncaught exceptions, we should exit as the process state may be corrupted
+  // But give a moment to log the error
+  setTimeout(() => process.exit(1), 100);
+});
 
 // Main entry point
 const config = parseConfig();

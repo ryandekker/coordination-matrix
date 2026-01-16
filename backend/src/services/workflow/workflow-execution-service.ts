@@ -16,6 +16,7 @@ import {
   StartWorkflowInput,
   TaskEvent,
   Document,
+  TaskStepConfig,
 } from '../../types/index.js';
 
 import { resolveTemplateVariables, getValueByPath, resolveTitleTemplate, getBaseUrl } from './template-utils.js';
@@ -417,6 +418,108 @@ class WorkflowExecutionService {
     return task;
   }
 
+  /**
+   * Build the stepConfig from workflow step for storage on the task.
+   * This preserves the original configuration for visibility and reruns.
+   */
+  private buildStepConfig(step: WorkflowStep): TaskStepConfig {
+    const config: TaskStepConfig = {
+      stepId: step.id,
+      stepType: step.stepType,
+      stepName: step.name,
+      stepDescription: step.description,
+    };
+
+    // Agent/Manual step config
+    if (step.additionalInstructions) {
+      config.additionalInstructions = step.additionalInstructions;
+    }
+    if (step.promptDocumentIds && step.promptDocumentIds.length > 0) {
+      config.promptDocumentIds = step.promptDocumentIds;
+    }
+    if (step.titleTemplate) {
+      config.titleTemplate = step.titleTemplate;
+    }
+    if (step.defaultAssigneeId) {
+      config.defaultAssigneeId = step.defaultAssigneeId;
+    }
+
+    // External step config
+    if (step.externalConfig) {
+      config.externalEndpoint = step.externalConfig.endpoint;
+      config.externalMethod = step.externalConfig.method;
+      config.externalHeaders = step.externalConfig.headers;
+      config.externalPayloadTemplate = step.externalConfig.payloadTemplate;
+      config.externalResponseMapping = step.externalConfig.responseMapping;
+      config.waitForCallback = step.externalConfig.waitForCallback !== false;
+    }
+
+    // Webhook step config
+    if (step.webhookConfig) {
+      config.webhookUrl = step.webhookConfig.url;
+      config.webhookMethod = step.webhookConfig.method;
+      config.webhookHeaders = step.webhookConfig.headers;
+      config.webhookBodyTemplate = step.webhookConfig.bodyTemplate;
+      config.webhookMaxRetries = step.webhookConfig.maxRetries;
+      config.webhookTimeoutMs = step.webhookConfig.timeoutMs;
+      config.webhookSuccessStatusCodes = step.webhookConfig.successStatusCodes;
+    }
+
+    // Foreach step config
+    if (step.itemsPath) {
+      config.itemsPath = step.itemsPath;
+    }
+    if (step.itemVariable) {
+      config.itemVariable = step.itemVariable;
+    }
+    if (step.maxItems) {
+      config.maxItems = step.maxItems;
+    }
+    if (step.expectedCountPath) {
+      config.expectedCountPath = step.expectedCountPath;
+    }
+
+    // Join step config
+    if (step.awaitStepId) {
+      config.awaitStepId = step.awaitStepId;
+    }
+    if (step.joinBoundary) {
+      config.joinBoundary = step.joinBoundary;
+    }
+    if (step.inputPath) {
+      config.joinInputPath = step.inputPath;
+    }
+
+    // Decision step config
+    if (step.connections && step.connections.length > 0) {
+      config.connections = step.connections;
+    }
+    if (step.defaultConnection) {
+      config.defaultConnection = step.defaultConnection;
+    }
+
+    // Flow step config (nested workflow)
+    if (step.flowId) {
+      config.flowId = step.flowId;
+    }
+    if (step.inputMapping) {
+      config.inputMapping = step.inputMapping;
+    }
+
+    // FindDocument step config
+    if (step.findDocumentConfig) {
+      config.findDocumentConfig = step.findDocumentConfig;
+    }
+
+    // Input aggregation config (only inputPath is on WorkflowStep - inputSource is runtime)
+    if (step.inputPath && !config.joinInputPath) {
+      // Only set if not already set as joinInputPath
+      config.inputPath = step.inputPath;
+    }
+
+    return config;
+  }
+
   private async createTaskForStep(
     run: WorkflowRun,
     workflow: Workflow,
@@ -443,6 +546,9 @@ class WorkflowExecutionService {
       taskTitle = resolveTitleTemplate(step.titleTemplate, inputPayload, step.name);
     }
 
+    // Build stepConfig to preserve original workflow step configuration
+    const stepConfig = this.buildStepConfig(step);
+
     const task: Omit<Task, '_id'> = {
       title: taskTitle,
       status: initialStatus,
@@ -451,6 +557,7 @@ class WorkflowExecutionService {
       workflowRunId: run._id,
       taskType,
       executionMode,
+      stepConfig,
       ...runDefaults,
       assigneeId: step.defaultAssigneeId
         ? new ObjectId(step.defaultAssigneeId)
@@ -1553,9 +1660,10 @@ class WorkflowExecutionService {
     if (!field || !values) return false;
 
     const actualValue = getValueByPath(payload, field);
-    const expectedValues = values.split(',').map(v => v.trim());
+    const expectedValues = values.split(',').map(v => v.trim().toLowerCase());
 
-    return expectedValues.includes(String(actualValue));
+    // Case-insensitive comparison
+    return expectedValues.includes(String(actualValue).toLowerCase());
   }
 
   // ============================================================================
@@ -2871,6 +2979,66 @@ class WorkflowExecutionService {
     };
   }
 
+  /**
+   * Advance workflow after a decision task has been manually forced to a specific branch.
+   * This executes the next step in the workflow based on the forced target.
+   */
+  async advanceFromForcedDecision(
+    workflowRunId: ObjectId | string,
+    decisionTaskId: ObjectId | string,
+    targetStepId: string
+  ): Promise<void> {
+    const runId = typeof workflowRunId === 'string' ? new ObjectId(workflowRunId) : workflowRunId;
+    const taskId = typeof decisionTaskId === 'string' ? new ObjectId(decisionTaskId) : decisionTaskId;
+
+    console.log(`[WorkflowExecutionService] advanceFromForcedDecision: run=${runId}, task=${taskId}, target=${targetStepId}`);
+
+    // Get the workflow run
+    const run = await this.workflowRuns.findOne({ _id: runId });
+    if (!run) {
+      console.error(`[WorkflowExecutionService] advanceFromForcedDecision: run ${runId} not found`);
+      return;
+    }
+
+    // Get the workflow definition
+    const workflow = await this.workflows.findOne({ _id: run.workflowId });
+    if (!workflow) {
+      console.error(`[WorkflowExecutionService] advanceFromForcedDecision: workflow ${run.workflowId} not found`);
+      return;
+    }
+
+    // Get the decision task
+    const decisionTask = await this.tasks.findOne({ _id: taskId });
+    if (!decisionTask) {
+      console.error(`[WorkflowExecutionService] advanceFromForcedDecision: task ${taskId} not found`);
+      return;
+    }
+
+    // Find the target step
+    const nextStep = workflow.steps.find(s => s.id === targetStepId);
+    if (!nextStep) {
+      console.error(`[WorkflowExecutionService] advanceFromForcedDecision: step ${targetStepId} not found in workflow`);
+      return;
+    }
+
+    // Get the parent task (usually the flow/root task)
+    const parentTask = decisionTask.parentId
+      ? await this.tasks.findOne({ _id: decisionTask.parentId })
+      : null;
+
+    if (!parentTask) {
+      console.error(`[WorkflowExecutionService] advanceFromForcedDecision: parent task not found for decision ${taskId}`);
+      return;
+    }
+
+    // Get input payload from decision task metadata
+    const inputPayload = (decisionTask.metadata as Record<string, unknown> | undefined)?.inputPayload as Record<string, unknown> | undefined;
+
+    // Execute the next step
+    console.log(`[WorkflowExecutionService] advanceFromForcedDecision: executing step ${nextStep.id} (${nextStep.name})`);
+    await this.executeStep(run, workflow, nextStep, parentTask, inputPayload);
+  }
+
   private async checkJoinConditionWithDebug(joinTaskId: ObjectId, foreachTaskId: ObjectId): Promise<{ success: boolean; debug: Record<string, unknown> }> {
     const foreachTask = await this.tasks.findOne({ _id: foreachTaskId });
     if (!foreachTask) {
@@ -3225,6 +3393,142 @@ class WorkflowExecutionService {
       return { success: true, taskId: task._id.toString() };
     } catch (error) {
       console.error(`[WorkflowExecutionService] Failed to execute step ${stepId}:`, error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  /**
+   * Rollback a manual review task to the previous step.
+   * This is used when a reviewer requests changes on a manual step.
+   *
+   * @param taskId - The ID of the manual task requesting rollback
+   * @param reviewComment - Optional comment explaining why changes are requested
+   */
+  async rollbackToPreviousStep(
+    taskId: string,
+    reviewComment?: string
+  ): Promise<{ success: boolean; error?: string; newTaskId?: string }> {
+    console.log(`[WorkflowExecutionService] rollbackToPreviousStep called for task ${taskId}`);
+
+    const task = await this.tasks.findOne({ _id: new ObjectId(taskId) });
+    if (!task) {
+      return { success: false, error: 'Task not found' };
+    }
+
+    if (task.taskType !== 'manual') {
+      return { success: false, error: 'Only manual tasks can be rolled back' };
+    }
+
+    if (!task.workflowRunId || !task.workflowStepId) {
+      return { success: false, error: 'Task is not part of a workflow' };
+    }
+
+    const run = await this.workflowRuns.findOne({ _id: task.workflowRunId });
+    if (!run) {
+      return { success: false, error: 'Workflow run not found' };
+    }
+
+    const workflow = await this.workflows.findOne({ _id: run.workflowId });
+    if (!workflow) {
+      return { success: false, error: 'Workflow not found' };
+    }
+
+    // Find the current step
+    const currentStep = workflow.steps.find(s => s.id === task.workflowStepId);
+    if (!currentStep) {
+      return { success: false, error: 'Current step not found in workflow' };
+    }
+
+    // Find the previous step
+    // First, look for steps that have connections TO this step
+    let previousStep: typeof workflow.steps[0] | undefined;
+    for (const step of workflow.steps) {
+      if (step.connections?.some(c => c.targetStepId === currentStep.id)) {
+        previousStep = step;
+        break;
+      }
+    }
+
+    // If no explicit connection found, use sequential order
+    if (!previousStep) {
+      const currentIndex = workflow.steps.findIndex(s => s.id === currentStep.id);
+      if (currentIndex > 0) {
+        previousStep = workflow.steps[currentIndex - 1];
+      }
+    }
+
+    if (!previousStep) {
+      return { success: false, error: 'No previous step found - cannot rollback from the first step' };
+    }
+
+    // Skip trigger steps (can't rollback to trigger)
+    if (previousStep.stepType === 'trigger') {
+      return { success: false, error: 'Cannot rollback to trigger step' };
+    }
+
+    console.log(`[WorkflowExecutionService] Rolling back from ${currentStep.name} to ${previousStep.name}`);
+
+    // Update the current task to archived/cancelled with review info
+    await this.tasks.updateOne(
+      { _id: task._id },
+      {
+        $set: {
+          status: 'archived',
+          reviewDecision: 'request_changes',
+          reviewComment: reviewComment || undefined,
+          reviewedAt: new Date(),
+          metadata: {
+            ...task.metadata,
+            rolledBackAt: new Date(),
+            rolledBackReason: reviewComment,
+            rolledBackFromStep: currentStep.id,
+            rolledBackToStep: previousStep.id,
+          },
+        },
+      }
+    );
+
+    // Update workflow run: move current step from currentStepIds, add previous step
+    await this.workflowRuns.updateOne(
+      { _id: run._id },
+      {
+        $pull: { currentStepIds: currentStep.id, completedStepIds: previousStep.id },
+        $addToSet: { currentStepIds: previousStep.id },
+      }
+    );
+
+    // Get the root task for creating the new task
+    const rootTask = run.rootTaskId ? await this.tasks.findOne({ _id: run.rootTaskId }) : null;
+    if (!rootTask) {
+      return { success: false, error: 'Root task not found' };
+    }
+
+    // Find the original input for the previous step by looking at its completed task
+    const previousStepTask = await this.tasks.findOne({
+      workflowRunId: run._id,
+      workflowStepId: previousStep.id,
+      status: { $in: ['completed', 'archived'] },
+    }, { sort: { createdAt: -1 } });
+
+    // Build input payload for the new task - include the review feedback
+    const inputPayload: Record<string, unknown> = {
+      ...(previousStepTask?.metadata || {}),
+      _rollbackFeedback: {
+        reviewComment: reviewComment,
+        rolledBackAt: new Date().toISOString(),
+        rolledBackFromStep: currentStep.name,
+        requestedBy: task.assigneeId?.toString() || 'unknown',
+      },
+    };
+
+    try {
+      // Create a new task for the previous step
+      const newTask = await this.executeStep(run, workflow, previousStep, rootTask, inputPayload);
+      console.log(`[WorkflowExecutionService] Created rollback task ${newTask._id} for step ${previousStep.id}`);
+
+      return { success: true, newTaskId: newTask._id.toString() };
+    } catch (error) {
+      console.error(`[WorkflowExecutionService] Failed to create rollback task:`, error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }

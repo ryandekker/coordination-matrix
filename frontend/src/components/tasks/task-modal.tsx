@@ -40,7 +40,7 @@ import {
   getSmartDefaultTab,
   type TaskModalTab,
 } from '@/lib/task-type-config'
-import { Activity, Workflow, ExternalLink, ListTree, FileText, FileOutput, Settings, Braces } from 'lucide-react'
+import { Activity, Workflow, ExternalLink, ListTree, FileText, FileOutput, Settings, Braces, Settings2 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { UserChip } from '@/components/ui/user-chip'
@@ -52,6 +52,7 @@ import {
   OutputTab,
   DetailsTab,
   MetadataTab,
+  StepConfigTab,
 } from './task-modal/index'
 
 interface TaskModalProps {
@@ -544,6 +545,26 @@ export function TaskModal({
     }
   }, [task, updateTask])
 
+  // Rollback handler for manual review tasks
+  const handleRollback = useCallback(async () => {
+    if (!task?._id) return
+    try {
+      const { tasksApi } = await import('@/lib/api')
+      // Get the review comment from the OutputTab state (passed through the component)
+      const response = await tasksApi.rollback(task._id)
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task', task._id] })
+      if (response.data?.newTaskId) {
+        queryClient.invalidateQueries({ queryKey: ['task', response.data.newTaskId] })
+      }
+      toast.success('Task rolled back to previous step')
+      onClose()
+    } catch (error) {
+      toast.error('Failed to rollback task')
+      throw error
+    }
+  }, [task, queryClient, onClose])
+
   // Create mode - single column, compact
   if (!task) {
     return (
@@ -1017,23 +1038,8 @@ export function TaskModal({
 
         {/* Main content - single scrollable area */}
         <Tabs value={activeTab} onValueChange={handleTabChange} className="flex-1 min-h-0 flex flex-col">
-          {/* Status Panel + Tab List (fixed) */}
+          {/* Tab List (fixed) */}
           <div className="flex-shrink-0">
-            {/* Status Panel */}
-            <div className="px-5 py-4 border-b border-border">
-              <StatusPanel
-                task={task}
-                statusOptions={statusOptions}
-                onRerun={handleRerun}
-                onExecuteWebhook={handleExecuteWebhook}
-                onRetryWebhook={handleRetryWebhook}
-                isRerunning={rerunTask.isPending}
-                isExecuting={isExecutingWebhook}
-                isRetrying={isRetryingWebhook}
-              />
-            </div>
-
-            {/* Tab List */}
             <TabsList className="w-full justify-start px-5 pt-2 pb-0 rounded-none border-b border-border bg-transparent h-auto">
               <TabsTrigger
                 value={TASK_MODAL_TABS.OUTPUT}
@@ -1076,6 +1082,15 @@ export function TaskModal({
                 <Braces className="h-3.5 w-3.5" />
                 <span className="text-xs">Metadata</span>
               </TabsTrigger>
+              {task.stepConfig && (
+                <TabsTrigger
+                  value={TASK_MODAL_TABS.STEP_CONFIG}
+                  className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+                >
+                  <Settings2 className="h-3.5 w-3.5" />
+                  <span className="text-xs">Step Config</span>
+                </TabsTrigger>
+              )}
               <TabsTrigger
                 value={TASK_MODAL_TABS.DETAILS}
                 className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
@@ -1089,7 +1104,7 @@ export function TaskModal({
           {/* Tab Content - scrollable */}
           <div className="flex-1 min-h-0 overflow-y-auto">
             <TabsContent value={TASK_MODAL_TABS.OUTPUT} className="mt-0">
-              <OutputTab task={task} />
+              <OutputTab task={task} onRollback={task.workflowRunId ? handleRollback : undefined} />
             </TabsContent>
 
             <TabsContent value={TASK_MODAL_TABS.SUBTASKS} className="mt-0">
@@ -1125,6 +1140,20 @@ export function TaskModal({
               <MetadataTab task={task} onSave={handleMetadataSave} />
             </TabsContent>
 
+            {task.stepConfig && (
+              <TabsContent value={TASK_MODAL_TABS.STEP_CONFIG} className="mt-0">
+                <StepConfigTab
+                  task={task}
+                  onConfigChange={(newConfig) => {
+                    updateTask.mutate({
+                      id: task._id,
+                      data: { stepConfig: newConfig }
+                    })
+                  }}
+                />
+              </TabsContent>
+            )}
+
             <TabsContent value={TASK_MODAL_TABS.DETAILS} className="mt-0">
               <DetailsTab
                 task={task}
@@ -1138,6 +1167,13 @@ export function TaskModal({
                 webhookConfig={webhookConfig}
                 onWebhookConfigChange={handleWebhookConfigChange}
                 updateTask={updateTask}
+                statusOptions={statusOptions}
+                onRerun={handleRerun}
+                onExecuteWebhook={handleExecuteWebhook}
+                onRetryWebhook={handleRetryWebhook}
+                isRerunning={rerunTask.isPending}
+                isExecuting={isExecutingWebhook}
+                isRetrying={isRetryingWebhook}
               />
             </TabsContent>
           </div>

@@ -1,6 +1,9 @@
 'use client'
 
+import { useState, useCallback } from 'react'
 import { Controller, Control, UseFormRegister, UseFormSetValue, UseFormWatch } from 'react-hook-form'
+import { format } from 'date-fns'
+import { Copy, Check } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import {
   Select,
@@ -9,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Button } from '@/components/ui/button'
 import { TagInput } from '@/components/ui/tag-input'
 import { Task, LookupValue, User, Workflow, WebhookConfig, TaskType } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -18,6 +22,47 @@ import {
   TASK_TYPE_CONFIG,
   getTaskTypeConfig,
 } from '@/lib/task-type-config'
+import { StatusPanel } from './status-panel'
+
+// Copyable field component
+function CopyableField({ label, value, mono = false }: { label: string; value: string | null | undefined; mono?: boolean }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = useCallback(async () => {
+    if (!value) return
+    await navigator.clipboard.writeText(value)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }, [value])
+
+  if (!value) return null
+
+  return (
+    <div className="flex items-center justify-between gap-2 py-1.5">
+      <span className="text-xs text-muted-foreground flex-shrink-0">{label}</span>
+      <div className="flex items-center gap-1.5 min-w-0">
+        <span className={cn(
+          "text-xs truncate",
+          mono && "font-mono"
+        )}>
+          {value}
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-5 w-5 p-0 flex-shrink-0"
+          onClick={handleCopy}
+        >
+          {copied ? (
+            <Check className="h-3 w-3 text-green-500" />
+          ) : (
+            <Copy className="h-3 w-3 text-muted-foreground" />
+          )}
+        </Button>
+      </div>
+    </div>
+  )
+}
 
 interface DetailsTabProps {
   task: Task
@@ -31,6 +76,14 @@ interface DetailsTabProps {
   webhookConfig?: WebhookConfig
   onWebhookConfigChange: (config: WebhookConfig, options?: { skipSave?: boolean }) => void
   updateTask: { mutate: (args: { id: string; data: Partial<Task> }) => void }
+  // StatusPanel props
+  statusOptions: LookupValue[]
+  onRerun?: () => void
+  onExecuteWebhook?: () => void
+  onRetryWebhook?: () => void
+  isRerunning?: boolean
+  isExecuting?: boolean
+  isRetrying?: boolean
 }
 
 export function DetailsTab({
@@ -45,6 +98,13 @@ export function DetailsTab({
   webhookConfig,
   onWebhookConfigChange,
   updateTask,
+  statusOptions,
+  onRerun,
+  onExecuteWebhook,
+  onRetryWebhook,
+  isRerunning,
+  isExecuting,
+  isRetrying,
 }: DetailsTabProps) {
   const selectedWorkflowId = watch('workflowId')
   const currentTaskType = watch('taskType') || 'agent'
@@ -57,8 +117,56 @@ export function DetailsTab({
   // Filter out current task from parent task options
   const parentTaskOptions = allTasks.filter((t) => t._id !== task._id)
 
+  // Format dates
+  const createdAt = task.createdAt ? format(new Date(task.createdAt), 'PPpp') : null
+  const updatedAt = task.updatedAt ? format(new Date(task.updatedAt), 'PPpp') : null
+  const createdByName = task._resolved?.createdBy?.displayName || null
+
   return (
     <div className="p-4 space-y-6">
+      {/* Task Info */}
+      <div className="space-y-1">
+        <h4 className="text-sm font-medium">Task Info</h4>
+        <div className="rounded-md border bg-muted/30 px-3 py-2 divide-y divide-border">
+          <CopyableField label="Task ID" value={task._id} mono />
+          <div className="flex items-center justify-between gap-2 py-1.5">
+            <span className="text-xs text-muted-foreground">Created</span>
+            <span className="text-xs">{createdAt}</span>
+          </div>
+          <div className="flex items-center justify-between gap-2 py-1.5">
+            <span className="text-xs text-muted-foreground">Updated</span>
+            <span className="text-xs">{updatedAt}</span>
+          </div>
+          {createdByName && (
+            <div className="flex items-center justify-between gap-2 py-1.5">
+              <span className="text-xs text-muted-foreground">Created By</span>
+              <span className="text-xs">{createdByName}</span>
+            </div>
+          )}
+          {task.externalId && (
+            <CopyableField label="External ID" value={task.externalId} mono />
+          )}
+          {task.workflowRunId && (
+            <CopyableField label="Workflow Run ID" value={task.workflowRunId} mono />
+          )}
+          {task.workflowStepId && (
+            <CopyableField label="Workflow Step ID" value={task.workflowStepId} mono />
+          )}
+        </div>
+      </div>
+
+      {/* Status */}
+      <StatusPanel
+        task={task}
+        statusOptions={statusOptions}
+        onRerun={onRerun}
+        onExecuteWebhook={onExecuteWebhook}
+        onRetryWebhook={onRetryWebhook}
+        isRerunning={isRerunning}
+        isExecuting={isExecuting}
+        isRetrying={isRetrying}
+      />
+
       {/* Summary */}
       <div className="space-y-2">
         <label className="text-sm font-medium">Summary</label>

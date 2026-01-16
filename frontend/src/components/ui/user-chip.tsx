@@ -18,19 +18,19 @@ export interface UserChipProps {
 
 const sizeStyles = {
   sm: {
-    chip: 'h-5 px-1.5 gap-1 text-xs',
+    chip: 'h-5 px-1.5 gap-1 text-xs max-w-[120px]',
     avatar: 'w-3.5 h-3.5',
     avatarText: 'text-[8px]',
     icon: 'h-2.5 w-2.5',
   },
   md: {
-    chip: 'h-6 px-2 gap-1.5 text-xs',
+    chip: 'h-6 px-2 gap-1.5 text-xs max-w-[140px]',
     avatar: 'w-4 h-4',
     avatarText: 'text-[10px]',
     icon: 'h-3 w-3',
   },
   lg: {
-    chip: 'h-7 px-2.5 gap-2 text-sm',
+    chip: 'h-7 px-2.5 gap-2 text-sm max-w-[160px]',
     avatar: 'w-5 h-5',
     avatarText: 'text-xs',
     icon: 'h-3.5 w-3.5',
@@ -133,7 +133,7 @@ export function UserChip({
     return (
       <div
         className={cn(
-          'inline-flex items-center rounded-full font-medium',
+          'inline-flex items-center rounded-full font-medium whitespace-nowrap',
           styles.chip,
           className
         )}
@@ -143,9 +143,10 @@ export function UserChip({
           borderWidth: '1px',
           borderColor: `${botColor}30`,
         }}
+        title={user.displayName}
       >
         <UserAvatar user={user} size={size} />
-        {user.displayName}
+        <span className="truncate">{user.displayName}</span>
       </div>
     )
   }
@@ -154,13 +155,14 @@ export function UserChip({
   return (
     <div
       className={cn(
-        'inline-flex items-center rounded-full bg-secondary/50 border border-border/50',
+        'inline-flex items-center rounded-full bg-secondary/50 border border-border/50 whitespace-nowrap',
         styles.chip,
         className
       )}
+      title={user.displayName}
     >
       <UserAvatar user={user} size={size} />
-      {user.displayName}
+      <span className="truncate">{user.displayName}</span>
     </div>
   )
 }
