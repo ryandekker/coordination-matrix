@@ -8,6 +8,7 @@ import { Task, WebhookAttempt } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { format, formatDistanceToNow } from 'date-fns'
 import Link from 'next/link'
+import { TaskResultDisplay } from '../task-result-display'
 
 interface OutputTabProps {
   task: Task
@@ -20,6 +21,18 @@ export function OutputTab({ task }: OutputTabProps) {
   const webhookConfig = task.webhookConfig
   const attempts = webhookConfig?.attempts || []
   const lastAttempt = attempts[attempts.length - 1]
+
+  // If task has structured taskResult, show TaskResultDisplay
+  if (task.taskResult?.current) {
+    return (
+      <div className="p-4">
+        <TaskResultDisplay
+          taskResult={task.taskResult}
+          taskType={task.taskType}
+        />
+      </div>
+    )
+  }
 
   // Extract output based on task type
   const output = useMemo(() => {

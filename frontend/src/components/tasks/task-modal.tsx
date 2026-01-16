@@ -40,7 +40,7 @@ import {
   getSmartDefaultTab,
   type TaskModalTab,
 } from '@/lib/task-type-config'
-import { Activity, Workflow, ExternalLink, ListTree, FileText, FileOutput, Settings, Braces } from 'lucide-react'
+import { Activity, Workflow, ExternalLink, ListTree, FileText, FileOutput, Settings, Braces, Settings2 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { UserChip } from '@/components/ui/user-chip'
@@ -52,6 +52,7 @@ import {
   OutputTab,
   DetailsTab,
   MetadataTab,
+  StepConfigTab,
 } from './task-modal/index'
 
 interface TaskModalProps {
@@ -1076,6 +1077,15 @@ export function TaskModal({
                 <Braces className="h-3.5 w-3.5" />
                 <span className="text-xs">Metadata</span>
               </TabsTrigger>
+              {task.stepConfig && (
+                <TabsTrigger
+                  value={TASK_MODAL_TABS.STEP_CONFIG}
+                  className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+                >
+                  <Settings2 className="h-3.5 w-3.5" />
+                  <span className="text-xs">Step Config</span>
+                </TabsTrigger>
+              )}
               <TabsTrigger
                 value={TASK_MODAL_TABS.DETAILS}
                 className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
@@ -1124,6 +1134,20 @@ export function TaskModal({
             <TabsContent value={TASK_MODAL_TABS.METADATA} className="mt-0">
               <MetadataTab task={task} onSave={handleMetadataSave} />
             </TabsContent>
+
+            {task.stepConfig && (
+              <TabsContent value={TASK_MODAL_TABS.STEP_CONFIG} className="mt-0">
+                <StepConfigTab
+                  task={task}
+                  onConfigChange={(newConfig) => {
+                    updateTask.mutate({
+                      id: task._id,
+                      data: { stepConfig: newConfig }
+                    })
+                  }}
+                />
+              </TabsContent>
+            )}
 
             <TabsContent value={TASK_MODAL_TABS.DETAILS} className="mt-0">
               <DetailsTab

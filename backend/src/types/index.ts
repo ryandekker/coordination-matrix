@@ -137,6 +137,151 @@ export interface BatchCounters {
   failedCount: number;
 }
 
+// ============================================================================
+// Step Configuration - Original workflow step config stored on task
+// ============================================================================
+
+// Workflow step connection (for decision routing)
+export interface StepConnection {
+  targetStepId: string;
+  condition?: string | null;
+  label?: string;
+}
+
+// FindDocument step configuration
+export interface FindDocumentConfig {
+  mode?: 'static' | 'dynamic';
+  documentId?: string;
+  searchPrompt?: string;
+  documentTypes?: string[];
+  documentStatus?: string[];
+  tags?: string[];
+  limit?: number;
+  minScore?: number;
+  storeAs?: string;
+  failIfNotFound?: boolean;
+}
+
+// Complete workflow step configuration stored on task for rerun/visibility
+export interface TaskStepConfig {
+  // Step identification
+  stepId: string;
+  stepType: string;
+  stepName?: string;
+  stepDescription?: string;
+
+  // Agent/Manual step config
+  additionalInstructions?: string;
+  promptDocumentIds?: string[];
+  titleTemplate?: string;
+  defaultAssigneeId?: string;
+
+  // External step config
+  externalEndpoint?: string;
+  externalMethod?: string;
+  externalHeaders?: Record<string, string>;
+  externalPayloadTemplate?: string;
+  externalResponseMapping?: Record<string, string>;
+  waitForCallback?: boolean;
+
+  // Webhook step config
+  webhookUrl?: string;
+  webhookMethod?: string;
+  webhookHeaders?: Record<string, string>;
+  webhookBodyTemplate?: string;
+  webhookMaxRetries?: number;
+  webhookTimeoutMs?: number;
+  webhookSuccessStatusCodes?: number[];
+
+  // Foreach step config
+  itemsPath?: string;
+  itemVariable?: string;
+  maxItems?: number;
+  expectedCountPath?: string;
+
+  // Join step config
+  awaitStepId?: string;
+  joinBoundary?: JoinBoundary;
+  joinInputPath?: string;
+
+  // Decision step config
+  connections?: StepConnection[];
+  defaultConnection?: string;
+
+  // Flow step config (nested workflow)
+  flowId?: string;
+  inputMapping?: Record<string, string>;
+
+  // FindDocument step config
+  findDocumentConfig?: FindDocumentConfig;
+
+  // Input aggregation config
+  inputPath?: string;
+  inputSource?: string;
+}
+
+// ============================================================================
+// Task Result - Standardized output storage with history
+// ============================================================================
+
+export type TaskResultStatus = 'success' | 'partial' | 'failed' | 'skipped';
+
+// A single execution result
+export interface TaskResultEntry {
+  id: string;                     // Unique ID for this result entry
+  status: TaskResultStatus;
+  output?: unknown;               // Primary output data
+  summary?: string;               // Human-readable summary
+  error?: string;                 // Error message if failed
+  executedAt: Date;
+  completedAt?: Date;
+  durationMs?: number;
+
+  // Webhook-specific result
+  webhookResponse?: {
+    httpStatus: number;
+    body: unknown;
+    headers?: Record<string, string>;
+    durationMs: number;
+  };
+
+  // Join-specific result
+  aggregatedResults?: unknown[];
+  aggregationStats?: {
+    expectedCount: number;
+    successCount: number;
+    failedCount: number;
+    successPercent: number;
+  };
+
+  // Decision-specific result
+  selectedPath?: string;
+  evaluatedCondition?: string;
+
+  // FindDocument-specific result
+  documentResults?: {
+    count: number;
+    documents: Array<{
+      id: string;
+      title: string;
+      score?: number;
+    }>;
+  };
+
+  // Flow-specific result (nested workflow)
+  spawnedWorkflow?: {
+    runId: string;
+    status: string;
+    outputPayload?: unknown;
+  };
+}
+
+// Task result with history (latest first)
+export interface TaskResult {
+  current: TaskResultEntry;           // Most recent result
+  history?: TaskResultEntry[];        // Previous results (capped, e.g., last 10)
+}
+
 export interface Task {
   _id: ObjectId;
   title: string;
@@ -211,6 +356,12 @@ export interface Task {
 
   // Flexible metadata for task outputs and custom data
   metadata?: Record<string, unknown>;
+
+  // Original workflow step configuration (for visibility and reruns)
+  stepConfig?: TaskStepConfig;
+
+  // Standardized task result with history
+  taskResult?: TaskResult;
 }
 
 export interface TaskWithChildren extends Task {

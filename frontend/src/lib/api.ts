@@ -560,6 +560,152 @@ export interface WebhookConfig {
   nextRetryAt?: string
 }
 
+// Step connection (for decision routing)
+export interface StepConnection {
+  targetStepId: string
+  condition?: string | null
+  label?: string
+}
+
+// Join boundary conditions
+export interface JoinBoundary {
+  minCount?: number
+  minPercent?: number
+  maxWaitMs?: number
+  failOnTimeout?: boolean
+}
+
+// FindDocument step configuration
+export interface FindDocumentConfig {
+  mode?: 'static' | 'dynamic'
+  documentId?: string
+  searchPrompt?: string
+  documentTypes?: string[]
+  documentStatus?: string[]
+  tags?: string[]
+  limit?: number
+  minScore?: number
+  storeAs?: string
+  failIfNotFound?: boolean
+}
+
+// Complete workflow step configuration stored on task
+export interface TaskStepConfig {
+  // Step identification
+  stepId: string
+  stepType: string
+  stepName?: string
+  stepDescription?: string
+
+  // Agent/Manual step config
+  additionalInstructions?: string
+  promptDocumentIds?: string[]
+  titleTemplate?: string
+  defaultAssigneeId?: string
+
+  // External step config
+  externalEndpoint?: string
+  externalMethod?: string
+  externalHeaders?: Record<string, string>
+  externalPayloadTemplate?: string
+  externalResponseMapping?: Record<string, string>
+  waitForCallback?: boolean
+
+  // Webhook step config
+  webhookUrl?: string
+  webhookMethod?: string
+  webhookHeaders?: Record<string, string>
+  webhookBodyTemplate?: string
+  webhookMaxRetries?: number
+  webhookTimeoutMs?: number
+  webhookSuccessStatusCodes?: number[]
+
+  // Foreach step config
+  itemsPath?: string
+  itemVariable?: string
+  maxItems?: number
+  expectedCountPath?: string
+
+  // Join step config
+  awaitStepId?: string
+  joinBoundary?: JoinBoundary
+  joinInputPath?: string
+
+  // Decision step config
+  connections?: StepConnection[]
+  defaultConnection?: string
+
+  // Flow step config (nested workflow)
+  flowId?: string
+  inputMapping?: Record<string, string>
+
+  // FindDocument step config
+  findDocumentConfig?: FindDocumentConfig
+
+  // Input aggregation config
+  inputPath?: string
+  inputSource?: string
+}
+
+// Task result status
+export type TaskResultStatus = 'success' | 'partial' | 'failed' | 'skipped'
+
+// A single execution result
+export interface TaskResultEntry {
+  id: string
+  status: TaskResultStatus
+  output?: unknown
+  summary?: string
+  error?: string
+  executedAt: string
+  completedAt?: string
+  durationMs?: number
+
+  // Webhook-specific result
+  webhookResponse?: {
+    httpStatus: number
+    body: unknown
+    headers?: Record<string, string>
+    durationMs: number
+  }
+
+  // Join-specific result
+  aggregatedResults?: unknown[]
+  aggregationStats?: {
+    expectedCount: number
+    successCount: number
+    failedCount: number
+    successPercent: number
+  }
+
+  // Decision-specific result
+  selectedPath?: string
+  evaluatedCondition?: string
+
+  // FindDocument-specific result
+  documentResults?: {
+    count: number
+    documents: Array<{
+      id: string
+      title: string
+      score?: number
+    }>
+  }
+
+  // Flow-specific result
+  spawnedWorkflow?: {
+    runId: string
+    status: string
+    outputPayload?: unknown
+  }
+}
+
+// Task result with history
+export interface TaskResult {
+  current: TaskResultEntry
+  history?: TaskResultEntry[]
+}
+
 export interface Task {
   _id: string
   title: string
@@ -603,6 +749,10 @@ export interface Task {
     status?: 'completed' | 'failed' | 'running'
     error?: string
   }
+  // Original workflow step configuration (for visibility and reruns)
+  stepConfig?: TaskStepConfig
+  // Standardized task result with history
+  taskResult?: TaskResult
   _resolved?: {
     assignee?: { _id: string; displayName: string }
     createdBy?: { _id: string; displayName: string }

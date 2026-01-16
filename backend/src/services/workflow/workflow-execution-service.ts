@@ -16,6 +16,7 @@ import {
   StartWorkflowInput,
   TaskEvent,
   Document,
+  TaskStepConfig,
 } from '../../types/index.js';
 
 import { resolveTemplateVariables, getValueByPath, resolveTitleTemplate, getBaseUrl } from './template-utils.js';
@@ -417,6 +418,108 @@ class WorkflowExecutionService {
     return task;
   }
 
+  /**
+   * Build the stepConfig from workflow step for storage on the task.
+   * This preserves the original configuration for visibility and reruns.
+   */
+  private buildStepConfig(step: WorkflowStep): TaskStepConfig {
+    const config: TaskStepConfig = {
+      stepId: step.id,
+      stepType: step.stepType,
+      stepName: step.name,
+      stepDescription: step.description,
+    };
+
+    // Agent/Manual step config
+    if (step.additionalInstructions) {
+      config.additionalInstructions = step.additionalInstructions;
+    }
+    if (step.promptDocumentIds && step.promptDocumentIds.length > 0) {
+      config.promptDocumentIds = step.promptDocumentIds;
+    }
+    if (step.titleTemplate) {
+      config.titleTemplate = step.titleTemplate;
+    }
+    if (step.defaultAssigneeId) {
+      config.defaultAssigneeId = step.defaultAssigneeId;
+    }
+
+    // External step config
+    if (step.externalConfig) {
+      config.externalEndpoint = step.externalConfig.endpoint;
+      config.externalMethod = step.externalConfig.method;
+      config.externalHeaders = step.externalConfig.headers;
+      config.externalPayloadTemplate = step.externalConfig.payloadTemplate;
+      config.externalResponseMapping = step.externalConfig.responseMapping;
+      config.waitForCallback = step.externalConfig.waitForCallback !== false;
+    }
+
+    // Webhook step config
+    if (step.webhookConfig) {
+      config.webhookUrl = step.webhookConfig.url;
+      config.webhookMethod = step.webhookConfig.method;
+      config.webhookHeaders = step.webhookConfig.headers;
+      config.webhookBodyTemplate = step.webhookConfig.bodyTemplate;
+      config.webhookMaxRetries = step.webhookConfig.maxRetries;
+      config.webhookTimeoutMs = step.webhookConfig.timeoutMs;
+      config.webhookSuccessStatusCodes = step.webhookConfig.successStatusCodes;
+    }
+
+    // Foreach step config
+    if (step.itemsPath) {
+      config.itemsPath = step.itemsPath;
+    }
+    if (step.itemVariable) {
+      config.itemVariable = step.itemVariable;
+    }
+    if (step.maxItems) {
+      config.maxItems = step.maxItems;
+    }
+    if (step.expectedCountPath) {
+      config.expectedCountPath = step.expectedCountPath;
+    }
+
+    // Join step config
+    if (step.awaitStepId) {
+      config.awaitStepId = step.awaitStepId;
+    }
+    if (step.joinBoundary) {
+      config.joinBoundary = step.joinBoundary;
+    }
+    if (step.inputPath) {
+      config.joinInputPath = step.inputPath;
+    }
+
+    // Decision step config
+    if (step.connections && step.connections.length > 0) {
+      config.connections = step.connections;
+    }
+    if (step.defaultConnection) {
+      config.defaultConnection = step.defaultConnection;
+    }
+
+    // Flow step config (nested workflow)
+    if (step.flowId) {
+      config.flowId = step.flowId;
+    }
+    if (step.inputMapping) {
+      config.inputMapping = step.inputMapping;
+    }
+
+    // FindDocument step config
+    if (step.findDocumentConfig) {
+      config.findDocumentConfig = step.findDocumentConfig;
+    }
+
+    // Input aggregation config (only inputPath is on WorkflowStep - inputSource is runtime)
+    if (step.inputPath && !config.joinInputPath) {
+      // Only set if not already set as joinInputPath
+      config.inputPath = step.inputPath;
+    }
+
+    return config;
+  }
+
   private async createTaskForStep(
     run: WorkflowRun,
     workflow: Workflow,
@@ -443,6 +546,9 @@ class WorkflowExecutionService {
       taskTitle = resolveTitleTemplate(step.titleTemplate, inputPayload, step.name);
     }
 
+    // Build stepConfig to preserve original workflow step configuration
+    const stepConfig = this.buildStepConfig(step);
+
     const task: Omit<Task, '_id'> = {
       title: taskTitle,
       status: initialStatus,
@@ -451,6 +557,7 @@ class WorkflowExecutionService {
       workflowRunId: run._id,
       taskType,
       executionMode,
+      stepConfig,
       ...runDefaults,
       assigneeId: step.defaultAssigneeId
         ? new ObjectId(step.defaultAssigneeId)
