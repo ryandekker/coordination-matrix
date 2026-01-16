@@ -463,11 +463,24 @@ export function useEventStream(options?: {
             const oldData = old as { data: Task }
             // Preserve existing children array if present (don't overwrite with empty)
             const preservedChildren = oldData.data.children || []
+            // Preserve _resolved references from the existing data
+            const preservedResolved = oldData.data._resolved
             return {
               ...oldData,
-              data: { ...oldData.data, ...event.task, children: event.task.children?.length ? event.task.children : preservedChildren }
+              data: {
+                ...oldData.data,
+                ...event.task,
+                children: event.task.children?.length ? event.task.children : preservedChildren,
+                _resolved: preservedResolved
+              }
             }
           })
+
+          // Invalidate individual task to get fresh resolved references for output/taskResult changes
+          // This is especially important for decision tasks that need taskResult to render options
+          if (taskData.taskResult || taskData.metadata) {
+            queryClient.invalidateQueries({ queryKey: ['task', event.taskId], refetchType: 'active' })
+          }
 
           // Update task in list caches - use a targeted approach
           queryClient.setQueriesData({ queryKey: ['tasks'] }, (old: unknown) => {
@@ -478,9 +491,15 @@ export function useEventStream(options?: {
               ...oldData,
               data: oldData.data.map((task: Task) => {
                 if (task._id === event.taskId) {
-                  // Preserve existing children array
+                  // Preserve existing children array and _resolved references
                   const preservedChildren = task.children || []
-                  return { ...task, ...eventTask, children: eventTask.children?.length ? eventTask.children : preservedChildren }
+                  const preservedResolved = task._resolved
+                  return {
+                    ...task,
+                    ...eventTask,
+                    children: eventTask.children?.length ? eventTask.children : preservedChildren,
+                    _resolved: preservedResolved
+                  }
                 }
                 return task
               })
@@ -520,7 +539,11 @@ export function useEventStream(options?: {
               if (!old) return old
               const oldData = old as { data: Task[]; pagination?: unknown }
               const updatedData = oldData.data.map((task: Task) =>
-                task._id === event.taskId ? { ...task, ...event.task } : task
+                task._id === event.taskId ? {
+                  ...task,
+                  ...event.task,
+                  _resolved: task._resolved // Preserve _resolved references
+                } : task
               )
               // Only return new object if something changed
               if (updatedData.some((t, i) => t !== oldData.data[i])) {
@@ -540,9 +563,11 @@ export function useEventStream(options?: {
           queryClient.setQueryData(['task', event.taskId], (old: unknown) => {
             if (!old || !event.task) return old
             const oldData = old as { data: Task }
+            // Preserve _resolved references from the existing data
+            const preservedResolved = oldData.data._resolved
             return {
               ...oldData,
-              data: { ...oldData.data, ...event.task }
+              data: { ...oldData.data, ...event.task, _resolved: preservedResolved }
             }
           })
 
@@ -553,7 +578,7 @@ export function useEventStream(options?: {
             return {
               ...oldData,
               data: oldData.data.map((task: Task) =>
-                task._id === event.taskId ? { ...task, ...event.task } : task
+                task._id === event.taskId ? { ...task, ...event.task, _resolved: task._resolved } : task
               )
             }
           })
@@ -576,7 +601,7 @@ export function useEventStream(options?: {
                 if (!old) return old
                 const oldData = old as { data: Task[]; pagination?: unknown }
                 const updatedData = oldData.data.map((task: Task) =>
-                  task._id === event.taskId ? { ...task, ...event.task } : task
+                  task._id === event.taskId ? { ...task, ...event.task, _resolved: task._resolved } : task
                 )
                 if (updatedData.some((t, i) => t !== oldData.data[i])) {
                   return { ...oldData, data: updatedData }
@@ -587,7 +612,7 @@ export function useEventStream(options?: {
           }
         }
         // Also invalidate to eventually get the full resolved reference
-        queryClient.invalidateQueries({ queryKey: ['task', event.taskId], refetchType: 'none' })
+        queryClient.invalidateQueries({ queryKey: ['task', event.taskId], refetchType: 'active' })
         break
 
       case 'task.deleted':
@@ -688,7 +713,13 @@ export function useEventStreamStatus() {
 function updateTaskInTree(tasks: Task[], taskId: string, updates: Partial<Task>): Task[] {
   return tasks.map(task => {
     if (task._id === taskId) {
-      return { ...task, ...updates }
+      // Preserve _resolved references and children when merging updates
+      return {
+        ...task,
+        ...updates,
+        _resolved: task._resolved,
+        children: updates.children?.length ? updates.children : task.children
+      }
     }
     if (task.children && task.children.length > 0) {
       return {
