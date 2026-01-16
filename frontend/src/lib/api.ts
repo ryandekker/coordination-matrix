@@ -191,6 +191,16 @@ export const tasksApi = {
     return handleResponse(response)
   },
 
+  // Decision task operations
+  forceDecision: async (id: string, targetStepId: string): Promise<ApiResponse<{ success: boolean; message: string; task: Task }>> => {
+    const response = await authFetch(`${API_BASE}/tasks/${id}/force-decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetStepId }),
+    })
+    return handleResponse(response)
+  },
+
   // Rollback a manual review task to the previous step
   rollback: async (id: string, comment?: string): Promise<ApiResponse<{ success: boolean; message: string; newTaskId?: string }>> => {
     const response = await authFetch(`${API_BASE}/tasks/${id}/rollback`, {
@@ -766,6 +776,8 @@ export interface Task {
   stepConfig?: TaskStepConfig
   // Standardized task result with history
   taskResult?: TaskResult
+  // Decision result: which branch was selected
+  decisionResult?: string
   // Manual review fields (for manual workflow steps)
   reviewDecision?: ManualReviewDecision
   reviewComment?: string

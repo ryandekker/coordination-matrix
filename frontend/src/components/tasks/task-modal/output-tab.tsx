@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 import { format, formatDistanceToNow } from 'date-fns'
 import Link from 'next/link'
 import { TaskResultDisplay } from '../task-result-display'
+import { DecisionOptionsPanel } from '../decision-options-panel'
 import { ManualReviewPanel } from './manual-review-panel'
 import { useUpdateTask } from '@/hooks/use-tasks'
 import { toast } from 'sonner'
@@ -67,6 +68,24 @@ export function OutputTab({ task, onRollback }: OutputTabProps) {
       setIsSubmitting(false)
     }
   }, [task, updateTask])
+
+  // For decision tasks, always show the DecisionOptionsPanel
+  if (taskType === 'decision') {
+    return (
+      <div className="p-4 space-y-4">
+        <DecisionOptionsPanel task={task} />
+        {/* Also show task result if available */}
+        {task.taskResult?.current && (
+          <div className="pt-4 border-t">
+            <TaskResultDisplay
+              taskResult={task.taskResult}
+              taskType={task.taskType}
+            />
+          </div>
+        )}
+      </div>
+    )
+  }
 
   // For manual tasks pending review, show the review panel
   if (needsReview || hasBeenReviewed) {

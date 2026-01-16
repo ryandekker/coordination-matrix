@@ -1392,6 +1392,105 @@ tasksRouter.delete('/:id', async (req: Request, res: Response, next: NextFunctio
   }
 });
 
+// POST /api/tasks/:id/force-decision - Force a decision task to a specific branch
+tasksRouter.post('/:id/force-decision', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const taskId = toObjectId(req.params.id);
+    const { targetStepId } = req.body;
+
+    if (!targetStepId) {
+      throw createError('targetStepId is required', 400);
+    }
+
+    // Get the decision task
+    const decisionTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
+    if (!decisionTask) {
+      throw createError('Task not found', 404);
+    }
+
+    if (decisionTask.taskType !== 'decision') {
+      throw createError('Task is not a decision task', 400);
+    }
+
+    // Verify the target is a valid option
+    const stepConfig = decisionTask.stepConfig;
+    const connections = stepConfig?.connections || [];
+    const defaultConnection = stepConfig?.defaultConnection;
+
+    const validTargets = connections.map(c => c.targetStepId);
+    if (defaultConnection && !validTargets.includes(defaultConnection)) {
+      validTargets.push(defaultConnection);
+    }
+
+    if (!validTargets.includes(targetStepId)) {
+      throw createError(
+        `Invalid targetStepId. Valid options: ${validTargets.join(', ')}`,
+        400
+      );
+    }
+
+    const selectedConnection = connections.find(c => c.targetStepId === targetStepId) ||
+      { targetStepId, condition: null, label: undefined };
+
+    const now = new Date();
+    const actorId = req.user?.userId ? toObjectId(req.user.userId) : null;
+
+    // Update the decision task
+    await db.collection('tasks').updateOne(
+      { _id: taskId },
+      {
+        $set: {
+          status: 'completed',
+          decisionResult: targetStepId,
+          updatedAt: now,
+          'metadata.selectedPath': targetStepId,
+          'metadata.condition': selectedConnection.condition || 'forced',
+          'metadata.forcedDecision': true,
+          'metadata.forcedAt': now,
+          'metadata.forcedBy': actorId?.toString() || 'unknown',
+        },
+        $unset: {
+          'metadata.error': '',
+        },
+      }
+    );
+
+    // Get the updated task
+    const updatedTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
+
+    // Publish event
+    await publishTaskEvent('task.status.changed', updatedTask!, {
+      actorId,
+      actorType: 'user',
+      changes: [{ field: 'status', oldValue: decisionTask.status, newValue: 'completed' }],
+    });
+
+    // If this is part of a workflow, we need to advance to the next step
+    if (decisionTask.workflowRunId && decisionTask.workflowStepId) {
+      try {
+        // Use the workflow execution service to continue the workflow
+        await workflowExecutionService.advanceFromForcedDecision(
+          decisionTask.workflowRunId,
+          taskId,
+          targetStepId
+        );
+      } catch (workflowError) {
+        console.error('[Tasks] Failed to advance workflow after forced decision:', workflowError);
+        // Don't fail the request, the decision was still forced successfully
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Decision forced to: ${selectedConnection.label || targetStepId}`,
+      task: updatedTask,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // POST /api/tasks/:id/force-complete-join - Force complete a join task with available results
 tasksRouter.post('/:id/force-complete-join', async (req: Request, res: Response, next: NextFunction) => {
   try {

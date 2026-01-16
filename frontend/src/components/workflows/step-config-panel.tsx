@@ -866,6 +866,179 @@ function FlowStepConfigPanel({
   )
 }
 
+// Decision step configuration component
+function DecisionStepConfig({
+  step,
+  stepIndex,
+  allSteps,
+  onUpdate,
+}: {
+  step: WorkflowStep
+  stepIndex: number
+  allSteps: WorkflowStep[]
+  onUpdate: (updates: Partial<WorkflowStep>) => void
+}) {
+  const [showDocs, setShowDocs] = useState(false)
+
+  return (
+    <div className="space-y-3 border-t pt-3">
+      <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3 text-sm">
+        <div className="flex items-start gap-2">
+          <GitBranch className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+          <div className="text-amber-800 dark:text-amber-200">
+            <p className="font-medium">Decision / Router</p>
+            <p className="text-xs mt-1">
+              Routes to different branches based on conditions evaluated against the input payload.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Collapsible documentation */}
+      <div className="border rounded-lg overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setShowDocs(!showDocs)}
+          className="w-full flex items-center justify-between p-2 text-sm bg-muted/50 hover:bg-muted transition-colors"
+        >
+          <span className="flex items-center gap-2 font-medium">
+            <Info className="h-4 w-4 text-muted-foreground" />
+            Condition Format & Examples
+          </span>
+          {showDocs ? (
+            <ChevronUp className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          )}
+        </button>
+        {showDocs && (
+          <div className="p-3 text-xs space-y-3 bg-background border-t">
+            <div>
+              <p className="font-medium text-sm mb-1">Condition Format</p>
+              <p className="text-muted-foreground">
+                Conditions use the format <code className="bg-muted px-1 rounded">field:value1,value2</code> where:
+              </p>
+              <ul className="list-disc list-inside mt-1 text-muted-foreground space-y-0.5">
+                <li><strong>field</strong> — path to the value in the input payload (supports nested paths with dots)</li>
+                <li><strong>value1,value2</strong> — comma-separated list of values to match (case-insensitive)</li>
+              </ul>
+            </div>
+
+            <div>
+              <p className="font-medium text-sm mb-1">Examples</p>
+              <div className="space-y-2 font-mono">
+                <div className="bg-muted/50 p-2 rounded">
+                  <p className="text-amber-600 dark:text-amber-400">route:Review</p>
+                  <p className="text-muted-foreground text-[10px] mt-0.5">
+                    Matches when <code>{"{ route: \"Review\" }"}</code>
+                  </p>
+                </div>
+                <div className="bg-muted/50 p-2 rounded">
+                  <p className="text-amber-600 dark:text-amber-400">status:approved,pending</p>
+                  <p className="text-muted-foreground text-[10px] mt-0.5">
+                    Matches when status is either "approved" OR "pending"
+                  </p>
+                </div>
+                <div className="bg-muted/50 p-2 rounded">
+                  <p className="text-amber-600 dark:text-amber-400">output.category:urgent</p>
+                  <p className="text-muted-foreground text-[10px] mt-0.5">
+                    Nested path — matches <code>{"{ output: { category: \"urgent\" } }"}</code>
+                  </p>
+                </div>
+                <div className="bg-muted/50 p-2 rounded">
+                  <p className="text-amber-600 dark:text-amber-400">result.data.type:A,B,C</p>
+                  <p className="text-muted-foreground text-[10px] mt-0.5">
+                    Deep nesting with multiple values
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded p-2">
+              <p className="flex items-center gap-1.5 font-medium text-amber-800 dark:text-amber-200">
+                <AlertCircle className="h-3 w-3" />
+                Common Mistake
+              </p>
+              <p className="text-muted-foreground mt-1">
+                <span className="line-through text-red-500">Review</span> — Missing field name!<br/>
+                <span className="text-green-600">route:Review</span> — Correct format
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-sm font-medium flex items-center gap-2">
+          <CornerDownRight className="h-4 w-4 text-muted-foreground" />
+          Branch Routes
+        </label>
+
+        {(step.connections || []).map((conn, connIdx) => (
+          <div key={connIdx} className="flex items-center gap-2 pl-4 border-l-2 border-amber-300">
+            <Input
+              value={conn.condition || conn.label || ''}
+              onChange={(e) => {
+                const newConns = [...(step.connections || [])]
+                newConns[connIdx] = { ...newConns[connIdx], condition: e.target.value, label: e.target.value }
+                onUpdate({ connections: newConns })
+              }}
+              placeholder="field:value (e.g., route:Review)"
+              className="font-mono text-sm flex-1"
+            />
+            <ArrowRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            <Select
+              value={conn.targetStepId}
+              onValueChange={(val) => {
+                const newConns = [...(step.connections || [])]
+                newConns[connIdx] = { ...newConns[connIdx], targetStepId: val }
+                onUpdate({ connections: newConns })
+              }}
+            >
+              <SelectTrigger className="w-[140px]">
+                <SelectValue placeholder="Target" />
+              </SelectTrigger>
+              <SelectContent>
+                {allSteps.filter((_, i) => i > stepIndex).map(s => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 text-destructive"
+              onClick={() => {
+                const newConns = (step.connections || []).filter((_, i) => i !== connIdx)
+                onUpdate({ connections: newConns })
+              }}
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          </div>
+        ))}
+
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            const newConns = [...(step.connections || []), { targetStepId: '', condition: '' }]
+            onUpdate({ connections: newConns })
+          }}
+          className="ml-4"
+        >
+          <Plus className="h-3 w-3 mr-1" />
+          Add Branch
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 export function StepConfigPanel({
   step,
   stepIndex,
@@ -1218,87 +1391,12 @@ export function StepConfigPanel({
 
         {/* Decision step configuration */}
         {step.stepType === 'decision' && (
-          <div className="space-y-3 border-t pt-3">
-            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3 text-sm">
-              <div className="flex items-start gap-2">
-                <GitBranch className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
-                <div className="text-amber-800 dark:text-amber-200">
-                  <p className="font-medium">Decision / Router</p>
-                  <p className="text-xs mt-1">
-                    Routes to different branches based on conditions.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium flex items-center gap-2">
-                <CornerDownRight className="h-4 w-4 text-muted-foreground" />
-                Branch Routes
-              </label>
-
-              {(step.connections || []).map((conn, connIdx) => (
-                <div key={connIdx} className="flex items-center gap-2 pl-4 border-l-2 border-amber-300">
-                  <Input
-                    value={conn.condition || conn.label || ''}
-                    onChange={(e) => {
-                      const newConns = [...(step.connections || [])]
-                      newConns[connIdx] = { ...newConns[connIdx], condition: e.target.value, label: e.target.value }
-                      onUpdate({ connections: newConns })
-                    }}
-                    placeholder="e.g., output.category === 'urgent'"
-                    className="font-mono text-sm flex-1"
-                  />
-                  <ArrowRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                  <Select
-                    value={conn.targetStepId}
-                    onValueChange={(val) => {
-                      const newConns = [...(step.connections || [])]
-                      newConns[connIdx] = { ...newConns[connIdx], targetStepId: val }
-                      onUpdate({ connections: newConns })
-                    }}
-                  >
-                    <SelectTrigger className="w-[140px]">
-                      <SelectValue placeholder="Target" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {allSteps.filter((_, i) => i > stepIndex).map(s => (
-                        <SelectItem key={s.id} value={s.id}>
-                          {s.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0 text-destructive"
-                    onClick={() => {
-                      const newConns = (step.connections || []).filter((_, i) => i !== connIdx)
-                      onUpdate({ connections: newConns })
-                    }}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                </div>
-              ))}
-
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  const newConns = [...(step.connections || []), { targetStepId: '', condition: '' }]
-                  onUpdate({ connections: newConns })
-                }}
-                className="ml-4"
-              >
-                <Plus className="h-3 w-3 mr-1" />
-                Add Branch
-              </Button>
-            </div>
-          </div>
+          <DecisionStepConfig
+            step={step}
+            stepIndex={stepIndex}
+            allSteps={allSteps}
+            onUpdate={onUpdate}
+          />
         )}
 
         {/* ForEach configuration */}

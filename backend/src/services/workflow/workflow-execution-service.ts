@@ -1660,9 +1660,10 @@ class WorkflowExecutionService {
     if (!field || !values) return false;
 
     const actualValue = getValueByPath(payload, field);
-    const expectedValues = values.split(',').map(v => v.trim());
+    const expectedValues = values.split(',').map(v => v.trim().toLowerCase());
 
-    return expectedValues.includes(String(actualValue));
+    // Case-insensitive comparison
+    return expectedValues.includes(String(actualValue).toLowerCase());
   }
 
   // ============================================================================
@@ -2976,6 +2977,66 @@ class WorkflowExecutionService {
         ...result.debug
       }
     };
+  }
+
+  /**
+   * Advance workflow after a decision task has been manually forced to a specific branch.
+   * This executes the next step in the workflow based on the forced target.
+   */
+  async advanceFromForcedDecision(
+    workflowRunId: ObjectId | string,
+    decisionTaskId: ObjectId | string,
+    targetStepId: string
+  ): Promise<void> {
+    const runId = typeof workflowRunId === 'string' ? new ObjectId(workflowRunId) : workflowRunId;
+    const taskId = typeof decisionTaskId === 'string' ? new ObjectId(decisionTaskId) : decisionTaskId;
+
+    console.log(`[WorkflowExecutionService] advanceFromForcedDecision: run=${runId}, task=${taskId}, target=${targetStepId}`);
+
+    // Get the workflow run
+    const run = await this.workflowRuns.findOne({ _id: runId });
+    if (!run) {
+      console.error(`[WorkflowExecutionService] advanceFromForcedDecision: run ${runId} not found`);
+      return;
+    }
+
+    // Get the workflow definition
+    const workflow = await this.workflows.findOne({ _id: run.workflowId });
+    if (!workflow) {
+      console.error(`[WorkflowExecutionService] advanceFromForcedDecision: workflow ${run.workflowId} not found`);
+      return;
+    }
+
+    // Get the decision task
+    const decisionTask = await this.tasks.findOne({ _id: taskId });
+    if (!decisionTask) {
+      console.error(`[WorkflowExecutionService] advanceFromForcedDecision: task ${taskId} not found`);
+      return;
+    }
+
+    // Find the target step
+    const nextStep = workflow.steps.find(s => s.id === targetStepId);
+    if (!nextStep) {
+      console.error(`[WorkflowExecutionService] advanceFromForcedDecision: step ${targetStepId} not found in workflow`);
+      return;
+    }
+
+    // Get the parent task (usually the flow/root task)
+    const parentTask = decisionTask.parentId
+      ? await this.tasks.findOne({ _id: decisionTask.parentId })
+      : null;
+
+    if (!parentTask) {
+      console.error(`[WorkflowExecutionService] advanceFromForcedDecision: parent task not found for decision ${taskId}`);
+      return;
+    }
+
+    // Get input payload from decision task metadata
+    const inputPayload = (decisionTask.metadata as Record<string, unknown> | undefined)?.inputPayload as Record<string, unknown> | undefined;
+
+    // Execute the next step
+    console.log(`[WorkflowExecutionService] advanceFromForcedDecision: executing step ${nextStep.id} (${nextStep.name})`);
+    await this.executeStep(run, workflow, nextStep, parentTask, inputPayload);
   }
 
   private async checkJoinConditionWithDebug(joinTaskId: ObjectId, foreachTaskId: ObjectId): Promise<{ success: boolean; debug: Record<string, unknown> }> {
