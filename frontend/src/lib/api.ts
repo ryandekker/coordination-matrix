@@ -191,6 +191,16 @@ export const tasksApi = {
     return handleResponse(response)
   },
 
+  // Rollback a manual review task to the previous step
+  rollback: async (id: string, comment?: string): Promise<ApiResponse<{ success: boolean; message: string; newTaskId?: string }>> => {
+    const response = await authFetch(`${API_BASE}/tasks/${id}/rollback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ comment }),
+    })
+    return handleResponse(response)
+  },
+
   // Get all webhook task attempts across all tasks
   getWebhookAttempts: async (params?: {
     status?: 'pending' | 'success' | 'failed'
@@ -527,6 +537,9 @@ export type TaskType =
   | 'flow'
   | 'external'
 
+// Review decision for manual workflow steps
+export type ManualReviewDecision = 'approved' | 'request_changes' | 'approved_with_notes'
+
 export type WebhookMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
 export interface WebhookAttempt {
@@ -753,6 +766,11 @@ export interface Task {
   stepConfig?: TaskStepConfig
   // Standardized task result with history
   taskResult?: TaskResult
+  // Manual review fields (for manual workflow steps)
+  reviewDecision?: ManualReviewDecision
+  reviewComment?: string
+  reviewedAt?: string
+  reviewedById?: string | null
   _resolved?: {
     assignee?: { _id: string; displayName: string }
     createdBy?: { _id: string; displayName: string }

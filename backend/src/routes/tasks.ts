@@ -1788,6 +1788,59 @@ tasksRouter.delete('/:id/documents/:documentId', async (req: Request, res: Respo
   }
 });
 
+// POST /api/tasks/:id/rollback - Rollback a manual review task to the previous step
+tasksRouter.post('/:id/rollback', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const taskId = toObjectId(req.params.id);
+    const { comment } = req.body as { comment?: string };
+
+    const db = getDb();
+    const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
+
+    if (!task) {
+      throw createError('Task not found', 404);
+    }
+
+    if (task.taskType !== 'manual') {
+      throw createError('Only manual tasks can be rolled back', 400);
+    }
+
+    if (!task.workflowRunId || !task.workflowStepId) {
+      throw createError('Task is not part of a workflow', 400);
+    }
+
+    // Call the workflow execution service to perform the rollback
+    const result = await workflowExecutionService.rollbackToPreviousStep(
+      taskId.toString(),
+      comment
+    );
+
+    if (!result.success) {
+      throw createError(result.error || 'Failed to rollback task', 400);
+    }
+
+    // Publish event for real-time updates
+    const userId = req.user?.userId ? new ObjectId(req.user.userId) : null;
+    await publishTaskEvent('task.updated', task, {
+      actorId: userId,
+      actorType: req.user ? 'user' : 'system',
+      metadata: {
+        action: 'rollback',
+        reviewComment: comment,
+        newTaskId: result.newTaskId,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: 'Task rolled back to previous step',
+      newTaskId: result.newTaskId,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Helper function to build tree structure
 function buildTaskTree(tasks: Task[], _maxDepth: number, _currentDepth = 0): TaskWithChildren[] {
   const taskMap = new Map<string, TaskWithChildren>();

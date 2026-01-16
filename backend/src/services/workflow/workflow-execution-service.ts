@@ -3335,6 +3335,142 @@ class WorkflowExecutionService {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
+
+  /**
+   * Rollback a manual review task to the previous step.
+   * This is used when a reviewer requests changes on a manual step.
+   *
+   * @param taskId - The ID of the manual task requesting rollback
+   * @param reviewComment - Optional comment explaining why changes are requested
+   */
+  async rollbackToPreviousStep(
+    taskId: string,
+    reviewComment?: string
+  ): Promise<{ success: boolean; error?: string; newTaskId?: string }> {
+    console.log(`[WorkflowExecutionService] rollbackToPreviousStep called for task ${taskId}`);
+
+    const task = await this.tasks.findOne({ _id: new ObjectId(taskId) });
+    if (!task) {
+      return { success: false, error: 'Task not found' };
+    }
+
+    if (task.taskType !== 'manual') {
+      return { success: false, error: 'Only manual tasks can be rolled back' };
+    }
+
+    if (!task.workflowRunId || !task.workflowStepId) {
+      return { success: false, error: 'Task is not part of a workflow' };
+    }
+
+    const run = await this.workflowRuns.findOne({ _id: task.workflowRunId });
+    if (!run) {
+      return { success: false, error: 'Workflow run not found' };
+    }
+
+    const workflow = await this.workflows.findOne({ _id: run.workflowId });
+    if (!workflow) {
+      return { success: false, error: 'Workflow not found' };
+    }
+
+    // Find the current step
+    const currentStep = workflow.steps.find(s => s.id === task.workflowStepId);
+    if (!currentStep) {
+      return { success: false, error: 'Current step not found in workflow' };
+    }
+
+    // Find the previous step
+    // First, look for steps that have connections TO this step
+    let previousStep: typeof workflow.steps[0] | undefined;
+    for (const step of workflow.steps) {
+      if (step.connections?.some(c => c.targetStepId === currentStep.id)) {
+        previousStep = step;
+        break;
+      }
+    }
+
+    // If no explicit connection found, use sequential order
+    if (!previousStep) {
+      const currentIndex = workflow.steps.findIndex(s => s.id === currentStep.id);
+      if (currentIndex > 0) {
+        previousStep = workflow.steps[currentIndex - 1];
+      }
+    }
+
+    if (!previousStep) {
+      return { success: false, error: 'No previous step found - cannot rollback from the first step' };
+    }
+
+    // Skip trigger steps (can't rollback to trigger)
+    if (previousStep.stepType === 'trigger') {
+      return { success: false, error: 'Cannot rollback to trigger step' };
+    }
+
+    console.log(`[WorkflowExecutionService] Rolling back from ${currentStep.name} to ${previousStep.name}`);
+
+    // Update the current task to archived/cancelled with review info
+    await this.tasks.updateOne(
+      { _id: task._id },
+      {
+        $set: {
+          status: 'archived',
+          reviewDecision: 'request_changes',
+          reviewComment: reviewComment || undefined,
+          reviewedAt: new Date(),
+          metadata: {
+            ...task.metadata,
+            rolledBackAt: new Date(),
+            rolledBackReason: reviewComment,
+            rolledBackFromStep: currentStep.id,
+            rolledBackToStep: previousStep.id,
+          },
+        },
+      }
+    );
+
+    // Update workflow run: move current step from currentStepIds, add previous step
+    await this.workflowRuns.updateOne(
+      { _id: run._id },
+      {
+        $pull: { currentStepIds: currentStep.id, completedStepIds: previousStep.id },
+        $addToSet: { currentStepIds: previousStep.id },
+      }
+    );
+
+    // Get the root task for creating the new task
+    const rootTask = run.rootTaskId ? await this.tasks.findOne({ _id: run.rootTaskId }) : null;
+    if (!rootTask) {
+      return { success: false, error: 'Root task not found' };
+    }
+
+    // Find the original input for the previous step by looking at its completed task
+    const previousStepTask = await this.tasks.findOne({
+      workflowRunId: run._id,
+      workflowStepId: previousStep.id,
+      status: { $in: ['completed', 'archived'] },
+    }, { sort: { createdAt: -1 } });
+
+    // Build input payload for the new task - include the review feedback
+    const inputPayload: Record<string, unknown> = {
+      ...(previousStepTask?.metadata || {}),
+      _rollbackFeedback: {
+        reviewComment: reviewComment,
+        rolledBackAt: new Date().toISOString(),
+        rolledBackFromStep: currentStep.name,
+        requestedBy: task.assigneeId?.toString() || 'unknown',
+      },
+    };
+
+    try {
+      // Create a new task for the previous step
+      const newTask = await this.executeStep(run, workflow, previousStep, rootTask, inputPayload);
+      console.log(`[WorkflowExecutionService] Created rollback task ${newTask._id} for step ${previousStep.id}`);
+
+      return { success: true, newTaskId: newTask._id.toString() };
+    } catch (error) {
+      console.error(`[WorkflowExecutionService] Failed to create rollback task:`, error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
 }
 
 // Singleton instance

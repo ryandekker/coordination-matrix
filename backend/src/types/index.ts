@@ -362,7 +362,16 @@ export interface Task {
 
   // Standardized task result with history
   taskResult?: TaskResult;
+
+  // Manual review fields (for manual workflow steps)
+  reviewDecision?: ManualReviewDecision;
+  reviewComment?: string;
+  reviewedAt?: Date;
+  reviewedById?: ObjectId | null;
 }
+
+// Review decision for manual workflow steps
+export type ManualReviewDecision = 'approved' | 'request_changes' | 'approved_with_notes';
 
 export interface TaskWithChildren extends Task {
   children?: TaskWithChildren[];

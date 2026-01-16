@@ -545,6 +545,26 @@ export function TaskModal({
     }
   }, [task, updateTask])
 
+  // Rollback handler for manual review tasks
+  const handleRollback = useCallback(async () => {
+    if (!task?._id) return
+    try {
+      const { tasksApi } = await import('@/lib/api')
+      // Get the review comment from the OutputTab state (passed through the component)
+      const response = await tasksApi.rollback(task._id)
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task', task._id] })
+      if (response.data?.newTaskId) {
+        queryClient.invalidateQueries({ queryKey: ['task', response.data.newTaskId] })
+      }
+      toast.success('Task rolled back to previous step')
+      onClose()
+    } catch (error) {
+      toast.error('Failed to rollback task')
+      throw error
+    }
+  }, [task, queryClient, onClose])
+
   // Create mode - single column, compact
   if (!task) {
     return (
@@ -1084,7 +1104,7 @@ export function TaskModal({
           {/* Tab Content - scrollable */}
           <div className="flex-1 min-h-0 overflow-y-auto">
             <TabsContent value={TASK_MODAL_TABS.OUTPUT} className="mt-0">
-              <OutputTab task={task} />
+              <OutputTab task={task} onRollback={task.workflowRunId ? handleRollback : undefined} />
             </TabsContent>
 
             <TabsContent value={TASK_MODAL_TABS.SUBTASKS} className="mt-0">
