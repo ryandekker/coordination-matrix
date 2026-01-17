@@ -635,12 +635,13 @@ export function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId
     }
   }
 
-  for (let i = 0; i < steps.length - 1; i++) {
-    const step = steps[i];
-    const originalId = step.id || `step${i}`;
-    const nodeId = stepIdToNodeId.get(originalId)!;
-
-    if (!connectedFrom.has(nodeId)) {
+  // Only add linear fallback connections if no steps have explicit connections
+  // (i.e., it's a truly linear workflow)
+  if (connectedFrom.size === 0) {
+    for (let i = 0; i < steps.length - 1; i++) {
+      const step = steps[i];
+      const originalId = step.id || `step${i}`;
+      const nodeId = stepIdToNodeId.get(originalId)!;
       const nextOriginalId = steps[i + 1].id || `step${i + 1}`;
       const nextNodeId = stepIdToNodeId.get(nextOriginalId)!;
       lines.push(`        ${nodeId} --> ${nextNodeId}`);
