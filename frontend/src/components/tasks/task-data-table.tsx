@@ -672,7 +672,7 @@ function TaskRow({
       <TableRow
         className={cn(
           depth > 0 && 'bg-muted/30',
-          isPulsing && depth === 0 && 'animate-pulse-bg border-b-2 border-pink-400'
+          isPulsing && 'animate-pulse-bg border-b-2 border-pink-400'
         )}
         data-state={isSelected ? 'selected' : undefined}
         data-task-id={task._id}
