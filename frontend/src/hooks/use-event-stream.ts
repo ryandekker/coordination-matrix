@@ -516,9 +516,12 @@ export function useEventStream(options?: {
             }
           })
 
-          // For child tasks, invalidate all cached pages for the parent's children
-          // This is more reliable than optimistic updates for nested data
-          if (isChildTask) {
+          // For child tasks, invalidate parent task and its children list
+          // The parent needs to be refreshed to update childStatusSummary
+          if (isChildTask && taskData.parentId) {
+            // Invalidate the parent task itself to refresh childStatusSummary
+            queryClient.invalidateQueries({ queryKey: ['task', taskData.parentId], refetchType: 'active' })
+
             // Invalidate all queries that start with ['task-children', parentId]
             // This covers all pagination variations
             queryClient.invalidateQueries({
@@ -530,6 +533,15 @@ export function useEventStream(options?: {
               },
               refetchType: 'active'
             })
+
+            // Also invalidate the tasks list so parent tasks in the list get refreshed childStatusSummary
+            // Use 'active' refetchType to only refetch if the query is being observed
+            queryClient.invalidateQueries({ queryKey: ['tasks'], refetchType: 'active' })
+          }
+
+          // For root-level tasks (no parentId), also invalidate tasks list to update the task in the list
+          if (!isChildTask) {
+            queryClient.invalidateQueries({ queryKey: ['tasks'], refetchType: 'active' })
           }
 
           // Also try optimistic update for immediate feedback on any matching query

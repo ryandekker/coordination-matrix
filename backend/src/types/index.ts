@@ -225,7 +225,7 @@ export interface TaskStepConfig {
 // Task Result - Standardized output storage with history
 // ============================================================================
 
-export type TaskResultStatus = 'success' | 'partial' | 'failed' | 'skipped';
+export type TaskResultStatus = 'success' | 'partial' | 'failed' | 'skipped' | 'running';
 
 // A single execution result
 export interface TaskResultEntry {

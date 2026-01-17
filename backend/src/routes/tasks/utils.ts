@@ -41,14 +41,12 @@ export function buildFilter(query: Record<string, unknown>, currentUserId?: stri
     (filters && typeof filters === 'object' && Object.keys(filters as object).length > 0)
   );
 
-  // Parent filter - flow tasks should appear at root level even if they have a parent
+  // Parent filter - rootOnly shows only true root-level tasks
+  // Subflow root tasks already have parentId: null, so they appear at root naturally
+  // Flow step tasks that spawn subflows remain nested under their parent and link to the subflow root
   // When filters are active, skip rootOnly to show all matching tasks (flattened view)
   if ((rootOnly === 'true' || rootOnly === true) && !hasActiveFilters) {
-    // Show root tasks OR flow tasks (flow tasks appear at both root and under parent)
-    filter.$or = [
-      { parentId: null },
-      { taskType: 'flow', parentId: { $ne: null } }
-    ];
+    filter.parentId = null;
   } else if (parentId) {
     filter.parentId = toObjectId(parentId as string);
   }

@@ -671,7 +671,7 @@ export interface TaskStepConfig {
 }
 
 // Task result status
-export type TaskResultStatus = 'success' | 'partial' | 'failed' | 'skipped'
+export type TaskResultStatus = 'success' | 'partial' | 'failed' | 'skipped' | 'running'
 
 // A single execution result
 export interface TaskResultEntry {

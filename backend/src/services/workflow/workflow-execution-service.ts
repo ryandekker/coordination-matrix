@@ -238,6 +238,8 @@ class WorkflowExecutionService {
     const runResult = await this.workflowRuns.insertOne(run as WorkflowRun);
     const createdRun = { ...run, _id: runResult.insertedId } as WorkflowRun;
 
+    // Always create a separate root task for the workflow run
+    // Subflow root tasks are top-level (parentId: null), linked via spawnedWorkflowRunId on the flow step
     const rootTask = await this.createRootTask(createdRun, workflow, actorId);
 
     await this.workflowRuns.updateOne(
@@ -247,16 +249,19 @@ class WorkflowExecutionService {
     createdRun.rootTaskId = rootTask._id;
 
     if (triggerTaskId) {
+      // Link the trigger task (flow step) to the spawned workflow run
+      // The flow step stores a reference - clicking it should navigate/highlight the subflow root task
       await this.tasks.updateOne(
         { _id: triggerTaskId },
         {
           $set: {
             spawnedWorkflowRunId: createdRun._id,
+            'metadata.spawnedRootTaskId': rootTask._id.toString(),
             updatedAt: now,
           }
         }
       );
-      console.log(`[WorkflowExecutionService] Linked trigger task ${triggerTaskId} to workflow run ${createdRun._id}`);
+      console.log(`[WorkflowExecutionService] Linked flow step ${triggerTaskId} to subflow root task ${rootTask._id}`);
     }
 
     await this.publish({
@@ -288,6 +293,8 @@ class WorkflowExecutionService {
       taskTitle = resolveTitleTemplate(workflow.rootTaskTitleTemplate, run.inputPayload, defaultTitle);
     }
 
+    // Root tasks always have no parent - they appear at the top level
+    // For subflows, the flow step task links to this root via spawnedRootTaskId
     const task: Omit<Task, '_id'> = {
       title: taskTitle,
       status: 'in_progress',
@@ -304,6 +311,8 @@ class WorkflowExecutionService {
         ...(run.inputPayload && { inputPayload: run.inputPayload }),
         ...(run.externalId && { externalId: run.externalId }),
         ...(run.source && { source: run.source }),
+        // For subflows, store the triggering flow step task ID for back-navigation
+        ...(run.triggerTaskId && { triggerTaskId: run.triggerTaskId.toString() }),
       },
       ...this.applyTaskDefaults(run, now),
     };
@@ -2002,7 +2011,8 @@ class WorkflowExecutionService {
       console.log(`[WorkflowExecutionService] No inputMapping, passing through full payload`);
     }
 
-    // Update flow task to in_progress
+    // Update flow task to in_progress with initial taskResult
+    const now = new Date();
     await this.tasks.updateOne(
       { _id: flowTask._id },
       {
@@ -2011,6 +2021,22 @@ class WorkflowExecutionService {
           'metadata.targetWorkflowId': step.flowId,
           'metadata.targetWorkflowName': targetWorkflow.name,
           'metadata.subflowInputPayload': subflowInputPayload,
+          // Set initial taskResult showing the flow is starting
+          'taskResult.current': {
+            id: `flow-${flowTask._id}-${Date.now()}`,
+            status: 'running' as const,
+            summary: `Starting subflow: ${targetWorkflow.name}`,
+            executedAt: now,
+            output: {
+              targetWorkflow: {
+                id: step.flowId,
+                name: targetWorkflow.name,
+              },
+              inputMapping: step.inputMapping || {},
+              inputPayload: subflowInputPayload,
+              nextStep: step.connections?.[0]?.targetStepId || null,
+            },
+          },
         }
       }
     );
@@ -2028,13 +2054,19 @@ class WorkflowExecutionService {
         parentRun.createdById
       );
 
-      // Link the flow task to the spawned workflow run
+      // Link the flow task to the spawned workflow run and update taskResult
       await this.tasks.updateOne(
         { _id: flowTask._id },
         {
           $set: {
             spawnedWorkflowRunId: subflowRun._id,
             'metadata.spawnedWorkflowRunId': subflowRun._id.toString(),
+            // Update taskResult with spawned workflow info
+            'taskResult.current.spawnedWorkflow': {
+              runId: subflowRun._id.toString(),
+              status: 'running',
+            },
+            'taskResult.current.summary': `Subflow running: ${targetWorkflow.name}`,
           }
         }
       );
@@ -2048,12 +2080,18 @@ class WorkflowExecutionService {
 
     } catch (error) {
       console.error(`[WorkflowExecutionService] Failed to start subflow:`, error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to start subflow';
       await this.tasks.updateOne(
         { _id: flowTask._id },
         {
           $set: {
             status: 'failed' as TaskStatus,
-            'metadata.error': error instanceof Error ? error.message : 'Failed to start subflow',
+            'metadata.error': errorMessage,
+            // Update taskResult with failure info
+            'taskResult.current.status': 'failed' as const,
+            'taskResult.current.completedAt': new Date(),
+            'taskResult.current.summary': `Failed to start subflow: ${targetWorkflow.name}`,
+            'taskResult.current.error': errorMessage,
           }
         }
       );
@@ -2394,7 +2432,9 @@ class WorkflowExecutionService {
       // Check if the trigger task is a flow task that needs to be marked as failed
       const triggerTask = await this.tasks.findOne({ _id: run.triggerTaskId });
 
-      if (triggerTask?.taskType === 'flow') {
+      // Check both taskType and stepConfig.stepType for backwards compatibility with older tasks
+      const isFlowTask = triggerTask?.taskType === 'flow' || triggerTask?.stepConfig?.stepType === 'flow';
+      if (isFlowTask) {
         // This is a subflow failure - mark the flow task as failed
         await this.tasks.updateOne(
           { _id: run.triggerTaskId },
@@ -2406,6 +2446,12 @@ class WorkflowExecutionService {
               'metadata.subflowFailed': true,
               'metadata.subflowFailedAt': now,
               updatedAt: now,
+              // Update taskResult with failed subflow info
+              'taskResult.current.status': 'failed' as const,
+              'taskResult.current.completedAt': now,
+              'taskResult.current.summary': `Subflow failed: ${failedTask.title}`,
+              'taskResult.current.error': `Step "${failedTask.title}" failed`,
+              'taskResult.current.spawnedWorkflow.status': 'failed',
             }
           }
         );
@@ -2487,15 +2533,37 @@ class WorkflowExecutionService {
     );
 
     if (run.rootTaskId) {
+      const rootTask = await this.tasks.findOne({ _id: run.rootTaskId });
+      const oldStatus = rootTask?.status || 'in_progress';
+
       await this.tasks.updateOne(
         { _id: run.rootTaskId },
         {
           $set: {
             status: 'completed' as TaskStatus,
             metadata: { ...outputPayload, completedAt: now },
+            updatedAt: now,
           },
         }
       );
+
+      // Emit task status changed event for the root task so UI updates in realtime
+      const updatedRootTask = await this.tasks.findOne({ _id: run.rootTaskId });
+      if (updatedRootTask) {
+        await eventBus.publish({
+          type: 'task.status.changed',
+          taskId: updatedRootTask._id,
+          task: updatedRootTask,
+          changes: [{
+            field: 'status',
+            oldValue: oldStatus,
+            newValue: 'completed',
+          }],
+          actorId: null,
+          actorType: 'system',
+        });
+        console.log(`[WorkflowExecutionService] Published task.status.changed for root task ${run.rootTaskId}`);
+      }
     }
 
     if (run.triggerTaskId) {
@@ -2508,7 +2576,9 @@ class WorkflowExecutionService {
       // Check if the trigger task is a flow task that needs to be completed
       const triggerTask = await this.tasks.findOne({ _id: run.triggerTaskId });
 
-      if (triggerTask?.taskType === 'flow') {
+      // Check both taskType and stepConfig.stepType for backwards compatibility with older tasks
+      const isFlowTask = triggerTask?.taskType === 'flow' || triggerTask?.stepConfig?.stepType === 'flow';
+      if (isFlowTask) {
         // This is a subflow completion - mark the flow task as completed
         // and include the output payload in metadata for the next step
         await this.tasks.updateOne(
@@ -2521,6 +2591,13 @@ class WorkflowExecutionService {
               'metadata.subflowCompleted': true,
               'metadata.subflowCompletedAt': now,
               updatedAt: now,
+              // Update taskResult with completed subflow info
+              'taskResult.current.status': 'success' as const,
+              'taskResult.current.completedAt': now,
+              'taskResult.current.summary': `Subflow completed successfully`,
+              'taskResult.current.output.subflowOutput': outputPayload,
+              'taskResult.current.spawnedWorkflow.status': 'completed',
+              'taskResult.current.spawnedWorkflow.outputPayload': outputPayload,
             }
           }
         );
