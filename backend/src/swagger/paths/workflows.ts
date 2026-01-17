@@ -7,6 +7,7 @@ export const workflowPaths = {
       summary: 'List all workflows',
       parameters: [
         { name: 'includeInactive', in: 'query', schema: { type: 'boolean', default: false }, description: 'Include inactive workflows (excluded by default)' },
+        { name: 'brief', in: 'query', schema: { type: 'boolean' }, description: 'Return step counts instead of full steps array (faster for list views)' },
       ],
       responses: {
         200: {
@@ -41,6 +42,7 @@ export const workflowPaths = {
                 steps: { type: 'array', items: { $ref: '#/components/schemas/WorkflowStep' } },
                 mermaidDiagram: { type: 'string' },
                 isActive: { type: 'boolean' },
+                rootTaskTitleTemplate: { type: 'string', description: 'Template for root task title' },
               },
             },
           },
@@ -48,6 +50,146 @@ export const workflowPaths = {
       },
       responses: {
         201: { description: 'Workflow created' },
+      },
+    },
+  },
+  '/api/workflows/stats': {
+    get: {
+      tags: ['Workflows'],
+      summary: 'Get workflow run statistics',
+      description: 'Returns run counts, success/failure counts, and last run time for each workflow',
+      responses: {
+        200: {
+          description: 'Workflow statistics by workflow ID',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  data: {
+                    type: 'object',
+                    additionalProperties: {
+                      type: 'object',
+                      properties: {
+                        runCount: { type: 'integer' },
+                        lastRunAt: { type: 'string', format: 'date-time', nullable: true },
+                        completedCount: { type: 'integer' },
+                        failedCount: { type: 'integer' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  '/api/workflows/export-multi': {
+    get: {
+      tags: ['Workflows'],
+      summary: 'Export workflows as multi-workflow Mermaid',
+      description: 'Export one or more workflows as a single Mermaid document with subgraphs. Use for backup or sharing.',
+      parameters: [
+        { name: 'ids', in: 'query', schema: { type: 'string' }, description: 'Comma-separated workflow IDs (omit to export all)' },
+      ],
+      responses: {
+        200: {
+          description: 'Multi-workflow Mermaid document',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  data: {
+                    type: 'object',
+                    properties: {
+                      mermaid: { type: 'string', description: 'Mermaid document with subgraphs' },
+                      workflows: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            id: { type: 'string' },
+                            name: { type: 'string' },
+                            isNew: { type: 'boolean' },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  '/api/workflows/import-multi': {
+    post: {
+      tags: ['Workflows'],
+      summary: 'Import workflows from multi-workflow Mermaid',
+      description: 'Import workflows from a Mermaid document with subgraphs. Use @workflow, @id, @description metadata in comments.',
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['mermaid'],
+              properties: {
+                mermaid: { type: 'string', description: 'Mermaid document with subgraphs' },
+                dryRun: { type: 'boolean', default: false, description: 'Validate without saving' },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        200: {
+          description: 'Import results',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  data: {
+                    type: 'object',
+                    properties: {
+                      results: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            name: { type: 'string' },
+                            id: { type: 'string' },
+                            action: { type: 'string', enum: ['create', 'update', 'skip'] },
+                            stepCount: { type: 'integer' },
+                            error: { type: 'string' },
+                            warnings: { type: 'array', items: { type: 'string' } },
+                          },
+                        },
+                      },
+                      summary: {
+                        type: 'object',
+                        properties: {
+                          total: { type: 'integer' },
+                          created: { type: 'integer' },
+                          updated: { type: 'integer' },
+                          skipped: { type: 'integer' },
+                        },
+                      },
+                      dryRun: { type: 'boolean' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        400: { description: 'Invalid Mermaid document or no subgraphs found' },
       },
     },
   },
@@ -206,17 +348,20 @@ export const workflowRunPaths = {
       summary: 'List workflow runs',
       parameters: [
         { name: 'workflowId', in: 'query', schema: { type: 'string' } },
-        { name: 'status', in: 'query', schema: { type: 'string' } },
-        { name: 'page', in: 'query', schema: { type: 'integer' } },
-        { name: 'limit', in: 'query', schema: { type: 'integer' } },
+        { name: 'status', in: 'query', schema: { type: 'string' }, description: 'Comma-separated statuses' },
+        { name: 'dateFrom', in: 'query', schema: { type: 'string', format: 'date' } },
+        { name: 'dateTo', in: 'query', schema: { type: 'string', format: 'date' } },
+        { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+        { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
       ],
       responses: {
-        200: { description: 'List of workflow runs' },
+        200: { description: 'List of workflow runs with pagination' },
       },
     },
     post: {
       tags: ['Workflow Runs'],
       summary: 'Start a new workflow run',
+      description: 'Requires authentication (JWT or API key)',
       requestBody: {
         required: true,
         content: {
@@ -226,18 +371,64 @@ export const workflowRunPaths = {
               required: ['workflowId'],
               properties: {
                 workflowId: { type: 'string' },
-                inputPayload: { type: 'object' },
-                taskDefaults: { type: 'object' },
-                executionOptions: { type: 'object' },
-                externalId: { type: 'string' },
-                source: { type: 'string' },
+                inputPayload: { type: 'object', description: 'Input data passed to workflow' },
+                taskDefaults: { type: 'object', description: 'Default values for created tasks' },
+                executionOptions: { type: 'object', description: 'Workflow execution options' },
+                externalId: { type: 'string', description: 'External reference ID' },
+                source: { type: 'string', description: 'Source system identifier' },
               },
             },
           },
         },
       },
       responses: {
-        201: { description: 'Workflow run started' },
+        201: {
+          description: 'Workflow run started',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  run: { type: 'object' },
+                  rootTask: { type: 'object' },
+                  message: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        400: { description: 'Invalid workflowId or workflow not found' },
+      },
+    },
+  },
+  '/api/workflow-runs/requests': {
+    get: {
+      tags: ['Workflow Runs'],
+      summary: 'List workflow requests (inbound request log)',
+      description: 'Returns logged inbound requests that trigger or interact with workflows',
+      parameters: [
+        { name: 'type', in: 'query', schema: { type: 'string', enum: ['workflow_start', 'workflow_callback'] } },
+        { name: 'status', in: 'query', schema: { type: 'string', enum: ['success', 'failed'] } },
+        { name: 'workflowId', in: 'query', schema: { type: 'string' } },
+        { name: 'workflowRunId', in: 'query', schema: { type: 'string' } },
+        { name: 'limit', in: 'query', schema: { type: 'integer', default: 50, maximum: 200 } },
+        { name: 'offset', in: 'query', schema: { type: 'integer', default: 0 } },
+      ],
+      responses: {
+        200: { description: 'List of workflow requests' },
+      },
+    },
+  },
+  '/api/workflow-runs/requests/{requestId}': {
+    get: {
+      tags: ['Workflow Runs'],
+      summary: 'Get a specific workflow request',
+      parameters: [
+        { name: 'requestId', in: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } },
+      ],
+      responses: {
+        200: { description: 'Workflow request details' },
+        404: { description: 'Workflow request not found' },
       },
     },
   },
@@ -247,10 +438,32 @@ export const workflowRunPaths = {
       summary: 'Get workflow run details',
       parameters: [
         { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
-        { name: 'includeTasks', in: 'query', schema: { type: 'boolean' } },
+        { name: 'includeTasks', in: 'query', schema: { type: 'boolean' }, description: 'Include tasks for this run' },
+        { name: 'includeChildCounts', in: 'query', schema: { type: 'boolean' }, description: 'Include descendant counts for tasks' },
+        { name: 'includeDetails', in: 'query', schema: { type: 'boolean' }, description: 'Include full task details' },
+        { name: 'limit', in: 'query', schema: { type: 'integer' }, description: 'Limit number of tasks' },
+        { name: 'beforeCreatedAt', in: 'query', schema: { type: 'string', format: 'date-time' }, description: 'Cursor for pagination' },
+        { name: 'afterCreatedAt', in: 'query', schema: { type: 'string', format: 'date-time' }, description: 'Cursor for pagination' },
       ],
       responses: {
         200: { description: 'Workflow run details' },
+        404: { description: 'Workflow run not found' },
+      },
+    },
+  },
+  '/api/workflow-runs/{id}/tasks/{taskId}/children': {
+    get: {
+      tags: ['Workflow Runs'],
+      summary: 'Get child tasks for a workflow run task',
+      description: 'Lazy loading endpoint for task children in workflow run view',
+      parameters: [
+        { name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Workflow run ID' },
+        { name: 'taskId', in: 'path', required: true, schema: { type: 'string' }, description: 'Parent task ID' },
+        { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } },
+        { name: 'offset', in: 'query', schema: { type: 'integer', default: 0 } },
+      ],
+      responses: {
+        200: { description: 'Child tasks' },
       },
     },
   },
@@ -263,6 +476,47 @@ export const workflowRunPaths = {
       ],
       responses: {
         200: { description: 'Workflow run cancelled' },
+        400: { description: 'Cannot cancel workflow run' },
+      },
+    },
+  },
+  '/api/workflow-runs/{id}/execute-step/{stepId}': {
+    post: {
+      tags: ['Workflow Runs'],
+      summary: 'Manually execute a stuck workflow step',
+      description: 'Used to recover stuck workflows where step tracking advanced but task was not created',
+      parameters: [
+        { name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Workflow run ID' },
+        { name: 'stepId', in: 'path', required: true, schema: { type: 'string' }, description: 'Step ID to execute' },
+      ],
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {
+                inputPayload: { type: 'object', description: 'Input data for the step' },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        200: {
+          description: 'Step executed successfully',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  message: { type: 'string' },
+                  taskId: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        400: { description: 'Cannot execute step' },
       },
     },
   },
@@ -333,14 +587,19 @@ export const batchJobPaths = {
       tags: ['Batch Jobs'],
       summary: 'List batch jobs',
       parameters: [
-        { name: 'status', in: 'query', schema: { type: 'string' } },
+        { name: 'status', in: 'query', schema: { type: 'string' }, description: 'Comma-separated statuses' },
         { name: 'type', in: 'query', schema: { type: 'string' } },
         { name: 'workflowId', in: 'query', schema: { type: 'string' } },
-        { name: 'page', in: 'query', schema: { type: 'integer' } },
-        { name: 'limit', in: 'query', schema: { type: 'integer' } },
+        { name: 'taskId', in: 'query', schema: { type: 'string' } },
+        { name: 'requiresManualReview', in: 'query', schema: { type: 'boolean' } },
+        { name: 'taskStatus', in: 'query', schema: { type: 'string' }, description: 'Filter by associated task status' },
+        { name: 'taskType', in: 'query', schema: { type: 'string' }, description: 'Filter by associated task type' },
+        { name: 'assigneeId', in: 'query', schema: { type: 'string' }, description: 'Filter by associated task assignee' },
+        { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+        { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
       ],
       responses: {
-        200: { description: 'List of batch jobs' },
+        200: { description: 'List of batch jobs with pagination' },
       },
     },
     post: {
@@ -354,21 +613,234 @@ export const batchJobPaths = {
               type: 'object',
               required: ['expectedCount'],
               properties: {
-                expectedCount: { type: 'integer' },
+                expectedCount: { type: 'integer', minimum: 0 },
                 name: { type: 'string' },
                 type: { type: 'string' },
                 workflowId: { type: 'string' },
                 taskId: { type: 'string' },
                 minSuccessPercent: { type: 'number', default: 100 },
                 deadlineAt: { type: 'string', format: 'date-time' },
-                items: { type: 'array', items: { type: 'object' } },
+                items: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    required: ['itemKey'],
+                    properties: {
+                      itemKey: { type: 'string', description: 'Unique key for this item' },
+                    },
+                  },
+                },
               },
             },
           },
         },
       },
       responses: {
-        201: { description: 'Batch job created' },
+        201: {
+          description: 'Batch job created',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  _id: { type: 'string' },
+                  callbackUrl: { type: 'string', description: 'URL for posting item completions' },
+                  callbackSecretHint: { type: 'string', description: 'First 10 chars of callback secret' },
+                },
+              },
+            },
+          },
+        },
+        400: { description: 'Validation error (duplicate itemKey, invalid expectedCount)' },
+      },
+    },
+  },
+  '/api/batch-jobs/stats/summary': {
+    get: {
+      tags: ['Batch Jobs'],
+      summary: 'Get batch job statistics',
+      responses: {
+        200: {
+          description: 'Batch job statistics',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  '/api/batch-jobs/admin/check-deadlines': {
+    post: {
+      tags: ['Batch Jobs'],
+      summary: 'Force deadline check (admin/debug)',
+      description: 'Triggers deadline check for batch jobs. Used for debugging.',
+      responses: {
+        200: { description: 'Deadline check completed' },
+      },
+    },
+  },
+  '/api/batch-jobs/{id}': {
+    get: {
+      tags: ['Batch Jobs'],
+      summary: 'Get a specific batch job',
+      parameters: [
+        { name: 'id', in: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } },
+        { name: 'includeItems', in: 'query', schema: { type: 'boolean' }, description: 'Include all items' },
+      ],
+      responses: {
+        200: { description: 'Batch job details' },
+        404: { description: 'Batch job not found' },
+      },
+    },
+  },
+  '/api/batch-jobs/{id}/start': {
+    post: {
+      tags: ['Batch Jobs'],
+      summary: 'Start a batch job',
+      description: 'Transitions job from pending to running',
+      parameters: [
+        { name: 'id', in: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } },
+      ],
+      responses: {
+        200: { description: 'Batch job started' },
+        400: { description: 'Cannot start batch job (wrong state)' },
+      },
+    },
+  },
+  '/api/batch-jobs/{id}/callback': {
+    post: {
+      tags: ['Batch Jobs'],
+      summary: 'Batch job callback (fan-in)',
+      description: 'Called when an item completes. Used by external workers.',
+      parameters: [
+        { name: 'id', in: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } },
+        { name: 'X-Batch-Secret', in: 'header', required: true, schema: { type: 'string' }, description: 'Callback secret for authentication' },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['itemKey', 'success'],
+              properties: {
+                itemKey: { type: 'string', description: 'Unique key for this item' },
+                externalId: { type: 'string' },
+                success: { type: 'boolean' },
+                result: { type: 'object', description: 'Result data for successful items' },
+                error: { type: 'string', description: 'Error message for failed items' },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        200: {
+          description: 'Callback processed',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  acknowledged: { type: 'boolean' },
+                  itemId: { type: 'string' },
+                  itemStatus: { type: 'string' },
+                  joinSatisfied: { type: 'boolean', description: 'Whether batch is now complete' },
+                  joinResult: { type: 'object', nullable: true },
+                },
+              },
+            },
+          },
+        },
+        401: { description: 'Invalid callback secret' },
+        404: { description: 'Batch job or item not found' },
+        409: { description: 'Batch job is sealed (no more callbacks accepted)' },
+      },
+    },
+  },
+  '/api/batch-jobs/{id}/aggregate': {
+    get: {
+      tags: ['Batch Jobs'],
+      summary: 'Get aggregated batch job results',
+      description: 'Returns aggregated results from all completed items',
+      parameters: [
+        { name: 'id', in: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } },
+      ],
+      responses: {
+        200: { description: 'Aggregated results' },
+        404: { description: 'Batch job not found' },
+      },
+    },
+  },
+  '/api/batch-jobs/{id}/review': {
+    post: {
+      tags: ['Batch Jobs'],
+      summary: 'Submit review for batch job',
+      description: 'Approve, reject, or proceed with partial results. Requires authentication.',
+      parameters: [
+        { name: 'id', in: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['decision'],
+              properties: {
+                decision: { type: 'string', enum: ['approved', 'rejected', 'proceed_with_partial'] },
+                notes: { type: 'string' },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        200: { description: 'Review submitted' },
+        400: { description: 'Invalid decision' },
+        401: { description: 'Authentication required for review' },
+      },
+    },
+  },
+  '/api/batch-jobs/{id}/request-review': {
+    post: {
+      tags: ['Batch Jobs'],
+      summary: 'Request manual review for batch job',
+      parameters: [
+        { name: 'id', in: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } },
+      ],
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {
+                reason: { type: 'string', default: 'Manual review requested' },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        200: { description: 'Review requested' },
+        400: { description: 'Cannot request review' },
+      },
+    },
+  },
+  '/api/batch-jobs/{id}/cancel': {
+    post: {
+      tags: ['Batch Jobs'],
+      summary: 'Cancel a batch job',
+      parameters: [
+        { name: 'id', in: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } },
+      ],
+      responses: {
+        200: { description: 'Batch job cancelled' },
+        400: { description: 'Cannot cancel batch job' },
       },
     },
   },

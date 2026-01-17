@@ -4,6 +4,8 @@ export { taskPaths } from './tasks.js';
 export { workflowPaths, workflowRunPaths, batchJobPaths } from './workflows.js';
 export { userPaths, viewPaths, webhookPaths, activityLogPaths, lookupPaths, tagPaths, externalJobPaths } from './other.js';
 export { documentPaths } from './documents.js';
+export { fieldConfigPaths } from './field-configs.js';
+export { eventPaths } from './events.js';
 
 // Combine all paths into a single object
 import { healthPaths, authPaths, apiKeyPaths } from './health-auth.js';
@@ -11,6 +13,8 @@ import { taskPaths } from './tasks.js';
 import { workflowPaths, workflowRunPaths, batchJobPaths } from './workflows.js';
 import { userPaths, viewPaths, webhookPaths, activityLogPaths, lookupPaths, tagPaths, externalJobPaths } from './other.js';
 import { documentPaths } from './documents.js';
+import { fieldConfigPaths } from './field-configs.js';
+import { eventPaths } from './events.js';
 
 export const allPaths = {
   ...healthPaths,
@@ -28,4 +32,6 @@ export const allPaths = {
   ...tagPaths,
   ...externalJobPaths,
   ...documentPaths,
+  ...fieldConfigPaths,
+  ...eventPaths,
 };
