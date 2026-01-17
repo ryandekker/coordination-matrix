@@ -3,6 +3,7 @@
 import { useState, useCallback, useMemo, useEffect } from 'react'
 import { MermaidInteractive } from '@/components/ui/mermaid-interactive'
 import { StepConfigPanel } from './step-config-panel'
+import { ResizablePanels } from '@/components/ui/resizable-panels'
 import { workflowsApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -472,179 +473,196 @@ export function IntegratedWorkflowView({
     setIsPanelCollapsed(false)
   }, [steps, onStepsChange])
 
-  return (
-    <div className={cn('flex gap-2 h-full', className)}>
-      {/* Diagram Panel */}
-      <div className={cn(
-        'flex flex-col bg-muted/20 border rounded-lg transition-all overflow-hidden min-h-0',
-        isPanelCollapsed ? 'flex-1' : 'flex-[3]'
-      )}>
-        {/* Diagram Header */}
-        <div className="flex items-center justify-between px-3 py-2 border-b bg-background/50 flex-shrink-0">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Layers className="h-4 w-4" />
-            <span>Workflow Diagram</span>
-            <span className="text-xs">({steps.length} steps)</span>
-          </div>
-          <div className="flex items-center gap-1">
-            {steps.length === 0 ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm">
-                    <Plus className="h-4 w-4 mr-1" />
-                    Add First Step
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {STEP_TYPES.map(st => (
-                    <DropdownMenuItem
-                      key={st.type}
-                      onClick={() => addFirstStep(st.type)}
-                    >
-                      <st.icon className={cn('h-4 w-4 mr-2', st.color)} />
-                      {st.label}
-                      <span className="text-xs text-muted-foreground ml-2">
-                        {st.description}
-                      </span>
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsPanelCollapsed(!isPanelCollapsed)}
-              >
-                {isPanelCollapsed ? (
-                  <>
-                    <ChevronLeft className="h-4 w-4 mr-1" />
-                    Show Panel
-                  </>
-                ) : (
-                  <>
-                    Hide Panel
-                    <ChevronRight className="h-4 w-4 ml-1" />
-                  </>
-                )}
-              </Button>
-            )}
-          </div>
+  // Diagram Panel content
+  const diagramPanel = (
+    <div className="flex flex-col bg-muted/20 border rounded-lg overflow-hidden min-h-0 h-full">
+      {/* Diagram Header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b bg-background/50 flex-shrink-0">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Layers className="h-4 w-4" />
+          <span>Workflow Diagram</span>
+          <span className="text-xs">({steps.length} steps)</span>
         </div>
-
-        {/* Diagram Content */}
-        <div className="flex-1 p-4 overflow-auto min-h-0">
+        <div className="flex items-center gap-1">
           {steps.length === 0 ? (
-            <div className="h-full flex items-center justify-center text-muted-foreground">
-              <div className="text-center">
-                <Layers className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                <p className="font-medium">No steps yet</p>
-                <p className="text-sm">Add your first step to begin building the workflow</p>
-              </div>
-            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add First Step
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {STEP_TYPES.map(st => (
+                  <DropdownMenuItem
+                    key={st.type}
+                    onClick={() => addFirstStep(st.type)}
+                  >
+                    <st.icon className={cn('h-4 w-4 mr-2', st.color)} />
+                    {st.label}
+                    <span className="text-xs text-muted-foreground ml-2">
+                      {st.description}
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           ) : (
-            <MermaidInteractive
-              chart={mermaidCode}
-              selectedNodeId={selectedStepId}
-              stepIds={['__start__', ...steps.map(s => s.id)]}
-              onNodeClick={handleNodeClick}
-              onAddAfter={handleAddAfter}
-              className="min-h-[200px]"
-            />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsPanelCollapsed(!isPanelCollapsed)}
+            >
+              {isPanelCollapsed ? (
+                <>
+                  <ChevronLeft className="h-4 w-4 mr-1" />
+                  Show Panel
+                </>
+              ) : (
+                <>
+                  Hide Panel
+                  <ChevronRight className="h-4 w-4 ml-1" />
+                </>
+              )}
+            </Button>
           )}
         </div>
+      </div>
 
-        {/* Hint */}
-        {steps.length > 0 && (
-          <div className="px-3 py-1.5 border-t bg-muted/30 text-xs text-muted-foreground flex items-center gap-1.5 flex-shrink-0">
-            <MousePointerClick className="h-3 w-3" />
-            Click node to edit • Hover between nodes to insert step
+      {/* Diagram Content */}
+      <div className="flex-1 p-4 overflow-auto min-h-0">
+        {steps.length === 0 ? (
+          <div className="h-full flex items-center justify-center text-muted-foreground">
+            <div className="text-center">
+              <Layers className="h-12 w-12 mx-auto mb-3 opacity-50" />
+              <p className="font-medium">No steps yet</p>
+              <p className="text-sm">Add your first step to begin building the workflow</p>
+            </div>
           </div>
+        ) : (
+          <MermaidInteractive
+            chart={mermaidCode}
+            selectedNodeId={selectedStepId}
+            stepIds={['__start__', ...steps.map(s => s.id)]}
+            onNodeClick={handleNodeClick}
+            onAddAfter={handleAddAfter}
+            className="min-h-[200px]"
+          />
         )}
       </div>
 
-      {/* Config Panel */}
-      {!isPanelCollapsed && (
-        <div className="flex-[2] flex flex-col border rounded-lg bg-background overflow-hidden min-h-0">
-          {selectedStep ? (
-            <div className="flex-1 min-h-0 overflow-y-auto">
-              <StepConfigPanel
-              step={selectedStep}
-              stepIndex={selectedStepIndex}
-              allSteps={steps}
-              workflowId={workflowId}
-              users={users}
-              loopScope={loopScope}
-              isInLoop={isInLoop}
-              availableWorkflows={availableWorkflows}
-              loadingWorkflows={loadingWorkflows}
-              onUpdate={(updates) => updateStep(selectedStepIndex, updates)}
-              onDelete={() => deleteStep(selectedStepIndex)}
-              onMoveUp={() => moveStepUp(selectedStepIndex)}
-              onMoveDown={() => moveStepDown(selectedStepIndex)}
-              onAddStepAfter={() => addStep(selectedStepIndex)}
-              onChangeType={(type) => changeStepType(selectedStepIndex, type)}
-            />
-            </div>
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-muted-foreground p-4">
-              <div className="text-center">
-                <MousePointerClick className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">Click a step in the diagram to edit</p>
-                {steps.length === 0 && (
-                  <p className="text-xs mt-1">Or add your first step to get started</p>
-                )}
-              </div>
-            </div>
-          )}
+      {/* Hint */}
+      {steps.length > 0 && (
+        <div className="px-3 py-1.5 border-t bg-muted/30 text-xs text-muted-foreground flex items-center gap-1.5 flex-shrink-0">
+          <MousePointerClick className="h-3 w-3" />
+          Click node to edit • Hover between nodes to insert step • Drag divider to resize
+        </div>
+      )}
+    </div>
+  )
 
-          {/* Step list for quick navigation */}
-          {steps.length > 0 && (
-            <div className="border-t bg-muted/20 flex-shrink-0">
-              <button
-                type="button"
-                onClick={() => setIsQuickSelectExpanded(!isQuickSelectExpanded)}
-                className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/40 transition-colors"
-              >
-                <span>Quick select ({steps.length} steps)</span>
-                <ChevronDown className={cn(
-                  'h-3 w-3 transition-transform',
-                  isQuickSelectExpanded && 'rotate-180'
-                )} />
-              </button>
-              {isQuickSelectExpanded && (
-                <div className="px-2 pb-2">
-                  <ScrollArea className="max-h-[224px]">
-                    <div className="space-y-0.5">
-                      {steps.map((step, index) => {
-                        const typeInfo = STEP_TYPES.find(t => t.type === step.stepType) || STEP_TYPES[0]
-                        const Icon = typeInfo.icon
-                        return (
-                          <button
-                            type="button"
-                            key={step.id}
-                            onClick={() => setSelectedStepId(step.id)}
-                            className={cn(
-                              'w-full flex items-center gap-2 px-2 py-1 rounded text-left text-sm transition-colors',
-                              selectedStepId === step.id
-                                ? 'bg-primary/10 text-primary'
-                                : 'hover:bg-muted'
-                            )}
-                          >
-                            <span className="text-xs text-muted-foreground w-4">{index + 1}.</span>
-                            <Icon className={cn('h-3 w-3 flex-shrink-0', typeInfo.color)} />
-                            <span className="truncate">{step.name}</span>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </ScrollArea>
+  // Config Panel content
+  const configPanel = (
+    <div className="flex flex-col border rounded-lg bg-background overflow-hidden min-h-0 h-full">
+      {selectedStep ? (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <StepConfigPanel
+            step={selectedStep}
+            stepIndex={selectedStepIndex}
+            allSteps={steps}
+            workflowId={workflowId}
+            users={users}
+            loopScope={loopScope}
+            isInLoop={isInLoop}
+            availableWorkflows={availableWorkflows}
+            loadingWorkflows={loadingWorkflows}
+            onUpdate={(updates) => updateStep(selectedStepIndex, updates)}
+            onDelete={() => deleteStep(selectedStepIndex)}
+            onMoveUp={() => moveStepUp(selectedStepIndex)}
+            onMoveDown={() => moveStepDown(selectedStepIndex)}
+            onAddStepAfter={() => addStep(selectedStepIndex)}
+            onChangeType={(type) => changeStepType(selectedStepIndex, type)}
+          />
+        </div>
+      ) : (
+        <div className="flex-1 flex items-center justify-center text-muted-foreground p-4">
+          <div className="text-center">
+            <MousePointerClick className="h-8 w-8 mx-auto mb-2 opacity-50" />
+            <p className="text-sm">Click a step in the diagram to edit</p>
+            {steps.length === 0 && (
+              <p className="text-xs mt-1">Or add your first step to get started</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Step list for quick navigation */}
+      {steps.length > 0 && (
+        <div className="border-t bg-muted/20 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsQuickSelectExpanded(!isQuickSelectExpanded)}
+            className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/40 transition-colors"
+          >
+            <span>Quick select ({steps.length} steps)</span>
+            <ChevronDown className={cn(
+              'h-3 w-3 transition-transform',
+              isQuickSelectExpanded && 'rotate-180'
+            )} />
+          </button>
+          {isQuickSelectExpanded && (
+            <div className="px-2 pb-2">
+              <ScrollArea className="max-h-[224px]">
+                <div className="space-y-0.5">
+                  {steps.map((step, index) => {
+                    const typeInfo = STEP_TYPES.find(t => t.type === step.stepType) || STEP_TYPES[0]
+                    const Icon = typeInfo.icon
+                    return (
+                      <button
+                        type="button"
+                        key={step.id}
+                        onClick={() => setSelectedStepId(step.id)}
+                        className={cn(
+                          'w-full flex items-center gap-2 px-2 py-1 rounded text-left text-sm transition-colors',
+                          selectedStepId === step.id
+                            ? 'bg-primary/10 text-primary'
+                            : 'hover:bg-muted'
+                        )}
+                      >
+                        <span className="text-xs text-muted-foreground w-4">{index + 1}.</span>
+                        <Icon className={cn('h-3 w-3 flex-shrink-0', typeInfo.color)} />
+                        <span className="truncate">{step.name}</span>
+                      </button>
+                    )
+                  })}
                 </div>
-              )}
+              </ScrollArea>
             </div>
           )}
         </div>
       )}
     </div>
+  )
+
+  // When panel is collapsed, show only the diagram full width
+  if (isPanelCollapsed) {
+    return (
+      <div className={cn('h-full', className)}>
+        {diagramPanel}
+      </div>
+    )
+  }
+
+  // When panel is visible, use resizable layout
+  return (
+    <ResizablePanels
+      defaultLeftWidth={60}
+      minLeftWidth={30}
+      maxLeftWidth={80}
+      className={className}
+    >
+      {diagramPanel}
+      {configPanel}
+    </ResizablePanels>
   )
 }

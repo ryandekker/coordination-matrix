@@ -7,13 +7,14 @@ import { ObjectId } from 'mongodb';
 export const NULLABLE_ID_FIELDS = new Set(['parentId', 'createdById', 'assigneeId']);
 
 /**
- * taskType values that exist in old Atlas validators.
- * New values like 'flow', 'trigger', 'agent', 'manual', 'webhook' are not in
- * the old enum and will cause validation failures. We strip these so the
- * optional taskType field is omitted rather than rejected.
+ * Valid taskType values for MongoDB validation.
+ * This includes all current task types used by the workflow system.
  */
-export const OLD_ATLAS_TASK_TYPES = new Set([
-  'standard', 'decision', 'foreach', 'join', 'external', 'subflow'
+export const VALID_TASK_TYPES = new Set([
+  // Legacy types
+  'standard', 'decision', 'foreach', 'join', 'external', 'subflow',
+  // Current types
+  'flow', 'trigger', 'agent', 'manual', 'webhook', 'findDocument'
 ]);
 
 /**
@@ -39,8 +40,8 @@ export function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
     if (value === undefined) continue;
     // Skip null values for optional objectId fields (old validators may reject null)
     if (value === null && NULLABLE_ID_FIELDS.has(key)) continue;
-    // Skip taskType values not in old Atlas enum (optional field, omit rather than reject)
-    if (key === 'taskType' && typeof value === 'string' && !OLD_ATLAS_TASK_TYPES.has(value)) continue;
+    // Skip invalid taskType values (optional field, omit rather than reject)
+    if (key === 'taskType' && typeof value === 'string' && !VALID_TASK_TYPES.has(value)) continue;
 
     if (typeof value === 'object' && value !== null && !(value instanceof Date) && !(value instanceof ObjectId)) {
       result[key] = stripUndefined(value as Record<string, unknown>);

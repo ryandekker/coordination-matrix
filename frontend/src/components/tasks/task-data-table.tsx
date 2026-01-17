@@ -52,7 +52,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { EditableCell } from './editable-cell'
-import { Task, FieldConfig, LookupValue, User, Workflow } from '@/lib/api'
+import { Task, FieldConfig, LookupValue, User, Workflow, tasksApi } from '@/lib/api'
 import { useTaskChildren, useUpdateTask, useDeleteTask, useBulkUpdateTasks, useBulkDeleteTasks, useLookups, useCreateTask } from '@/hooks/use-tasks'
 import { formatDateTime, cn } from '@/lib/utils'
 import { TASK_TYPE_CONFIG, getTaskTypeConfig } from '@/lib/task-type-config'
@@ -543,6 +543,7 @@ function TaskRow({
   handleCreateSubtask,
   expandAllEnabled,
   onNavigateToFlow,
+  onNavigateToTrigger,
   isPulsing,
   onTriggerPulse,
   inlineCreationParentId,
@@ -576,6 +577,7 @@ function TaskRow({
   handleCreateSubtask: (task: Task) => void
   expandAllEnabled: boolean
   onNavigateToFlow: (taskId: string) => void
+  onNavigateToTrigger: (triggerTaskId: string) => void
   isPulsing: boolean
   onTriggerPulse: (taskId: string, shouldScroll?: boolean) => void
   inlineCreationParentId: string | null
@@ -585,6 +587,14 @@ function TaskRow({
   isCreatingTask: boolean
 }) {
   const isFlowTask = task.taskType === 'flow'
+
+  // A flow step that has spawned a subflow - shows as a reference link, not expandable
+  const spawnedRootTaskId = task.metadata?.spawnedRootTaskId as string | undefined
+  const hasSpawnedSubflow = Boolean(spawnedRootTaskId)
+
+  // A subflow root that was triggered by a flow step - can link back to the trigger task
+  const triggerTaskId = task.metadata?.triggerTaskId as string | undefined
+  const isSubflowRoot = Boolean(triggerTaskId)
 
   // Track which children have been auto-expanded to prevent re-expanding manually collapsed ones
   const autoExpandedChildrenRef = useRef<Set<string>>(new Set())
@@ -598,7 +608,8 @@ function TaskRow({
 
   // Fetch children when expanded (including flow tasks - they now expand inline)
   // Skip fetching if we already have pre-attached children from filtering
-  const { data: childrenData } = useTaskChildren(isExpanded && !hasPreAttachedChildren ? task._id : null, {
+  // Skip fetching for flow tasks that spawned subflows - they link to root, not expand
+  const { data: childrenData } = useTaskChildren(isExpanded && !hasPreAttachedChildren && !hasSpawnedSubflow ? task._id : null, {
     page: childrenPage,
     limit: CHILDREN_PAGE_SIZE,
   })
@@ -618,14 +629,11 @@ function TaskRow({
     }
   }, [isExpanded])
 
-  // Handle expand toggle with pulse animation for flow tasks
+  // Handle expand toggle - just toggle, no self-pulse needed
+  // Pulse animation is only for highlighting OTHER tasks (like when clicking a flow step ref link)
   const handleToggleExpand = useCallback(() => {
     onToggleExpand()
-    // Trigger pulse when expanding a flow task
-    if (isFlowTask && !isExpanded) {
-      onTriggerPulse(task._id)
-    }
-  }, [onToggleExpand, isFlowTask, isExpanded, onTriggerPulse, task._id])
+  }, [onToggleExpand])
 
   // Auto-expand children that have grandchildren when expandAllEnabled is true
   // Uses a Set to track which children have been processed, so manually collapsed ones aren't re-expanded
@@ -655,9 +663,9 @@ function TaskRow({
     }
   }, [expandAllEnabled, isExpanded, children, expandedRows, toggleRowExpansion])
 
-  // Flow tasks that are children (depth > 0) appear as placeholders
-  // They also appear at root level, so this is just a reference/link
-  const isFlowPlaceholder = isFlowTask && depth > 0
+  // Flow tasks that have spawned a subflow show as reference links
+  // They link to the subflow's root task (which is at the top level)
+  const isFlowPlaceholder = hasSpawnedSubflow
 
   return (
     <>
@@ -682,19 +690,35 @@ function TaskRow({
           </div>
         </TableCell>
         <TableCell className="w-10 p-0">
-          {isFlowPlaceholder ? (
+          {isFlowPlaceholder && spawnedRootTaskId ? (
+            // Flow step task that spawned a subflow - links forward to subflow root
             <button
               className="w-full h-full flex flex-col items-center justify-center py-1 cursor-pointer"
               onClick={(e) => {
                 e.stopPropagation()
-                // Highlight this flow task at the root level and scroll to it
-                onTriggerPulse(task._id, true)
+                // Highlight the subflow's root task at the top level and scroll to it
+                onTriggerPulse(spawnedRootTaskId, true)
               }}
             >
               <span className="mt-1">
                 <TaskTypeIcon taskType={task.taskType} batchCounters={task.batchCounters} />
               </span>
               <span className="text-[10px] text-pink-500">ref →</span>
+            </button>
+          ) : isSubflowRoot && triggerTaskId ? (
+            // Subflow root task - links back to the triggering flow step
+            <button
+              className="w-full h-full flex flex-col items-center justify-center py-1 cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation()
+                // Navigate to the trigger task (expand its parent and pulse it)
+                onNavigateToTrigger(triggerTaskId)
+              }}
+            >
+              <span className="text-[10px] text-pink-500">← ref</span>
+              <span className="mb-1">
+                <TaskTypeIcon taskType={task.taskType} batchCounters={task.batchCounters} />
+              </span>
             </button>
           ) : (
             <div className="flex justify-center">
@@ -805,6 +829,7 @@ function TaskRow({
             handleCreateSubtask={handleCreateSubtask}
             expandAllEnabled={expandAllEnabled}
             onNavigateToFlow={onNavigateToFlow}
+            onNavigateToTrigger={onNavigateToTrigger}
             isPulsing={pulsingRows.has(child._id)}
             onTriggerPulse={onTriggerPulse}
             inlineCreationParentId={inlineCreationParentId}
@@ -897,6 +922,8 @@ export function TaskDataTable({
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null)
   // Inline creation state: null = not creating, string = parentId being created under (empty string = root level)
   const [inlineCreationParentId, setInlineCreationParentId] = useState<string | null>(null)
+  // Pending pulse target - when set, we'll watch for this task to appear in the DOM and pulse it
+  const [pendingPulseTarget, setPendingPulseTarget] = useState<string | null>(null)
 
   const createTask = useCreateTask()
 
@@ -938,6 +965,65 @@ export function TaskDataTable({
     })
   }, [])
 
+  // Watch for pending pulse target to appear in the DOM using MutationObserver
+  useEffect(() => {
+    if (!pendingPulseTarget) return
+
+    // Track if we've already handled this target to prevent double-triggering
+    let handled = false
+
+    // Helper to safely trigger pulse outside of React's render cycle
+    const safeTriggerPulse = () => {
+      setTimeout(() => {
+        triggerPulse(pendingPulseTarget, true)
+        setPendingPulseTarget(null)
+      }, 0)
+    }
+
+    // Check if element already exists
+    const existingElement = document.querySelector(`[data-task-id="${pendingPulseTarget}"]`)
+    if (existingElement) {
+      safeTriggerPulse()
+      return
+    }
+
+    // Set up MutationObserver to watch for the element
+    const observer = new MutationObserver(() => {
+      if (handled) return
+      const targetElement = document.querySelector(`[data-task-id="${pendingPulseTarget}"]`)
+      if (targetElement) {
+        handled = true
+        observer.disconnect()
+        safeTriggerPulse()
+      }
+    })
+
+    // Start observing the table body for changes
+    const tableBody = document.querySelector('tbody')
+    if (tableBody) {
+      observer.observe(tableBody, { childList: true, subtree: true })
+    }
+
+    // Cleanup and timeout fallback
+    const timeout = setTimeout(() => {
+      if (handled) return
+      handled = true
+      observer.disconnect()
+      // Try one more time in case the element appeared
+      const finalCheck = document.querySelector(`[data-task-id="${pendingPulseTarget}"]`)
+      if (finalCheck) {
+        triggerPulse(pendingPulseTarget, true)
+      }
+      setPendingPulseTarget(null)
+    }, 3000) // 3 second timeout
+
+    return () => {
+      handled = true
+      observer.disconnect()
+      clearTimeout(timeout)
+    }
+  }, [pendingPulseTarget, triggerPulse])
+
   // Wrapper for onEditTask that also triggers pulse
   const handleEditTaskWithPulse = useCallback((task: Task) => {
     triggerPulse(task._id)
@@ -948,6 +1034,36 @@ export function TaskDataTable({
   const handleNavigateToFlow = useCallback((taskId: string) => {
     router.push(`/tasks?parentId=${taskId}`)
   }, [router])
+
+  // Navigate to a trigger task (from subflow root back to the flow step that triggered it)
+  // This needs to: 1) Fetch the trigger task to get its parentId, 2) Expand the parent, 3) Pulse the trigger task
+  const handleNavigateToTrigger = useCallback(async (triggerTaskId: string) => {
+    try {
+      // Fetch the trigger task to get its parentId
+      const response = await tasksApi.get(triggerTaskId)
+      const triggerTask = response.data
+
+      if (triggerTask.parentId) {
+        // Set the pending pulse target - TaskRow will trigger the pulse when this task appears
+        setPendingPulseTarget(triggerTaskId)
+        // Expand the parent task if not already expanded
+        if (!expandedRows.has(triggerTask.parentId)) {
+          setExpandedRows(prev => new Set([...Array.from(prev), triggerTask.parentId!]))
+        } else {
+          // Parent already expanded, children should be visible - pulse directly
+          triggerPulse(triggerTaskId, true)
+          setPendingPulseTarget(null)
+        }
+      } else {
+        // Trigger task has no parent (shouldn't happen, but handle gracefully)
+        triggerPulse(triggerTaskId, true)
+      }
+    } catch (error) {
+      console.error('Failed to fetch trigger task:', error)
+      // Fallback: just try to pulse the task
+      triggerPulse(triggerTaskId, true)
+    }
+  }, [expandedRows, triggerPulse])
 
   // Get task IDs that have children (for expand all functionality)
   const tasksWithChildren = useMemo(() => {
@@ -1491,6 +1607,7 @@ export function TaskDataTable({
                   handleCreateSubtask={onCreateSubtask}
                   expandAllEnabled={expandAllEnabled}
                   onNavigateToFlow={handleNavigateToFlow}
+                  onNavigateToTrigger={handleNavigateToTrigger}
                   isPulsing={pulsingRows.has(task._id)}
                   onTriggerPulse={triggerPulse}
                   inlineCreationParentId={inlineCreationParentId}

@@ -169,6 +169,73 @@ export const authPaths = {
       },
     },
   },
+  '/api/auth/change-password': {
+    post: {
+      tags: ['Auth'],
+      summary: 'Change password',
+      description: 'Change the current user\'s password. Rate limited to 5 attempts per hour per user.',
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['currentPassword', 'newPassword'],
+              properties: {
+                currentPassword: { type: 'string', minLength: 1 },
+                newPassword: { type: 'string', minLength: 8 },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        200: { description: 'Password changed successfully' },
+        400: { description: 'Invalid input' },
+        401: { description: 'Current password is incorrect' },
+      },
+    },
+  },
+  '/api/auth/dev-login': {
+    post: {
+      tags: ['Auth'],
+      summary: 'Development-only passwordless login',
+      description: 'Login without password. Only available when NODE_ENV !== "production". Rate limited like regular login.',
+      security: [],
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['email'],
+              properties: {
+                email: { type: 'string', format: 'email' },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        200: {
+          description: 'Login successful',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  token: { type: 'string' },
+                  user: { $ref: '#/components/schemas/User' },
+                },
+              },
+            },
+          },
+        },
+        403: { description: 'Dev login is not available in production' },
+        404: { description: 'User not found' },
+      },
+    },
+  },
 };
 
 export const apiKeyPaths = {
@@ -176,9 +243,11 @@ export const apiKeyPaths = {
     get: {
       tags: ['API Keys'],
       summary: 'List API keys',
+      description: 'Non-admins can only see their own keys. Admins can see all keys and use filters.',
       parameters: [
-        { name: 'userId', in: 'query', schema: { type: 'string' } },
-        { name: 'includeInactive', in: 'query', schema: { type: 'boolean' } },
+        { name: 'createdById', in: 'query', schema: { type: 'string' }, description: 'Filter by who created the key (admin only)' },
+        { name: 'actsAsUserId', in: 'query', schema: { type: 'string' }, description: 'Filter by which user the key acts as (admin only)' },
+        { name: 'includeInactive', in: 'query', schema: { type: 'boolean' }, description: 'Include revoked/inactive keys' },
       ],
       responses: {
         200: {
@@ -200,7 +269,7 @@ export const apiKeyPaths = {
     post: {
       tags: ['API Keys'],
       summary: 'Create a new API key',
-      description: 'Returns the full key only once - store it securely',
+      description: 'Returns the full key only once - store it securely. Only admins can create keys that act as other users.',
       requestBody: {
         required: true,
         content: {
@@ -213,6 +282,7 @@ export const apiKeyPaths = {
                 description: { type: 'string' },
                 scopes: { type: 'array', items: { type: 'string' }, example: ['tasks:read', 'tasks:write'] },
                 expiresAt: { type: 'string', format: 'date-time' },
+                userId: { type: 'string', description: 'User ID this key acts as (admin only)' },
               },
             },
           },
@@ -239,6 +309,98 @@ export const apiKeyPaths = {
             },
           },
         },
+        403: { description: 'Only admins can create keys that act as other users' },
+      },
+    },
+  },
+  '/api/auth/api-keys/{id}': {
+    get: {
+      tags: ['API Keys'],
+      summary: 'Get a specific API key',
+      description: 'Users can only view their own API keys unless they are admin.',
+      parameters: [
+        { name: 'id', in: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } },
+      ],
+      responses: {
+        200: { description: 'API key details (without keyHash)' },
+        403: { description: 'You do not have permission to view this API key' },
+        404: { description: 'API key not found' },
+      },
+    },
+    patch: {
+      tags: ['API Keys'],
+      summary: 'Update an API key',
+      description: 'Users can only update their own API keys unless they are admin. Only admins can change userId.',
+      parameters: [
+        { name: 'id', in: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                description: { type: 'string' },
+                scopes: { type: 'array', items: { type: 'string' } },
+                expiresAt: { type: 'string', format: 'date-time', nullable: true },
+                isActive: { type: 'boolean' },
+                userId: { type: 'string', nullable: true, description: 'User this key acts as (admin only)' },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        200: { description: 'API key updated' },
+        403: { description: 'You do not have permission to update this API key' },
+        404: { description: 'API key not found' },
+      },
+    },
+    delete: {
+      tags: ['API Keys'],
+      summary: 'Revoke an API key',
+      description: 'Soft-deletes an API key by setting isActive to false. Users can only revoke their own keys unless they are admin.',
+      parameters: [
+        { name: 'id', in: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } },
+      ],
+      responses: {
+        200: { description: 'API key revoked' },
+        403: { description: 'You do not have permission to revoke this API key' },
+        404: { description: 'API key not found' },
+      },
+    },
+  },
+  '/api/auth/api-keys/{id}/regenerate': {
+    post: {
+      tags: ['API Keys'],
+      summary: 'Regenerate an API key',
+      description: 'Generates a new key value while keeping the same API key record. Users can only regenerate their own keys unless they are admin.',
+      parameters: [
+        { name: 'id', in: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } },
+      ],
+      responses: {
+        200: {
+          description: 'API key regenerated - save the new key now',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  data: {
+                    type: 'object',
+                    properties: {
+                      key: { type: 'string', description: 'New API key - save this!' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        403: { description: 'You do not have permission to regenerate this API key' },
+        404: { description: 'API key not found' },
       },
     },
   },

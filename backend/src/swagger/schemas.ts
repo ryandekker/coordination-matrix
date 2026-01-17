@@ -443,6 +443,36 @@ export const schemas = {
     },
   },
 
+  // Field Config schemas
+  FieldConfig: {
+    type: 'object',
+    properties: {
+      _id: { $ref: '#/components/schemas/ObjectId' },
+      collectionName: { type: 'string', example: 'tasks', description: 'Collection this config applies to' },
+      fieldPath: { type: 'string', example: 'customField', description: 'Path to the field in the document' },
+      displayName: { type: 'string', example: 'Custom Field', description: 'Human-readable display name' },
+      fieldType: { type: 'string', enum: ['text', 'number', 'boolean', 'date', 'select', 'multiselect', 'reference'], default: 'text' },
+      isRequired: { type: 'boolean', default: false },
+      isEditable: { type: 'boolean', default: true },
+      isSearchable: { type: 'boolean', default: false },
+      isSortable: { type: 'boolean', default: true },
+      isFilterable: { type: 'boolean', default: false },
+      displayOrder: { type: 'integer', default: 0 },
+      width: { type: 'integer', nullable: true },
+      minWidth: { type: 'integer', nullable: true },
+      lookupType: { type: 'string', nullable: true, description: 'For select fields, the lookup type to use for options' },
+      options: { type: 'array', items: { type: 'object' }, nullable: true, description: 'Static options for select fields' },
+      referenceCollection: { type: 'string', nullable: true, description: 'For reference fields, the target collection' },
+      referenceDisplayField: { type: 'string', default: 'displayName', description: 'Field to display from referenced document' },
+      defaultValue: { type: 'string', nullable: true },
+      defaultVisible: { type: 'boolean', default: true },
+      renderAs: { type: 'string', default: 'text', description: 'UI render type (text, badge, date, etc.)' },
+      validation: { type: 'object', nullable: true, description: 'Validation rules' },
+      createdAt: { type: 'string', format: 'date-time' },
+      updatedAt: { type: 'string', format: 'date-time' },
+    },
+  },
+
   // External Job schemas
   ExternalJobStatus: {
     type: 'string',
@@ -468,18 +498,23 @@ export const schemas = {
 };
 
 export const tags = [
+  { name: 'Health', description: 'Health check endpoint' },
   { name: 'Auth', description: 'Authentication and authorization' },
   { name: 'API Keys', description: 'API key management' },
   { name: 'Tasks', description: 'Task CRUD and tree operations' },
   { name: 'Workflows', description: 'Workflow definitions' },
   { name: 'Workflow Runs', description: 'Workflow execution instances' },
   { name: 'Batch Jobs', description: 'Fan-out/fan-in job coordination' },
-  { name: 'Users', description: 'User and team management' },
+  { name: 'Users', description: 'User management' },
+  { name: 'Teams', description: 'Team management' },
   { name: 'Views', description: 'Saved searches and views' },
-  { name: 'Webhooks', description: 'Webhook configuration' },
+  { name: 'Webhooks', description: 'Webhook configuration and delivery' },
   { name: 'Activity Logs', description: 'Audit trail and comments' },
   { name: 'Lookups', description: 'Lookup/enum values' },
+  { name: 'Tags', description: 'Tag management' },
   { name: 'Field Configs', description: 'Dynamic field configuration' },
   { name: 'External Jobs', description: 'External worker job queue' },
+  { name: 'Events', description: 'Real-time Server-Sent Events (SSE)' },
   { name: 'Documents', description: 'Markdown documentation management with semantic search' },
+  { name: 'AI', description: 'AI-related endpoints for workflow generation' },
 ];

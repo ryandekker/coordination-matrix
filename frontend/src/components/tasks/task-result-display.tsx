@@ -34,6 +34,7 @@ const STATUS_CONFIG: Record<TaskResultStatus, { icon: typeof CheckCircle2; color
   partial: { icon: AlertCircle, color: 'text-amber-600', label: 'Partial' },
   failed: { icon: XCircle, color: 'text-red-600', label: 'Failed' },
   skipped: { icon: SkipForward, color: 'text-muted-foreground', label: 'Skipped' },
+  running: { icon: Clock, color: 'text-blue-600', label: 'Running' },
 }
 
 function ResultStatusBadge({ status }: { status: TaskResultStatus }) {

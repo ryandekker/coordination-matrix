@@ -671,7 +671,7 @@ export interface TaskStepConfig {
 }
 
 // Task result status
-export type TaskResultStatus = 'success' | 'partial' | 'failed' | 'skipped'
+export type TaskResultStatus = 'success' | 'partial' | 'failed' | 'skipped' | 'running'
 
 // A single execution result
 export interface TaskResultEntry {
@@ -729,6 +729,18 @@ export interface TaskResult {
   history?: TaskResultEntry[]
 }
 
+// Summary of child task statuses for parent tasks
+export interface ChildStatusSummary {
+  total: number
+  pending: number
+  in_progress: number
+  waiting: number
+  on_hold: number
+  completed: number
+  failed: number
+  cancelled: number
+}
+
 export interface Task {
   _id: string
   title: string
@@ -751,6 +763,8 @@ export interface Task {
   dueAt?: string | null
   metadata?: Record<string, unknown>
   children?: Task[]
+  childCount?: number
+  childStatusSummary?: ChildStatusSummary
   taskType?: TaskType
   webhookConfig?: WebhookConfig
   batchCounters?: {

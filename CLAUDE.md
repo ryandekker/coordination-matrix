@@ -96,7 +96,10 @@ npm run cli tasks --status pending --brief
 Full API documentation is available at:
 - **Swagger UI**: http://localhost:3100/api-docs (interactive API explorer)
 - **OpenAPI Spec**: http://localhost:3100/api-docs.json
-- **Reference Doc**: [docs/API-endpoints.md](./docs/API-endpoints.md) (complete endpoint reference)
+- **AI Quick Reference**: [docs/API-for-AI.md](./docs/API-for-AI.md) (concise guide for AI agents)
+- **Full Reference**: [docs/API-endpoints.md](./docs/API-endpoints.md) (complete endpoint reference)
+
+The Swagger spec is defined in `backend/src/swagger/` with paths organized by domain (tasks, workflows, auth, etc.).
 
 ### CLI Tool
 
