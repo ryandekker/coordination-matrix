@@ -23,8 +23,10 @@ import {
   Search,
   Clock,
   Loader2,
+  Maximize2,
 } from 'lucide-react'
 import { workflowRunsApi } from '@/lib/api'
+import { TokenBrowserDialog } from './token-browser-dialog'
 
 interface TokenCategory {
   name: string
@@ -84,6 +86,7 @@ export function TokenBrowser({
   forJoinInputPath = false,
 }: TokenBrowserProps) {
   const [open, setOpen] = useState(false)
+  const [dialogOpen, setDialogOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [sampleData, setSampleData] = useState<SampleData[]>([])
   const [loadingSamples, setLoadingSamples] = useState(false)
@@ -479,21 +482,46 @@ export function TokenBrowser({
           </div>
         </div>
 
-        <div className="border-t p-2 bg-muted/30">
-          <p className="text-xs text-muted-foreground space-y-0.5">
-            <span className="block"><strong>{`{{output}}`}</strong> = previous step&apos;s result (task.metadata.inputPayload.output)</span>
-            <span className="block"><strong>{`{{response.field}}`}</strong> = previous step&apos;s response data directly</span>
-            <span className="block"><strong>{`{{title}}`}, {`{{status}}`}</strong> = current task&apos;s own fields</span>
-            <span className="block"><strong>{`{{item}}`}</strong> = current loop item (in foreach)</span>
-            <span className="block"><strong>{`{{_apiUrl}}`}, {`{{_apiKey}}`}</strong> = system vars for API calls</span>
+        <div className="border-t p-2 bg-muted/30 space-y-2">
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            className="w-full h-8 text-xs"
+            onClick={() => {
+              setOpen(false)
+              setDialogOpen(true)
+            }}
+          >
+            <Maximize2 className="h-3.5 w-3.5 mr-1.5" />
+            Browse All Tokens & Run Data
+          </Button>
+          <p className="text-[10px] text-muted-foreground leading-relaxed">
+            <strong>{`{{output}}`}</strong> = previous step &middot; <strong>{`{{item}}`}</strong> = loop item &middot; <strong>{`{{_apiUrl}}`}</strong> = system
           </p>
           {workflowId && sampleData.length === 0 && !loadingSamples && fetchError && (
-            <p className="text-xs text-amber-600 mt-1">
+            <p className="text-xs text-amber-600">
               {fetchError}
             </p>
           )}
         </div>
       </PopoverContent>
+
+      {/* Full token browser dialog */}
+      <TokenBrowserDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        workflowId={workflowId}
+        previousSteps={previousSteps}
+        currentStepIndex={currentStepIndex}
+        loopVariable={loopVariable}
+        onSelectToken={(token) => {
+          onSelectToken(token)
+          setDialogOpen(false)
+        }}
+        wrapInBraces={wrapInBraces}
+        forJoinInputPath={forJoinInputPath}
+      />
     </Popover>
   )
 }
