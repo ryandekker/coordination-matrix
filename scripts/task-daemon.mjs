@@ -1090,6 +1090,19 @@ function assemblePrompt(task, agent, workflowStep) {
     }
   }
 
+  // 8. Response format reminder (placed last to override any conflicting instructions in extraPrompt)
+  sections.push(`## IMPORTANT: Response Format
+Your response MUST be a JSON object with this exact structure:
+{
+  "status": "SUCCESS" | "PARTIAL" | "BLOCKED" | "FAILED",
+  "summary": "Brief summary of what was done",
+  "output": { /* Your task-specific result goes here */ },
+  "nextAction": "COMPLETE" | "CONTINUE" | "ESCALATE" | "HOLD"
+}
+
+If the task instructions specify an output format, that format goes INSIDE the "output" field.
+Respond with ONLY this JSON object, no markdown code blocks, no explanation.`);
+
   return sections.join('\n\n---\n\n');
 }
 

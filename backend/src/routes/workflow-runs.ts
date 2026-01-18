@@ -187,6 +187,101 @@ router.get('/', requireAuth, async (req: Request, res: Response): Promise<void> 
 });
 
 // ============================================================================
+// List Workflow Requests (Inbound Request Log)
+// GET /api/workflow-runs/requests
+// Returns logged inbound requests that trigger or interact with workflows
+// NOTE: This route MUST be defined BEFORE /:id routes to avoid path matching issues
+// ============================================================================
+router.get('/requests', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const db = getDb();
+    const {
+      type,           // 'workflow_start' | 'workflow_callback'
+      status,         // 'success' | 'failed'
+      workflowId,
+      workflowRunId,
+      limit = '50',
+      offset = '0',
+    } = req.query;
+
+    // Build filter
+    const filter: Record<string, unknown> = {};
+
+    if (type) {
+      filter.type = type;
+    }
+    if (status) {
+      filter.status = status;
+    }
+    if (workflowId && ObjectId.isValid(workflowId as string)) {
+      filter.workflowId = new ObjectId(workflowId as string);
+    }
+    if (workflowRunId && ObjectId.isValid(workflowRunId as string)) {
+      filter.workflowRunId = new ObjectId(workflowRunId as string);
+    }
+
+    const limitNum = Math.min(parseInt(limit as string, 10) || 50, 200);
+    const offsetNum = parseInt(offset as string, 10) || 0;
+
+    // Get total count
+    const total = await db.collection('workflow_requests').countDocuments(filter);
+
+    // Get requests
+    const requests = await db
+      .collection('workflow_requests')
+      .find(filter)
+      .sort({ receivedAt: -1 })
+      .skip(offsetNum)
+      .limit(limitNum)
+      .toArray();
+
+    res.json({
+      data: requests,
+      pagination: {
+        limit: limitNum,
+        offset: offsetNum,
+        total,
+      },
+    });
+  } catch (error) {
+    console.error('[WorkflowRuns] List requests error:', error);
+    res.status(500).json({ error: 'Failed to list workflow requests' });
+  }
+});
+
+// ============================================================================
+// Get Single Workflow Request
+// GET /api/workflow-runs/requests/:requestId
+// Returns details of a specific workflow request
+// NOTE: This route MUST be defined BEFORE /:id routes to avoid path matching issues
+// ============================================================================
+router.get('/requests/:requestId', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const db = getDb();
+    const { requestId } = req.params;
+
+    if (!ObjectId.isValid(requestId)) {
+      res.status(400).json({ error: 'Invalid request ID' });
+      return;
+    }
+
+    const request = await db
+      .collection('workflow_requests')
+      .findOne({ _id: new ObjectId(requestId) });
+
+    if (!request) {
+      res.status(404).json({ error: 'Workflow request not found' });
+      return;
+    }
+
+    res.json({ data: request });
+  } catch (error) {
+    console.error('[WorkflowRuns] Get request error:', error);
+    res.status(500).json({ error: 'Failed to get workflow request' });
+  }
+});
+
+// ============================================================================
 // Get Workflow Run
 // GET /api/workflow-runs/:id
 // Requires authentication (JWT or API key)
@@ -549,99 +644,6 @@ router.post('/:id/foreach/:stepId/item', async (req: Request, res: Response): Pr
     }
 
     res.status(500).json({ error: message });
-  }
-});
-
-// ============================================================================
-// List Workflow Requests (Inbound Request Log)
-// GET /api/workflow-runs/requests
-// Returns logged inbound requests that trigger or interact with workflows
-// ============================================================================
-router.get('/requests', requireAuth, async (req: Request, res: Response): Promise<void> => {
-  try {
-    const db = getDb();
-    const {
-      type,           // 'workflow_start' | 'workflow_callback'
-      status,         // 'success' | 'failed'
-      workflowId,
-      workflowRunId,
-      limit = '50',
-      offset = '0',
-    } = req.query;
-
-    // Build filter
-    const filter: Record<string, unknown> = {};
-
-    if (type) {
-      filter.type = type;
-    }
-    if (status) {
-      filter.status = status;
-    }
-    if (workflowId && ObjectId.isValid(workflowId as string)) {
-      filter.workflowId = new ObjectId(workflowId as string);
-    }
-    if (workflowRunId && ObjectId.isValid(workflowRunId as string)) {
-      filter.workflowRunId = new ObjectId(workflowRunId as string);
-    }
-
-    const limitNum = Math.min(parseInt(limit as string, 10) || 50, 200);
-    const offsetNum = parseInt(offset as string, 10) || 0;
-
-    // Get total count
-    const total = await db.collection('workflow_requests').countDocuments(filter);
-
-    // Get requests
-    const requests = await db
-      .collection('workflow_requests')
-      .find(filter)
-      .sort({ receivedAt: -1 })
-      .skip(offsetNum)
-      .limit(limitNum)
-      .toArray();
-
-    res.json({
-      data: requests,
-      pagination: {
-        limit: limitNum,
-        offset: offsetNum,
-        total,
-      },
-    });
-  } catch (error) {
-    console.error('[WorkflowRuns] List requests error:', error);
-    res.status(500).json({ error: 'Failed to list workflow requests' });
-  }
-});
-
-// ============================================================================
-// Get Single Workflow Request
-// GET /api/workflow-runs/requests/:requestId
-// Returns details of a specific workflow request
-// ============================================================================
-router.get('/requests/:requestId', requireAuth, async (req: Request, res: Response): Promise<void> => {
-  try {
-    const db = getDb();
-    const { requestId } = req.params;
-
-    if (!ObjectId.isValid(requestId)) {
-      res.status(400).json({ error: 'Invalid request ID' });
-      return;
-    }
-
-    const request = await db
-      .collection('workflow_requests')
-      .findOne({ _id: new ObjectId(requestId) });
-
-    if (!request) {
-      res.status(404).json({ error: 'Workflow request not found' });
-      return;
-    }
-
-    res.json({ data: request });
-  } catch (error) {
-    console.error('[WorkflowRuns] Get request error:', error);
-    res.status(500).json({ error: 'Failed to get workflow request' });
   }
 });
 
