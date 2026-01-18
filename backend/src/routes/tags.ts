@@ -7,6 +7,7 @@ import { Tag } from '../types/index.js';
 export const tagsRouter = Router();
 
 // GET /api/tags - Get all tags (for API consumers like daemons/agents)
+// Falls back to distinct tags from tasks if the tags collection is empty
 tagsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
@@ -26,11 +27,31 @@ tagsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
       ];
     }
 
-    const tags = await db
+    let tags = await db
       .collection<Tag>('tags')
       .find(filter)
       .sort({ name: 1 })
       .toArray();
+
+    // If tags collection is empty, fall back to distinct tags from tasks
+    if (tags.length === 0 && !search) {
+      const distinctTags = await db.collection('tasks').distinct('tags');
+      // Convert string tags to Tag-like objects for consistent API response
+      tags = distinctTags
+        .filter((tag): tag is string => typeof tag === 'string' && tag.length > 0)
+        .sort()
+        .map((tagName) => ({
+          _id: new ObjectId(), // Generate a temporary ObjectId
+          name: tagName,
+          displayName: tagName,
+          color: '#6B7280', // Default gray color
+          description: null,
+          isActive: true,
+          createdById: null,
+          createdAt: new Date(),
+          updatedAt: null,
+        }));
+    }
 
     res.json({ data: tags });
   } catch (error) {

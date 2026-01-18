@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { tasksApi, lookupsApi, fieldConfigsApi, viewsApi, usersApi, workflowsApi, Task } from '@/lib/api'
+import { tasksApi, lookupsApi, fieldConfigsApi, viewsApi, usersApi, workflowsApi, tagsApi, Task } from '@/lib/api'
 
 // Helper to normalize query params for consistent cache keys
 function normalizeParams(params?: Record<string, string | number | boolean>): string {
@@ -465,6 +465,15 @@ export function useWorkflows() {
   return useQuery({
     queryKey: ['workflows'],
     queryFn: () => workflowsApi.list(),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  })
+}
+
+// Tags
+export function useTags() {
+  return useQuery({
+    queryKey: ['tags'],
+    queryFn: () => tagsApi.list(),
     staleTime: 5 * 60 * 1000, // 5 minutes
   })
 }
