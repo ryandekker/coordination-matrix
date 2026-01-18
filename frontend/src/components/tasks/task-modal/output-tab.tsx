@@ -34,6 +34,68 @@ export function OutputTab({ task, onRollback }: OutputTabProps) {
   const needsReview = isManualTask && ['pending', 'in_progress'].includes(task.status)
   const hasBeenReviewed = isManualTask && task.reviewDecision
 
+  // Extract output based on task type - MUST be before any early returns (React hooks rule)
+  const output = useMemo(() => {
+    // Check for daemon-style output first
+    if (metadata?.output !== undefined) {
+      return metadata.output
+    }
+    // Check for response from webhook
+    if (lastAttempt?.responseBody !== undefined) {
+      return lastAttempt.responseBody
+    }
+    // Check for any result field
+    if (metadata?.result !== undefined) {
+      return metadata.result
+    }
+    return null
+  }, [metadata, lastAttempt])
+
+  const hasOutput = output !== null && output !== undefined
+
+  // Format output for display - MUST be before any early returns (React hooks rule)
+  const formattedOutput = useMemo(() => {
+    if (!hasOutput) return ''
+    if (typeof output === 'string') {
+      // Try to parse as JSON for pretty printing
+      try {
+        const parsed = JSON.parse(output)
+        return JSON.stringify(parsed, null, 2)
+      } catch {
+        return output
+      }
+    }
+    return JSON.stringify(output, null, 2)
+  }, [output, hasOutput])
+
+  // Check if output is JSON-like (object or array) - MUST be before any early returns (React hooks rule)
+  const isJsonOutput = useMemo(() => {
+    if (output === null || output === undefined) return false
+    if (typeof output === 'object') return true
+    if (typeof output === 'string') {
+      try {
+        const parsed = JSON.parse(output)
+        return typeof parsed === 'object'
+      } catch {
+        return false
+      }
+    }
+    return false
+  }, [output])
+
+  // Parse string JSON for JsonViewer - MUST be before any early returns (React hooks rule)
+  const jsonData = useMemo(() => {
+    if (typeof output === 'object') return output
+    if (typeof output === 'string') {
+      try {
+        return JSON.parse(output)
+      } catch {
+        return null
+      }
+    }
+    return null
+  }, [output])
+
   // Handle manual review submission
   const handleReview = useCallback(async (decision: ManualReviewDecision, comment: string) => {
     setIsSubmitting(true)
@@ -68,6 +130,12 @@ export function OutputTab({ task, onRollback }: OutputTabProps) {
       setIsSubmitting(false)
     }
   }, [task, updateTask])
+
+  const handleCopy = useCallback(async () => {
+    await navigator.clipboard.writeText(formattedOutput)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }, [formattedOutput])
 
   // For decision tasks, show the DecisionOptionsPanel
   if (taskType === 'decision') {
@@ -112,46 +180,6 @@ export function OutputTab({ task, onRollback }: OutputTabProps) {
     )
   }
 
-  // Extract output based on task type
-  const output = useMemo(() => {
-    // Check for daemon-style output first
-    if (metadata?.output !== undefined) {
-      return metadata.output
-    }
-    // Check for response from webhook
-    if (lastAttempt?.responseBody !== undefined) {
-      return lastAttempt.responseBody
-    }
-    // Check for any result field
-    if (metadata?.result !== undefined) {
-      return metadata.result
-    }
-    return null
-  }, [metadata, lastAttempt])
-
-  const hasOutput = output !== null && output !== undefined
-
-  // Format output for display
-  const formattedOutput = useMemo(() => {
-    if (!hasOutput) return ''
-    if (typeof output === 'string') {
-      // Try to parse as JSON for pretty printing
-      try {
-        const parsed = JSON.parse(output)
-        return JSON.stringify(parsed, null, 2)
-      } catch {
-        return output
-      }
-    }
-    return JSON.stringify(output, null, 2)
-  }, [output, hasOutput])
-
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(formattedOutput)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-
   // For external/webhook tasks, show attempts history
   if (taskType === 'external' && attempts.length > 0) {
     return (
@@ -194,34 +222,6 @@ export function OutputTab({ task, onRollback }: OutputTabProps) {
       </div>
     )
   }
-
-  // Check if output is JSON-like (object or array)
-  const isJsonOutput = useMemo(() => {
-    if (output === null || output === undefined) return false
-    if (typeof output === 'object') return true
-    if (typeof output === 'string') {
-      try {
-        const parsed = JSON.parse(output)
-        return typeof parsed === 'object'
-      } catch {
-        return false
-      }
-    }
-    return false
-  }, [output])
-
-  // Parse string JSON for JsonViewer
-  const jsonData = useMemo(() => {
-    if (typeof output === 'object') return output
-    if (typeof output === 'string') {
-      try {
-        return JSON.parse(output)
-      } catch {
-        return null
-      }
-    }
-    return null
-  }, [output])
 
   // Show output
   return (
