@@ -9,7 +9,7 @@ import { TaskModal } from './task-modal'
 import { ColumnConfigModal } from './column-config-modal'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { useTasks, useTask, useLookups, useFieldConfigs, useViews, useUsers, useWorkflows, useCreateView, useUpdateView } from '@/hooks/use-tasks'
+import { useTasks, useTask, useLookups, useFieldConfigs, useViews, useUsers, useWorkflows, useTags, useCreateView, useUpdateView } from '@/hooks/use-tasks'
 import { useEventStream } from '@/hooks/use-event-stream'
 import { Task, View, FieldConfig } from '@/lib/api'
 
@@ -131,6 +131,7 @@ export function TasksPage() {
   const { data: viewsData, refetch: refetchViews } = useViews('tasks')
   const { data: usersData } = useUsers()
   const { data: workflowsData } = useWorkflows()
+  const { data: tagsData } = useTags()
   const createViewMutation = useCreateView()
   const updateViewMutation = useUpdateView()
 
@@ -159,6 +160,7 @@ export function TasksPage() {
   const views = viewsData?.data || []
   const users = usersData?.data || []
   const workflows = workflowsData?.data || []
+  const tags = tagsData?.data || []
 
   // Check if any tasks have children (for expand all button)
   const hasAnyChildren = useMemo(() => {
@@ -450,6 +452,7 @@ export function TasksPage() {
         lookups={lookups}
         users={users}
         tasks={tasks}
+        availableTags={tags}
         filters={filters}
         search={search}
         sorting={currentSorting}

@@ -1567,6 +1567,20 @@ async function processTask(config, task) {
   }
 
   // Build output for metadata
+  // Extract suggested tags from multiple locations with priority:
+  // 1. output.result.suggestedTags (workflow prompt-specified location)
+  // 2. output.suggestedTags (alternate workflow location)
+  // 3. metadata.suggestedTags (standard daemon location)
+  const suggestedTags =
+    (Array.isArray(parsedResponse.data.output?.result?.suggestedTags) && parsedResponse.data.output.result.suggestedTags.length > 0
+      ? parsedResponse.data.output.result.suggestedTags
+      : null) ||
+    (Array.isArray(parsedResponse.data.output?.suggestedTags) && parsedResponse.data.output.suggestedTags.length > 0
+      ? parsedResponse.data.output.suggestedTags
+      : null) ||
+    parsedResponse.data.metadata?.suggestedTags ||
+    [];
+
   const output = {
     timestamp,
     status: parsedResponse.data.status,
@@ -1575,15 +1589,15 @@ async function processTask(config, task) {
     summary: parsedResponse.data.summary,
     result: resultData,
     confidence: parsedResponse.data.metadata?.confidence || null,
-    suggestedTags: parsedResponse.data.metadata?.suggestedTags || [],
+    suggestedTags,
     suggestedNextStage: parsedResponse.data.metadata?.suggestedNextStage || null,
   };
 
   // Merge suggested tags if provided
   let tagsUpdate = undefined;
-  if (parsedResponse.data.metadata?.suggestedTags?.length > 0) {
+  if (suggestedTags.length > 0) {
     const existingTags = new Set(task.tags || []);
-    parsedResponse.data.metadata.suggestedTags.forEach(t => existingTags.add(t));
+    suggestedTags.forEach(t => existingTags.add(t));
     tagsUpdate = Array.from(existingTags);
   }
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useCallback } from 'react'
-import { Search, Filter, Columns, ChevronDown, X, Bookmark, Tag, ChevronsDownUp, ChevronsUpDown, Archive } from 'lucide-react'
+import { Search, Filter, Columns, ChevronDown, X, Bookmark, Tag as TagIcon, ChevronsDownUp, ChevronsUpDown, Archive } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -28,7 +28,7 @@ import {
   DialogFooter,
   DialogDescription,
 } from '@/components/ui/dialog'
-import { View, LookupValue, User, Task } from '@/lib/api'
+import { View, LookupValue, User, Task, Tag } from '@/lib/api'
 import { UserChip } from '@/components/ui/user-chip'
 
 interface TaskToolbarProps {
@@ -37,6 +37,7 @@ interface TaskToolbarProps {
   lookups: Record<string, LookupValue[]>
   users: User[]
   tasks?: Task[]
+  availableTags?: Tag[]
   filters: Record<string, unknown>
   search: string
   sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>
@@ -57,6 +58,7 @@ export function TaskToolbar({
   lookups,
   users,
   tasks = [],
+  availableTags = [],
   filters,
   search,
   sorting,
@@ -78,17 +80,6 @@ export function TaskToolbar({
 
   const statusOptions = lookups.task_status || []
   const urgencyOptions = lookups.urgency || []
-
-  // Get unique tags from tasks for filter dropdown
-  const availableTags = useMemo(() => {
-    const tagSet = new Set<string>()
-    tasks.forEach((task) => {
-      if (task.tags && Array.isArray(task.tags)) {
-        task.tags.forEach((tag) => tagSet.add(tag))
-      }
-    })
-    return Array.from(tagSet).sort()
-  }, [tasks])
 
   const hasActiveFilters = Object.keys(filters).length > 0 || search.length > 0
 
@@ -229,8 +220,14 @@ export function TaskToolbar({
     })
 
     const tagFilters = toArray(filters.tags)
-    tagFilters.forEach((tag) => {
-      result.push({ key: `tag-${tag}`, label: 'Tag', value: tag })
+    tagFilters.forEach((tagName) => {
+      const tagObj = availableTags.find((t) => t.name === tagName)
+      result.push({
+        key: `tag-${tagName}`,
+        label: 'Tag',
+        value: tagObj?.displayName || tagName,
+        color: tagObj?.color,
+      })
     })
 
     if (filters.includeArchived) {
@@ -238,7 +235,7 @@ export function TaskToolbar({
     }
 
     return result
-  }, [search, filters, statusOptions, urgencyOptions, users])
+  }, [search, filters, statusOptions, urgencyOptions, users, availableTags])
 
   const removeFilter = useCallback((filterKey: string) => {
     if (filterKey === 'search') {
@@ -390,7 +387,7 @@ export function TaskToolbar({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm">
-              <Tag className="mr-2 h-4 w-4" />
+              <TagIcon className="mr-2 h-4 w-4" />
               Tags
               <ChevronDown className="ml-2 h-4 w-4" />
             </Button>
@@ -400,11 +397,15 @@ export function TaskToolbar({
             <DropdownMenuSeparator />
             {availableTags.map((tag) => (
               <DropdownMenuCheckboxItem
-                key={tag}
-                checked={((filters.tags as string[]) || []).includes(tag)}
-                onCheckedChange={(checked) => handleTagFilter(tag, checked)}
+                key={tag._id}
+                checked={((filters.tags as string[]) || []).includes(tag.name)}
+                onCheckedChange={(checked) => handleTagFilter(tag.name, checked)}
               >
-                {tag}
+                <span
+                  className="mr-2 h-2 w-2 rounded-full"
+                  style={{ backgroundColor: tag.color }}
+                />
+                {tag.displayName}
               </DropdownMenuCheckboxItem>
             ))}
           </DropdownMenuContent>

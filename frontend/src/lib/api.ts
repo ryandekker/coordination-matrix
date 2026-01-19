@@ -535,6 +535,60 @@ export const externalJobsApi = {
   },
 }
 
+// Tags API
+export interface Tag {
+  _id: string
+  name: string
+  displayName: string
+  color: string
+  description?: string | null
+  isActive: boolean
+  createdById?: string | null
+  createdAt: string
+  updatedAt?: string | null
+}
+
+export const tagsApi = {
+  list: async (params?: { includeInactive?: boolean; search?: string }): Promise<ApiResponse<Tag[]>> => {
+    const searchParams = new URLSearchParams()
+    if (params?.includeInactive) searchParams.append('includeInactive', 'true')
+    if (params?.search) searchParams.append('search', params.search)
+    const queryString = searchParams.toString()
+    const response = await authFetch(`${API_BASE}/tags${queryString ? `?${queryString}` : ''}`)
+    return handleResponse(response)
+  },
+
+  get: async (id: string): Promise<ApiResponse<Tag>> => {
+    const response = await authFetch(`${API_BASE}/tags/${id}`)
+    return handleResponse(response)
+  },
+
+  create: async (data: { name: string; displayName?: string; color?: string; description?: string }): Promise<ApiResponse<Tag>> => {
+    const response = await authFetch(`${API_BASE}/tags`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  update: async (id: string, data: Partial<Tag>): Promise<ApiResponse<Tag>> => {
+    const response = await authFetch(`${API_BASE}/tags/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  delete: async (id: string): Promise<ApiResponse<void>> => {
+    const response = await authFetch(`${API_BASE}/tags/${id}`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
+}
+
 // Types
 export type TaskType =
   | 'flow'

@@ -44,6 +44,8 @@ interface ExternalConfig {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   headers?: Record<string, string>
   payloadTemplate?: string
+  waitForCallback?: boolean
+  successStatusCodes?: number[]
 }
 
 interface WorkflowStep {
