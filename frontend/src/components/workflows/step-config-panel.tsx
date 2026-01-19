@@ -70,6 +70,8 @@ interface ExternalConfig {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   headers?: Record<string, string>
   payloadTemplate?: string
+  waitForCallback?: boolean
+  successStatusCodes?: number[]
 }
 
 interface JoinBoundary {
@@ -867,6 +869,279 @@ function FlowStepConfigPanel({
   )
 }
 
+// External step configuration component with editable headers
+function ExternalStepConfigPanel({
+  step,
+  stepIndex,
+  workflowId,
+  previousSteps,
+  isInLoop,
+  loopScope,
+  onUpdate,
+}: {
+  step: WorkflowStep
+  stepIndex: number
+  workflowId?: string
+  previousSteps: { id: string; name: string; stepType?: WorkflowStepType; itemVariable?: string }[]
+  isInLoop: boolean
+  loopScope?: LoopScope | null
+  onUpdate: (updates: Partial<WorkflowStep>) => void
+}) {
+  const waitForCallback = step.externalConfig?.waitForCallback !== false
+
+  // Default headers that system will use - shown as info
+  const DEFAULT_HEADERS = { 'Content-Type': 'application/json' }
+
+  // Track raw headers text for editing (allows invalid JSON while typing)
+  const [headersText, setHeadersText] = useState(() => {
+    if (step.externalConfig?.headers && Object.keys(step.externalConfig.headers).length > 0) {
+      return JSON.stringify(step.externalConfig.headers, null, 2)
+    }
+    return ''
+  })
+  const [headersError, setHeadersError] = useState<string | null>(null)
+
+  // Sync headersText when step changes externally
+  useEffect(() => {
+    if (step.externalConfig?.headers && Object.keys(step.externalConfig.headers).length > 0) {
+      const newText = JSON.stringify(step.externalConfig.headers, null, 2)
+      // Only update if different to avoid cursor jump
+      if (newText !== headersText) {
+        setHeadersText(newText)
+        setHeadersError(null)
+      }
+    }
+  }, [step.id]) // Only re-sync when step changes, not on every header change
+
+  // Validate and save headers on blur
+  const handleHeadersBlur = () => {
+    if (!headersText.trim()) {
+      // Empty is valid - clear headers
+      onUpdate({ externalConfig: { ...step.externalConfig, headers: undefined } })
+      setHeadersError(null)
+      return
+    }
+    try {
+      const parsed = JSON.parse(headersText)
+      if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+        setHeadersError('Headers must be a JSON object')
+        return
+      }
+      onUpdate({ externalConfig: { ...step.externalConfig, headers: parsed } })
+      setHeadersError(null)
+    } catch (e) {
+      setHeadersError('Invalid JSON')
+    }
+  }
+
+  return (
+    <div className="space-y-3 border-t pt-3">
+      <div className="bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800 rounded-lg p-3 text-sm">
+        <div className="flex items-start gap-2">
+          <Globe className="h-4 w-4 text-orange-600 dark:text-orange-400 mt-0.5 flex-shrink-0" />
+          <div className="text-orange-800 dark:text-orange-200">
+            <p className="font-medium">External HTTP Call</p>
+            <p className="text-xs mt-1">
+              {waitForCallback
+                ? 'Sends request and waits for external system to call back with results.'
+                : 'Sends request and continues immediately (fire-and-forget).'}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Wait for callback toggle */}
+      <div className="flex items-center gap-3 py-2 px-3 bg-muted/30 rounded-lg">
+        <input
+          type="checkbox"
+          id={`waitForCallback-${step.id}`}
+          checked={waitForCallback}
+          onChange={(e) => onUpdate({
+            externalConfig: { ...step.externalConfig, waitForCallback: e.target.checked }
+          })}
+          className="h-4 w-4 rounded border-gray-300"
+        />
+        <label htmlFor={`waitForCallback-${step.id}`} className="text-sm">
+          <span className="font-medium">Wait for callback</span>
+          <span className="text-muted-foreground ml-2">
+            {waitForCallback ? '(async - workflow pauses until callback)' : '(fire-and-forget - continues immediately)'}
+          </span>
+        </label>
+      </div>
+
+      {/* Callback URL info for async flows */}
+      {waitForCallback && (
+        <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3 text-sm">
+          <div className="flex items-start gap-2">
+            <Link2 className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+            <div className="text-blue-800 dark:text-blue-200">
+              <p className="font-medium">Callback URL (for async responses)</p>
+              <p className="text-xs mt-1 mb-2">
+                If the external service needs to send results back asynchronously,
+                include these template variables in your payload:
+              </p>
+              <div className="bg-muted/60 rounded p-2 font-mono text-xs space-y-1">
+                <p><span className="text-blue-600">{"{{systemWebhookUrl}}"}</span> - Webhook endpoint URL</p>
+                <p><span className="text-blue-600">{"{{callbackSecret}}"}</span> - Auth token for callback</p>
+                <p><span className="text-blue-600">{"{{workflowRunId}}"}</span> - Current workflow run ID</p>
+                <p><span className="text-blue-600">{"{{stepId}}"}</span> - This step&apos;s ID</p>
+                <p><span className="text-blue-600">{"{{taskId}}"}</span> - Current task ID</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* API Token Info - shown for fire-and-forget mode */}
+      {!waitForCallback && (
+        <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg p-3 text-sm">
+          <div className="flex items-start gap-2">
+            <Zap className="h-4 w-4 text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
+            <div className="text-emerald-800 dark:text-emerald-200">
+              <p className="font-medium">System Variables</p>
+              <p className="text-xs mt-1 mb-2">
+                Use these tokens for calling internal APIs or referencing previous step outputs:
+              </p>
+              <div className="bg-muted/60 rounded p-2 font-mono text-xs space-y-1">
+                <p><span className="text-emerald-600">{"{{_apiUrl}}"}</span> - Base API URL (e.g., http://localhost:3001)</p>
+                <p><span className="text-emerald-600">{"{{_apiKey}}"}</span> - System API key for authentication</p>
+                <p><span className="text-emerald-600">{"{{_workflowRunId}}"}</span> - Current workflow run ID</p>
+                <p><span className="text-emerald-600">{"{{output.field}}"}</span> - Previous step&apos;s output (use Token Browser for paths)</p>
+              </div>
+              <p className="text-xs mt-2 text-emerald-700 dark:text-emerald-300">
+                <strong>Note:</strong> {"{{_apiKey}}"} requires MATRIX_API_KEY env var on the server.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-4 gap-2">
+        <div className="space-y-1">
+          <label className="text-xs font-medium">Method</label>
+          <Select
+            value={step.externalConfig?.method || 'POST'}
+            onValueChange={(val) => onUpdate({
+              externalConfig: { ...step.externalConfig, method: val as any }
+            })}
+          >
+            <SelectTrigger className="h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="GET">GET</SelectItem>
+              <SelectItem value="POST">POST</SelectItem>
+              <SelectItem value="PUT">PUT</SelectItem>
+              <SelectItem value="PATCH">PATCH</SelectItem>
+              <SelectItem value="DELETE">DELETE</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="col-span-3 space-y-1">
+          <label className="text-xs font-medium">Endpoint URL</label>
+          <Input
+            value={step.externalConfig?.endpoint || ''}
+            onChange={(e) => onUpdate({
+              externalConfig: { ...step.externalConfig, endpoint: e.target.value }
+            })}
+            placeholder="https://api.example.com/webhook"
+            className="font-mono text-xs h-8"
+          />
+        </div>
+      </div>
+
+      {/* Headers - editable with proper state management */}
+      <div className="space-y-1">
+        <label className="text-xs font-medium flex items-center gap-2">
+          Headers (JSON)
+          {headersError && (
+            <span className="text-destructive text-[10px]">{headersError}</span>
+          )}
+        </label>
+        <Textarea
+          value={headersText}
+          onChange={(e) => setHeadersText(e.target.value)}
+          onBlur={handleHeadersBlur}
+          placeholder={`{
+  "Authorization": "Bearer {{_apiKey}}",
+  "X-Custom-Header": "value"
+}`}
+          className={cn(
+            "min-h-[80px] font-mono text-xs",
+            headersError && "border-destructive"
+          )}
+        />
+        <p className="text-xs text-muted-foreground">
+          <strong>Note:</strong> <code className="bg-muted px-1 rounded">Content-Type: application/json</code> is added automatically.
+          Add additional headers here (leave empty if none needed).
+        </p>
+      </div>
+
+      <div className="space-y-1">
+        <label className="text-xs font-medium">Payload Template (JSON)</label>
+        <Textarea
+          value={step.externalConfig?.payloadTemplate || ''}
+          onChange={(e) => onUpdate({
+            externalConfig: { ...step.externalConfig, payloadTemplate: e.target.value }
+          })}
+          placeholder={waitForCallback ? `{
+  "callbackUrl": "{{systemWebhookUrl}}",
+  "callbackSecret": "{{callbackSecret}}",
+  "workflowRunId": "{{workflowRunId}}",
+  "stepId": "{{stepId}}",
+  "taskId": "{{taskId}}",
+  "data": "{{input.previousStep.output}}"
+}` : `{
+  "title": "{{output.document.title}}",
+  "content": "{{output.document.content}}",
+  "workflowRunId": "{{_workflowRunId}}"
+}`}
+          className="min-h-[100px] font-mono text-xs"
+        />
+        <div className="flex items-center gap-2 mt-1">
+          <TokenBrowser
+            workflowId={workflowId}
+            previousSteps={previousSteps}
+            currentStepIndex={stepIndex}
+            loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
+            onSelectToken={(token) => {
+              const current = step.externalConfig?.payloadTemplate || ''
+              onUpdate({
+                externalConfig: { ...step.externalConfig, payloadTemplate: current + token }
+              })
+            }}
+            variant="text"
+          />
+          <span className="text-xs text-muted-foreground">
+            Click to insert token at end of payload
+          </span>
+        </div>
+      </div>
+
+      {/* Success status codes - only shown when not waiting for callback */}
+      {!waitForCallback && (
+        <div className="space-y-1">
+          <label className="text-xs font-medium">Success Status Codes</label>
+          <Input
+            value={step.externalConfig?.successStatusCodes?.join(', ') || '200, 201'}
+            onChange={(e) => {
+              const codes = e.target.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n))
+              onUpdate({
+                externalConfig: { ...step.externalConfig, successStatusCodes: codes }
+              })
+            }}
+            placeholder="200, 201"
+            className="font-mono text-xs h-8"
+          />
+          <p className="text-xs text-muted-foreground">
+            Comma-separated list of HTTP status codes that indicate success
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Decision step configuration component
 function DecisionStepConfig({
   step,
@@ -1289,100 +1564,15 @@ export function StepConfigPanel({
 
         {/* External step configuration */}
         {step.stepType === 'external' && (
-          <div className="space-y-3 border-t pt-3">
-            <div className="bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800 rounded-lg p-3 text-sm">
-              <div className="flex items-start gap-2">
-                <Globe className="h-4 w-4 text-orange-600 dark:text-orange-400 mt-0.5 flex-shrink-0" />
-                <div className="text-orange-800 dark:text-orange-200">
-                  <p className="font-medium">External Service Call</p>
-                  <p className="text-xs mt-1">
-                    Calls an external API or webhook.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-2 text-xs">
-              <div className="flex items-start gap-2">
-                <Link2 className="h-3 w-3 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
-                <div className="text-blue-800 dark:text-blue-200 space-y-1.5">
-                  <p className="font-medium">Template Variables (from task.metadata.inputPayload)</p>
-                  <div className="space-y-1 font-mono text-[10px]">
-                    <p><span className="text-blue-600 dark:text-blue-300">System:</span> {`{{_apiUrl}}`}, {`{{_apiKey}}`}, {`{{_workflowRunId}}`}</p>
-                    <p><span className="text-blue-600 dark:text-blue-300">Callbacks:</span> {`{{systemWebhookUrl}}`}, {`{{callbackSecret}}`}, {`{{taskId}}`}</p>
-                    <p><span className="text-blue-600 dark:text-blue-300">This task:</span> {`{{title}}`}, {`{{status}}`}, {`{{tags}}`}, {`{{summary}}`}</p>
-                    <p><span className="text-blue-600 dark:text-blue-300">Prev step:</span> {`{{output}}`}, {`{{output.field}}`}, {`{{response.field}}`}</p>
-                    <p><span className="text-blue-600 dark:text-blue-300">Loop item:</span> {`{{item}}`}, {`{{item.field}}`}, {`{{_index}}`}</p>
-                  </div>
-                  <p className="text-[10px] opacity-75">
-                    Use the Token browser below to see actual data from previous runs.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-4 gap-2">
-              <div className="space-y-1">
-                <label className="text-xs font-medium">Method</label>
-                <Select
-                  value={step.externalConfig?.method || 'POST'}
-                  onValueChange={(val) => onUpdate({
-                    externalConfig: { ...step.externalConfig, method: val as any }
-                  })}
-                >
-                  <SelectTrigger className="h-8">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="GET">GET</SelectItem>
-                    <SelectItem value="POST">POST</SelectItem>
-                    <SelectItem value="PUT">PUT</SelectItem>
-                    <SelectItem value="PATCH">PATCH</SelectItem>
-                    <SelectItem value="DELETE">DELETE</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="col-span-3 space-y-1">
-                <label className="text-xs font-medium">Endpoint URL</label>
-                <Input
-                  value={step.externalConfig?.endpoint || ''}
-                  onChange={(e) => onUpdate({
-                    externalConfig: { ...step.externalConfig, endpoint: e.target.value }
-                  })}
-                  placeholder="https://api.example.com/webhook"
-                  className="font-mono text-xs h-8"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium">Payload Template (JSON)</label>
-              <Textarea
-                value={step.externalConfig?.payloadTemplate || ''}
-                onChange={(e) => onUpdate({
-                  externalConfig: { ...step.externalConfig, payloadTemplate: e.target.value }
-                })}
-                placeholder={`{
-  "callbackUrl": "{{systemWebhookUrl}}",
-  "data": "{{input.previousStep.output}}"
-}`}
-                className="min-h-[80px] font-mono text-xs"
-              />
-              <TokenBrowser
-                workflowId={workflowId}
-                previousSteps={previousSteps}
-                currentStepIndex={stepIndex}
-                loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
-                onSelectToken={(token) => {
-                  const current = step.externalConfig?.payloadTemplate || ''
-                  onUpdate({
-                    externalConfig: { ...step.externalConfig, payloadTemplate: current + token }
-                  })
-                }}
-                variant="text"
-              />
-            </div>
-          </div>
+          <ExternalStepConfigPanel
+            step={step}
+            stepIndex={stepIndex}
+            workflowId={workflowId}
+            previousSteps={previousSteps}
+            isInLoop={isInLoop}
+            loopScope={loopScope}
+            onUpdate={onUpdate}
+          />
         )}
 
         {/* Manual step configuration */}
