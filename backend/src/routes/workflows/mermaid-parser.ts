@@ -390,7 +390,9 @@ export function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string):
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
     const nodeId = step.id || `step${i}`;
-    const nodeName = step.name.replace(/"/g, "'");
+    // Use placeholder for empty names to avoid Mermaid syntax errors
+    const rawName = step.name?.trim() || '(unnamed)';
+    const nodeName = rawName.replace(/"/g, "'");
 
     const metadata: Record<string, unknown> = {};
     if (step.description) metadata.description = step.description;
@@ -555,7 +557,9 @@ export function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId
     const step = steps[i];
     const originalId = step.id || `step${i}`;
     const nodeId = stepIdToNodeId.get(originalId)!;
-    const nodeName = step.name.replace(/"/g, "'");
+    // Use placeholder for empty names to avoid Mermaid syntax errors
+    const rawName = step.name?.trim() || '(unnamed)';
+    const nodeName = rawName.replace(/"/g, "'");
 
     const metadata: Record<string, unknown> = {};
     if (step.description) metadata.description = step.description;
