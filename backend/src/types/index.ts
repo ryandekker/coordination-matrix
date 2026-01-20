@@ -500,6 +500,22 @@ export interface View {
   sorting: ViewSorting[];
   visibleColumns: string[];
   columnWidths?: Record<string, number>;
+  folderId?: ObjectId | null;
+  createdById?: ObjectId | null;
+  createdAt: Date;
+  updatedAt?: Date;
+}
+
+// ============================================================================
+// View Folder Types
+// ============================================================================
+
+export interface ViewFolder {
+  _id: ObjectId;
+  name: string;
+  collectionName: string;
+  sortOrder: number;
+  isExpanded: boolean;
   createdById?: ObjectId | null;
   createdAt: Date;
   updatedAt?: Date;

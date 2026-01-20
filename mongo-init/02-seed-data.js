@@ -278,6 +278,25 @@ const fieldConfigs = [
 db.field_configs.insertMany(fieldConfigs);
 
 // ============================================================================
+// VIEW FOLDERS
+// ============================================================================
+
+const systemFolderId = new ObjectId();
+
+const viewFolders = [
+  {
+    _id: systemFolderId,
+    name: 'System',
+    collectionName: 'tasks',
+    sortOrder: 0,
+    isExpanded: true,
+    createdAt: new Date(),
+  },
+];
+
+db.view_folders.insertMany(viewFolders);
+
+// ============================================================================
 // DEFAULT VIEWS
 // ============================================================================
 
@@ -290,6 +309,7 @@ const views = [
     filters: {},
     sorting: [{ field: 'createdAt', direction: 'desc' }],
     visibleColumns: ['title', 'status', 'urgency', 'assigneeId', 'workflowId', 'workflowStage', 'tags', 'dueAt', 'createdAt'],
+    folderId: null,  // All Tasks stays at root level (shown as static nav item)
     createdAt: new Date(),
   },
   {
@@ -300,6 +320,7 @@ const views = [
     filters: { assigneeId: '{{currentUserId}}' },
     sorting: [{ field: 'urgency', direction: 'desc' }, { field: 'dueAt', direction: 'asc' }],
     visibleColumns: ['title', 'status', 'urgency', 'dueAt', 'tags'],
+    folderId: systemFolderId,
     createdAt: new Date(),
   },
   {
@@ -310,6 +331,7 @@ const views = [
     filters: { status: ['on_hold'] },
     sorting: [{ field: 'externalHoldDate', direction: 'asc' }],
     visibleColumns: ['title', 'status', 'urgency', 'externalHoldDate', 'externalId', 'assigneeId'],
+    folderId: systemFolderId,
     createdAt: new Date(),
   },
   {
@@ -320,6 +342,7 @@ const views = [
     filters: { urgency: ['high', 'urgent'] },
     sorting: [{ field: 'urgency', direction: 'desc' }, { field: 'createdAt', direction: 'asc' }],
     visibleColumns: ['title', 'status', 'urgency', 'assigneeId', 'dueAt'],
+    folderId: systemFolderId,
     createdAt: new Date(),
   },
   {
@@ -333,6 +356,7 @@ const views = [
     },
     sorting: [{ field: 'urgency', direction: 'desc' }, { field: 'createdAt', direction: 'asc' }],
     visibleColumns: ['title', 'status', 'urgency', 'workflowId', 'workflowStage', 'dueAt', 'createdAt'],
+    folderId: systemFolderId,
     createdAt: new Date(),
   },
 ];

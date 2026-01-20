@@ -31,6 +31,7 @@ import { tasksRouter } from './routes/tasks.js';
 import { lookupsRouter } from './routes/lookups.js';
 import { fieldConfigsRouter } from './routes/field-configs.js';
 import { viewsRouter } from './routes/views.js';
+import { viewFoldersRouter } from './routes/view-folders.js';
 import { usersRouter } from './routes/users.js';
 import { externalJobsRouter } from './routes/external-jobs.js';
 import { workflowsRouter } from './routes/workflows.js';
@@ -229,6 +230,7 @@ app.use('/api/field-configs', requireAuth, requireScope(SCOPES.TASKS_READ), fiel
 
 // Views/saved searches
 app.use('/api/views', requireAuth, requireScope(SCOPES.VIEWS_READ), viewsRouter);
+app.use('/api/view-folders', requireAuth, requireScope(SCOPES.VIEWS_READ), viewFoldersRouter);
 
 // Users - admin operations handled within route
 app.use('/api/users', requireAuth, requireScope(SCOPES.USERS_READ), usersRouter);

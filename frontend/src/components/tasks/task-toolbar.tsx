@@ -28,12 +28,12 @@ import {
   DialogFooter,
   DialogDescription,
 } from '@/components/ui/dialog'
-import { View, LookupValue, User, Task, Tag, Workflow } from '@/lib/api'
+import { View, ViewFolder, LookupValue, User, Task, Tag, Workflow } from '@/lib/api'
 import { UserChip } from '@/components/ui/user-chip'
 
 interface TaskToolbarProps {
-  views: View[]
   currentView?: View
+  viewFolders?: ViewFolder[]
   lookups: Record<string, LookupValue[]>
   users: User[]
   tasks?: Task[]
@@ -42,11 +42,10 @@ interface TaskToolbarProps {
   filters: Record<string, unknown>
   search: string
   sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>
-  onViewChange: (viewId: string) => void
   onFilterChange: (filters: Record<string, unknown>) => void
   onSearchChange: (search: string) => void
   onOpenColumnConfig: () => void
-  onSaveSearch?: (name: string, filters: Record<string, unknown>, sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>) => Promise<void>
+  onSaveSearch?: (name: string, filters: Record<string, unknown>, sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>, folderId?: string | null) => Promise<void>
   onUpdateSearch?: (viewId: string, filters: Record<string, unknown>, sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>) => Promise<void>
   hasAnyChildren?: boolean
   expandAllEnabled?: boolean
@@ -54,8 +53,8 @@ interface TaskToolbarProps {
 }
 
 export function TaskToolbar({
-  views,
   currentView,
+  viewFolders = [],
   lookups,
   users,
   tasks = [],
@@ -64,7 +63,6 @@ export function TaskToolbar({
   filters,
   search,
   sorting,
-  onViewChange,
   onFilterChange,
   onSearchChange,
   onOpenColumnConfig,
@@ -76,6 +74,7 @@ export function TaskToolbar({
 }: TaskToolbarProps) {
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false)
   const [saveName, setSaveName] = useState('')
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [saveMode, setSaveMode] = useState<'new' | 'update'>('new')
   const [isSearchFocused, setIsSearchFocused] = useState(false)
@@ -166,12 +165,14 @@ export function TaskToolbar({
     if (canUpdateCurrentView) {
       setSaveMode('update')
       setSaveName(currentView?.name || '')
+      setSelectedFolderId(currentView?.folderId || null)
     } else {
       setSaveMode('new')
       setSaveName('')
+      setSelectedFolderId(null)
     }
     setIsSaveModalOpen(true)
-  }, [canUpdateCurrentView, currentView?.name])
+  }, [canUpdateCurrentView, currentView?.name, currentView?.folderId])
 
   const handleSaveSearch = useCallback(async () => {
     if (saveMode === 'update' && canUpdateCurrentView && onUpdateSearch) {
@@ -193,14 +194,15 @@ export function TaskToolbar({
         if (search) {
           filtersToSave.search = search
         }
-        await onSaveSearch(saveName.trim(), filtersToSave, sorting)
+        await onSaveSearch(saveName.trim(), filtersToSave, sorting, selectedFolderId)
         setIsSaveModalOpen(false)
         setSaveName('')
+        setSelectedFolderId(null)
       } finally {
         setIsSaving(false)
       }
     }
-  }, [saveMode, canUpdateCurrentView, onUpdateSearch, currentView, filters, search, sorting, saveName, onSaveSearch])
+  }, [saveMode, canUpdateCurrentView, onUpdateSearch, currentView, filters, search, sorting, saveName, onSaveSearch, selectedFolderId])
 
   const handleStatusFilter = useCallback((status: string, checked: boolean) => {
     const currentStatuses = (filters.status as string[]) || []
@@ -393,22 +395,6 @@ export function TaskToolbar({
     <div className="space-y-2">
       {/* Single row toolbar */}
       <div className="flex flex-wrap items-center gap-2">
-        {/* View Selector */}
-        <Select value={currentView?._id} onValueChange={onViewChange}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="Select view" />
-          </SelectTrigger>
-          <SelectContent>
-            {views
-              .filter((view) => view._id)
-              .map((view) => (
-                <SelectItem key={view._id} value={view._id}>
-                  {view.name}
-                </SelectItem>
-              ))}
-          </SelectContent>
-        </Select>
-
         {/* Search */}
         <div className={`relative transition-all duration-200 ${isSearchFocused || search ? 'w-64' : 'w-40'}`}>
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -770,15 +756,38 @@ export function TaskToolbar({
 
             {/* Name Input - only show for new saves */}
             {saveMode === 'new' && (
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Name *</label>
-                <Input
-                  value={saveName}
-                  onChange={(e) => setSaveName(e.target.value)}
-                  placeholder="e.g., Urgent Pending Tasks"
-                  autoFocus
-                />
-              </div>
+              <>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Name *</label>
+                  <Input
+                    value={saveName}
+                    onChange={(e) => setSaveName(e.target.value)}
+                    placeholder="e.g., Urgent Pending Tasks"
+                    autoFocus
+                  />
+                </div>
+                {viewFolders.length > 0 && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Folder (optional)</label>
+                    <Select
+                      value={selectedFolderId || '__none__'}
+                      onValueChange={(value) => setSelectedFolderId(value === '__none__' ? null : value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="No folder" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">No folder</SelectItem>
+                        {viewFolders.map((folder) => (
+                          <SelectItem key={folder._id} value={folder._id}>
+                            {folder.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </>
             )}
 
             {/* Current Filters Preview */}

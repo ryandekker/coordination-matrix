@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { tasksApi, lookupsApi, fieldConfigsApi, viewsApi, usersApi, workflowsApi, tagsApi, Task } from '@/lib/api'
+import { tasksApi, lookupsApi, fieldConfigsApi, viewsApi, viewFoldersApi, usersApi, workflowsApi, tagsApi, Task, ViewFolder } from '@/lib/api'
 
 // Helper to normalize query params for consistent cache keys
 function normalizeParams(params?: Record<string, string | number | boolean>): string {
@@ -446,6 +446,51 @@ export function useDeleteView() {
   return useMutation({
     mutationFn: viewsApi.delete,
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['views'] })
+    },
+  })
+}
+
+// View Folders
+export function useViewFolders(collectionName?: string) {
+  return useQuery({
+    queryKey: ['view-folders', collectionName],
+    queryFn: () => viewFoldersApi.list(collectionName),
+    staleTime: 60 * 1000, // 1 minute
+  })
+}
+
+export function useCreateViewFolder() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: viewFoldersApi.create,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['view-folders'] })
+    },
+  })
+}
+
+export function useUpdateViewFolder() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<ViewFolder> }) =>
+      viewFoldersApi.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['view-folders'] })
+    },
+  })
+}
+
+export function useDeleteViewFolder() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, moveViewsToRoot = true }: { id: string; moveViewsToRoot?: boolean }) =>
+      viewFoldersApi.delete(id, moveViewsToRoot),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['view-folders'] })
       queryClient.invalidateQueries({ queryKey: ['views'] })
     },
   })

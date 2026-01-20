@@ -217,6 +217,15 @@ db.createCollection('views');
 
 db.views.createIndex({ collectionName: 1, isDefault: 1 });
 db.views.createIndex({ createdById: 1 });
+db.views.createIndex({ folderId: 1 });
+
+// ============================================================================
+// VIEW FOLDERS - Folders for organizing saved views
+// ============================================================================
+db.createCollection('view_folders');
+
+db.view_folders.createIndex({ collectionName: 1, sortOrder: 1 });
+db.view_folders.createIndex({ createdById: 1 });
 
 // ============================================================================
 // USERS - Basic user management

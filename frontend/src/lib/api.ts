@@ -403,6 +403,62 @@ export const viewsApi = {
   },
 }
 
+// View Folders API
+export const viewFoldersApi = {
+  list: async (collectionName?: string): Promise<ApiResponse<ViewFolder[]>> => {
+    const params = collectionName ? `?collectionName=${collectionName}` : ''
+    const response = await authFetch(`${API_BASE}/view-folders${params}`)
+    return handleResponse(response)
+  },
+
+  get: async (id: string): Promise<ApiResponse<ViewFolder>> => {
+    const response = await authFetch(`${API_BASE}/view-folders/${id}`)
+    return handleResponse(response)
+  },
+
+  create: async (data: {
+    name: string
+    collectionName: string
+    sortOrder?: number
+    isExpanded?: boolean
+  }): Promise<ApiResponse<ViewFolder>> => {
+    const response = await authFetch(`${API_BASE}/view-folders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  update: async (id: string, data: Partial<ViewFolder>): Promise<ApiResponse<ViewFolder>> => {
+    const response = await authFetch(`${API_BASE}/view-folders/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  delete: async (id: string, moveViewsToRoot = true): Promise<ApiResponse<void>> => {
+    const response = await authFetch(`${API_BASE}/view-folders/${id}?moveViewsToRoot=${moveViewsToRoot}`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
+
+  reorder: async (
+    order: Array<{ id: string; sortOrder: number }>,
+    collectionName?: string
+  ): Promise<ApiResponse<ViewFolder[]>> => {
+    const response = await authFetch(`${API_BASE}/view-folders/reorder`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order, collectionName }),
+    })
+    return handleResponse(response)
+  },
+}
+
 // Users API
 export const usersApi = {
   list: async (): Promise<ApiResponse<User[]>> => {
@@ -905,6 +961,7 @@ export interface View {
   sorting: Array<{ field: string; direction: 'asc' | 'desc' }>
   visibleColumns: string[]
   columnWidths?: Record<string, number>
+  folderId?: string | null
   createdById?: string | null
   createdAt: string
   userPreference?: {
@@ -912,6 +969,17 @@ export interface View {
     columnWidths?: Record<string, number>
     columnOrder?: string[]
   }
+}
+
+export interface ViewFolder {
+  _id: string
+  name: string
+  collectionName: string
+  sortOrder: number
+  isExpanded: boolean
+  createdById?: string | null
+  createdAt: string
+  updatedAt?: string
 }
 
 export interface User {
