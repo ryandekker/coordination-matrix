@@ -453,6 +453,7 @@ export function TasksPage() {
         users={users}
         tasks={tasks}
         availableTags={tags}
+        workflows={workflows}
         filters={filters}
         search={search}
         sorting={currentSorting}

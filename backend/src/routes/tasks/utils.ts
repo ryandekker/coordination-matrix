@@ -21,7 +21,7 @@ export function resolveUserPlaceholder(value: string, currentUserId?: string): s
 // Helper to build filter from query params
 export function buildFilter(query: Record<string, unknown>, currentUserId?: string): Filter<Task> {
   const filter: Filter<Task> = {};
-  const { search, filters, parentId, rootOnly, status, urgency, assigneeId, tags, includeArchived } = query;
+  const { search, filters, parentId, rootOnly, status, urgency, assigneeId, tags, includeArchived, workflowId, workflowRunId, workflowStage, hasWorkflow } = query;
 
   // By default, exclude archived tasks unless explicitly requested
   const shouldIncludeArchived = includeArchived === 'true' || includeArchived === true;
@@ -38,6 +38,10 @@ export function buildFilter(query: Record<string, unknown>, currentUserId?: stri
     urgency ||
     assigneeId ||
     tags ||
+    workflowId ||
+    workflowRunId ||
+    workflowStage ||
+    hasWorkflow ||
     (filters && typeof filters === 'object' && Object.keys(filters as object).length > 0)
   );
 
@@ -99,6 +103,40 @@ export function buildFilter(query: Record<string, unknown>, currentUserId?: stri
   if (tags) {
     const tagArray = Array.isArray(tags) ? tags : [tags];
     filter.tags = { $in: tagArray };
+  }
+
+  // Workflow ID filter
+  if (workflowId) {
+    if (Array.isArray(workflowId)) {
+      filter.workflowId = { $in: workflowId.map((id) => toObjectId(id as string)) };
+    } else {
+      filter.workflowId = toObjectId(workflowId as string);
+    }
+  }
+
+  // Workflow Run ID filter
+  if (workflowRunId) {
+    if (Array.isArray(workflowRunId)) {
+      filter.workflowRunId = { $in: workflowRunId.map((id) => toObjectId(id as string)) };
+    } else {
+      filter.workflowRunId = toObjectId(workflowRunId as string);
+    }
+  }
+
+  // Workflow Stage filter
+  if (workflowStage) {
+    if (Array.isArray(workflowStage)) {
+      (filter as Record<string, unknown>).workflowStage = { $in: workflowStage };
+    } else {
+      (filter as Record<string, unknown>).workflowStage = workflowStage as string;
+    }
+  }
+
+  // Has Workflow filter (tasks that are part of any workflow)
+  if (hasWorkflow === 'true' || hasWorkflow === true) {
+    filter.workflowId = { $ne: null } as unknown as ObjectId;
+  } else if (hasWorkflow === 'false' || hasWorkflow === false) {
+    filter.workflowId = { $eq: null } as unknown as ObjectId;
   }
 
   // Custom filters

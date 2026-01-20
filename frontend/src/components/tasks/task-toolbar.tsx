@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useCallback } from 'react'
-import { Search, Filter, Columns, ChevronDown, X, Bookmark, Tag as TagIcon, ChevronsDownUp, ChevronsUpDown, Archive } from 'lucide-react'
+import { Search, Filter, Columns, ChevronDown, X, Bookmark, Tag as TagIcon, ChevronsDownUp, ChevronsUpDown, Archive, Workflow as WorkflowIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -28,7 +28,7 @@ import {
   DialogFooter,
   DialogDescription,
 } from '@/components/ui/dialog'
-import { View, LookupValue, User, Task, Tag } from '@/lib/api'
+import { View, LookupValue, User, Task, Tag, Workflow } from '@/lib/api'
 import { UserChip } from '@/components/ui/user-chip'
 
 interface TaskToolbarProps {
@@ -38,6 +38,7 @@ interface TaskToolbarProps {
   users: User[]
   tasks?: Task[]
   availableTags?: Tag[]
+  workflows?: Workflow[]
   filters: Record<string, unknown>
   search: string
   sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>
@@ -59,6 +60,7 @@ export function TaskToolbar({
   users,
   tasks = [],
   availableTags = [],
+  workflows = [],
   filters,
   search,
   sorting,
@@ -77,9 +79,82 @@ export function TaskToolbar({
   const [isSaving, setIsSaving] = useState(false)
   const [saveMode, setSaveMode] = useState<'new' | 'update'>('new')
   const [isSearchFocused, setIsSearchFocused] = useState(false)
+  const [workflowSearchTerm, setWorkflowSearchTerm] = useState('')
+  const [assigneeSearchTerm, setAssigneeSearchTerm] = useState('')
+  const [tagSearchTerm, setTagSearchTerm] = useState('')
 
   const statusOptions = lookups.task_status || []
   const urgencyOptions = lookups.urgency || []
+
+  // Filter users by search term
+  const filteredUsers = useMemo(() => {
+    const activeUsers = users.filter(u => u.isActive)
+    if (!assigneeSearchTerm.trim()) {
+      return activeUsers
+    }
+    const searchLower = assigneeSearchTerm.toLowerCase()
+    return activeUsers.filter(u =>
+      u.displayName.toLowerCase().includes(searchLower) ||
+      (u.email && u.email.toLowerCase().includes(searchLower))
+    )
+  }, [users, assigneeSearchTerm])
+
+  // Filter tags by search term
+  const filteredTags = useMemo(() => {
+    if (!tagSearchTerm.trim()) {
+      return availableTags
+    }
+    const searchLower = tagSearchTerm.toLowerCase()
+    return availableTags.filter(t =>
+      t.name.toLowerCase().includes(searchLower) ||
+      t.displayName.toLowerCase().includes(searchLower)
+    )
+  }, [availableTags, tagSearchTerm])
+
+  // Build workflow data with stages for filtering and display
+  const workflowsWithStages = useMemo(() => {
+    return workflows.filter(w => w.isActive).map(workflow => {
+      const stages: string[] = []
+      if (workflow.steps) {
+        workflow.steps.forEach(step => {
+          const stageName = step.hitlPhase || step.name
+          if (stageName && !stages.includes(stageName)) {
+            stages.push(stageName)
+          }
+        })
+      } else if (workflow.stages) {
+        stages.push(...workflow.stages)
+      }
+      return { workflow, stages: stages.sort() }
+    })
+  }, [workflows])
+
+  // Filter workflows and stages by search term
+  const filteredWorkflowsWithStages = useMemo(() => {
+    if (!workflowSearchTerm.trim()) {
+      return workflowsWithStages
+    }
+    const searchLower = workflowSearchTerm.toLowerCase()
+    return workflowsWithStages
+      .map(({ workflow, stages }) => {
+        // Check if workflow name matches
+        const workflowMatches = workflow.name.toLowerCase().includes(searchLower)
+        // Check which stages match
+        const matchingStages = stages.filter(stage => stage.toLowerCase().includes(searchLower))
+
+        // Include workflow if its name matches OR if any stage matches
+        if (workflowMatches || matchingStages.length > 0) {
+          return {
+            workflow,
+            // If workflow name matches, show all stages; otherwise show only matching stages
+            stages: workflowMatches ? stages : matchingStages,
+            workflowMatches,
+          }
+        }
+        return null
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null)
+  }, [workflowsWithStages, workflowSearchTerm])
 
   const hasActiveFilters = Object.keys(filters).length > 0 || search.length > 0
 
@@ -178,6 +253,35 @@ export function TaskToolbar({
     })
   }, [filters, onFilterChange])
 
+  const handleWorkflowFilter = useCallback((workflowId: string, checked: boolean) => {
+    const currentWorkflows = (filters.workflowId as string[]) || []
+    const newWorkflows = checked
+      ? [...currentWorkflows, workflowId]
+      : currentWorkflows.filter((w) => w !== workflowId)
+    onFilterChange({
+      ...filters,
+      workflowId: newWorkflows.length > 0 ? newWorkflows : undefined,
+    })
+  }, [filters, onFilterChange])
+
+  const handleHasWorkflowFilter = useCallback((value: 'all' | 'yes' | 'no') => {
+    onFilterChange({
+      ...filters,
+      hasWorkflow: value === 'all' ? undefined : value === 'yes',
+    })
+  }, [filters, onFilterChange])
+
+  const handleWorkflowStageFilter = useCallback((stage: string, checked: boolean) => {
+    const currentStages = (filters.workflowStage as string[]) || []
+    const newStages = checked
+      ? [...currentStages, stage]
+      : currentStages.filter((s) => s !== stage)
+    onFilterChange({
+      ...filters,
+      workflowStage: newStages.length > 0 ? newStages : undefined,
+    })
+  }, [filters, onFilterChange])
+
   const clearAllFilters = useCallback(() => {
     onFilterChange({})
     onSearchChange('')
@@ -234,8 +338,28 @@ export function TaskToolbar({
       result.push({ key: 'includeArchived', label: 'Show', value: 'Archived' })
     }
 
+    // Workflow filters
+    if (filters.hasWorkflow === true) {
+      result.push({ key: 'hasWorkflow-yes', label: 'Workflow', value: 'Part of workflow' })
+    } else if (filters.hasWorkflow === false) {
+      result.push({ key: 'hasWorkflow-no', label: 'Workflow', value: 'Standalone only' })
+    }
+
+    const workflowFilters = toArray(filters.workflowId)
+    workflowFilters.forEach((workflowId) => {
+      const workflow = workflows.find((w) => w._id === workflowId)
+      if (workflow) {
+        result.push({ key: `workflow-${workflowId}`, label: 'Workflow', value: workflow.name })
+      }
+    })
+
+    const workflowStageFilters = toArray(filters.workflowStage)
+    workflowStageFilters.forEach((stage) => {
+      result.push({ key: `workflowStage-${stage}`, label: 'Stage', value: stage })
+    })
+
     return result
-  }, [search, filters, statusOptions, urgencyOptions, users, availableTags])
+  }, [search, filters, statusOptions, urgencyOptions, users, availableTags, workflows])
 
   const removeFilter = useCallback((filterKey: string) => {
     if (filterKey === 'search') {
@@ -254,8 +378,16 @@ export function TaskToolbar({
       handleTagFilter(tag, false)
     } else if (filterKey === 'includeArchived') {
       handleIncludeArchivedChange(false)
+    } else if (filterKey === 'hasWorkflow-yes' || filterKey === 'hasWorkflow-no') {
+      handleHasWorkflowFilter('all')
+    } else if (filterKey.startsWith('workflow-')) {
+      const workflowId = filterKey.replace('workflow-', '')
+      handleWorkflowFilter(workflowId, false)
+    } else if (filterKey.startsWith('workflowStage-')) {
+      const stage = filterKey.replace('workflowStage-', '')
+      handleWorkflowStageFilter(stage, false)
     }
-  }, [onSearchChange, handleStatusFilter, handleUrgencyFilter, handleAssigneeFilter, handleTagFilter, handleIncludeArchivedChange])
+  }, [onSearchChange, handleStatusFilter, handleUrgencyFilter, handleAssigneeFilter, handleTagFilter, handleIncludeArchivedChange, handleHasWorkflowFilter, handleWorkflowFilter, handleWorkflowStageFilter])
 
   return (
     <div className="space-y-2">
@@ -355,7 +487,7 @@ export function TaskToolbar({
       </DropdownMenu>
 
       {/* Assignee Filter */}
-      <DropdownMenu>
+      <DropdownMenu onOpenChange={(open) => { if (!open) setAssigneeSearchTerm('') }}>
         <DropdownMenuTrigger asChild>
           <Button variant="outline" size="sm">
             <Filter className="mr-2 h-4 w-4" />
@@ -363,28 +495,45 @@ export function TaskToolbar({
             <ChevronDown className="ml-2 h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-56 max-h-64 overflow-y-auto">
-          <DropdownMenuLabel>Filter by Assignee</DropdownMenuLabel>
+        <DropdownMenuContent align="start" className="w-56">
+          <div className="px-2 py-1.5">
+            <Input
+              placeholder="Search assignees..."
+              value={assigneeSearchTerm}
+              onChange={(e) => setAssigneeSearchTerm(e.target.value)}
+              className="h-8"
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+            />
+          </div>
           <DropdownMenuSeparator />
-          {users.filter(u => u.isActive).map((user) => (
-            <DropdownMenuCheckboxItem
-              key={user._id}
-              checked={((filters.assigneeId as string[]) || []).includes(user._id)}
-              onCheckedChange={(checked) => handleAssigneeFilter(user._id, checked)}
-            >
-              <UserChip
-                user={user as Parameters<typeof UserChip>[0]['user']}
-                size="sm"
-                showUnassigned={false}
-              />
-            </DropdownMenuCheckboxItem>
-          ))}
+          <div className="max-h-48 overflow-y-auto">
+            {filteredUsers.length === 0 ? (
+              <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                No assignees found
+              </div>
+            ) : (
+              filteredUsers.map((user) => (
+                <DropdownMenuCheckboxItem
+                  key={user._id}
+                  checked={((filters.assigneeId as string[]) || []).includes(user._id)}
+                  onCheckedChange={(checked) => handleAssigneeFilter(user._id, checked)}
+                >
+                  <UserChip
+                    user={user as Parameters<typeof UserChip>[0]['user']}
+                    size="sm"
+                    showUnassigned={false}
+                  />
+                </DropdownMenuCheckboxItem>
+              ))
+            )}
+          </div>
         </DropdownMenuContent>
       </DropdownMenu>
 
       {/* Tags Filter */}
       {availableTags.length > 0 && (
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={(open) => { if (!open) setTagSearchTerm('') }}>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm">
               <TagIcon className="mr-2 h-4 w-4" />
@@ -392,22 +541,120 @@ export function TaskToolbar({
               <ChevronDown className="ml-2 h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-56 max-h-64 overflow-y-auto">
-            <DropdownMenuLabel>Filter by Tag</DropdownMenuLabel>
+          <DropdownMenuContent align="start" className="w-56">
+            <div className="px-2 py-1.5">
+              <Input
+                placeholder="Search tags..."
+                value={tagSearchTerm}
+                onChange={(e) => setTagSearchTerm(e.target.value)}
+                className="h-8"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+              />
+            </div>
             <DropdownMenuSeparator />
-            {availableTags.map((tag) => (
-              <DropdownMenuCheckboxItem
-                key={tag._id}
-                checked={((filters.tags as string[]) || []).includes(tag.name)}
-                onCheckedChange={(checked) => handleTagFilter(tag.name, checked)}
-              >
-                <span
-                  className="mr-2 h-2 w-2 rounded-full"
-                  style={{ backgroundColor: tag.color }}
-                />
-                {tag.displayName}
-              </DropdownMenuCheckboxItem>
-            ))}
+            <div className="max-h-48 overflow-y-auto">
+              {filteredTags.length === 0 ? (
+                <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                  No tags found
+                </div>
+              ) : (
+                filteredTags.map((tag) => (
+                  <DropdownMenuCheckboxItem
+                    key={tag._id}
+                    checked={((filters.tags as string[]) || []).includes(tag.name)}
+                    onCheckedChange={(checked) => handleTagFilter(tag.name, checked)}
+                  >
+                    <span
+                      className="mr-2 h-2 w-2 rounded-full"
+                      style={{ backgroundColor: tag.color }}
+                    />
+                    {tag.displayName}
+                  </DropdownMenuCheckboxItem>
+                ))
+              )}
+            </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+
+      {/* Workflow Filter */}
+      {workflows.length > 0 && (
+        <DropdownMenu onOpenChange={(open) => { if (!open) setWorkflowSearchTerm('') }}>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm">
+              <WorkflowIcon className="mr-2 h-4 w-4" />
+              Workflow
+              <ChevronDown className="ml-2 h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-72">
+            <div className="px-2 py-1.5">
+              <Input
+                placeholder="Search..."
+                value={workflowSearchTerm}
+                onChange={(e) => setWorkflowSearchTerm(e.target.value)}
+                className="h-8"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+              />
+            </div>
+            <DropdownMenuSeparator />
+            <div className="max-h-64 overflow-y-auto">
+              {/* Quick filters - show if no search or if they match */}
+              {(!workflowSearchTerm.trim() || 'part of any workflow'.includes(workflowSearchTerm.toLowerCase())) && (
+                <DropdownMenuCheckboxItem
+                  checked={filters.hasWorkflow === true}
+                  onCheckedChange={(checked) => handleHasWorkflowFilter(checked ? 'yes' : 'all')}
+                >
+                  Part of any workflow
+                </DropdownMenuCheckboxItem>
+              )}
+              {(!workflowSearchTerm.trim() || 'standalone tasks only'.includes(workflowSearchTerm.toLowerCase())) && (
+                <DropdownMenuCheckboxItem
+                  checked={filters.hasWorkflow === false}
+                  onCheckedChange={(checked) => handleHasWorkflowFilter(checked ? 'no' : 'all')}
+                >
+                  Standalone tasks only
+                </DropdownMenuCheckboxItem>
+              )}
+              {!workflowSearchTerm.trim() && <DropdownMenuSeparator />}
+              {/* Workflows and stages */}
+              {filteredWorkflowsWithStages.length === 0 && workflowSearchTerm.trim() && (
+                <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                  No workflows or stages found
+                </div>
+              )}
+              {filteredWorkflowsWithStages.map(({ workflow, stages }) => {
+                const isWorkflowSelected = ((filters.workflowId as string[]) || []).includes(workflow._id)
+                return (
+                  <div key={workflow._id}>
+                    <DropdownMenuCheckboxItem
+                      checked={isWorkflowSelected}
+                      onCheckedChange={(checked) => handleWorkflowFilter(workflow._id, checked)}
+                      className="font-medium"
+                    >
+                      {workflow.name}
+                    </DropdownMenuCheckboxItem>
+                    {/* Show stages nested under selected workflow, or when searching */}
+                    {(isWorkflowSelected || workflowSearchTerm.trim()) && stages.length > 0 && (
+                      <div className="ml-4 border-l border-muted pl-2">
+                        {stages.map((stage) => (
+                          <DropdownMenuCheckboxItem
+                            key={`${workflow._id}-${stage}`}
+                            checked={((filters.workflowStage as string[]) || []).includes(stage)}
+                            onCheckedChange={(checked) => handleWorkflowStageFilter(stage, checked)}
+                            className="text-sm text-muted-foreground"
+                          >
+                            {stage}
+                          </DropdownMenuCheckboxItem>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           </DropdownMenuContent>
         </DropdownMenu>
       )}
