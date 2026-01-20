@@ -1472,6 +1472,24 @@ export function TaskDataTable({
     if (fieldConfig.fieldPath === 'title') {
       return <span>{value?.toString()}</span>
     }
+    // Workflow stage - truncate with tooltip for full text on hover
+    if (fieldConfig.fieldPath === 'workflowStage') {
+      const stageText = value?.toString() || ''
+      return (
+        <TooltipProvider>
+          <Tooltip delayDuration={300}>
+            <TooltipTrigger asChild>
+              <div className="text-center truncate max-w-[120px] mx-auto">
+                {stageText}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{stageText}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )
+    }
     return <div className="text-center">{value?.toString()}</div>
   }, [lookups, users])
 
