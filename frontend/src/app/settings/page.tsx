@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Database, Palette, Bell, Shield, Webhook, Activity, Key, Tags } from 'lucide-react'
+import { Database, Palette, Bell, Shield, Webhook, Activity, Key, Tags, Package } from 'lucide-react'
 
 const settingsItems = [
   {
@@ -15,6 +15,12 @@ const settingsItems = [
     description: 'Create and manage tags with custom colors for task categorization',
     href: '/settings/tags',
     icon: Tags,
+  },
+  {
+    name: 'Variable Packages',
+    description: 'Manage credential packages and configuration variables for workflows',
+    href: '/settings/variables',
+    icon: Package,
   },
   {
     name: 'API Keys',

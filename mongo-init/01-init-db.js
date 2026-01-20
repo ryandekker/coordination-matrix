@@ -1169,4 +1169,83 @@ db.document_versions.createIndex({ documentId: 1, modifiedAt: -1 });
 // Unique constraint: only one version number per document
 db.document_versions.createIndex({ documentId: 1, version: 1 }, { unique: true });
 
+// ============================================================================
+// VARIABLE PACKAGES - Global variable packages with branches for credentials
+// ============================================================================
+db.createCollection('variable_packages', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['name', 'branches', 'createdAt', 'isActive'],
+      properties: {
+        name: {
+          bsonType: 'string',
+          description: 'Package name (unique, used in templates) - required'
+        },
+        displayName: {
+          bsonType: 'string',
+          description: 'Human-readable display name'
+        },
+        description: {
+          bsonType: 'string',
+          description: 'Package description'
+        },
+        // Branch definitions - each branch is a variant of the package
+        // Example: { "personal": { email: "...", password: "enc:..." }, "work": { ... } }
+        branches: {
+          bsonType: 'object',
+          description: 'Map of branch name -> branch data'
+        },
+        // Default branch to use when not specified
+        defaultBranch: {
+          bsonType: 'string',
+          description: 'Default branch name'
+        },
+        // Schema definition for UI and validation
+        // Each field defines: key, displayName, type (string|secret|number|boolean), required, description
+        schema: {
+          bsonType: 'array',
+          items: {
+            bsonType: 'object',
+            properties: {
+              key: { bsonType: 'string' },
+              displayName: { bsonType: 'string' },
+              type: { bsonType: 'string' },
+              required: { bsonType: 'bool' },
+              description: { bsonType: 'string' }
+            }
+          },
+          description: 'Field schema for the package'
+        },
+        // Ownership and audit
+        createdById: {
+          bsonType: ['objectId', 'null'],
+          description: 'User who created this package'
+        },
+        updatedById: {
+          bsonType: ['objectId', 'null'],
+          description: 'User who last updated this package'
+        },
+        isActive: {
+          bsonType: 'bool',
+          description: 'Whether the package is active'
+        },
+        createdAt: {
+          bsonType: 'date',
+          description: 'Creation timestamp'
+        },
+        updatedAt: {
+          bsonType: 'date',
+          description: 'Last update timestamp'
+        }
+      }
+    }
+  }
+});
+
+// Variable package indexes
+db.variable_packages.createIndex({ name: 1 }, { unique: true });
+db.variable_packages.createIndex({ isActive: 1 });
+db.variable_packages.createIndex({ createdById: 1 });
+
 print('Database initialization complete!');

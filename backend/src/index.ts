@@ -43,6 +43,7 @@ import { eventsRouter } from './routes/events.js';
 import { authRouter } from './routes/auth.js';
 import { tagsRouter } from './routes/tags.js';
 import { documentsRouter } from './routes/documents.js';
+import { variablePackagesRouter } from './routes/variable-packages.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { requireAuth } from './middleware/auth.js';
 import { requireScope, SCOPES } from './middleware/authorize.js';
@@ -262,6 +263,9 @@ app.use('/api/tags', requireAuth, requireScope(SCOPES.TASKS_READ), tagsRouter);
 
 // Documents - separate scope
 app.use('/api/documents', requireAuth, requireScope(SCOPES.DOCUMENTS_READ), documentsRouter);
+
+// Variable packages - configuration data, requires admin for write
+app.use('/api/variable-packages', requireAuth, requireScope(SCOPES.ADMIN), variablePackagesRouter);
 
 // Error handling
 app.use(errorHandler);

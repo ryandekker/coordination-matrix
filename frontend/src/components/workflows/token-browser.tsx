@@ -24,8 +24,12 @@ import {
   Clock,
   Loader2,
   Maximize2,
+  Package,
+  Lock,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react'
-import { workflowRunsApi } from '@/lib/api'
+import { workflowRunsApi, variablePackagesApi, PackageToken } from '@/lib/api'
 import { TokenBrowserDialog } from './token-browser-dialog'
 
 interface TokenCategory {
@@ -66,6 +70,9 @@ interface TokenBrowserProps {
   children?: React.ReactNode
   // For join inputPath: paths are relative to child task metadata (no output prefix)
   forJoinInputPath?: boolean
+  // Field context for the bottom panel
+  fieldLabel?: string
+  fieldValue?: string
 }
 
 interface SampleData {
@@ -84,6 +91,8 @@ export function TokenBrowser({
   variant = 'icon',
   children,
   forJoinInputPath = false,
+  fieldLabel,
+  fieldValue,
 }: TokenBrowserProps) {
   const [open, setOpen] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -91,6 +100,8 @@ export function TokenBrowser({
   const [sampleData, setSampleData] = useState<SampleData[]>([])
   const [loadingSamples, setLoadingSamples] = useState(false)
   const [fetchError, setFetchError] = useState<string | null>(null)
+  const [packageTokens, setPackageTokens] = useState<PackageToken[]>([])
+  const [expandedPackages, setExpandedPackages] = useState<Set<string>>(new Set())
   const searchInputRef = useRef<HTMLInputElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
@@ -112,6 +123,34 @@ export function TokenBrowser({
       fetchSampleData()
     }
   }, [open, workflowId])
+
+  // Fetch package tokens when popover opens
+  useEffect(() => {
+    if (open && packageTokens.length === 0) {
+      fetchPackageTokens()
+    }
+  }, [open])
+
+  const fetchPackageTokens = async () => {
+    try {
+      const response = await variablePackagesApi.getTokens()
+      setPackageTokens(response.data || [])
+    } catch (error) {
+      console.error('Failed to fetch package tokens:', error)
+    }
+  }
+
+  const togglePackageExpanded = (packageName: string) => {
+    setExpandedPackages(prev => {
+      const next = new Set(prev)
+      if (next.has(packageName)) {
+        next.delete(packageName)
+      } else {
+        next.add(packageName)
+      }
+      return next
+    })
+  }
 
   const fetchSampleData = async () => {
     if (!workflowId) return
@@ -366,6 +405,13 @@ export function TokenBrowser({
     ],
   })
 
+  // Filter package tokens by search
+  const filteredPackages = packageTokens.filter(pkg =>
+    pkg.name.toLowerCase().includes(search.toLowerCase()) ||
+    pkg.displayName.toLowerCase().includes(search.toLowerCase()) ||
+    pkg.fields.some(f => f.key.toLowerCase().includes(search.toLowerCase()))
+  )
+
   // Filter tokens by search
   const filteredCategories = categories.map(cat => ({
     ...cat,
@@ -435,6 +481,7 @@ export function TokenBrowser({
           style={{ WebkitOverflowScrolling: 'touch' }}
         >
           <div className="p-2 space-y-3">
+            {/* Regular token categories */}
             {filteredCategories.map((category) => (
               <div key={category.name}>
                 <div className="flex items-center gap-2 px-2 py-1 text-xs font-medium text-muted-foreground">
@@ -474,13 +521,94 @@ export function TokenBrowser({
               </div>
             ))}
 
-            {filteredCategories.length === 0 && (
+            {/* Variable Packages */}
+            {filteredPackages.length > 0 && (
+              <div>
+                <div className="flex items-center gap-2 px-2 py-1 text-xs font-medium text-muted-foreground">
+                  <Package className="h-3 w-3 text-violet-500" />
+                  Packages
+                </div>
+                <div className="space-y-0.5">
+                  {filteredPackages.map((pkg) => (
+                    <div key={pkg.name}>
+                      <button
+                        onClick={() => togglePackageExpanded(pkg.name)}
+                        className="w-full text-left px-2 py-1.5 rounded hover:bg-muted flex items-center gap-2 group"
+                      >
+                        {expandedPackages.has(pkg.name) ? (
+                          <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                        ) : (
+                          <ChevronRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                        )}
+                        <span className="text-sm font-medium">{pkg.displayName}</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {pkg.branches.length} {pkg.branches.length === 1 ? 'branch' : 'branches'}
+                        </span>
+                      </button>
+                      {expandedPackages.has(pkg.name) && (
+                        <div className="ml-5 space-y-0.5">
+                          {pkg.branches.map((branch) => (
+                            <div key={branch} className="border-l pl-2 ml-1 space-y-0.5">
+                              <div className="text-[10px] text-muted-foreground font-medium py-0.5">
+                                [{branch}]
+                              </div>
+                              {pkg.fields.map((field) => {
+                                const tokenPath = `packages.${pkg.name}[${branch}].${field.key}`
+                                return (
+                                  <button
+                                    key={`${branch}-${field.key}`}
+                                    onClick={() => handleSelect({ path: tokenPath, description: field.displayName })}
+                                    className="w-full text-left px-2 py-1 rounded hover:bg-muted flex items-center gap-2 group"
+                                  >
+                                    <code className="text-xs font-mono bg-muted group-hover:bg-background px-1 py-0.5 rounded flex-shrink-0 truncate max-w-[250px]">
+                                      {wrapInBraces ? `{{${tokenPath}}}` : tokenPath}
+                                    </code>
+                                    {field.isSecret && (
+                                      <Lock className="h-3 w-3 text-amber-500 flex-shrink-0" />
+                                    )}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          ))}
+                          {/* Dynamic branch selection hint */}
+                          <div className="px-2 py-1">
+                            <p className="text-[10px] text-muted-foreground italic">
+                              Tip: Use nested interpolation for dynamic branches:
+                            </p>
+                            <code className="text-[10px] font-mono text-violet-400 block mt-0.5">
+                              {`{{packages.${pkg.name}[{{trigger.payload.account}}].${pkg.fields[0]?.key || 'field'}}}`}
+                            </code>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {filteredCategories.length === 0 && filteredPackages.length === 0 && (
               <div className="text-center py-4 text-sm text-muted-foreground">
                 No tokens found
               </div>
             )}
           </div>
         </div>
+
+        {/* Field context panel (when provided) */}
+        {fieldLabel && fieldValue !== undefined && (
+          <div className="border-t p-2 bg-muted/20">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[10px] font-medium text-muted-foreground">{fieldLabel}</span>
+            </div>
+            <div className="bg-background rounded border p-2 max-h-[80px] overflow-auto">
+              <pre className="text-xs font-mono whitespace-pre-wrap break-all text-foreground/80">
+                {fieldValue || <span className="text-muted-foreground italic">(empty)</span>}
+              </pre>
+            </div>
+          </div>
+        )}
 
         <div className="border-t p-2 bg-muted/30 space-y-2">
           <Button
@@ -497,7 +625,7 @@ export function TokenBrowser({
             Browse All Tokens & Run Data
           </Button>
           <p className="text-[10px] text-muted-foreground leading-relaxed">
-            <strong>{`{{output}}`}</strong> = previous step &middot; <strong>{`{{item}}`}</strong> = loop item &middot; <strong>{`{{_apiUrl}}`}</strong> = system
+            <strong>{`{{output}}`}</strong> = previous step &middot; <strong>{`{{item}}`}</strong> = loop item &middot; <strong>{`{{packages.name[branch].field}}`}</strong> = credentials
           </p>
           {workflowId && sampleData.length === 0 && !loadingSamples && fetchError && (
             <p className="text-xs text-amber-600">

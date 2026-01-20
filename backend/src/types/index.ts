@@ -1271,6 +1271,46 @@ export interface DocumentEvent {
   metadata?: Record<string, unknown>;
 }
 
+// ============================================================================
+// Variable Package Types (Credential and Configuration Packages)
+// ============================================================================
+
+export type VariableFieldType = 'string' | 'secret' | 'number' | 'boolean';
+
+export interface VariableFieldSchema {
+  key: string;                      // Field name
+  displayName: string;              // UI label
+  type: VariableFieldType;          // Field type (secret fields are encrypted)
+  required?: boolean;
+  description?: string;
+}
+
+export interface VariablePackage {
+  _id: ObjectId;
+  name: string;                     // Unique package name (used in templates)
+  displayName?: string;             // Human-readable display name
+  description?: string;
+
+  // Schema definition for validation and UI
+  schema: VariableFieldSchema[];
+
+  // Branch definitions - each branch is a variant of the package
+  // Example: { "personal": { email: "...", password: "enc:..." }, "work": { ... } }
+  branches: Record<string, Record<string, unknown>>;
+
+  // Default branch to use when not specified
+  defaultBranch?: string;
+
+  // Ownership and audit
+  createdById?: ObjectId | null;
+  updatedById?: ObjectId | null;
+  isActive: boolean;
+
+  // Timestamps
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 // Semantic search types
 export interface DocumentSearchQuery {
   prompt: string;                    // Natural language search prompt

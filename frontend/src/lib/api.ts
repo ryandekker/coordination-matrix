@@ -1900,3 +1900,145 @@ export const documentsApi = {
     })
   },
 }
+
+// Variable Package Types
+export type VariableFieldType = 'string' | 'secret' | 'number' | 'boolean'
+
+export interface VariableFieldSchema {
+  key: string
+  displayName: string
+  type: VariableFieldType
+  required?: boolean
+  description?: string
+}
+
+export interface VariablePackage {
+  _id: string
+  name: string
+  displayName?: string
+  description?: string
+  schema: VariableFieldSchema[]
+  branches: Record<string, Record<string, unknown>>
+  defaultBranch?: string
+  createdById?: string | null
+  updatedById?: string | null
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+// Token browser format for packages
+export interface PackageToken {
+  packageId: string
+  name: string
+  displayName: string
+  description?: string
+  defaultBranch?: string
+  branches: string[]
+  fields: Array<{
+    key: string
+    displayName: string
+    type: VariableFieldType
+    isSecret: boolean
+  }>
+}
+
+// Variable Packages API
+export const variablePackagesApi = {
+  list: async (params?: { includeInactive?: boolean; search?: string }): Promise<ApiResponse<VariablePackage[]>> => {
+    const searchParams = new URLSearchParams()
+    if (params?.includeInactive) searchParams.append('includeInactive', 'true')
+    if (params?.search) searchParams.append('search', params.search)
+    const queryString = searchParams.toString()
+    const response = await authFetch(`${API_BASE}/variable-packages${queryString ? `?${queryString}` : ''}`)
+    return handleResponse(response)
+  },
+
+  get: async (id: string): Promise<ApiResponse<VariablePackage>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages/${id}`)
+    return handleResponse(response)
+  },
+
+  create: async (data: {
+    name: string
+    displayName?: string
+    description?: string
+    schema: VariableFieldSchema[]
+    branches?: Record<string, Record<string, unknown>>
+    defaultBranch?: string
+  }): Promise<ApiResponse<VariablePackage>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  update: async (id: string, data: Partial<{
+    name: string
+    displayName: string
+    description: string
+    schema: VariableFieldSchema[]
+    branches: Record<string, Record<string, unknown>>
+    defaultBranch: string
+    isActive: boolean
+  }>): Promise<ApiResponse<VariablePackage>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  delete: async (id: string): Promise<ApiResponse<void>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages/${id}`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
+
+  // Branch management
+  addBranch: async (id: string, name: string, data: Record<string, unknown>): Promise<ApiResponse<VariablePackage>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages/${id}/branches`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, data }),
+    })
+    return handleResponse(response)
+  },
+
+  updateBranch: async (id: string, branch: string, data: Record<string, unknown>): Promise<ApiResponse<VariablePackage>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages/${id}/branches/${branch}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data }),
+    })
+    return handleResponse(response)
+  },
+
+  deleteBranch: async (id: string, branch: string): Promise<ApiResponse<void>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages/${id}/branches/${branch}`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
+
+  // Reveal secrets (decrypted values)
+  revealBranch: async (id: string, branch: string): Promise<ApiResponse<{
+    packageId: string
+    packageName: string
+    branchName: string
+    values: Record<string, unknown>
+  }>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages/${id}/branches/${branch}/reveal`)
+    return handleResponse(response)
+  },
+
+  // Token browser format
+  getTokens: async (): Promise<ApiResponse<PackageToken[]>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages/tokens/list`)
+    return handleResponse(response)
+  },
+}
