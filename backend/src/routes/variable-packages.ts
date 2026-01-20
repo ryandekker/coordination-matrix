@@ -1,43 +1,150 @@
 /**
- * Variable Packages API Routes
+ * Variables API Routes
  *
- * Manages global variable packages with branches for credentials and configuration.
- * Secret fields are encrypted at rest and redacted in API responses.
+ * Manages global variables for use in workflows and templates.
+ * Variables can store simple strings or JSON/YAML objects.
+ * When encrypted=true, the entire value is encrypted at rest.
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { ObjectId } from 'mongodb';
 import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
-import { VariablePackage, VariableFieldSchema } from '../types/index.js';
+import { VariablePackage } from '../types/index.js';
 import {
-  encryptPackageBranches,
-  decryptPackageBranches,
-  redactPackageBranches,
+  encrypt,
+  decrypt,
+  isEncrypted,
   isEncryptionConfigured,
 } from '../services/encryption.js';
+import YAML from 'yaml';
 
 export const variablePackagesRouter = Router();
 
-// Helper to normalize package name (lowercase, alphanumeric and underscores only)
-function normalizePackageName(name: string): string {
+// Helper to normalize variable name (lowercase, alphanumeric and underscores only)
+function normalizeVariableName(name: string): string {
   return name.toLowerCase().trim().replace(/[^a-z0-9_]/g, '_');
 }
 
-// Helper to validate schema
-function validateSchema(schema: unknown): schema is VariableFieldSchema[] {
-  if (!Array.isArray(schema)) return false;
-
-  for (const field of schema) {
-    if (!field.key || typeof field.key !== 'string') return false;
-    if (!field.displayName || typeof field.displayName !== 'string') return false;
-    if (!field.type || !['string', 'secret', 'number', 'boolean'].includes(field.type)) return false;
+// Helper to parse value as JSON or YAML (returns null if not valid)
+function tryParseValue(value: string): unknown | null {
+  // First try JSON
+  try {
+    return JSON.parse(value);
+  } catch {
+    // Then try YAML
+    try {
+      const parsed = YAML.parse(value);
+      // YAML.parse returns the string itself for plain strings, only return if it's an object
+      if (parsed !== null && typeof parsed === 'object') {
+        return parsed;
+      }
+      return null;
+    } catch {
+      return null;
+    }
   }
-
-  return true;
 }
 
-// GET /api/variable-packages - List all packages (secrets redacted)
+// Helper to recursively extract all paths and values from an object
+interface KeyValuePath {
+  path: string;  // e.g., "user.profile.name"
+  value: unknown;
+  type: 'string' | 'number' | 'boolean' | 'null' | 'object' | 'array';
+}
+
+function extractAllPaths(obj: unknown, parentPath: string = ''): KeyValuePath[] {
+  const results: KeyValuePath[] = [];
+
+  if (obj === null) {
+    return [{ path: parentPath, value: null, type: 'null' }];
+  }
+
+  if (Array.isArray(obj)) {
+    // For arrays, add the array itself and each item
+    results.push({ path: parentPath, value: obj, type: 'array' });
+    obj.forEach((item, index) => {
+      const itemPath = parentPath ? `${parentPath}[${index}]` : `[${index}]`;
+      results.push(...extractAllPaths(item, itemPath));
+    });
+    return results;
+  }
+
+  if (typeof obj === 'object') {
+    // For objects, add the object itself (if has a path) and recurse into children
+    if (parentPath) {
+      results.push({ path: parentPath, value: obj, type: 'object' });
+    }
+    for (const [key, value] of Object.entries(obj)) {
+      const childPath = parentPath ? `${parentPath}.${key}` : key;
+      results.push(...extractAllPaths(value, childPath));
+    }
+    return results;
+  }
+
+  // Primitive values
+  const type = typeof obj as 'string' | 'number' | 'boolean';
+  return [{ path: parentPath, value: obj, type }];
+}
+
+// ============================================================================
+// Token browser endpoint (must be before /:id routes)
+// ============================================================================
+
+// GET /api/variable-packages/tokens/list - Get all variables formatted for token browser
+variablePackagesRouter.get('/tokens/list', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+
+    const variables = await db
+      .collection<VariablePackage>('variable_packages')
+      .find({ isActive: true })
+      .sort({ name: 1 })
+      .toArray();
+
+    // Format for token browser consumption
+    const tokens = variables.map((v) => {
+      // Try to parse as JSON or YAML to detect structure
+      let parsedValue: unknown = null;
+      let rawValue: string | null = null;
+
+      if (v.encrypted) {
+        // For encrypted values, show placeholder
+        rawValue = '••••••••';
+      } else {
+        rawValue = v.value;
+        parsedValue = tryParseValue(v.value);
+      }
+
+      // Extract all paths and values recursively
+      const paths: KeyValuePath[] = parsedValue !== null
+        ? extractAllPaths(parsedValue)
+        : [];
+
+      return {
+        variableId: v._id.toString(),
+        name: v.name,
+        description: v.description,
+        encrypted: v.encrypted,
+        isObject: parsedValue !== null && typeof parsedValue === 'object',
+        // For simple values, include the raw value
+        value: parsedValue === null ? rawValue : null,
+        // For objects, include all paths with their values
+        paths,
+      };
+    });
+
+    res.json({ data: tokens });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================================
+// CRUD endpoints
+// ============================================================================
+
+// GET /api/variable-packages - List all variables (encrypted values redacted)
 variablePackagesRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
@@ -57,97 +164,99 @@ variablePackagesRouter.get('/', async (req: Request, res: Response, next: NextFu
       ];
     }
 
-    const packages = await db
+    const variables = await db
       .collection<VariablePackage>('variable_packages')
       .find(filter)
       .sort({ name: 1 })
       .toArray();
 
-    // Redact secrets in response
-    const redactedPackages = packages.map((pkg) => ({
-      ...pkg,
-      branches: redactPackageBranches(pkg.branches, pkg.schema),
+    // Redact encrypted values in response
+    const redactedVariables = variables.map((v) => ({
+      ...v,
+      value: v.encrypted ? '••••••••' : v.value,
     }));
 
-    res.json({ data: redactedPackages });
+    res.json({ data: redactedVariables });
   } catch (error) {
     next(error);
   }
 });
 
-// GET /api/variable-packages/:id - Get package by ID (secrets redacted)
+// GET /api/variable-packages/:id - Get variable by ID (encrypted value redacted)
 variablePackagesRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
 
     if (!ObjectId.isValid(req.params.id)) {
-      throw createError('Invalid package ID', 400);
+      throw createError('Invalid variable ID', 400);
     }
 
-    const pkg = await db
+    const variable = await db
       .collection<VariablePackage>('variable_packages')
       .findOne({ _id: new ObjectId(req.params.id) });
 
-    if (!pkg) {
-      throw createError('Package not found', 404);
+    if (!variable) {
+      throw createError('Variable not found', 404);
     }
 
-    // Redact secrets
-    const redactedPackage = {
-      ...pkg,
-      branches: redactPackageBranches(pkg.branches, pkg.schema),
+    // Redact encrypted value
+    const redactedVariable = {
+      ...variable,
+      value: variable.encrypted ? '••••••••' : variable.value,
     };
 
-    res.json({ data: redactedPackage });
+    res.json({ data: redactedVariable });
   } catch (error) {
     next(error);
   }
 });
 
-// POST /api/variable-packages - Create a new package
+// POST /api/variable-packages - Create a new variable
 variablePackagesRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { name, displayName, description, schema, branches, defaultBranch } = req.body;
+    const { name, displayName, description, value, encrypted } = req.body;
 
     if (!name) {
       throw createError('name is required', 400);
     }
 
-    if (!schema || !validateSchema(schema)) {
-      throw createError('Valid schema is required with key, displayName, and type for each field', 400);
+    if (value === undefined || value === null) {
+      throw createError('value is required', 400);
     }
 
-    // Check if any secret fields exist and encryption is configured
-    const hasSecrets = schema.some((f: VariableFieldSchema) => f.type === 'secret');
-    if (hasSecrets && !isEncryptionConfigured()) {
-      throw createError('VARIABLE_ENCRYPTION_KEY must be configured to use secret fields', 400);
+    // Convert value to string if it's an object
+    let valueStr = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+
+    // Check encryption requirement
+    const shouldEncrypt = encrypted === true;
+    if (shouldEncrypt && !isEncryptionConfigured()) {
+      throw createError('VARIABLE_ENCRYPTION_KEY must be configured to use encryption', 400);
     }
 
-    const normalizedName = normalizePackageName(name);
+    const normalizedName = normalizeVariableName(name);
 
     // Check for duplicate
     const existing = await db
       .collection<VariablePackage>('variable_packages')
       .findOne({ name: normalizedName });
     if (existing) {
-      throw createError('Package with this name already exists', 409);
+      throw createError('Variable with this name already exists', 409);
+    }
+
+    // Encrypt if requested
+    if (shouldEncrypt) {
+      valueStr = encrypt(valueStr);
     }
 
     const now = new Date();
 
-    // Encrypt secrets in branches if provided
-    const encryptedBranches = branches && typeof branches === 'object'
-      ? encryptPackageBranches(branches, schema)
-      : {};
-
-    const newPackage: Omit<VariablePackage, '_id'> = {
+    const newVariable: Omit<VariablePackage, '_id'> = {
       name: normalizedName,
       displayName: displayName || name,
       description: description || undefined,
-      schema,
-      branches: encryptedBranches,
-      defaultBranch: defaultBranch || (Object.keys(encryptedBranches)[0] || undefined),
+      value: valueStr,
+      encrypted: shouldEncrypt,
       isActive: true,
       createdById: req.user?.userId ? new ObjectId(req.user.userId) : null,
       updatedById: null,
@@ -157,43 +266,43 @@ variablePackagesRouter.post('/', async (req: Request, res: Response, next: NextF
 
     const result = await db
       .collection<VariablePackage>('variable_packages')
-      .insertOne(newPackage as VariablePackage);
+      .insertOne(newVariable as VariablePackage);
 
     const inserted = await db
       .collection<VariablePackage>('variable_packages')
       .findOne({ _id: result.insertedId });
 
-    // Redact secrets in response
-    const redactedPackage = inserted ? {
+    // Redact encrypted value in response
+    const redactedVariable = inserted ? {
       ...inserted,
-      branches: redactPackageBranches(inserted.branches, inserted.schema),
+      value: inserted.encrypted ? '••••••••' : inserted.value,
     } : null;
 
-    res.status(201).json({ data: redactedPackage });
+    res.status(201).json({ data: redactedVariable });
   } catch (error) {
     next(error);
   }
 });
 
-// PATCH /api/variable-packages/:id - Update a package
+// PATCH /api/variable-packages/:id - Update a variable
 variablePackagesRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
 
     if (!ObjectId.isValid(req.params.id)) {
-      throw createError('Invalid package ID', 400);
+      throw createError('Invalid variable ID', 400);
     }
 
-    const pkgId = new ObjectId(req.params.id);
+    const varId = new ObjectId(req.params.id);
     const updates = { ...req.body };
 
-    // Get existing package
+    // Get existing variable
     const existing = await db
       .collection<VariablePackage>('variable_packages')
-      .findOne({ _id: pkgId });
+      .findOne({ _id: varId });
 
     if (!existing) {
-      throw createError('Package not found', 404);
+      throw createError('Variable not found', 404);
     }
 
     // Don't allow updating certain fields
@@ -203,33 +312,53 @@ variablePackagesRouter.patch('/:id', async (req: Request, res: Response, next: N
 
     // If name is being updated, normalize it
     if (updates.name) {
-      updates.name = normalizePackageName(updates.name);
+      updates.name = normalizeVariableName(updates.name);
 
       // Check for duplicate with the new name
       const duplicate = await db
         .collection<VariablePackage>('variable_packages')
-        .findOne({ name: updates.name, _id: { $ne: pkgId } });
+        .findOne({ name: updates.name, _id: { $ne: varId } });
       if (duplicate) {
-        throw createError('Package with this name already exists', 409);
+        throw createError('Variable with this name already exists', 409);
       }
     }
 
-    // If schema is being updated, validate it
-    if (updates.schema) {
-      if (!validateSchema(updates.schema)) {
-        throw createError('Valid schema is required', 400);
+    // Handle value and encryption changes
+    if (updates.value !== undefined || updates.encrypted !== undefined) {
+      const newEncrypted = updates.encrypted !== undefined ? updates.encrypted === true : existing.encrypted;
+      let newValue = updates.value !== undefined ? updates.value : existing.value;
+
+      // If value was passed as object, stringify it
+      if (typeof newValue !== 'string') {
+        newValue = JSON.stringify(newValue, null, 2);
       }
 
-      const hasSecrets = updates.schema.some((f: VariableFieldSchema) => f.type === 'secret');
-      if (hasSecrets && !isEncryptionConfigured()) {
-        throw createError('VARIABLE_ENCRYPTION_KEY must be configured to use secret fields', 400);
+      // Check encryption requirement
+      if (newEncrypted && !isEncryptionConfigured()) {
+        throw createError('VARIABLE_ENCRYPTION_KEY must be configured to use encryption', 400);
       }
-    }
 
-    // If branches are being updated, encrypt secrets
-    if (updates.branches) {
-      const schema = updates.schema || existing.schema;
-      updates.branches = encryptPackageBranches(updates.branches, schema);
+      // Handle encryption state changes
+      if (updates.value !== undefined) {
+        // New value provided - encrypt if needed
+        if (newEncrypted && !isEncrypted(newValue)) {
+          newValue = encrypt(newValue);
+        }
+      } else if (updates.encrypted !== undefined && updates.encrypted !== existing.encrypted) {
+        // Encryption flag changed without new value
+        if (newEncrypted) {
+          // Turning encryption ON - encrypt current value
+          newValue = encrypt(existing.value);
+        } else {
+          // Turning encryption OFF - decrypt current value
+          if (isEncrypted(existing.value)) {
+            newValue = decrypt(existing.value);
+          }
+        }
+      }
+
+      updates.value = newValue;
+      updates.encrypted = newEncrypted;
     }
 
     updates.updatedAt = new Date();
@@ -238,42 +367,42 @@ variablePackagesRouter.patch('/:id', async (req: Request, res: Response, next: N
     const result = await db
       .collection<VariablePackage>('variable_packages')
       .findOneAndUpdate(
-        { _id: pkgId },
+        { _id: varId },
         { $set: updates },
         { returnDocument: 'after' }
       );
 
     if (!result) {
-      throw createError('Package not found', 404);
+      throw createError('Variable not found', 404);
     }
 
-    // Redact secrets
-    const redactedPackage = {
+    // Redact encrypted value
+    const redactedVariable = {
       ...result,
-      branches: redactPackageBranches(result.branches, result.schema),
+      value: result.encrypted ? '••••••••' : result.value,
     };
 
-    res.json({ data: redactedPackage });
+    res.json({ data: redactedVariable });
   } catch (error) {
     next(error);
   }
 });
 
-// DELETE /api/variable-packages/:id - Soft delete (deactivate) a package
+// DELETE /api/variable-packages/:id - Soft delete (deactivate) a variable
 variablePackagesRouter.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
 
     if (!ObjectId.isValid(req.params.id)) {
-      throw createError('Invalid package ID', 400);
+      throw createError('Invalid variable ID', 400);
     }
 
-    const pkgId = new ObjectId(req.params.id);
+    const varId = new ObjectId(req.params.id);
 
     const result = await db
       .collection<VariablePackage>('variable_packages')
       .findOneAndUpdate(
-        { _id: pkgId },
+        { _id: varId },
         {
           $set: {
             isActive: false,
@@ -285,289 +414,55 @@ variablePackagesRouter.delete('/:id', async (req: Request, res: Response, next: 
       );
 
     if (!result) {
-      throw createError('Package not found', 404);
+      throw createError('Variable not found', 404);
     }
 
-    res.json({ success: true, message: 'Package deactivated' });
+    res.json({ success: true, message: 'Variable deactivated' });
   } catch (error) {
     next(error);
   }
 });
 
 // ============================================================================
-// Branch Management
+// Value Reveal (for authorized viewing)
 // ============================================================================
 
-// POST /api/variable-packages/:id/branches - Add a new branch
-variablePackagesRouter.post('/:id/branches', async (req: Request, res: Response, next: NextFunction) => {
+// GET /api/variable-packages/:id/reveal - Get decrypted value
+variablePackagesRouter.get('/:id/reveal', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
 
     if (!ObjectId.isValid(req.params.id)) {
-      throw createError('Invalid package ID', 400);
+      throw createError('Invalid variable ID', 400);
     }
 
-    const { name, data } = req.body;
+    const varId = new ObjectId(req.params.id);
 
-    if (!name || typeof name !== 'string') {
-      throw createError('Branch name is required', 400);
-    }
-
-    if (!data || typeof data !== 'object') {
-      throw createError('Branch data is required', 400);
-    }
-
-    const branchName = name.toLowerCase().trim().replace(/[^a-z0-9_-]/g, '_');
-    const pkgId = new ObjectId(req.params.id);
-
-    const pkg = await db
+    const variable = await db
       .collection<VariablePackage>('variable_packages')
-      .findOne({ _id: pkgId });
+      .findOne({ _id: varId });
 
-    if (!pkg) {
-      throw createError('Package not found', 404);
+    if (!variable) {
+      throw createError('Variable not found', 404);
     }
 
-    if (pkg.branches[branchName]) {
-      throw createError('Branch already exists', 409);
+    // Decrypt if encrypted
+    let decryptedValue = variable.value;
+    if (variable.encrypted && isEncrypted(variable.value)) {
+      decryptedValue = decrypt(variable.value);
     }
-
-    // Encrypt secrets in branch data
-    const encryptedBranches = encryptPackageBranches({ [branchName]: data }, pkg.schema);
-    const encryptedData = encryptedBranches[branchName];
-
-    const result = await db
-      .collection<VariablePackage>('variable_packages')
-      .findOneAndUpdate(
-        { _id: pkgId },
-        {
-          $set: {
-            [`branches.${branchName}`]: encryptedData,
-            updatedAt: new Date(),
-            updatedById: req.user?.userId ? new ObjectId(req.user.userId) : null,
-          }
-        },
-        { returnDocument: 'after' }
-      );
-
-    if (!result) {
-      throw createError('Failed to update package', 500);
-    }
-
-    // Redact secrets
-    const redactedPackage = {
-      ...result,
-      branches: redactPackageBranches(result.branches, result.schema),
-    };
-
-    res.status(201).json({ data: redactedPackage });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// PATCH /api/variable-packages/:id/branches/:branch - Update a branch
-variablePackagesRouter.patch('/:id/branches/:branch', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const db = getDb();
-
-    if (!ObjectId.isValid(req.params.id)) {
-      throw createError('Invalid package ID', 400);
-    }
-
-    const { data } = req.body;
-    const branchName = req.params.branch;
-    const pkgId = new ObjectId(req.params.id);
-
-    if (!data || typeof data !== 'object') {
-      throw createError('Branch data is required', 400);
-    }
-
-    const pkg = await db
-      .collection<VariablePackage>('variable_packages')
-      .findOne({ _id: pkgId });
-
-    if (!pkg) {
-      throw createError('Package not found', 404);
-    }
-
-    if (!pkg.branches[branchName]) {
-      throw createError('Branch not found', 404);
-    }
-
-    // Encrypt secrets in branch data
-    const encryptedBranches = encryptPackageBranches({ [branchName]: data }, pkg.schema);
-    const encryptedData = encryptedBranches[branchName];
-
-    const result = await db
-      .collection<VariablePackage>('variable_packages')
-      .findOneAndUpdate(
-        { _id: pkgId },
-        {
-          $set: {
-            [`branches.${branchName}`]: encryptedData,
-            updatedAt: new Date(),
-            updatedById: req.user?.userId ? new ObjectId(req.user.userId) : null,
-          }
-        },
-        { returnDocument: 'after' }
-      );
-
-    if (!result) {
-      throw createError('Failed to update package', 500);
-    }
-
-    // Redact secrets
-    const redactedPackage = {
-      ...result,
-      branches: redactPackageBranches(result.branches, result.schema),
-    };
-
-    res.json({ data: redactedPackage });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// DELETE /api/variable-packages/:id/branches/:branch - Delete a branch
-variablePackagesRouter.delete('/:id/branches/:branch', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const db = getDb();
-
-    if (!ObjectId.isValid(req.params.id)) {
-      throw createError('Invalid package ID', 400);
-    }
-
-    const branchName = req.params.branch;
-    const pkgId = new ObjectId(req.params.id);
-
-    const pkg = await db
-      .collection<VariablePackage>('variable_packages')
-      .findOne({ _id: pkgId });
-
-    if (!pkg) {
-      throw createError('Package not found', 404);
-    }
-
-    if (!pkg.branches[branchName]) {
-      throw createError('Branch not found', 404);
-    }
-
-    // Don't allow deleting the last branch
-    if (Object.keys(pkg.branches).length === 1) {
-      throw createError('Cannot delete the last branch', 400);
-    }
-
-    const result = await db
-      .collection<VariablePackage>('variable_packages')
-      .findOneAndUpdate(
-        { _id: pkgId },
-        {
-          $unset: { [`branches.${branchName}`]: '' },
-          $set: {
-            updatedAt: new Date(),
-            updatedById: req.user?.userId ? new ObjectId(req.user.userId) : null,
-            // If deleting the default branch, set a new default
-            ...(pkg.defaultBranch === branchName && {
-              defaultBranch: Object.keys(pkg.branches).find(b => b !== branchName),
-            }),
-          },
-        },
-        { returnDocument: 'after' }
-      );
-
-    if (!result) {
-      throw createError('Failed to update package', 500);
-    }
-
-    res.json({ success: true, message: 'Branch deleted' });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// ============================================================================
-// Secret Reveal (for authorized viewing)
-// ============================================================================
-
-// GET /api/variable-packages/:id/branches/:branch/reveal - Get decrypted values
-variablePackagesRouter.get('/:id/branches/:branch/reveal', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const db = getDb();
-
-    if (!ObjectId.isValid(req.params.id)) {
-      throw createError('Invalid package ID', 400);
-    }
-
-    const branchName = req.params.branch;
-    const pkgId = new ObjectId(req.params.id);
-
-    const pkg = await db
-      .collection<VariablePackage>('variable_packages')
-      .findOne({ _id: pkgId });
-
-    if (!pkg) {
-      throw createError('Package not found', 404);
-    }
-
-    if (!pkg.branches[branchName]) {
-      throw createError('Branch not found', 404);
-    }
-
-    // Decrypt secrets for this branch
-    const decryptedBranches = decryptPackageBranches(
-      { [branchName]: pkg.branches[branchName] },
-      pkg.schema
-    );
 
     // Log the access for audit purposes
-    console.log(`[AUDIT] Secret reveal: package=${pkg.name}, branch=${branchName}, user=${req.user?.userId || 'anonymous'}, time=${new Date().toISOString()}`);
+    console.log(`[AUDIT] Variable reveal: name=${variable.name}, user=${req.user?.userId || 'anonymous'}, time=${new Date().toISOString()}`);
 
     res.json({
       data: {
-        packageId: pkg._id,
-        packageName: pkg.name,
-        branchName,
-        values: decryptedBranches[branchName],
+        variableId: variable._id,
+        variableName: variable.name,
+        value: decryptedValue,
+        encrypted: variable.encrypted,
       },
     });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// ============================================================================
-// Utility endpoint for token browser
-// ============================================================================
-
-// GET /api/variable-packages/tokens - Get all packages formatted for token browser
-variablePackagesRouter.get('/tokens/list', async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const db = getDb();
-
-    const packages = await db
-      .collection<VariablePackage>('variable_packages')
-      .find({ isActive: true })
-      .sort({ name: 1 })
-      .toArray();
-
-    // Format for token browser consumption
-    const tokens = packages.map((pkg) => ({
-      packageId: pkg._id.toString(),
-      name: pkg.name,
-      displayName: pkg.displayName || pkg.name,
-      description: pkg.description,
-      defaultBranch: pkg.defaultBranch,
-      branches: Object.keys(pkg.branches),
-      fields: pkg.schema.map((f) => ({
-        key: f.key,
-        displayName: f.displayName,
-        type: f.type,
-        isSecret: f.type === 'secret',
-      })),
-    }));
-
-    res.json({ data: tokens });
   } catch (error) {
     next(error);
   }

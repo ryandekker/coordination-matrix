@@ -532,9 +532,10 @@ export function WorkflowEditor({
                       workflowId={workflow?._id}
                       previousSteps={[]}
                       currentStepIndex={0}
-                      onSelectToken={(token) => {
-                        setRootTaskTitleTemplate(prev => prev + token)
-                      }}
+                      onSelectToken={() => {}}
+                      fieldLabel="Root Task Title"
+                      fieldValue={rootTaskTitleTemplate}
+                      onFieldValueChange={setRootTaskTitleTemplate}
                     />
                   </div>
                   <p className="text-xs text-muted-foreground">
@@ -852,10 +853,10 @@ export function WorkflowEditor({
                                     }))}
                                     currentStepIndex={index}
                                     loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
-                                    onSelectToken={(token) => {
-                                      const current = step.titleTemplate || ''
-                                      updateStep(index, { titleTemplate: current + token })
-                                    }}
+                                    onSelectToken={() => {}}
+                                    fieldLabel="Task Title"
+                                    fieldValue={step.titleTemplate || ''}
+                                    onFieldValueChange={(value) => updateStep(index, { titleTemplate: value })}
                                     variant="text"
                                   />
                                 </div>

@@ -1272,34 +1272,31 @@ export interface DocumentEvent {
 }
 
 // ============================================================================
-// Variable Package Types (Credential and Configuration Packages)
+// Variable Types (Configuration Variables)
 // ============================================================================
 
-export type VariableFieldType = 'string' | 'secret' | 'number' | 'boolean';
-
-export interface VariableFieldSchema {
-  key: string;                      // Field name
-  displayName: string;              // UI label
-  type: VariableFieldType;          // Field type (secret fields are encrypted)
-  required?: boolean;
-  description?: string;
-}
-
+/**
+ * Simplified variable model:
+ * - name: unique identifier for use in templates ({{variables.name}} or {{variables.name.path}})
+ * - value: string or JSON/YAML object stored as string
+ * - encrypted: if true, the entire value is encrypted at rest
+ *
+ * Template usage:
+ *   {{variables.api_key}} - returns the raw value
+ *   {{variables.config.database.host}} - traverses into JSON object
+ */
 export interface VariablePackage {
   _id: ObjectId;
-  name: string;                     // Unique package name (used in templates)
+  name: string;                     // Unique variable name (used in templates)
   displayName?: string;             // Human-readable display name
   description?: string;
 
-  // Schema definition for validation and UI
-  schema: VariableFieldSchema[];
+  // The value - can be a simple string or a JSON/YAML object stored as string
+  // When encrypted=true, this is stored as "enc:..." format
+  value: string;
 
-  // Branch definitions - each branch is a variant of the package
-  // Example: { "personal": { email: "...", password: "enc:..." }, "work": { ... } }
-  branches: Record<string, Record<string, unknown>>;
-
-  // Default branch to use when not specified
-  defaultBranch?: string;
+  // If true, the entire value is encrypted at rest
+  encrypted: boolean;
 
   // Ownership and audit
   createdById?: ObjectId | null;

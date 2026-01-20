@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, MoreHorizontal, Trash2, Pencil, Package, Eye, EyeOff, Lock, GitBranch, Copy } from 'lucide-react'
+import { Plus, MoreHorizontal, Trash2, Pencil, Variable as VariableIcon, Eye, EyeOff, Lock, Copy, Unlock } from 'lucide-react'
 import {
   Table,
   TableBody,
@@ -40,22 +40,16 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { Checkbox } from '@/components/ui/checkbox'
 import { formatDateTime } from '@/lib/utils'
-import { variablePackagesApi, type VariablePackage, type VariableFieldSchema, type VariableFieldType } from '@/lib/api'
+import { variablePackagesApi, type VariableRecord } from '@/lib/api'
 
 export default function VariablesPage() {
   const queryClient = useQueryClient()
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const [editingPackage, setEditingPackage] = useState<VariablePackage | null>(null)
-  const [packageToDelete, setPackageToDelete] = useState<VariablePackage | null>(null)
-  const [revealedSecrets, setRevealedSecrets] = useState<Record<string, Record<string, Record<string, unknown>>>>({})
+  const [editingVariable, setEditingVariable] = useState<VariableRecord | null>(null)
+  const [variableToDelete, setVariableToDelete] = useState<VariableRecord | null>(null)
+  const [revealedValues, setRevealedValues] = useState<Record<string, string>>({})
   const [copied, setCopied] = useState<string | null>(null)
 
   // Form state
@@ -63,24 +57,19 @@ export default function VariablesPage() {
     name: '',
     displayName: '',
     description: '',
-    schema: [] as VariableFieldSchema[],
-    branches: {} as Record<string, Record<string, unknown>>,
-    defaultBranch: '',
+    value: '',
+    encrypted: false,
   })
 
-  // Branch editing state
-  const [editingBranch, setEditingBranch] = useState<{ packageId: string; branchName: string; data: Record<string, unknown> } | null>(null)
-  const [newBranchName, setNewBranchName] = useState('')
-
-  const { data: packagesData, isLoading } = useQuery({
-    queryKey: ['variable-packages'],
+  const { data: variablesData, isLoading } = useQuery({
+    queryKey: ['variables'],
     queryFn: () => variablePackagesApi.list({ includeInactive: true }),
   })
 
   const createMutation = useMutation({
     mutationFn: variablePackagesApi.create,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['variable-packages'] })
+      queryClient.invalidateQueries({ queryKey: ['variables'] })
       closeModal()
     },
   })
@@ -89,7 +78,7 @@ export default function VariablesPage() {
     mutationFn: ({ id, data }: { id: string; data: Parameters<typeof variablePackagesApi.update>[1] }) =>
       variablePackagesApi.update(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['variable-packages'] })
+      queryClient.invalidateQueries({ queryKey: ['variables'] })
       closeModal()
     },
   })
@@ -97,86 +86,71 @@ export default function VariablesPage() {
   const deleteMutation = useMutation({
     mutationFn: variablePackagesApi.delete,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['variable-packages'] })
-      setPackageToDelete(null)
+      queryClient.invalidateQueries({ queryKey: ['variables'] })
+      setVariableToDelete(null)
     },
   })
 
-  const addBranchMutation = useMutation({
-    mutationFn: ({ id, name, data }: { id: string; name: string; data: Record<string, unknown> }) =>
-      variablePackagesApi.addBranch(id, name, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['variable-packages'] })
-      setNewBranchName('')
-    },
-  })
-
-  const updateBranchMutation = useMutation({
-    mutationFn: ({ id, branch, data }: { id: string; branch: string; data: Record<string, unknown> }) =>
-      variablePackagesApi.updateBranch(id, branch, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['variable-packages'] })
-      setEditingBranch(null)
-    },
-  })
-
-  const deleteBranchMutation = useMutation({
-    mutationFn: ({ id, branch }: { id: string; branch: string }) =>
-      variablePackagesApi.deleteBranch(id, branch),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['variable-packages'] })
-    },
-  })
-
-  const packages = packagesData?.data || []
+  const variables = variablesData?.data || []
 
   const resetForm = () => {
     setFormData({
       name: '',
       displayName: '',
       description: '',
-      schema: [],
-      branches: {},
-      defaultBranch: '',
+      value: '',
+      encrypted: false,
     })
   }
 
   const closeModal = () => {
     setIsModalOpen(false)
-    setEditingPackage(null)
+    setEditingVariable(null)
     resetForm()
   }
 
   const openCreateModal = () => {
     resetForm()
-    setEditingPackage(null)
+    setEditingVariable(null)
     setIsModalOpen(true)
   }
 
-  const openEditModal = (pkg: VariablePackage) => {
+  const openEditModal = async (v: VariableRecord) => {
+    // If encrypted, need to fetch the revealed value first
+    let value = v.value
+    if (v.encrypted && revealedValues[v._id]) {
+      value = revealedValues[v._id]
+    } else if (v.encrypted) {
+      try {
+        const response = await variablePackagesApi.reveal(v._id)
+        value = response.data.value
+        setRevealedValues((prev) => ({ ...prev, [v._id]: value }))
+      } catch {
+        // If reveal fails, leave as redacted
+      }
+    }
+
     setFormData({
-      name: pkg.name,
-      displayName: pkg.displayName || '',
-      description: pkg.description || '',
-      schema: [...pkg.schema],
-      branches: { ...pkg.branches },
-      defaultBranch: pkg.defaultBranch || '',
+      name: v.name,
+      displayName: v.displayName || '',
+      description: v.description || '',
+      value,
+      encrypted: v.encrypted,
     })
-    setEditingPackage(pkg)
+    setEditingVariable(v)
     setIsModalOpen(true)
   }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (editingPackage) {
+    if (editingVariable) {
       updateMutation.mutate({
-        id: editingPackage._id,
+        id: editingVariable._id,
         data: {
-          name: formData.name,
           displayName: formData.displayName,
           description: formData.description,
-          schema: formData.schema,
-          defaultBranch: formData.defaultBranch,
+          value: formData.value,
+          encrypted: formData.encrypted,
         },
       })
     } else {
@@ -184,58 +158,25 @@ export default function VariablesPage() {
         name: formData.name,
         displayName: formData.displayName || formData.name,
         description: formData.description,
-        schema: formData.schema,
-        branches: formData.branches,
-        defaultBranch: formData.defaultBranch,
+        value: formData.value,
+        encrypted: formData.encrypted,
       })
     }
   }
 
-  const addSchemaField = () => {
-    setFormData((prev) => ({
-      ...prev,
-      schema: [
-        ...prev.schema,
-        { key: '', displayName: '', type: 'string' as VariableFieldType },
-      ],
-    }))
-  }
-
-  const updateSchemaField = (index: number, updates: Partial<VariableFieldSchema>) => {
-    setFormData((prev) => ({
-      ...prev,
-      schema: prev.schema.map((field, i) => (i === index ? { ...field, ...updates } : field)),
-    }))
-  }
-
-  const removeSchemaField = (index: number) => {
-    setFormData((prev) => ({
-      ...prev,
-      schema: prev.schema.filter((_, i) => i !== index),
-    }))
-  }
-
-  const revealSecrets = async (pkg: VariablePackage, branch: string) => {
+  const revealValue = async (v: VariableRecord) => {
     try {
-      const response = await variablePackagesApi.revealBranch(pkg._id, branch)
-      setRevealedSecrets((prev) => ({
-        ...prev,
-        [pkg._id]: {
-          ...prev[pkg._id],
-          [branch]: response.data.values,
-        },
-      }))
+      const response = await variablePackagesApi.reveal(v._id)
+      setRevealedValues((prev) => ({ ...prev, [v._id]: response.data.value }))
     } catch (error) {
-      console.error('Failed to reveal secrets:', error)
+      console.error('Failed to reveal value:', error)
     }
   }
 
-  const hideSecrets = (pkgId: string, branch: string) => {
-    setRevealedSecrets((prev) => {
+  const hideValue = (id: string) => {
+    setRevealedValues((prev) => {
       const next = { ...prev }
-      if (next[pkgId]) {
-        delete next[pkgId][branch]
-      }
+      delete next[id]
       return next
     })
   }
@@ -246,22 +187,52 @@ export default function VariablesPage() {
     setTimeout(() => setCopied(null), 2000)
   }
 
-  const getTokenPath = (pkgName: string, branch: string, fieldKey: string) => {
-    return `{{packages.${pkgName}[${branch}].${fieldKey}}}`
+  const getTokenPath = (name: string) => {
+    return `{{variables.${name}}}`
+  }
+
+  // Try to detect if value is JSON
+  const isJsonValue = (value: string): boolean => {
+    try {
+      const parsed = JSON.parse(value)
+      return typeof parsed === 'object' && parsed !== null
+    } catch {
+      return false
+    }
+  }
+
+  // Format value for display (truncate if long, format JSON)
+  const formatValuePreview = (value: string, maxLength = 100): string => {
+    if (isJsonValue(value)) {
+      try {
+        const obj = JSON.parse(value)
+        const keys = Object.keys(obj)
+        if (keys.length <= 3) {
+          return `{ ${keys.join(', ')} }`
+        }
+        return `{ ${keys.slice(0, 3).join(', ')}, ... }`
+      } catch {
+        return value
+      }
+    }
+    if (value.length > maxLength) {
+      return value.slice(0, maxLength) + '...'
+    }
+    return value
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Variable Packages</h1>
+          <h1 className="text-2xl font-bold">Variables</h1>
           <p className="text-muted-foreground">
-            Manage credential packages and configuration variables for workflows
+            Manage variables and credentials for use in workflows and templates
           </p>
         </div>
         <Button onClick={openCreateModal}>
           <Plus className="mr-2 h-4 w-4" />
-          Create Package
+          Create Variable
         </Button>
       </div>
 
@@ -269,9 +240,8 @@ export default function VariablesPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Package</TableHead>
-              <TableHead>Branches</TableHead>
-              <TableHead>Fields</TableHead>
+              <TableHead>Variable</TableHead>
+              <TableHead>Value</TableHead>
               <TableHead>Created</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="w-12" />
@@ -280,330 +250,202 @@ export default function VariablesPage() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-24 text-center">
+                <TableCell colSpan={5} className="h-24 text-center">
                   Loading...
                 </TableCell>
               </TableRow>
-            ) : packages.length === 0 ? (
+            ) : variables.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
                   <div className="flex flex-col items-center gap-2">
-                    <Package className="h-8 w-8" />
-                    <p>No variable packages yet</p>
-                    <p className="text-sm">Create a package to store credentials and configuration</p>
+                    <VariableIcon className="h-8 w-8" />
+                    <p>No variables yet</p>
+                    <p className="text-sm">Create a variable to store credentials and configuration</p>
                   </div>
                 </TableCell>
               </TableRow>
             ) : (
-              packages.map((pkg) => (
-                <TableRow key={pkg._id}>
-                  <TableCell>
-                    <div>
-                      <p className="font-medium">{pkg.displayName || pkg.name}</p>
-                      <code className="text-xs text-muted-foreground">{pkg.name}</code>
-                      {pkg.description && (
-                        <p className="text-sm text-muted-foreground mt-1">{pkg.description}</p>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {Object.keys(pkg.branches).map((branch) => (
-                        <Badge
-                          key={branch}
-                          variant={branch === pkg.defaultBranch ? 'default' : 'secondary'}
-                          className="text-xs"
+              variables.map((v) => {
+                const isRevealed = !!revealedValues[v._id]
+                const displayValue = v.encrypted
+                  ? isRevealed
+                    ? formatValuePreview(revealedValues[v._id])
+                    : '••••••••'
+                  : formatValuePreview(v.value)
+
+                return (
+                  <TableRow key={v._id}>
+                    <TableCell>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium">{v.displayName || v.name}</p>
+                          {v.encrypted && (
+                            <Badge variant="outline" className="text-xs">
+                              <Lock className="h-3 w-3 mr-1" />
+                              Encrypted
+                            </Badge>
+                          )}
+                        </div>
+                        <code className="text-xs text-muted-foreground">{v.name}</code>
+                        {v.description && (
+                          <p className="text-sm text-muted-foreground mt-1">{v.description}</p>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <code className="bg-muted px-2 py-1 rounded text-sm max-w-[300px] truncate">
+                          {displayValue}
+                        </code>
+                        {v.encrypted && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2"
+                            onClick={() => (isRevealed ? hideValue(v._id) : revealValue(v))}
+                          >
+                            {isRevealed ? (
+                              <EyeOff className="h-4 w-4" />
+                            ) : (
+                              <Eye className="h-4 w-4" />
+                            )}
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2"
+                          onClick={() => copyToClipboard(getTokenPath(v.name), v._id)}
                         >
-                          <GitBranch className="h-3 w-3 mr-1" />
-                          {branch}
-                        </Badge>
-                      ))}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {pkg.schema.map((field) => (
-                        <Badge key={field.key} variant="outline" className="text-xs">
-                          {field.type === 'secret' && <Lock className="h-3 w-3 mr-1" />}
-                          {field.key}
-                        </Badge>
-                      ))}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDateTime(pkg.createdAt)}
-                  </TableCell>
-                  <TableCell>
-                    {pkg.isActive ? (
-                      <Badge variant="outline" className="text-green-600 border-green-600">
-                        Active
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="text-gray-500 border-gray-500">
-                        Inactive
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                          <MoreHorizontal className="h-4 w-4" />
+                          {copied === v._id ? (
+                            <span className="text-xs text-green-500">Copied!</span>
+                          ) : (
+                            <Copy className="h-4 w-4" />
+                          )}
                         </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => openEditModal(pkg)}>
-                          <Pencil className="mr-2 h-4 w-4" />
-                          Edit Package
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          className="text-destructive"
-                          onClick={() => setPackageToDelete(pkg)}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              ))
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {formatDateTime(v.createdAt)}
+                    </TableCell>
+                    <TableCell>
+                      {v.isActive ? (
+                        <Badge variant="outline" className="text-green-600 border-green-600">
+                          Active
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-gray-500 border-gray-500">
+                          Inactive
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => openEditModal(v)}>
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Edit Variable
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={() => setVariableToDelete(v)}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                )
+              })
             )}
           </TableBody>
         </Table>
       </div>
 
-      {/* Expanded view for each package */}
-      {packages.map((pkg) => (
-        <div key={`detail-${pkg._id}`} className="rounded-md border p-4 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-semibold">{pkg.displayName || pkg.name}</h3>
-            <div className="flex gap-2">
-              <Input
-                placeholder="New branch name"
-                value={newBranchName}
-                onChange={(e) => setNewBranchName(e.target.value)}
-                className="w-40 h-8"
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!newBranchName || addBranchMutation.isPending}
-                onClick={() => {
-                  const emptyData: Record<string, unknown> = {}
-                  pkg.schema.forEach((f) => {
-                    emptyData[f.key] = ''
-                  })
-                  addBranchMutation.mutate({ id: pkg._id, name: newBranchName, data: emptyData })
-                }}
-              >
-                <Plus className="h-4 w-4 mr-1" />
-                Add Branch
-              </Button>
-            </div>
-          </div>
-
-          {Object.entries(pkg.branches).map(([branchName, branchData]) => {
-            const isRevealed = !!revealedSecrets[pkg._id]?.[branchName]
-            const revealedData = revealedSecrets[pkg._id]?.[branchName] || {}
-
-            return (
-              <div key={branchName} className="border rounded-md p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Badge variant={branchName === pkg.defaultBranch ? 'default' : 'secondary'}>
-                      <GitBranch className="h-3 w-3 mr-1" />
-                      {branchName}
-                    </Badge>
-                    {branchName === pkg.defaultBranch && (
-                      <span className="text-xs text-muted-foreground">(default)</span>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    {pkg.schema.some((f) => f.type === 'secret') && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() =>
-                          isRevealed ? hideSecrets(pkg._id, branchName) : revealSecrets(pkg, branchName)
-                        }
-                      >
-                        {isRevealed ? (
-                          <>
-                            <EyeOff className="h-4 w-4 mr-1" />
-                            Hide
-                          </>
-                        ) : (
-                          <>
-                            <Eye className="h-4 w-4 mr-1" />
-                            Reveal
-                          </>
-                        )}
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        setEditingBranch({
-                          packageId: pkg._id,
-                          branchName,
-                          data: isRevealed ? { ...revealedData } : { ...branchData },
-                        })
-                      }
-                    >
-                      <Pencil className="h-4 w-4 mr-1" />
-                      Edit
-                    </Button>
-                    {Object.keys(pkg.branches).length > 1 && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-destructive"
-                        onClick={() => deleteBranchMutation.mutate({ id: pkg._id, branch: branchName })}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  {pkg.schema.map((field) => {
-                    const value = isRevealed ? revealedData[field.key] : branchData[field.key]
-                    const displayValue =
-                      field.type === 'secret' && !isRevealed ? '••••••••' : String(value || '')
-                    const tokenPath = getTokenPath(pkg.name, branchName, field.key)
-                    const copyKey = `${pkg._id}-${branchName}-${field.key}`
-
-                    return (
-                      <div key={field.key} className="flex items-center gap-2 text-sm">
-                        <span className="text-muted-foreground min-w-[100px]">
-                          {field.type === 'secret' && <Lock className="h-3 w-3 inline mr-1" />}
-                          {field.displayName || field.key}:
-                        </span>
-                        <code className="bg-muted px-1 rounded flex-1 truncate">{displayValue}</code>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-6 w-6 p-0"
-                          onClick={() => copyToClipboard(tokenPath, copyKey)}
-                        >
-                          {copied === copyKey ? (
-                            <span className="text-xs text-green-500">Copied</span>
-                          ) : (
-                            <Copy className="h-3 w-3" />
-                          )}
-                        </Button>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      ))}
-
-      {/* Create/Edit Package Modal */}
+      {/* Create/Edit Variable Modal */}
       <Dialog open={isModalOpen} onOpenChange={closeModal}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingPackage ? 'Edit Package' : 'Create Package'}</DialogTitle>
+            <DialogTitle>{editingVariable ? 'Edit Variable' : 'Create Variable'}</DialogTitle>
             <DialogDescription>
-              {editingPackage
-                ? 'Update the package configuration.'
-                : 'Create a new variable package for credentials or configuration.'}
+              {editingVariable
+                ? 'Update the variable configuration.'
+                : 'Create a new variable for credentials or configuration. Values can be strings or JSON/YAML objects.'}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Name *</label>
-              <Input
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="e.g., email_credentials"
-                required
-                disabled={!!editingPackage}
-              />
-              <p className="text-xs text-muted-foreground">
-                Used in templates: {`{{packages.${formData.name || 'name'}[branch].field}}`}
-              </p>
-            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Name *</label>
+                <Input
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="e.g., api_key"
+                  required
+                  disabled={!!editingVariable}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Used in templates: {getTokenPath(formData.name || 'name')}
+                </p>
+              </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Display Name</label>
-              <Input
-                value={formData.displayName}
-                onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
-                placeholder="e.g., Email Credentials"
-              />
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Display Name</label>
+                <Input
+                  value={formData.displayName}
+                  onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
+                  placeholder="e.g., API Key"
+                />
+              </div>
             </div>
 
             <div className="space-y-2">
               <label className="text-sm font-medium">Description</label>
-              <Textarea
+              <Input
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                placeholder="What is this package used for?"
-                rows={2}
+                placeholder="What is this variable used for?"
               />
             </div>
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <label className="text-sm font-medium">Fields</label>
-                <Button type="button" variant="outline" size="sm" onClick={addSchemaField}>
-                  <Plus className="h-4 w-4 mr-1" />
-                  Add Field
-                </Button>
+                <label className="text-sm font-medium">Value *</label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <Checkbox
+                    checked={formData.encrypted}
+                    onCheckedChange={(checked) =>
+                      setFormData({ ...formData, encrypted: checked === true })
+                    }
+                  />
+                  <Lock className="h-3 w-3" />
+                  Encrypt value
+                </label>
               </div>
-              <div className="space-y-2 max-h-48 overflow-y-auto">
-                {formData.schema.map((field, index) => (
-                  <div key={index} className="flex items-center gap-2 p-2 border rounded">
-                    <Input
-                      placeholder="key"
-                      value={field.key}
-                      onChange={(e) => updateSchemaField(index, { key: e.target.value })}
-                      className="flex-1"
-                    />
-                    <Input
-                      placeholder="Label"
-                      value={field.displayName}
-                      onChange={(e) => updateSchemaField(index, { displayName: e.target.value })}
-                      className="flex-1"
-                    />
-                    <Select
-                      value={field.type}
-                      onValueChange={(value) => updateSchemaField(index, { type: value as VariableFieldType })}
-                    >
-                      <SelectTrigger className="w-28">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="string">String</SelectItem>
-                        <SelectItem value="secret">Secret</SelectItem>
-                        <SelectItem value="number">Number</SelectItem>
-                        <SelectItem value="boolean">Boolean</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeSchemaField(index)}
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
-                ))}
-                {formData.schema.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-4">
-                    No fields defined. Add fields to define the structure.
-                  </p>
-                )}
-              </div>
+              <Textarea
+                value={formData.value}
+                onChange={(e) => setFormData({ ...formData, value: e.target.value })}
+                placeholder={`Enter a string value or JSON/YAML object, e.g.:
+{
+  "host": "localhost",
+  "port": 5432,
+  "database": "mydb"
+}`}
+                rows={10}
+                className="font-mono text-sm"
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                For JSON objects, access nested values with: {`{{variables.${formData.name || 'name'}.path.to.field}}`}
+              </p>
             </div>
 
             <DialogFooter>
@@ -616,95 +458,39 @@ export default function VariablesPage() {
                   createMutation.isPending ||
                   updateMutation.isPending ||
                   !formData.name ||
-                  formData.schema.length === 0
+                  !formData.value
                 }
               >
-                {editingPackage
+                {editingVariable
                   ? updateMutation.isPending
                     ? 'Saving...'
                     : 'Save Changes'
                   : createMutation.isPending
                     ? 'Creating...'
-                    : 'Create Package'}
+                    : 'Create Variable'}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* Edit Branch Modal */}
-      <Dialog open={!!editingBranch} onOpenChange={() => setEditingBranch(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit Branch: {editingBranch?.branchName}</DialogTitle>
-          </DialogHeader>
-          {editingBranch && (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                updateBranchMutation.mutate({
-                  id: editingBranch.packageId,
-                  branch: editingBranch.branchName,
-                  data: editingBranch.data,
-                })
-              }}
-              className="space-y-4"
-            >
-              {packages
-                .find((p) => p._id === editingBranch.packageId)
-                ?.schema.map((field) => (
-                  <div key={field.key} className="space-y-2">
-                    <label className="text-sm font-medium">
-                      {field.type === 'secret' && <Lock className="h-3 w-3 inline mr-1" />}
-                      {field.displayName || field.key}
-                    </label>
-                    <Input
-                      type={field.type === 'secret' ? 'password' : 'text'}
-                      value={String(editingBranch.data[field.key] || '')}
-                      onChange={(e) =>
-                        setEditingBranch((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                data: { ...prev.data, [field.key]: e.target.value },
-                              }
-                            : null
-                        )
-                      }
-                      placeholder={field.type === 'secret' ? 'Enter new value to update' : ''}
-                    />
-                  </div>
-                ))}
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setEditingBranch(null)}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={updateBranchMutation.isPending}>
-                  {updateBranchMutation.isPending ? 'Saving...' : 'Save'}
-                </Button>
-              </DialogFooter>
-            </form>
-          )}
-        </DialogContent>
-      </Dialog>
-
       {/* Delete Confirmation */}
-      <AlertDialog open={!!packageToDelete} onOpenChange={() => setPackageToDelete(null)}>
+      <AlertDialog open={!!variableToDelete} onOpenChange={() => setVariableToDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Package?</AlertDialogTitle>
+            <AlertDialogTitle>Delete Variable?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete the package &quot;{packageToDelete?.displayName || packageToDelete?.name}&quot;
-              and all its branches. This action cannot be undone.
+              This will permanently delete the variable &quot;{variableToDelete?.displayName || variableToDelete?.name}&quot;.
+              This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => packageToDelete && deleteMutation.mutate(packageToDelete._id)}
+              onClick={() => variableToDelete && deleteMutation.mutate(variableToDelete._id)}
             >
-              {deleteMutation.isPending ? 'Deleting...' : 'Delete Package'}
+              {deleteMutation.isPending ? 'Deleting...' : 'Delete Variable'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

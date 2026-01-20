@@ -1901,25 +1901,14 @@ export const documentsApi = {
   },
 }
 
-// Variable Package Types
-export type VariableFieldType = 'string' | 'secret' | 'number' | 'boolean'
-
-export interface VariableFieldSchema {
-  key: string
-  displayName: string
-  type: VariableFieldType
-  required?: boolean
-  description?: string
-}
-
-export interface VariablePackage {
+// Variable Types (simplified model)
+export interface VariableRecord {
   _id: string
   name: string
   displayName?: string
   description?: string
-  schema: VariableFieldSchema[]
-  branches: Record<string, Record<string, unknown>>
-  defaultBranch?: string
+  value: string              // Raw value or JSON string (redacted if encrypted)
+  encrypted: boolean         // If true, value is encrypted at rest
   createdById?: string | null
   updatedById?: string | null
   isActive: boolean
@@ -1927,25 +1916,32 @@ export interface VariablePackage {
   updatedAt: string
 }
 
-// Token browser format for packages
-export interface PackageToken {
-  packageId: string
-  name: string
-  displayName: string
-  description?: string
-  defaultBranch?: string
-  branches: string[]
-  fields: Array<{
-    key: string
-    displayName: string
-    type: VariableFieldType
-    isSecret: boolean
-  }>
+// Path/value info for nested object keys
+export interface KeyValuePath {
+  path: string               // e.g., "user.profile.name"
+  value: unknown             // The actual value
+  type: 'string' | 'number' | 'boolean' | 'null' | 'object' | 'array'
 }
 
-// Variable Packages API
+// Token browser format for variables
+export interface VariableToken {
+  variableId: string
+  name: string
+  description?: string
+  encrypted: boolean
+  isObject: boolean          // True if value is a JSON/YAML object
+  value?: string | null      // For simple (non-object) values
+  paths: KeyValuePath[]      // All paths with values for objects
+}
+
+// Legacy aliases for backwards compatibility
+export type VariablePackage = VariableRecord
+export type Variable = VariableRecord
+export type PackageToken = VariableToken
+
+// Variables API (simplified)
 export const variablePackagesApi = {
-  list: async (params?: { includeInactive?: boolean; search?: string }): Promise<ApiResponse<VariablePackage[]>> => {
+  list: async (params?: { includeInactive?: boolean; search?: string }): Promise<ApiResponse<Variable[]>> => {
     const searchParams = new URLSearchParams()
     if (params?.includeInactive) searchParams.append('includeInactive', 'true')
     if (params?.search) searchParams.append('search', params.search)
@@ -1954,7 +1950,7 @@ export const variablePackagesApi = {
     return handleResponse(response)
   },
 
-  get: async (id: string): Promise<ApiResponse<VariablePackage>> => {
+  get: async (id: string): Promise<ApiResponse<Variable>> => {
     const response = await authFetch(`${API_BASE}/variable-packages/${id}`)
     return handleResponse(response)
   },
@@ -1963,10 +1959,9 @@ export const variablePackagesApi = {
     name: string
     displayName?: string
     description?: string
-    schema: VariableFieldSchema[]
-    branches?: Record<string, Record<string, unknown>>
-    defaultBranch?: string
-  }): Promise<ApiResponse<VariablePackage>> => {
+    value: string
+    encrypted?: boolean
+  }): Promise<ApiResponse<Variable>> => {
     const response = await authFetch(`${API_BASE}/variable-packages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1979,11 +1974,10 @@ export const variablePackagesApi = {
     name: string
     displayName: string
     description: string
-    schema: VariableFieldSchema[]
-    branches: Record<string, Record<string, unknown>>
-    defaultBranch: string
+    value: string
+    encrypted: boolean
     isActive: boolean
-  }>): Promise<ApiResponse<VariablePackage>> => {
+  }>): Promise<ApiResponse<Variable>> => {
     const response = await authFetch(`${API_BASE}/variable-packages/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -1999,45 +1993,19 @@ export const variablePackagesApi = {
     return handleResponse(response)
   },
 
-  // Branch management
-  addBranch: async (id: string, name: string, data: Record<string, unknown>): Promise<ApiResponse<VariablePackage>> => {
-    const response = await authFetch(`${API_BASE}/variable-packages/${id}/branches`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, data }),
-    })
-    return handleResponse(response)
-  },
-
-  updateBranch: async (id: string, branch: string, data: Record<string, unknown>): Promise<ApiResponse<VariablePackage>> => {
-    const response = await authFetch(`${API_BASE}/variable-packages/${id}/branches/${branch}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data }),
-    })
-    return handleResponse(response)
-  },
-
-  deleteBranch: async (id: string, branch: string): Promise<ApiResponse<void>> => {
-    const response = await authFetch(`${API_BASE}/variable-packages/${id}/branches/${branch}`, {
-      method: 'DELETE',
-    })
-    return handleResponse(response)
-  },
-
-  // Reveal secrets (decrypted values)
-  revealBranch: async (id: string, branch: string): Promise<ApiResponse<{
-    packageId: string
-    packageName: string
-    branchName: string
-    values: Record<string, unknown>
+  // Reveal decrypted value
+  reveal: async (id: string): Promise<ApiResponse<{
+    variableId: string
+    variableName: string
+    value: string
+    encrypted: boolean
   }>> => {
-    const response = await authFetch(`${API_BASE}/variable-packages/${id}/branches/${branch}/reveal`)
+    const response = await authFetch(`${API_BASE}/variable-packages/${id}/reveal`)
     return handleResponse(response)
   },
 
   // Token browser format
-  getTokens: async (): Promise<ApiResponse<PackageToken[]>> => {
+  getTokens: async (): Promise<ApiResponse<VariableToken[]>> => {
     const response = await authFetch(`${API_BASE}/variable-packages/tokens/list`)
     return handleResponse(response)
   },

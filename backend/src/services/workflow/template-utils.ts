@@ -1,7 +1,8 @@
 import { ObjectId } from 'mongodb';
 import { getDb } from '../../db/connection.js';
 import { VariablePackage } from '../../types/index.js';
-import { decryptPackageBranches, isEncryptionConfigured } from '../encryption.js';
+import { isEncryptionConfigured } from '../encryption.js';
+import YAML from 'yaml';
 
 // Environment config for webhook URLs
 // Set BASE_URL in .env for your environment (see .env.example)
@@ -244,17 +245,125 @@ export function resolveTitleTemplate(
   return result;
 }
 
+/**
+ * Async version of resolveTitleTemplate that supports variable packages with nested interpolation.
+ *
+ * Supports:
+ *   {{variables.name}} - Simple variable access
+ *   {{variables.name.path}} - Nested variable access
+ *   {{variables.name[key].path}} - Bracket notation for dynamic keys
+ *   {{variables.yaml[{{variables.test.testkey}}].my}} - Nested interpolation
+ *   {{input.path}} - Input payload access
+ *   {{item}}, {{_index}}, {{_total}} - Loop variables
+ */
+export async function resolveTitleTemplateWithPackages(
+  template: string,
+  inputPayload?: Record<string, unknown>,
+  fallbackTitle?: string
+): Promise<string> {
+  if (!template) return fallbackTitle || '';
+
+  // Load packages for variable resolution
+  const packageContext = await loadPackageContext();
+
+  let result = template;
+  let iterations = 0;
+  const maxIterations = 10;
+
+  // Iterate to resolve nested expressions from innermost outward
+  while (iterations < maxIterations) {
+    const prevResult = result;
+
+    // Match innermost expressions (those without nested {{ }})
+    result = result.replace(/\{\{([^{}]+)\}\}/g, (_match, path) => {
+      const trimmedPath = path.trim();
+
+      // Handle variables.* prefix - supports nested interpolation
+      if (trimmedPath.startsWith('variables.') && packageContext) {
+        const value = getValueByPathWithBrackets(
+          packageContext as unknown as Record<string, unknown>,
+          trimmedPath
+        );
+        if (value !== undefined && value !== null) {
+          if (typeof value === 'object') {
+            // For objects in titles, try to get a meaningful identifier
+            const obj = value as Record<string, unknown>;
+            if (obj.name) return String(obj.name);
+            if (obj.title) return String(obj.title);
+            if (obj.id) return String(obj.id);
+            return JSON.stringify(value);
+          }
+          return String(value);
+        }
+        // If variable not found, leave as-is for potential later resolution
+        return _match;
+      }
+
+      // Handle input.* prefix explicitly
+      if (trimmedPath.startsWith('input.') && inputPayload) {
+        const inputPath = trimmedPath.substring(6); // Remove 'input.' prefix
+        const value = getValueByPath(inputPayload, inputPath);
+        if (value !== undefined && value !== null) {
+          if (typeof value === 'object') {
+            const obj = value as Record<string, unknown>;
+            if (obj.name) return String(obj.name);
+            if (obj.title) return String(obj.title);
+            if (obj.id) return String(obj.id);
+            return JSON.stringify(value);
+          }
+          return String(value);
+        }
+        return '';
+      }
+
+      // Handle direct property lookup (for item, _index, _total, etc.)
+      if (inputPayload) {
+        const value = getValueByPath(inputPayload, trimmedPath);
+        if (value !== undefined && value !== null) {
+          if (typeof value === 'object') {
+            const obj = value as Record<string, unknown>;
+            if (obj.name) return String(obj.name);
+            if (obj.title) return String(obj.title);
+            if (obj.id) return String(obj.id);
+            return JSON.stringify(value);
+          }
+          return String(value);
+        }
+      }
+
+      // If not found, return empty string
+      return '';
+    });
+
+    // If nothing changed, we're done
+    if (result === prevResult) {
+      break;
+    }
+
+    iterations++;
+  }
+
+  // If the result is empty after substitution, use fallback
+  if (!result.trim()) {
+    return fallbackTitle || template;
+  }
+
+  return result;
+}
+
 // ============================================================================
-// Variable Package Resolution with Nested Interpolation
+// Variables Resolution with Nested Interpolation
 // ============================================================================
 
 /**
- * Package context for template resolution
+ * Variable context for template resolution
  * Loaded from database and decrypted for runtime use
+ *
+ * Template syntax: {{variables.name}} or {{variables.name.path.to.field}}
  */
 export interface PackageContext {
-  // packages.{packageName}.{branchName}.{fieldKey}
-  packages: Record<string, Record<string, Record<string, unknown>>>;
+  // variables.{variableName} -> parsed value (string or object)
+  variables: Record<string, unknown>;
 }
 
 /**
@@ -265,8 +374,8 @@ let packageCacheTime: number = 0;
 const PACKAGE_CACHE_TTL_MS = 60000; // 1 minute cache
 
 /**
- * Load all active variable packages from database
- * Returns decrypted package data organized by name > branch > field
+ * Load all active variables from database
+ * Returns decrypted values organized by name
  */
 export async function loadPackageContext(): Promise<PackageContext> {
   const now = Date.now();
@@ -277,26 +386,52 @@ export async function loadPackageContext(): Promise<PackageContext> {
   }
 
   const db = getDb();
-  const packages = await db
+  const variables = await db
     .collection<VariablePackage>('variable_packages')
     .find({ isActive: true })
     .toArray();
 
-  const context: PackageContext = { packages: {} };
+  const variablesMap: Record<string, unknown> = {};
 
-  for (const pkg of packages) {
-    // Decrypt secrets if encryption is configured
-    let branches = pkg.branches;
-    if (isEncryptionConfigured()) {
+  for (const v of variables) {
+    let value = v.value;
+
+    // Decrypt if encrypted
+    if (v.encrypted && isEncryptionConfigured()) {
       try {
-        branches = decryptPackageBranches(pkg.branches, pkg.schema);
+        const { decrypt, isEncrypted } = await import('../encryption.js');
+        if (isEncrypted(value)) {
+          value = decrypt(value);
+        }
       } catch {
-        console.warn(`[TemplateUtils] Failed to decrypt package ${pkg.name}, using raw values`);
+        console.warn(`[TemplateUtils] Failed to decrypt variable ${v.name}, using raw value`);
       }
     }
 
-    context.packages[pkg.name] = branches;
+    // Try to parse as JSON, then YAML, for object access
+    try {
+      variablesMap[v.name] = JSON.parse(value);
+    } catch {
+      // Not JSON, try YAML
+      try {
+        const parsed = YAML.parse(value);
+        // Only use YAML result if it's actually an object (YAML.parse returns string for plain text)
+        if (parsed !== null && typeof parsed === 'object') {
+          variablesMap[v.name] = parsed;
+        } else {
+          // Not structured data, store as string
+          variablesMap[v.name] = value;
+        }
+      } catch {
+        // Not YAML either, store as string
+        variablesMap[v.name] = value;
+      }
+    }
   }
+
+  const context: PackageContext = {
+    variables: variablesMap,
+  };
 
   // Update cache
   packageCache = context;
@@ -380,7 +515,10 @@ export function getValueByPathWithBrackets(
 
 /**
  * Resolve nested template expressions
- * Handles patterns like: {{packages.email[{{trigger.payload.account}}].username}}
+ * Handles patterns like:
+ *   {{variables.config.database.host}}     - dot notation
+ *   {{variables.config[env].database}}     - bracket notation for dynamic keys
+ *   {{variables.{{input.varName}}.field}}  - nested interpolation
  *
  * Resolution order:
  * 1. Resolve innermost expressions first (those without nested braces)
@@ -403,13 +541,14 @@ export function resolveNestedExpressions(
     result = result.replace(/\{\{([^{}]+)\}\}/g, (match, expression) => {
       const trimmed = expression.trim();
 
-      // Try to resolve from packages first (with bracket notation)
-      if (trimmed.startsWith('packages.') && packageContext) {
+      // Try to resolve from variables ({{variables.name}} or {{variables.name.path}} or {{variables.name[key].path}})
+      if (trimmed.startsWith('variables.') && packageContext) {
+        // Use bracket-aware path resolution to support both dot and bracket notation
         const value = getValueByPathWithBrackets(packageContext as unknown as Record<string, unknown>, trimmed);
         if (value !== undefined) {
           return typeof value === 'object' ? JSON.stringify(value) : String(value);
         }
-        // If package variable not found, leave as-is for potential later resolution
+        // If variable not found, leave as-is for potential later resolution
         return match;
       }
 
@@ -455,12 +594,12 @@ export function resolveNestedExpressions(
 }
 
 /**
- * Full template resolution with package support and nested interpolation
+ * Full template resolution with variable support and nested interpolation
  *
  * Supports:
  * - All standard template variables (system, input, etc.)
- * - Package variables: {{packages.name[branch].field}}
- * - Nested interpolation: {{packages.name[{{input.branch}}].field}}
+ * - Variables: {{variables.name}} or {{variables.name.path.to.field}}
+ * - Nested interpolation: {{variables.{{input.configName}}.value}}
  */
 export async function resolveTemplateWithPackages(
   template: string,
@@ -475,7 +614,7 @@ export async function resolveTemplateWithPackages(
   // Then apply standard template resolution for remaining variables
   result = resolveTemplateVariables(result, context);
 
-  // Final pass for any remaining package variables that may have been unresolved
+  // Final pass for any remaining variables that may have been unresolved
   result = resolveNestedExpressions(result, context, packageContext);
 
   return result;
@@ -495,7 +634,7 @@ export function resolveTemplateWithPackagesSync(
   // Then apply standard template resolution for remaining variables
   result = resolveTemplateVariables(result, context);
 
-  // Final pass for any remaining package variables
+  // Final pass for any remaining variables
   result = resolveNestedExpressions(result, context, packageContext);
 
   return result;
