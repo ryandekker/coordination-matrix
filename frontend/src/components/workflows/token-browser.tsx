@@ -34,6 +34,8 @@ interface TokenBrowserProps {
   fieldValue?: string
   // Callback when field value changes (enables editable mode)
   onFieldValueChange?: (value: string) => void
+  // Task-only mode - shows system variables and variable packages without workflow context
+  taskOnly?: boolean
 }
 
 /**
@@ -55,6 +57,7 @@ export function TokenBrowser({
   fieldLabel,
   fieldValue,
   onFieldValueChange,
+  taskOnly = false,
 }: TokenBrowserProps) {
   const [dialogOpen, setDialogOpen] = useState(false)
 
@@ -106,6 +109,7 @@ export function TokenBrowser({
         fieldLabel={fieldLabel}
         fieldValue={fieldValue}
         onFieldValueChange={onFieldValueChange}
+        taskOnly={taskOnly}
       />
     </>
   )

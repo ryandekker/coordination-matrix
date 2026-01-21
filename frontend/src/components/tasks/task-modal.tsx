@@ -32,6 +32,7 @@ import { useCreateTask, useUpdateTask, useRerunTask, useUsers, useWorkflows, use
 import { cn } from '@/lib/utils'
 import { TaskActivity } from './task-activity'
 import { WebhookTaskConfig } from './webhook-task-config'
+import { FlowTaskConfig, FlowConfig } from './flow-task-config'
 import {
   TASK_TYPE_CONFIG,
   getTaskTypeConfig,
@@ -45,6 +46,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { UserChip } from '@/components/ui/user-chip'
 import { TagInput } from '@/components/ui/tag-input'
+import { TemplateTextarea } from '@/components/ui/template-textarea'
 import {
   SubtasksList,
   AttachedDocuments,
@@ -77,6 +79,7 @@ export function TaskModal({
   const prevIsOpenRef = useRef(false)
   const titleInputRef = useRef<HTMLInputElement | null>(null)
   const [webhookConfig, setWebhookConfig] = useState<WebhookConfig | undefined>(undefined)
+  const [flowConfig, setFlowConfig] = useState<FlowConfig | undefined>(undefined)
 
   // Subtask creation state
   const subtaskInputRef = useRef<HTMLInputElement>(null)
@@ -414,6 +417,27 @@ export function TaskModal({
       taskData.webhookConfig = webhookConfig
     }
 
+    // For flow tasks, set the workflow to trigger and input payload
+    if (taskData.taskType === 'flow' && flowConfig?.workflowId) {
+      taskData.triggerWorkflowId = flowConfig.workflowId
+      // Parse input payload and add to metadata for the workflow to receive
+      if (flowConfig.inputPayload) {
+        try {
+          // Store the template string in metadata - backend will resolve variables
+          taskData.metadata = {
+            ...(taskData.metadata || {}),
+            flowInputPayloadTemplate: flowConfig.inputPayload,
+          }
+        } catch {
+          // If parsing fails, just store as template
+          taskData.metadata = {
+            ...(taskData.metadata || {}),
+            flowInputPayloadTemplate: flowConfig.inputPayload,
+          }
+        }
+      }
+    }
+
     if (task) {
       await updateTask.mutateAsync({ id: task._id, data: taskData })
     } else {
@@ -597,78 +621,22 @@ export function TaskModal({
               </div>
 
               {/* Summary */}
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Summary</label>
-                <textarea
-                  {...register('summary')}
-                  placeholder="Brief description..."
-                  rows={2}
-                  className={cn(
-                    'flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm',
-                    'placeholder:text-muted-foreground resize-y',
-                    'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
-                  )}
-                />
-              </div>
-
-              {/* Status & Urgency */}
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Status</label>
-                  <Controller
-                    name="status"
-                    control={control}
-                    render={({ field }) => (
-                      <Select value={field.value as string || ''} onValueChange={field.onChange}>
-                        <SelectTrigger className="h-8 text-sm">
-                          <SelectValue placeholder="Select status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {statusOptions.map((opt) => (
-                            <SelectItem key={opt.code} value={opt.code}>
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className="h-2 w-2 rounded-full flex-shrink-0"
-                                  style={{ backgroundColor: opt.color }}
-                                />
-                                {opt.displayName}
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
+              <Controller
+                name="summary"
+                control={control}
+                render={({ field }) => (
+                  <TemplateTextarea
+                    label="Summary"
+                    value={field.value as string || ''}
+                    onChange={field.onChange}
+                    placeholder="Brief description... Use {{variable}} for dynamic values"
+                    minHeight="60px"
+                    maxHeight="120px"
+                    showTokenBrowser={true}
+                    taskOnly={true}
                   />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Urgency</label>
-                  <Controller
-                    name="urgency"
-                    control={control}
-                    render={({ field }) => (
-                      <Select value={field.value as string || ''} onValueChange={field.onChange}>
-                        <SelectTrigger className="h-8 text-sm">
-                          <SelectValue placeholder="Select urgency" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {urgencyOptions.map((opt) => (
-                            <SelectItem key={opt.code} value={opt.code}>
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className="h-2 w-2 rounded-full flex-shrink-0"
-                                  style={{ backgroundColor: opt.color }}
-                                />
-                                {opt.displayName}
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  />
-                </div>
-              </div>
+                )}
+              />
 
               {/* Task Type */}
               <div className="space-y-1">
@@ -688,6 +656,12 @@ export function TaskModal({
                             maxRetries: 3,
                             retryDelayMs: 1000,
                             timeoutMs: 30000,
+                          })
+                        }
+                        if (val === 'flow' && !flowConfig) {
+                          setFlowConfig({
+                            workflowId: '',
+                            inputPayload: '{\n  "title": "{{title}}",\n  "summary": "{{summary}}"\n}',
                           })
                         }
                       }}
@@ -725,6 +699,16 @@ export function TaskModal({
                 />
               )}
 
+              {/* Flow Configuration for flow type */}
+              {currentTaskType === 'flow' && (
+                <FlowTaskConfig
+                  task={null}
+                  isEditMode={false}
+                  flowConfig={flowConfig}
+                  onConfigChange={(config) => setFlowConfig(config)}
+                />
+              )}
+
               {/* Assignee */}
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">Assignee</label>
@@ -752,22 +736,6 @@ export function TaskModal({
                           ))}
                       </SelectContent>
                     </Select>
-                  )}
-                />
-              </div>
-
-              {/* Tags */}
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Tags</label>
-                <Controller
-                  name="tags"
-                  control={control}
-                  render={({ field }) => (
-                    <TagInput
-                      value={Array.isArray(field.value) ? field.value : []}
-                      onChange={field.onChange}
-                      placeholder="Add tags..."
-                    />
                   )}
                 />
               </div>

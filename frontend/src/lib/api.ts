@@ -683,6 +683,9 @@ export interface WebhookConfig {
   url: string
   method: WebhookMethod
   headers?: Record<string, string>
+  // Template string for headers - supports {{variables}}
+  // Takes precedence over headers if set
+  headersTemplate?: string
   body?: string
   maxRetries?: number
   retryDelayMs?: number

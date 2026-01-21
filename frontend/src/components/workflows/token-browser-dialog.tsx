@@ -74,6 +74,8 @@ interface TokenBrowserDialogProps {
   fieldLabel?: string
   fieldValue?: string
   onFieldValueChange?: (value: string) => void
+  // Task-only mode - shows system variables and variable packages without workflow context
+  taskOnly?: boolean
 }
 
 interface WorkflowRun {
@@ -453,6 +455,7 @@ export function TokenBrowserDialog({
   fieldLabel,
   fieldValue,
   onFieldValueChange,
+  taskOnly = false,
 }: TokenBrowserDialogProps) {
   // State
   const [selectedCategory, setSelectedCategory] = useState<CategoryId>('system')
@@ -475,12 +478,12 @@ export function TokenBrowserDialog({
   const [variablesError, setVariablesError] = useState<string | null>(null)
   const [expandedVariables, setExpandedVariables] = useState<Set<string>>(new Set())
 
-  // Fetch available runs when dialog opens
+  // Fetch available runs when dialog opens (skip in taskOnly mode)
   useEffect(() => {
-    if (open && workflowId && runs.length === 0) {
+    if (open && workflowId && !taskOnly && runs.length === 0) {
       fetchRuns()
     }
-  }, [open, workflowId])
+  }, [open, workflowId, taskOnly])
 
   // Fetch run data when run is selected
   useEffect(() => {
@@ -624,29 +627,43 @@ export function TokenBrowserDialog({
 
   // Build categories list
   const categories = useMemo(() => {
-    const cats: Array<{ id: CategoryId; name: string; icon: React.ElementType; color: string; hasData?: boolean }> = [
-      { id: 'system', name: 'System', icon: Zap, color: 'text-yellow-500', hasData: !!runContext },
-      { id: 'trigger', name: 'Trigger', icon: Zap, color: 'text-orange-500', hasData: !!runContext },
-      { id: 'variables', name: 'Variables', icon: Variable, color: 'text-violet-500', hasData: variableTokens.length > 0 },
-    ]
+    const cats: Array<{ id: CategoryId; name: string; icon: React.ElementType; color: string; hasData?: boolean }> = []
 
-    if (loopVariable) {
+    // In taskOnly mode, always show system and variables (they're available without workflow context)
+    // In workflow mode, show system only if we have run context
+    if (taskOnly || runContext) {
+      cats.push({ id: 'system', name: 'System', icon: Zap, color: 'text-yellow-500', hasData: taskOnly || !!runContext })
+    }
+
+    // Trigger data only available with workflow run context
+    if (!taskOnly && runContext) {
+      cats.push({ id: 'trigger', name: 'Trigger', icon: Zap, color: 'text-orange-500', hasData: !!runContext })
+    }
+
+    // Variables are always available
+    cats.push({ id: 'variables', name: 'Variables', icon: Variable, color: 'text-violet-500', hasData: variableTokens.length > 0 })
+
+    // Loop variable only in workflow context
+    if (!taskOnly && loopVariable) {
       cats.push({ id: 'loop', name: `Loop: {{${loopVariable}}}`, icon: Repeat, color: 'text-green-500' })
     }
 
-    for (const step of previousSteps) {
-      const hasData = taskData.has(step.id)
-      cats.push({
-        id: step.id,
-        name: step.name,
-        icon: getStepIcon(step.stepType),
-        color: getStepColor(step.stepType),
-        hasData,
-      })
+    // Previous steps only in workflow context
+    if (!taskOnly) {
+      for (const step of previousSteps) {
+        const hasData = taskData.has(step.id)
+        cats.push({
+          id: step.id,
+          name: step.name,
+          icon: getStepIcon(step.stepType),
+          color: getStepColor(step.stepType),
+          hasData,
+        })
+      }
     }
 
     return cats
-  }, [previousSteps, loopVariable, taskData, runContext, variableTokens.length])
+  }, [previousSteps, loopVariable, taskData, runContext, variableTokens.length, taskOnly])
 
   // Helper to format example value for display
   const formatExampleValue = (value: unknown): string | undefined => {
@@ -670,12 +687,17 @@ export function TokenBrowserDialog({
   // Get tokens for selected category
   const getTokensForCategory = (categoryId: CategoryId): Token[] => {
     if (categoryId === 'system') {
-      return [
+      // Base API URL from window location
+      const apiUrl = typeof window !== 'undefined'
+        ? `${window.location.origin}/api`
+        : '/api'
+
+      const tokens: Token[] = [
         {
           path: '_apiUrl',
           description: 'Base API URL for internal calls',
           type: 'string',
-          example: runContext?.apiUrl,
+          example: runContext?.apiUrl || apiUrl,
         },
         {
           path: '_apiKey',
@@ -684,42 +706,50 @@ export function TokenBrowserDialog({
           example: '(injected at runtime)',
         },
         {
-          path: '_workflowRunId',
-          description: 'Current workflow run ID',
-          type: 'string',
-          example: runContext?.workflowRunId,
-        },
-        {
-          path: 'workflowRunId',
-          description: 'Current workflow run ID (alias)',
-          type: 'string',
-          example: runContext?.workflowRunId,
-        },
-        {
-          path: 'stepId',
-          description: 'Current step ID',
-          type: 'string',
-          example: '(varies per step)',
-        },
-        {
           path: 'taskId',
           description: 'Current task ID',
           type: 'string',
           example: '(varies per task)',
         },
-        {
-          path: 'systemWebhookUrl',
-          description: 'URL for external callbacks',
-          type: 'string',
-          example: runContext?.systemWebhookUrl,
-        },
-        {
-          path: 'callbackSecret',
-          description: 'Secret for callback authentication',
-          type: 'string',
-          example: runContext?.callbackSecret ? `${runContext.callbackSecret.substring(0, 12)}...` : undefined,
-        },
       ]
+
+      // Workflow-specific tokens (only if in workflow context)
+      if (!taskOnly) {
+        tokens.push(
+          {
+            path: '_workflowRunId',
+            description: 'Current workflow run ID',
+            type: 'string',
+            example: runContext?.workflowRunId,
+          },
+          {
+            path: 'workflowRunId',
+            description: 'Current workflow run ID (alias)',
+            type: 'string',
+            example: runContext?.workflowRunId,
+          },
+          {
+            path: 'stepId',
+            description: 'Current step ID',
+            type: 'string',
+            example: '(varies per step)',
+          },
+          {
+            path: 'systemWebhookUrl',
+            description: 'URL for external callbacks',
+            type: 'string',
+            example: runContext?.systemWebhookUrl,
+          },
+          {
+            path: 'callbackSecret',
+            description: 'Secret for callback authentication',
+            type: 'string',
+            example: runContext?.callbackSecret ? `${runContext.callbackSecret.substring(0, 12)}...` : undefined,
+          }
+        )
+      }
+
+      return tokens
     }
 
     if (categoryId === 'trigger') {
