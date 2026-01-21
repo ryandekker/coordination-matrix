@@ -1,7 +1,8 @@
 'use client'
 
-import { Bot, User as UserIcon } from 'lucide-react'
+import { Bot, User as UserIcon, Cog } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { isSystemUser } from '@/lib/api'
 import type { User } from '@/lib/api'
 
 export interface UserChipProps {
@@ -47,6 +48,26 @@ function UserAvatar({
   className?: string
 }) {
   const styles = sizeStyles[size]
+
+  // System user - show cog icon with gray color
+  if (isSystemUser(user)) {
+    const systemColor = user.botColor || '#6B7280' // Default to gray
+    return (
+      <span
+        className={cn(
+          'rounded-full flex items-center justify-center flex-shrink-0',
+          styles.avatar,
+          className
+        )}
+        style={{
+          backgroundColor: `${systemColor}20`,
+          color: systemColor,
+        }}
+      >
+        <Cog className={styles.icon} />
+      </span>
+    )
+  }
 
   if (user.isAgent) {
     // Bot user - show bot icon with optional custom color
@@ -125,6 +146,30 @@ export function UserChip({
 
   if (avatarOnly) {
     return <UserAvatar user={user} size={size} className={className} />
+  }
+
+  // System user chip styling
+  if (isSystemUser(user)) {
+    const systemColor = user.botColor || '#6B7280' // Gray
+    return (
+      <div
+        className={cn(
+          'inline-flex items-center rounded-full font-medium whitespace-nowrap',
+          styles.chip,
+          className
+        )}
+        style={{
+          backgroundColor: `${systemColor}15`,
+          color: systemColor,
+          borderWidth: '1px',
+          borderColor: `${systemColor}30`,
+        }}
+        title={`${user.displayName} (automated)`}
+      >
+        <UserAvatar user={user} size={size} />
+        <span className="truncate">{user.displayName}</span>
+      </div>
+    )
   }
 
   // Bot user chip styling

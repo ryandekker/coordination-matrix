@@ -364,6 +364,26 @@ const views = [
 db.views.insertMany(views);
 
 // ============================================================================
+// SYSTEM USER - Special pseudo-user for system-executed tasks
+// This user is assigned to tasks that are executed by the system (webhooks, joins, etc.)
+// Using a well-known ObjectId so it can be referenced consistently
+// ============================================================================
+
+const SYSTEM_USER_ID = ObjectId('000000000000000000000001');
+
+const systemUser = {
+  _id: SYSTEM_USER_ID,
+  displayName: 'System',
+  role: 'operator',
+  isActive: true,
+  isSystem: true,
+  botColor: '#6B7280',  // Gray - neutral system color
+  createdAt: new Date(),
+};
+
+db.users.insertOne(systemUser);
+
+// ============================================================================
 // SAMPLE USERS
 // ============================================================================
 

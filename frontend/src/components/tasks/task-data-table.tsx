@@ -52,7 +52,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { EditableCell } from './editable-cell'
-import { Task, FieldConfig, LookupValue, User, Workflow, tasksApi } from '@/lib/api'
+import { Task, FieldConfig, LookupValue, User, Workflow, tasksApi, isSystemUser } from '@/lib/api'
 import { useTaskChildren, useUpdateTask, useDeleteTask, useBulkUpdateTasks, useBulkDeleteTasks, useLookups, useCreateTask } from '@/hooks/use-tasks'
 import { formatDateTime, cn } from '@/lib/utils'
 import { TASK_TYPE_CONFIG, getTaskTypeConfig } from '@/lib/task-type-config'
@@ -155,7 +155,7 @@ const BulkActionsBar = memo(function BulkActionsBar({
             <SelectItem value="__unassign__">
               <UserChip user={null} size="sm" />
             </SelectItem>
-            {users.map((user) => (
+            {users.filter(user => !isSystemUser(user)).map((user) => (
               <SelectItem key={user._id} value={user._id}>
                 <UserChip user={user} size="sm" />
               </SelectItem>

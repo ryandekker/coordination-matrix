@@ -26,7 +26,7 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs'
-import { Task, FieldConfig, LookupValue, TaskType, WebhookConfig } from '@/lib/api'
+import { Task, FieldConfig, LookupValue, TaskType, WebhookConfig, isSystemUser } from '@/lib/api'
 import { toast } from 'sonner'
 import { useCreateTask, useUpdateTask, useRerunTask, useUsers, useWorkflows, useTasks, useTask, useTaskChildren, useTaskDocuments, useDetachDocument } from '@/hooks/use-tasks'
 import { cn } from '@/lib/utils'
@@ -744,7 +744,7 @@ export function TaskModal({
                           <UserChip user={null} size="sm" />
                         </SelectItem>
                         {users
-                          .filter((user) => user._id && user.isActive)
+                          .filter((user) => user._id && user.isActive && !isSystemUser(user))
                           .map((user) => (
                             <SelectItem key={user._id} value={user._id}>
                               <UserChip user={user} size="sm" />
@@ -986,7 +986,7 @@ export function TaskModal({
                       <UserChip user={null} size="sm" />
                     </SelectItem>
                     {users
-                      .filter((user) => user._id && user.isActive)
+                      .filter((user) => user._id && user.isActive && !isSystemUser(user))
                       .map((user) => (
                         <SelectItem key={user._id} value={user._id}>
                           <UserChip user={user} size="sm" />

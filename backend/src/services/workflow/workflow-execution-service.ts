@@ -22,6 +22,7 @@ import {
 import { resolveTemplateWithPackages, getValueByPath, resolveTitleTemplateWithPackages, getBaseUrl } from './template-utils.js';
 import { stripUndefined } from './mongo-utils.js';
 import { searchDocuments } from '../embedding-service.js';
+import { SYSTEM_USER_ID, isSystemExecutedTaskType } from '../system-user.js';
 
 type WorkflowRunEventHandler = (event: WorkflowRunEvent) => void | Promise<void>;
 
@@ -563,6 +564,21 @@ class WorkflowExecutionService {
     // Build stepConfig to preserve original workflow step configuration
     const stepConfig = this.buildStepConfig(step);
 
+    // Determine assignee:
+    // 1. If step has explicit defaultAssigneeId, use that
+    // 2. If run has taskDefaults.assigneeId, use that
+    // 3. If task type is system-executed (webhook, join, etc.), assign to system user
+    // 4. Otherwise leave null (unassigned - awaiting human assignment)
+    let assigneeId: ObjectId | null = null;
+    if (step.defaultAssigneeId) {
+      assigneeId = new ObjectId(step.defaultAssigneeId);
+    } else if (runDefaults.assigneeId) {
+      assigneeId = runDefaults.assigneeId;
+    } else if (isSystemExecutedTaskType(taskType)) {
+      // System-executed task types default to system user when unassigned
+      assigneeId = SYSTEM_USER_ID;
+    }
+
     const task: Omit<Task, '_id'> = {
       title: taskTitle,
       status: initialStatus,
@@ -573,9 +589,7 @@ class WorkflowExecutionService {
       executionMode,
       stepConfig,
       ...runDefaults,
-      assigneeId: step.defaultAssigneeId
-        ? new ObjectId(step.defaultAssigneeId)
-        : runDefaults.assigneeId ?? null,
+      assigneeId,
       createdAt: now,
       updatedAt: now,
       metadata: {

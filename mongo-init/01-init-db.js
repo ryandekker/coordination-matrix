@@ -234,6 +234,7 @@ db.createCollection('users');
 
 db.users.createIndex({ email: 1 }, { unique: true, sparse: true });
 db.users.createIndex({ isActive: 1 });
+db.users.createIndex({ isSystem: 1 }, { sparse: true });  // For finding the system user
 
 // ============================================================================
 // TEAMS - Team management

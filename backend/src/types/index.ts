@@ -547,6 +547,7 @@ export interface User {
   role: UserRole;
   isActive: boolean;
   isAgent?: boolean;              // Is this user an AI agent?
+  isSystem?: boolean;             // Is this the system user? (for automated workflow tasks)
   agentPrompt?: string;           // Agent's base prompt/persona
   profilePicture?: string;        // URL to profile picture (for humans)
   botColor?: string;              // Custom color for bot users (hex code)

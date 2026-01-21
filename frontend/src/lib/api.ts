@@ -989,11 +989,23 @@ export interface User {
   role: string
   isActive: boolean
   isAgent?: boolean               // Is this user an AI agent?
+  isSystem?: boolean              // Is this the system user? (for automated workflow tasks)
   agentPrompt?: string            // Agent's base prompt/persona
   profilePicture?: string         // URL to profile picture (for humans)
   botColor?: string               // Custom color for bot users (hex code)
   createdAt?: string
   updatedAt?: string
+}
+
+// Well-known system user ID (matches backend)
+export const SYSTEM_USER_ID = '000000000000000000000001'
+
+/**
+ * Check if a user is the system user
+ */
+export function isSystemUser(user: User | null | undefined): boolean {
+  if (!user) return false
+  return user.isSystem === true || user._id === SYSTEM_USER_ID
 }
 
 export interface ExternalJob {

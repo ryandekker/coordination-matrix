@@ -28,7 +28,7 @@ import {
   DialogFooter,
   DialogDescription,
 } from '@/components/ui/dialog'
-import { View, ViewFolder, LookupValue, User, Task, Tag, Workflow } from '@/lib/api'
+import { View, ViewFolder, LookupValue, User, Task, Tag, Workflow, isSystemUser } from '@/lib/api'
 import { UserChip } from '@/components/ui/user-chip'
 
 interface TaskToolbarProps {
@@ -85,9 +85,9 @@ export function TaskToolbar({
   const statusOptions = lookups.task_status || []
   const urgencyOptions = lookups.urgency || []
 
-  // Filter users by search term
+  // Filter users by search term (exclude system user from assignment options)
   const filteredUsers = useMemo(() => {
-    const activeUsers = users.filter(u => u.isActive)
+    const activeUsers = users.filter(u => u.isActive && !isSystemUser(u))
     if (!assigneeSearchTerm.trim()) {
       return activeUsers
     }

@@ -24,7 +24,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { Checkbox } from '@/components/ui/checkbox'
-import { FieldConfig, LookupValue, User, Task, Workflow, tasksApi } from '@/lib/api'
+import { FieldConfig, LookupValue, User, Task, Workflow, tasksApi, isSystemUser } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useQuery } from '@tanstack/react-query'
 import { UserChip } from '@/components/ui/user-chip'
@@ -182,9 +182,11 @@ export function EditableCell({
       </div>
     )
 
+    // Filter users by search term (exclude system user from assignment options)
     const filteredUsers = users.filter((user) =>
-      (user.displayName && user.displayName.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (user.email && user.email.toLowerCase().includes(searchQuery.toLowerCase()))
+      !isSystemUser(user) &&
+      ((user.displayName && user.displayName.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (user.email && user.email.toLowerCase().includes(searchQuery.toLowerCase())))
     )
 
     return (
