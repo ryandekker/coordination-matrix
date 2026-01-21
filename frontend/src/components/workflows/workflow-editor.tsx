@@ -61,6 +61,7 @@ import {
 } from 'lucide-react'
 import { TokenBrowser } from './token-browser'
 import { WorkflowWebhook } from './workflow-webhook'
+import { TemplateTextarea } from '@/components/ui/template-textarea'
 
 // Import types, constants, and utilities from editor module
 import type { WorkflowStep, WorkflowStepType, Workflow, WorkflowEditorProps, LoopScope } from './editor/types'
@@ -95,6 +96,7 @@ export function WorkflowEditor({
 }: WorkflowEditorProps) {
   const [steps, setSteps] = useState<WorkflowStep[]>([])
   const [rootTaskTitleTemplate, setRootTaskTitleTemplate] = useState('')
+  const [samplePayload, setSamplePayload] = useState('')
   const [mermaidCode, setMermaidCode] = useState('')
   const [mermaidError, setMermaidError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState('integrated')
@@ -158,6 +160,7 @@ export function WorkflowEditor({
       setSteps(normalizedSteps)
       setMermaidCode(workflow.mermaidDiagram || '')
       setRootTaskTitleTemplate(workflow.rootTaskTitleTemplate || '')
+      setSamplePayload(workflow.samplePayload || '')
     } else {
       reset({
         name: '',
@@ -167,6 +170,7 @@ export function WorkflowEditor({
       setSteps([])
       setMermaidCode('')
       setRootTaskTitleTemplate('')
+      setSamplePayload('')
     }
   }, [workflow, reset])
 
@@ -312,6 +316,7 @@ export function WorkflowEditor({
       mermaidDiagram: mermaidCode,
       description: data.description || '',
       rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
+      samplePayload: samplePayload || undefined,
     }
     onSave(workflowData)
   }
@@ -323,6 +328,7 @@ export function WorkflowEditor({
       description: watch('description') || '',
       isActive: watch('isActive'),
       rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
+      samplePayload: samplePayload || undefined,
       steps,
       mermaidDiagram: mermaidCode,
       exportedAt: new Date().toISOString(),
@@ -358,6 +364,7 @@ export function WorkflowEditor({
           if (data.description !== undefined) setValue('description', data.description)
           if (data.isActive !== undefined) setValue('isActive', data.isActive)
           if (data.rootTaskTitleTemplate) setRootTaskTitleTemplate(data.rootTaskTitleTemplate)
+          if (data.samplePayload) setSamplePayload(data.samplePayload)
 
           // Apply steps if present
           if (data.steps && Array.isArray(data.steps)) {
@@ -553,6 +560,30 @@ export function WorkflowEditor({
                   <label htmlFor="isActive" className="text-sm font-medium">
                     Active
                   </label>
+                </div>
+
+                {/* Sample Payload Section */}
+                <div className="space-y-2 pt-4 border-t">
+                  <label className="text-sm font-medium flex items-center gap-2">
+                    <FileCode className="h-4 w-4 text-muted-foreground" />
+                    Sample Payload
+                    <span className="text-xs text-muted-foreground">(optional)</span>
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Define a sample JSON payload that shows what data this workflow expects when triggered.
+                    This helps agents and API callers know what data to provide.
+                  </p>
+                  <TemplateTextarea
+                    value={samplePayload}
+                    onChange={setSamplePayload}
+                    placeholder={'{\n  "orderId": "ORD-12345",\n  "customerName": "John Doe",\n  "items": [\n    { "sku": "ABC123", "quantity": 2 }\n  ]\n}'}
+                    minHeight="120px"
+                    maxHeight="300px"
+                    showTokenBrowser={false}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Access payload fields in templates using {`{{input.fieldName}}`}, e.g., {`{{input.orderId}}`}
+                  </p>
                 </div>
 
                 {/* AI Prompt Helper Section */}

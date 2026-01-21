@@ -1067,6 +1067,9 @@ export interface Workflow {
   isActive: boolean
   createdAt: string
   updatedAt?: string
+  rootTaskTitleTemplate?: string
+  // Sample payload template for triggering this workflow - helps agents/callers know what data to provide
+  samplePayload?: string
 }
 
 // Activity Log Types

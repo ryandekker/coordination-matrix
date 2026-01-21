@@ -1465,6 +1465,25 @@ export function TaskDataTable({
       return <div className="text-center">{value?.toString() || '0'}</div>
     }
 
+    // Handle workflowStage - truncate to single line with max width
+    if (fieldConfig.fieldPath === 'workflowStage' && value) {
+      const stageValue = value.toString()
+      return (
+        <TooltipProvider>
+          <Tooltip delayDuration={300}>
+            <TooltipTrigger asChild>
+              <div className="text-center truncate max-w-[150px] mx-auto">
+                {stageValue}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{stageValue}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )
+    }
+
     if (value === null || value === undefined || value === '') {
       return <span className={cn("block text-muted-foreground", fieldConfig.fieldPath !== 'title' && "text-center")}>-</span>
     }

@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Play, Loader2, CheckCircle2, XCircle, ExternalLink, Network } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Play, Loader2, CheckCircle2, XCircle, ExternalLink, Network, FileDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -44,6 +44,9 @@ export function FlowTaskConfig({
   const { data: workflowsData, isLoading: isLoadingWorkflows } = useWorkflows()
   const workflows = workflowsData?.data?.filter((w: Workflow) => w.isActive) || []
 
+  // Track if we've auto-loaded sample payload for a workflow (to avoid overwriting user edits)
+  const lastAutoLoadedWorkflowId = useRef<string | null>(null)
+
   // Input payload as string template
   const [inputPayloadText, setInputPayloadText] = useState(() => {
     if (flowConfig?.inputPayload) {
@@ -60,15 +63,48 @@ export function FlowTaskConfig({
     }
   }, [flowConfig?.inputPayload])
 
+  // Get the selected workflow
+  const selectedWorkflow = workflows.find((w: Workflow) => w._id === flowConfig?.workflowId)
+
+  // Auto-load sample payload when workflow is first selected (if available)
+  useEffect(() => {
+    if (
+      selectedWorkflow?.samplePayload &&
+      selectedWorkflow._id !== lastAutoLoadedWorkflowId.current &&
+      // Only auto-load if current payload is empty or is the default template
+      (inputPayloadText === '{\n  "title": "{{title}}",\n  "summary": "{{summary}}"\n}' || !inputPayloadText.trim())
+    ) {
+      setInputPayloadText(selectedWorkflow.samplePayload)
+      onConfigChange({
+        ...flowConfig!,
+        inputPayload: selectedWorkflow.samplePayload,
+      })
+      lastAutoLoadedWorkflowId.current = selectedWorkflow._id
+    }
+  }, [selectedWorkflow])
+
   // Check if task already has a spawned workflow (for edit mode)
   const spawnedWorkflowRunId = task?.spawnedWorkflowRunId
   const workflowResult = task?.workflowResult
 
   const handleWorkflowChange = (workflowId: string) => {
-    onConfigChange({
-      ...flowConfig!,
-      workflowId: workflowId === '_none' ? '' : workflowId,
-    })
+    const actualId = workflowId === '_none' ? '' : workflowId
+    const newWorkflow = workflows.find((w: Workflow) => w._id === actualId)
+
+    // If the new workflow has a sample payload, auto-load it
+    if (newWorkflow?.samplePayload) {
+      setInputPayloadText(newWorkflow.samplePayload)
+      lastAutoLoadedWorkflowId.current = actualId
+      onConfigChange({
+        workflowId: actualId,
+        inputPayload: newWorkflow.samplePayload,
+      })
+    } else {
+      onConfigChange({
+        ...flowConfig!,
+        workflowId: actualId,
+      })
+    }
   }
 
   const handleInputPayloadChange = (value: string) => {
@@ -79,8 +115,16 @@ export function FlowTaskConfig({
     })
   }
 
-  // Get the selected workflow name for display
-  const selectedWorkflow = workflows.find((w: Workflow) => w._id === flowConfig?.workflowId)
+  // Load sample payload from workflow
+  const handleLoadSamplePayload = () => {
+    if (selectedWorkflow?.samplePayload) {
+      setInputPayloadText(selectedWorkflow.samplePayload)
+      onConfigChange({
+        ...flowConfig!,
+        inputPayload: selectedWorkflow.samplePayload,
+      })
+    }
+  }
 
   // Render workflow result status (for edit mode)
   const renderWorkflowStatus = () => {
@@ -177,17 +221,33 @@ export function FlowTaskConfig({
 
       {/* Input Payload Template */}
       {flowConfig?.workflowId && (
-        <TemplateTextarea
-          label="Input Payload (JSON)"
-          description="Define the data to pass to the workflow. Use {{variable}} for dynamic values from this task."
-          value={inputPayloadText}
-          onChange={handleInputPayloadChange}
-          placeholder={'{\n  "title": "{{title}}",\n  "summary": "{{summary}}",\n  "customField": "value"\n}'}
-          minHeight="100px"
-          maxHeight="200px"
-          showTokenBrowser={true}
-          taskOnly={true}
-        />
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium text-muted-foreground">Input Payload (JSON)</label>
+            {selectedWorkflow?.samplePayload && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs text-pink-600 dark:text-pink-400 hover:text-pink-700 dark:hover:text-pink-300"
+                onClick={handleLoadSamplePayload}
+              >
+                <FileDown className="h-3 w-3 mr-1" />
+                Load Sample
+              </Button>
+            )}
+          </div>
+          <TemplateTextarea
+            description="Define the data to pass to the workflow. Use {{variable}} for dynamic values from this task."
+            value={inputPayloadText}
+            onChange={handleInputPayloadChange}
+            placeholder={'{\n  "title": "{{title}}",\n  "summary": "{{summary}}",\n  "customField": "value"\n}'}
+            minHeight="100px"
+            maxHeight="200px"
+            showTokenBrowser={true}
+            taskOnly={true}
+          />
+        </div>
       )}
 
       {/* Workflow info hint */}
@@ -196,6 +256,12 @@ export function FlowTaskConfig({
           <p className="font-medium">Selected: {selectedWorkflow.name}</p>
           {selectedWorkflow.description && (
             <p className="opacity-80 mt-0.5">{selectedWorkflow.description}</p>
+          )}
+          {selectedWorkflow.samplePayload && (
+            <p className="opacity-70 mt-0.5 flex items-center gap-1">
+              <FileDown className="h-2.5 w-2.5" />
+              Sample payload available
+            </p>
           )}
         </div>
       )}
