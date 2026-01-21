@@ -1287,6 +1287,43 @@ export interface DocumentEvent {
   metadata?: Record<string, unknown>;
 }
 
+// ============================================================================
+// Variable Types (Configuration Variables)
+// ============================================================================
+
+/**
+ * Simplified variable model:
+ * - name: unique identifier for use in templates ({{variables.name}} or {{variables.name.path}})
+ * - value: string or JSON/YAML object stored as string
+ * - encrypted: if true, the entire value is encrypted at rest
+ *
+ * Template usage:
+ *   {{variables.api_key}} - returns the raw value
+ *   {{variables.config.database.host}} - traverses into JSON object
+ */
+export interface VariablePackage {
+  _id: ObjectId;
+  name: string;                     // Unique variable name (used in templates)
+  displayName?: string;             // Human-readable display name
+  description?: string;
+
+  // The value - can be a simple string or a JSON/YAML object stored as string
+  // When encrypted=true, this is stored as "enc:..." format
+  value: string;
+
+  // If true, the entire value is encrypted at rest
+  encrypted: boolean;
+
+  // Ownership and audit
+  createdById?: ObjectId | null;
+  updatedById?: ObjectId | null;
+  isActive: boolean;
+
+  // Timestamps
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 // Semantic search types
 export interface DocumentSearchQuery {
   prompt: string;                    // Natural language search prompt

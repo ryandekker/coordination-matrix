@@ -1968,3 +1968,113 @@ export const documentsApi = {
     })
   },
 }
+
+// Variable Types (simplified model)
+export interface VariableRecord {
+  _id: string
+  name: string
+  displayName?: string
+  description?: string
+  value: string              // Raw value or JSON string (redacted if encrypted)
+  encrypted: boolean         // If true, value is encrypted at rest
+  createdById?: string | null
+  updatedById?: string | null
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+// Path/value info for nested object keys
+export interface KeyValuePath {
+  path: string               // e.g., "user.profile.name"
+  value: unknown             // The actual value
+  type: 'string' | 'number' | 'boolean' | 'null' | 'object' | 'array'
+}
+
+// Token browser format for variables
+export interface VariableToken {
+  variableId: string
+  name: string
+  description?: string
+  encrypted: boolean
+  isObject: boolean          // True if value is a JSON/YAML object
+  value?: string | null      // For simple (non-object) values
+  paths: KeyValuePath[]      // All paths with values for objects
+}
+
+// Legacy aliases for backwards compatibility
+export type VariablePackage = VariableRecord
+export type Variable = VariableRecord
+export type PackageToken = VariableToken
+
+// Variables API (simplified)
+export const variablePackagesApi = {
+  list: async (params?: { includeInactive?: boolean; search?: string }): Promise<ApiResponse<Variable[]>> => {
+    const searchParams = new URLSearchParams()
+    if (params?.includeInactive) searchParams.append('includeInactive', 'true')
+    if (params?.search) searchParams.append('search', params.search)
+    const queryString = searchParams.toString()
+    const response = await authFetch(`${API_BASE}/variable-packages${queryString ? `?${queryString}` : ''}`)
+    return handleResponse(response)
+  },
+
+  get: async (id: string): Promise<ApiResponse<Variable>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages/${id}`)
+    return handleResponse(response)
+  },
+
+  create: async (data: {
+    name: string
+    displayName?: string
+    description?: string
+    value: string
+    encrypted?: boolean
+  }): Promise<ApiResponse<Variable>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  update: async (id: string, data: Partial<{
+    name: string
+    displayName: string
+    description: string
+    value: string
+    encrypted: boolean
+    isActive: boolean
+  }>): Promise<ApiResponse<Variable>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  delete: async (id: string): Promise<ApiResponse<void>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages/${id}`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
+
+  // Reveal decrypted value
+  reveal: async (id: string): Promise<ApiResponse<{
+    variableId: string
+    variableName: string
+    value: string
+    encrypted: boolean
+  }>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages/${id}/reveal`)
+    return handleResponse(response)
+  },
+
+  // Token browser format
+  getTokens: async (): Promise<ApiResponse<VariableToken[]>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages/tokens/list`)
+    return handleResponse(response)
+  },
+}

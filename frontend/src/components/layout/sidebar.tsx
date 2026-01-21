@@ -30,6 +30,7 @@ import {
   FolderPlus,
   MoreHorizontal,
   Pencil,
+  Variable,
 } from 'lucide-react'
 import { Logo } from '@/components/ui/logo'
 import { View, ViewFolder } from '@/lib/api'
@@ -86,6 +87,7 @@ const bottomNavigation: NavItem[] = [
 const settingsNavigation: NavItem[] = [
   { name: 'Field Configuration', href: '/settings/fields', icon: Database, exact: true },
   { name: 'Tags', href: '/settings/tags', icon: Tags, exact: true },
+  { name: 'Variables', href: '/settings/variables', icon: Variable, exact: true },
   { name: 'API Keys', href: '/settings/api-keys', icon: Key, exact: true },
   { name: 'Webhooks', href: '/settings/webhooks', icon: Webhook, exact: true },
   { name: 'Appearance', href: '/settings/appearance', icon: Palette, exact: true },

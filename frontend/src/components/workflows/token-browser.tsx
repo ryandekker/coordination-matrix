@@ -1,46 +1,9 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { cn } from '@/lib/utils'
-import {
-  Plus,
-  Zap,
-  Database,
-  Repeat,
-  Bot,
-  Globe,
-  User,
-  Merge,
-  GitBranch,
-  Hash,
-  Search,
-  Clock,
-  Loader2,
-  Maximize2,
-} from 'lucide-react'
-import { workflowRunsApi } from '@/lib/api'
+import { Plus } from 'lucide-react'
 import { TokenBrowserDialog } from './token-browser-dialog'
-
-interface TokenCategory {
-  name: string
-  icon: React.ElementType
-  color: string
-  tokens: Token[]
-}
-
-interface Token {
-  path: string
-  description: string
-  example?: string
-  fromRun?: boolean // Indicates this came from actual run data
-}
 
 interface TokenBrowserProps {
   // Workflow ID to fetch past run data
@@ -66,14 +29,19 @@ interface TokenBrowserProps {
   children?: React.ReactNode
   // For join inputPath: paths are relative to child task metadata (no output prefix)
   forJoinInputPath?: boolean
+  // Field context for the bottom panel (editable mode)
+  fieldLabel?: string
+  fieldValue?: string
+  // Callback when field value changes (enables editable mode)
+  onFieldValueChange?: (value: string) => void
 }
 
-interface SampleData {
-  stepId: string
-  stepName: string
-  output: unknown
-}
-
+/**
+ * TokenBrowser - A button that opens the full Token Browser dialog
+ *
+ * This component provides a simple trigger button that opens the TokenBrowserDialog
+ * for browsing and inserting template tokens.
+ */
 export function TokenBrowser({
   workflowId,
   previousSteps = [],
@@ -84,428 +52,39 @@ export function TokenBrowser({
   variant = 'icon',
   children,
   forJoinInputPath = false,
+  fieldLabel,
+  fieldValue,
+  onFieldValueChange,
 }: TokenBrowserProps) {
-  const [open, setOpen] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [search, setSearch] = useState('')
-  const [sampleData, setSampleData] = useState<SampleData[]>([])
-  const [loadingSamples, setLoadingSamples] = useState(false)
-  const [fetchError, setFetchError] = useState<string | null>(null)
-  const searchInputRef = useRef<HTMLInputElement>(null)
-  const scrollContainerRef = useRef<HTMLDivElement>(null)
-
-  // Handle wheel events manually to ensure scrolling works in portal
-  const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
-    const container = scrollContainerRef.current
-    if (!container) return
-
-    // Prevent the event from bubbling to parent elements
-    e.stopPropagation()
-
-    // Manually scroll the container
-    container.scrollTop += e.deltaY
-  }, [])
-
-  // Fetch sample data from past workflow runs when popover opens
-  useEffect(() => {
-    if (open && workflowId && sampleData.length === 0 && !fetchError) {
-      fetchSampleData()
-    }
-  }, [open, workflowId])
-
-  const fetchSampleData = async () => {
-    if (!workflowId) return
-
-    setLoadingSamples(true)
-    setFetchError(null)
-    try {
-      // Get recent runs (completed or running) using authenticated API client
-      // Include running runs since they may have tasks with output data
-      const runsResponse = await workflowRunsApi.list({
-        workflowId,
-        status: ['completed', 'running'],
-        limit: 1,
-      })
-      const runs = runsResponse.data || []
-
-      if (runs.length === 0) {
-        setFetchError('No runs yet')
-        setLoadingSamples(false)
-        return
-      }
-
-      // Get tasks from the most recent run
-      const runId = runs[0]._id
-      const runResponse = await workflowRunsApi.get(runId, true) as { tasks?: Array<{ workflowStepId?: string; title?: string; metadata?: unknown }> }
-      const tasks = runResponse.tasks || []
-
-      // Extract output data from each task - data is in `metadata` field
-      const samples: SampleData[] = tasks
-        .filter((task) => task.metadata && Object.keys(task.metadata as object).length > 0)
-        .map((task) => ({
-          stepId: task.workflowStepId || '',
-          stepName: task.title || 'Unknown Step',
-          output: task.metadata,
-        }))
-
-      if (samples.length === 0) {
-        setFetchError('No task outputs found in runs')
-      }
-
-      setSampleData(samples)
-    } catch (error) {
-      console.error('Failed to fetch sample data:', error)
-      const errorMessage = error instanceof Error ? error.message : 'Network error'
-      setFetchError(errorMessage)
-    } finally {
-      setLoadingSamples(false)
-    }
-  }
-
-  // Extract paths from sample output object
-  const extractPaths = (obj: unknown, prefix: string = '', maxDepth: number = 3): Token[] => {
-    if (maxDepth <= 0 || obj === null || obj === undefined) return []
-
-    const tokens: Token[] = []
-
-    if (typeof obj === 'object' && !Array.isArray(obj)) {
-      const record = obj as Record<string, unknown>
-      for (const [key, value] of Object.entries(record)) {
-        const path = prefix ? `${prefix}.${key}` : key
-        const valueType = Array.isArray(value) ? 'array' : typeof value
-        const example = valueType === 'string'
-          ? (value as string).substring(0, 100) + ((value as string).length > 100 ? '...' : '')
-          : valueType === 'number' || valueType === 'boolean'
-          ? String(value)
-          : valueType === 'array'
-          ? `[${(value as unknown[]).length} items]`
-          : undefined
-
-        tokens.push({
-          path,
-          description: `${valueType}${example ? '' : ''}`,
-          example,
-          fromRun: true,
-        })
-
-        // Recurse into objects and first array item
-        if (typeof value === 'object' && value !== null) {
-          if (Array.isArray(value) && value.length > 0) {
-            tokens.push(...extractPaths(value[0], `${path}[0]`, maxDepth - 1))
-          } else if (!Array.isArray(value)) {
-            tokens.push(...extractPaths(value, path, maxDepth - 1))
-          }
-        }
-      }
-    }
-
-    return tokens
-  }
-
-  // Build token categories based on context
-  const categories: TokenCategory[] = []
-
-  // System tokens - always available
-  categories.push({
-    name: 'System',
-    icon: Zap,
-    color: 'text-yellow-500',
-    tokens: [
-      { path: '_apiUrl', description: 'Base API URL (for internal API calls)' },
-      { path: '_apiKey', description: 'System API key (for internal API calls)' },
-      { path: '_workflowRunId', description: 'Current workflow run ID' },
-      { path: 'workflowRunId', description: 'Current workflow run ID (alias)' },
-      { path: 'stepId', description: 'Current step ID' },
-      { path: 'taskId', description: 'Current task ID' },
-      { path: 'systemWebhookUrl', description: 'URL for external callbacks' },
-      { path: 'callbackSecret', description: 'Secret for callback auth' },
-    ],
-  })
-
-  // Loop variable if inside a loop
-  if (loopVariable) {
-    categories.push({
-      name: 'Loop Item',
-      icon: Repeat,
-      color: 'text-green-500',
-      tokens: [
-        { path: loopVariable, description: `Current item being processed` },
-        { path: `${loopVariable}.id`, description: 'Item ID (if object)' },
-        { path: `${loopVariable}.name`, description: 'Item name (if object)' },
-        { path: '_index', description: 'Current item index (0-based)' },
-        { path: '_total', description: 'Total items in loop' },
-      ],
-    })
-  }
-
-  // Previous step outputs
-  if (previousSteps.length > 0) {
-    const prevStep = previousSteps[previousSteps.length - 1]
-
-    // Check if we have sample data for this step
-    const stepSample = sampleData.find(s => s.stepId === prevStep.id)
-
-    let stepTokens: Token[] = []
-
-    if (stepSample) {
-      const metadata = stepSample.output as Record<string, unknown> | null
-      const responseData = metadata?.response as Record<string, unknown> | undefined
-
-      if (forJoinInputPath) {
-        // For join inputPath: paths are relative to child task metadata directly
-        // No "output" prefix - extract paths from the raw metadata structure
-        if (metadata) {
-          stepTokens = extractPaths(metadata, '')
-        }
-      } else {
-        // Build tokens that mirror the actual runtime payload structure
-        // Backend constructs: { ...metadata, output: metadata.response || metadata }
-        // So paths like "response.count" access the spread metadata,
-        // and paths like "output.count" access metadata.response (or metadata if no response)
-        const outputSource = responseData || metadata
-        if (outputSource) {
-          stepTokens = extractPaths(outputSource, 'output')
-        }
-
-        // Also add direct paths to response (spread at root level)
-        if (responseData) {
-          stepTokens.push(...extractPaths(responseData, 'response'))
-        }
-      }
-
-      if (stepTokens.length === 0) {
-        stepTokens.push({ path: forJoinInputPath ? 'output' : 'output', description: 'Step output', fromRun: true })
-      }
-    } else {
-      // Fallback to type-based suggestions
-      if (forJoinInputPath) {
-        // For join inputPath: suggest paths relative to child task metadata
-        stepTokens = [
-          { path: 'output', description: 'Task output data' },
-          { path: 'output.data', description: 'Nested data field (if present)' },
-        ]
-      } else {
-        switch (prevStep.stepType) {
-          case 'external':
-            stepTokens = [
-              { path: 'output', description: 'Full response from external call' },
-              { path: 'output.data', description: 'Response data field' },
-              { path: 'output.items', description: 'Items array (if returned)' },
-            ]
-            break
-          case 'foreach':
-            if (prevStep.itemVariable) {
-              stepTokens = [
-                { path: prevStep.itemVariable, description: `Current loop item` },
-              ]
-            }
-            break
-          case 'join':
-            stepTokens = [
-              { path: 'output.aggregatedResults', description: 'Array of all completed results' },
-              { path: 'output.aggregatedResults[0]', description: 'First result' },
-              { path: 'output.completedCount', description: 'Number of completed tasks' },
-              { path: 'output.expectedCount', description: 'Total expected tasks' },
-            ]
-            break
-          case 'agent':
-          case 'manual':
-          default:
-            stepTokens = [
-              { path: 'output', description: 'Task output' },
-              { path: 'output.data', description: 'Output data (if structured)' },
-            ]
-        }
-      }
-    }
-
-    const categoryName = stepSample
-      ? `From: ${prevStep.name} (sampled)`
-      : `From: ${prevStep.name}`
-
-    categories.push({
-      name: categoryName,
-      icon: stepSample ? Clock : getStepIcon(prevStep.stepType),
-      color: stepSample ? 'text-emerald-500' : getStepColor(prevStep.stepType),
-      tokens: stepTokens,
-    })
-
-    // Add option to reference other steps with sample data
-    if (previousSteps.length > 1) {
-      const otherStepTokens: Token[] = previousSteps.slice(0, -1).flatMap(step => {
-        const sample = sampleData.find(s => s.stepId === step.id)
-        if (sample) {
-          const paths = extractPaths(sample.output, `steps.${step.id}.output`)
-          if (paths.length > 0) return paths.slice(0, 3) // Limit to top 3 paths
-        }
-        return [{
-          path: `steps.${step.id}.output`,
-          description: `Output from "${step.name}"`,
-        }]
-      })
-
-      if (otherStepTokens.length > 0) {
-        categories.push({
-          name: 'Other Steps',
-          icon: Database,
-          color: 'text-gray-500',
-          tokens: otherStepTokens,
-        })
-      }
-    }
-  }
-
-  // Trigger payload
-  categories.push({
-    name: 'Trigger Payload',
-    icon: Zap,
-    color: 'text-orange-500',
-    tokens: [
-      { path: 'trigger.payload', description: 'Full initial payload' },
-      { path: 'trigger.payload.data', description: 'Payload data field' },
-    ],
-  })
-
-  // Filter tokens by search
-  const filteredCategories = categories.map(cat => ({
-    ...cat,
-    tokens: cat.tokens.filter(token =>
-      token.path.toLowerCase().includes(search.toLowerCase()) ||
-      token.description.toLowerCase().includes(search.toLowerCase())
-    ),
-  })).filter(cat => cat.tokens.length > 0)
-
-  const handleSelect = (token: Token) => {
-    const value = wrapInBraces ? `{{${token.path}}}` : token.path
-    onSelectToken(value)
-    setOpen(false)
-    setSearch('')
-  }
 
   return (
-    <Popover open={open} onOpenChange={setOpen} modal={false}>
-      <PopoverTrigger asChild>
-        {children || (
-          variant === 'icon' ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-9 w-9 p-0 flex-shrink-0"
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-9 gap-1.5 flex-shrink-0"
-            >
-              <Plus className="h-4 w-4" />
-              Token
-            </Button>
-          )
-        )}
-      </PopoverTrigger>
-      <PopoverContent className="w-[420px] p-0" align="start">
-        <div className="p-2 border-b">
-          <div className="flex items-center gap-2 bg-muted/50 rounded-md px-2">
-            <Search
-              className="h-4 w-4 text-muted-foreground flex-shrink-0 cursor-pointer"
-              onClick={() => searchInputRef.current?.focus()}
-            />
-            <Input
-              ref={searchInputRef}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search tokens..."
-              className="h-8 border-0 p-0 focus-visible:ring-0 bg-transparent"
-            />
-            {loadingSamples && (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground flex-shrink-0" />
-            )}
-          </div>
-        </div>
-
-        <div
-          ref={scrollContainerRef}
-          onWheel={handleWheel}
-          className="max-h-[400px] overflow-y-auto overscroll-contain"
-          style={{ WebkitOverflowScrolling: 'touch' }}
+    <>
+      {/* Trigger button */}
+      {children ? (
+        <div onClick={() => setDialogOpen(true)}>{children}</div>
+      ) : variant === 'icon' ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-9 w-9 p-0 flex-shrink-0"
+          onClick={() => setDialogOpen(true)}
         >
-          <div className="p-2 space-y-3">
-            {filteredCategories.map((category) => (
-              <div key={category.name}>
-                <div className="flex items-center gap-2 px-2 py-1 text-xs font-medium text-muted-foreground">
-                  <category.icon className={cn('h-3 w-3', category.color)} />
-                  {category.name}
-                </div>
-                <div className="space-y-0.5">
-                  {category.tokens.map((token) => (
-                    <button
-                      key={token.path}
-                      onClick={() => handleSelect(token)}
-                      className="w-full text-left px-2 py-1.5 rounded hover:bg-muted flex flex-col gap-0.5 group"
-                    >
-                      <div className="flex items-center gap-2">
-                        <code className="text-xs font-mono bg-muted group-hover:bg-background px-1 py-0.5 rounded flex-shrink-0">
-                          {wrapInBraces ? `{{${token.path}}}` : token.path}
-                        </code>
-                        {token.fromRun && (
-                          <span className="text-[10px] text-emerald-400 dark:text-emerald-400 bg-emerald-950/50 dark:bg-emerald-950/50 px-1 rounded">
-                            from run
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground">
-                          {token.description}
-                        </span>
-                        {token.example && (
-                          <span className="text-[10px] text-muted-foreground/70 font-mono break-all max-w-[280px]">
-                            = {token.example}
-                          </span>
-                        )}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-
-            {filteredCategories.length === 0 && (
-              <div className="text-center py-4 text-sm text-muted-foreground">
-                No tokens found
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="border-t p-2 bg-muted/30 space-y-2">
-          <Button
-            type="button"
-            variant="default"
-            size="sm"
-            className="w-full h-8 text-xs"
-            onClick={() => {
-              setOpen(false)
-              setDialogOpen(true)
-            }}
-          >
-            <Maximize2 className="h-3.5 w-3.5 mr-1.5" />
-            Browse All Tokens & Run Data
-          </Button>
-          <p className="text-[10px] text-muted-foreground leading-relaxed">
-            <strong>{`{{output}}`}</strong> = previous step &middot; <strong>{`{{item}}`}</strong> = loop item &middot; <strong>{`{{_apiUrl}}`}</strong> = system
-          </p>
-          {workflowId && sampleData.length === 0 && !loadingSamples && fetchError && (
-            <p className="text-xs text-amber-600">
-              {fetchError}
-            </p>
-          )}
-        </div>
-      </PopoverContent>
+          <Plus className="h-4 w-4" />
+        </Button>
+      ) : (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-9 gap-1.5 flex-shrink-0"
+          onClick={() => setDialogOpen(true)}
+        >
+          <Plus className="h-4 w-4" />
+          Token
+        </Button>
+      )}
 
       {/* Full token browser dialog */}
       <TokenBrowserDialog
@@ -517,35 +96,20 @@ export function TokenBrowser({
         loopVariable={loopVariable}
         onSelectToken={(token) => {
           onSelectToken(token)
-          setDialogOpen(false)
+          // Only close if not in external field mode
+          if (!onFieldValueChange) {
+            setDialogOpen(false)
+          }
         }}
         wrapInBraces={wrapInBraces}
         forJoinInputPath={forJoinInputPath}
+        fieldLabel={fieldLabel}
+        fieldValue={fieldValue}
+        onFieldValueChange={onFieldValueChange}
       />
-    </Popover>
+    </>
   )
 }
 
-function getStepIcon(stepType?: string): React.ElementType {
-  switch (stepType) {
-    case 'agent': return Bot
-    case 'external': return Globe
-    case 'manual': return User
-    case 'foreach': return Repeat
-    case 'join': return Merge
-    case 'decision': return GitBranch
-    default: return Hash
-  }
-}
-
-function getStepColor(stepType?: string): string {
-  switch (stepType) {
-    case 'agent': return 'text-blue-500'
-    case 'external': return 'text-orange-500'
-    case 'manual': return 'text-purple-500'
-    case 'foreach': return 'text-green-500'
-    case 'join': return 'text-indigo-500'
-    case 'decision': return 'text-amber-500'
-    default: return 'text-gray-500'
-  }
-}
+// Re-export types that may be used by consumers
+export type { TokenBrowserProps }
