@@ -150,7 +150,9 @@ function generateMermaidFromSteps(steps: WorkflowStep[], includeStartNode: boole
   // Create nodes
   steps.forEach((step, index) => {
     const id = step.id
-    const name = step.name.replace(/"/g, "'")
+    // Use placeholder for empty names to avoid Mermaid syntax errors
+    const rawName = step.name?.trim() || '(unnamed)'
+    const name = rawName.replace(/"/g, "'")
 
     let shape: string
     let styleClass: string

@@ -1,4 +1,8 @@
 import { ObjectId } from 'mongodb';
+import { getDb } from '../../db/connection.js';
+import { VariablePackage } from '../../types/index.js';
+import { isEncryptionConfigured } from '../encryption.js';
+import YAML from 'yaml';
 
 // Environment config for webhook URLs
 // Set BASE_URL in .env for your environment (see .env.example)
@@ -237,6 +241,401 @@ export function resolveTitleTemplate(
   if (!result.trim()) {
     return fallbackTitle || template;
   }
+
+  return result;
+}
+
+/**
+ * Async version of resolveTitleTemplate that supports variable packages with nested interpolation.
+ *
+ * Supports:
+ *   {{variables.name}} - Simple variable access
+ *   {{variables.name.path}} - Nested variable access
+ *   {{variables.name[key].path}} - Bracket notation for dynamic keys
+ *   {{variables.yaml[{{variables.test.testkey}}].my}} - Nested interpolation
+ *   {{input.path}} - Input payload access
+ *   {{item}}, {{_index}}, {{_total}} - Loop variables
+ */
+export async function resolveTitleTemplateWithPackages(
+  template: string,
+  inputPayload?: Record<string, unknown>,
+  fallbackTitle?: string
+): Promise<string> {
+  if (!template) return fallbackTitle || '';
+
+  // Load packages for variable resolution
+  const packageContext = await loadPackageContext();
+
+  let result = template;
+  let iterations = 0;
+  const maxIterations = 10;
+
+  // Iterate to resolve nested expressions from innermost outward
+  while (iterations < maxIterations) {
+    const prevResult = result;
+
+    // Match innermost expressions (those without nested {{ }})
+    result = result.replace(/\{\{([^{}]+)\}\}/g, (_match, path) => {
+      const trimmedPath = path.trim();
+
+      // Handle variables.* prefix - supports nested interpolation
+      if (trimmedPath.startsWith('variables.') && packageContext) {
+        const value = getValueByPathWithBrackets(
+          packageContext as unknown as Record<string, unknown>,
+          trimmedPath
+        );
+        if (value !== undefined && value !== null) {
+          if (typeof value === 'object') {
+            // For objects in titles, try to get a meaningful identifier
+            const obj = value as Record<string, unknown>;
+            if (obj.name) return String(obj.name);
+            if (obj.title) return String(obj.title);
+            if (obj.id) return String(obj.id);
+            return JSON.stringify(value);
+          }
+          return String(value);
+        }
+        // If variable not found, leave as-is for potential later resolution
+        return _match;
+      }
+
+      // Handle input.* prefix explicitly
+      if (trimmedPath.startsWith('input.') && inputPayload) {
+        const inputPath = trimmedPath.substring(6); // Remove 'input.' prefix
+        const value = getValueByPath(inputPayload, inputPath);
+        if (value !== undefined && value !== null) {
+          if (typeof value === 'object') {
+            const obj = value as Record<string, unknown>;
+            if (obj.name) return String(obj.name);
+            if (obj.title) return String(obj.title);
+            if (obj.id) return String(obj.id);
+            return JSON.stringify(value);
+          }
+          return String(value);
+        }
+        return '';
+      }
+
+      // Handle direct property lookup (for item, _index, _total, etc.)
+      if (inputPayload) {
+        const value = getValueByPath(inputPayload, trimmedPath);
+        if (value !== undefined && value !== null) {
+          if (typeof value === 'object') {
+            const obj = value as Record<string, unknown>;
+            if (obj.name) return String(obj.name);
+            if (obj.title) return String(obj.title);
+            if (obj.id) return String(obj.id);
+            return JSON.stringify(value);
+          }
+          return String(value);
+        }
+      }
+
+      // If not found, return empty string
+      return '';
+    });
+
+    // If nothing changed, we're done
+    if (result === prevResult) {
+      break;
+    }
+
+    iterations++;
+  }
+
+  // If the result is empty after substitution, use fallback
+  if (!result.trim()) {
+    return fallbackTitle || template;
+  }
+
+  return result;
+}
+
+// ============================================================================
+// Variables Resolution with Nested Interpolation
+// ============================================================================
+
+/**
+ * Variable context for template resolution
+ * Loaded from database and decrypted for runtime use
+ *
+ * Template syntax: {{variables.name}} or {{variables.name.path.to.field}}
+ */
+export interface PackageContext {
+  // variables.{variableName} -> parsed value (string or object)
+  variables: Record<string, unknown>;
+}
+
+/**
+ * Cache for loaded packages (cleared on each workflow run start)
+ */
+let packageCache: PackageContext | null = null;
+let packageCacheTime: number = 0;
+const PACKAGE_CACHE_TTL_MS = 60000; // 1 minute cache
+
+/**
+ * Load all active variables from database
+ * Returns decrypted values organized by name
+ */
+export async function loadPackageContext(): Promise<PackageContext> {
+  const now = Date.now();
+
+  // Return cached if fresh
+  if (packageCache && (now - packageCacheTime) < PACKAGE_CACHE_TTL_MS) {
+    return packageCache;
+  }
+
+  const db = getDb();
+  const variables = await db
+    .collection<VariablePackage>('variable_packages')
+    .find({ isActive: true })
+    .toArray();
+
+  const variablesMap: Record<string, unknown> = {};
+
+  for (const v of variables) {
+    let value = v.value;
+
+    // Decrypt if encrypted
+    if (v.encrypted && isEncryptionConfigured()) {
+      try {
+        const { decrypt, isEncrypted } = await import('../encryption.js');
+        if (isEncrypted(value)) {
+          value = decrypt(value);
+        }
+      } catch {
+        console.warn(`[TemplateUtils] Failed to decrypt variable ${v.name}, using raw value`);
+      }
+    }
+
+    // Try to parse as JSON, then YAML, for object access
+    try {
+      variablesMap[v.name] = JSON.parse(value);
+    } catch {
+      // Not JSON, try YAML
+      try {
+        const parsed = YAML.parse(value);
+        // Only use YAML result if it's actually an object (YAML.parse returns string for plain text)
+        if (parsed !== null && typeof parsed === 'object') {
+          variablesMap[v.name] = parsed;
+        } else {
+          // Not structured data, store as string
+          variablesMap[v.name] = value;
+        }
+      } catch {
+        // Not YAML either, store as string
+        variablesMap[v.name] = value;
+      }
+    }
+  }
+
+  const context: PackageContext = {
+    variables: variablesMap,
+  };
+
+  // Update cache
+  packageCache = context;
+  packageCacheTime = now;
+
+  return context;
+}
+
+/**
+ * Clear the package cache (call when packages are updated)
+ */
+export function clearPackageCache(): void {
+  packageCache = null;
+  packageCacheTime = 0;
+}
+
+/**
+ * Get a value from a path that may include array bracket notation
+ * Supports: "field", "nested.field", "array[0].field", "packages.name[branch].field"
+ */
+export function getValueByPathWithBrackets(
+  obj: Record<string, unknown> | undefined,
+  path: string
+): unknown {
+  if (!obj || !path) return undefined;
+
+  // Parse path with bracket notation
+  // e.g., "packages.email[personal].username" -> ["packages", "email", "[personal]", "username"]
+  const parts: string[] = [];
+  let current = '';
+  let inBracket = false;
+
+  for (let i = 0; i < path.length; i++) {
+    const char = path[i];
+
+    if (char === '[' && !inBracket) {
+      if (current) {
+        parts.push(current);
+        current = '';
+      }
+      inBracket = true;
+      current = '[';
+    } else if (char === ']' && inBracket) {
+      current += ']';
+      parts.push(current);
+      current = '';
+      inBracket = false;
+    } else if (char === '.' && !inBracket) {
+      if (current) {
+        parts.push(current);
+        current = '';
+      }
+    } else {
+      current += char;
+    }
+  }
+
+  if (current) {
+    parts.push(current);
+  }
+
+  // Traverse the path
+  let value: unknown = obj;
+
+  for (const part of parts) {
+    if (value === null || value === undefined) return undefined;
+    if (typeof value !== 'object') return undefined;
+
+    if (part.startsWith('[') && part.endsWith(']')) {
+      // Bracket notation - extract the key (remove brackets)
+      const key = part.slice(1, -1);
+      value = (value as Record<string, unknown>)[key];
+    } else {
+      // Regular property access
+      value = (value as Record<string, unknown>)[part];
+    }
+  }
+
+  return value;
+}
+
+/**
+ * Resolve nested template expressions
+ * Handles patterns like:
+ *   {{variables.config.database.host}}     - dot notation
+ *   {{variables.config[env].database}}     - bracket notation for dynamic keys
+ *   {{variables.{{input.varName}}.field}}  - nested interpolation
+ *
+ * Resolution order:
+ * 1. Resolve innermost expressions first (those without nested braces)
+ * 2. Continue until no more expressions can be resolved
+ */
+export function resolveNestedExpressions(
+  template: string,
+  context: TemplateContext,
+  packageContext?: PackageContext
+): string {
+  let result = template;
+  let iterations = 0;
+  const maxIterations = 10; // Safety limit to prevent infinite loops
+
+  while (iterations < maxIterations) {
+    const prevResult = result;
+
+    // Find and resolve innermost expressions (those without nested {{ }})
+    // Pattern matches {{...}} where ... doesn't contain {{ or }}
+    result = result.replace(/\{\{([^{}]+)\}\}/g, (match, expression) => {
+      const trimmed = expression.trim();
+
+      // Try to resolve from variables ({{variables.name}} or {{variables.name.path}} or {{variables.name[key].path}})
+      if (trimmed.startsWith('variables.') && packageContext) {
+        // Use bracket-aware path resolution to support both dot and bracket notation
+        const value = getValueByPathWithBrackets(packageContext as unknown as Record<string, unknown>, trimmed);
+        if (value !== undefined) {
+          return typeof value === 'object' ? JSON.stringify(value) : String(value);
+        }
+        // If variable not found, leave as-is for potential later resolution
+        return match;
+      }
+
+      // Try trigger.payload prefix
+      if (trimmed.startsWith('trigger.payload.') && context.inputPayload) {
+        const path = trimmed.replace('trigger.payload.', '');
+        const value = getValueByPath(context.inputPayload, path);
+        if (value !== undefined) {
+          return typeof value === 'object' ? JSON.stringify(value) : String(value);
+        }
+      }
+
+      // Try input prefix
+      if (trimmed.startsWith('input.') && context.inputPayload) {
+        const path = trimmed.replace('input.', '');
+        const value = getValueByPath(context.inputPayload, path);
+        if (value !== undefined) {
+          return typeof value === 'object' ? JSON.stringify(value) : String(value);
+        }
+      }
+
+      // Try direct payload lookup
+      if (context.inputPayload) {
+        const value = getValueByPath(context.inputPayload, trimmed);
+        if (value !== undefined) {
+          return typeof value === 'object' ? JSON.stringify(value) : String(value);
+        }
+      }
+
+      // Return unchanged if we can't resolve
+      return match;
+    });
+
+    // If nothing changed, we're done
+    if (result === prevResult) {
+      break;
+    }
+
+    iterations++;
+  }
+
+  return result;
+}
+
+/**
+ * Full template resolution with variable support and nested interpolation
+ *
+ * Supports:
+ * - All standard template variables (system, input, etc.)
+ * - Variables: {{variables.name}} or {{variables.name.path.to.field}}
+ * - Nested interpolation: {{variables.{{input.configName}}.value}}
+ */
+export async function resolveTemplateWithPackages(
+  template: string,
+  context: TemplateContext
+): Promise<string> {
+  // Load packages
+  const packageContext = await loadPackageContext();
+
+  // First, resolve nested expressions (innermost first)
+  let result = resolveNestedExpressions(template, context, packageContext);
+
+  // Then apply standard template resolution for remaining variables
+  result = resolveTemplateVariables(result, context);
+
+  // Final pass for any remaining variables that may have been unresolved
+  result = resolveNestedExpressions(result, context, packageContext);
+
+  return result;
+}
+
+/**
+ * Synchronous version for use when packages are already loaded
+ */
+export function resolveTemplateWithPackagesSync(
+  template: string,
+  context: TemplateContext,
+  packageContext: PackageContext
+): string {
+  // First, resolve nested expressions (innermost first)
+  let result = resolveNestedExpressions(template, context, packageContext);
+
+  // Then apply standard template resolution for remaining variables
+  result = resolveTemplateVariables(result, context);
+
+  // Final pass for any remaining variables
+  result = resolveNestedExpressions(result, context, packageContext);
 
   return result;
 }

@@ -26,6 +26,7 @@ import { migration as addPerformanceIndexes } from './2026-01-08-001-add-perform
 import { migration as addWorkflowPromptType } from './2026-01-10-001-add-workflow-prompt-type.js';
 import { migration as addFailedStatusLookup } from './2026-01-14-001-add-failed-status-lookup.js';
 import { migration as addWorkflowRequestsCollection } from './2026-01-14-002-add-workflow-requests-collection.js';
+import { migration as addSystemUser } from './2026-01-21-001-add-system-user.js';
 
 // Register all migrations in order
 export const migrations: Migration[] = [
@@ -47,4 +48,5 @@ export const migrations: Migration[] = [
   addWorkflowPromptType,
   addFailedStatusLookup,
   addWorkflowRequestsCollection,
+  addSystemUser,
 ];

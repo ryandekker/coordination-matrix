@@ -102,6 +102,8 @@ export interface Workflow {
   steps: WorkflowStep[];
   mermaidDiagram?: string;
   rootTaskTitleTemplate?: string;
+  // Sample payload template for triggering this workflow - helps agents/callers know what data to provide
+  samplePayload?: string;
   createdAt: Date;
   updatedAt: Date;
   createdById?: ObjectId | null;

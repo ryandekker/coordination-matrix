@@ -152,14 +152,14 @@ usersRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) 
 usersRouter.post('/', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { email, displayName, role, isAgent, agentPrompt, profilePicture, botColor } = req.body;
+    const { email, displayName, role, isAgent, isSystem, agentPrompt, profilePicture, botColor } = req.body;
 
     if (!displayName) {
       throw createError('displayName is required', 400);
     }
 
-    // Email is required for non-agent users
-    if (!isAgent && !email) {
+    // Email is required for non-agent, non-system users
+    if (!isAgent && !isSystem && !email) {
       throw createError('email is required for non-agent users', 400);
     }
 
@@ -199,6 +199,15 @@ usersRouter.post('/', requireRole('admin'), async (req: Request, res: Response, 
         newUser.agentPrompt = agentPrompt;
       }
       // Set bot color for agent users
+      if (botColor) {
+        newUser.botColor = botColor;
+      }
+    }
+
+    // Set system user fields
+    if (isSystem) {
+      newUser.isSystem = true;
+      // System users can have a custom color
       if (botColor) {
         newUser.botColor = botColor;
       }

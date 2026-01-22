@@ -278,6 +278,25 @@ const fieldConfigs = [
 db.field_configs.insertMany(fieldConfigs);
 
 // ============================================================================
+// VIEW FOLDERS
+// ============================================================================
+
+const systemFolderId = new ObjectId();
+
+const viewFolders = [
+  {
+    _id: systemFolderId,
+    name: 'System',
+    collectionName: 'tasks',
+    sortOrder: 0,
+    isExpanded: true,
+    createdAt: new Date(),
+  },
+];
+
+db.view_folders.insertMany(viewFolders);
+
+// ============================================================================
 // DEFAULT VIEWS
 // ============================================================================
 
@@ -290,6 +309,7 @@ const views = [
     filters: {},
     sorting: [{ field: 'createdAt', direction: 'desc' }],
     visibleColumns: ['title', 'status', 'urgency', 'assigneeId', 'workflowId', 'workflowStage', 'tags', 'dueAt', 'createdAt'],
+    folderId: null,  // All Tasks stays at root level (shown as static nav item)
     createdAt: new Date(),
   },
   {
@@ -300,6 +320,7 @@ const views = [
     filters: { assigneeId: '{{currentUserId}}' },
     sorting: [{ field: 'urgency', direction: 'desc' }, { field: 'dueAt', direction: 'asc' }],
     visibleColumns: ['title', 'status', 'urgency', 'dueAt', 'tags'],
+    folderId: systemFolderId,
     createdAt: new Date(),
   },
   {
@@ -310,6 +331,7 @@ const views = [
     filters: { status: ['on_hold'] },
     sorting: [{ field: 'externalHoldDate', direction: 'asc' }],
     visibleColumns: ['title', 'status', 'urgency', 'externalHoldDate', 'externalId', 'assigneeId'],
+    folderId: systemFolderId,
     createdAt: new Date(),
   },
   {
@@ -320,6 +342,7 @@ const views = [
     filters: { urgency: ['high', 'urgent'] },
     sorting: [{ field: 'urgency', direction: 'desc' }, { field: 'createdAt', direction: 'asc' }],
     visibleColumns: ['title', 'status', 'urgency', 'assigneeId', 'dueAt'],
+    folderId: systemFolderId,
     createdAt: new Date(),
   },
   {
@@ -333,11 +356,32 @@ const views = [
     },
     sorting: [{ field: 'urgency', direction: 'desc' }, { field: 'createdAt', direction: 'asc' }],
     visibleColumns: ['title', 'status', 'urgency', 'workflowId', 'workflowStage', 'dueAt', 'createdAt'],
+    folderId: systemFolderId,
     createdAt: new Date(),
   },
 ];
 
 db.views.insertMany(views);
+
+// ============================================================================
+// SYSTEM USER - Special pseudo-user for system-executed tasks
+// This user is assigned to tasks that are executed by the system (webhooks, joins, etc.)
+// Using a well-known ObjectId so it can be referenced consistently
+// ============================================================================
+
+const SYSTEM_USER_ID = ObjectId('000000000000000000000001');
+
+const systemUser = {
+  _id: SYSTEM_USER_ID,
+  displayName: 'System',
+  role: 'operator',
+  isActive: true,
+  isSystem: true,
+  botColor: '#6B7280',  // Gray - neutral system color
+  createdAt: new Date(),
+};
+
+db.users.insertOne(systemUser);
 
 // ============================================================================
 // SAMPLE USERS

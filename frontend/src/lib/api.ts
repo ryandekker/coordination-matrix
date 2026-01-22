@@ -403,6 +403,62 @@ export const viewsApi = {
   },
 }
 
+// View Folders API
+export const viewFoldersApi = {
+  list: async (collectionName?: string): Promise<ApiResponse<ViewFolder[]>> => {
+    const params = collectionName ? `?collectionName=${collectionName}` : ''
+    const response = await authFetch(`${API_BASE}/view-folders${params}`)
+    return handleResponse(response)
+  },
+
+  get: async (id: string): Promise<ApiResponse<ViewFolder>> => {
+    const response = await authFetch(`${API_BASE}/view-folders/${id}`)
+    return handleResponse(response)
+  },
+
+  create: async (data: {
+    name: string
+    collectionName: string
+    sortOrder?: number
+    isExpanded?: boolean
+  }): Promise<ApiResponse<ViewFolder>> => {
+    const response = await authFetch(`${API_BASE}/view-folders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  update: async (id: string, data: Partial<ViewFolder>): Promise<ApiResponse<ViewFolder>> => {
+    const response = await authFetch(`${API_BASE}/view-folders/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  delete: async (id: string, moveViewsToRoot = true): Promise<ApiResponse<void>> => {
+    const response = await authFetch(`${API_BASE}/view-folders/${id}?moveViewsToRoot=${moveViewsToRoot}`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
+
+  reorder: async (
+    order: Array<{ id: string; sortOrder: number }>,
+    collectionName?: string
+  ): Promise<ApiResponse<ViewFolder[]>> => {
+    const response = await authFetch(`${API_BASE}/view-folders/reorder`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order, collectionName }),
+    })
+    return handleResponse(response)
+  },
+}
+
 // Users API
 export const usersApi = {
   list: async (): Promise<ApiResponse<User[]>> => {
@@ -627,6 +683,9 @@ export interface WebhookConfig {
   url: string
   method: WebhookMethod
   headers?: Record<string, string>
+  // Template string for headers - supports {{variables}}
+  // Takes precedence over headers if set
+  headersTemplate?: string
   body?: string
   maxRetries?: number
   retryDelayMs?: number
@@ -905,6 +964,7 @@ export interface View {
   sorting: Array<{ field: string; direction: 'asc' | 'desc' }>
   visibleColumns: string[]
   columnWidths?: Record<string, number>
+  folderId?: string | null
   createdById?: string | null
   createdAt: string
   userPreference?: {
@@ -914,6 +974,17 @@ export interface View {
   }
 }
 
+export interface ViewFolder {
+  _id: string
+  name: string
+  collectionName: string
+  sortOrder: number
+  isExpanded: boolean
+  createdById?: string | null
+  createdAt: string
+  updatedAt?: string
+}
+
 export interface User {
   _id: string
   email?: string                  // Optional for agent users
@@ -921,11 +992,23 @@ export interface User {
   role: string
   isActive: boolean
   isAgent?: boolean               // Is this user an AI agent?
+  isSystem?: boolean              // Is this the system user? (for automated workflow tasks)
   agentPrompt?: string            // Agent's base prompt/persona
   profilePicture?: string         // URL to profile picture (for humans)
   botColor?: string               // Custom color for bot users (hex code)
   createdAt?: string
   updatedAt?: string
+}
+
+// Well-known system user ID (matches backend)
+export const SYSTEM_USER_ID = '000000000000000000000001'
+
+/**
+ * Check if a user is the system user
+ */
+export function isSystemUser(user: User | null | undefined): boolean {
+  if (!user) return false
+  return user.isSystem === true || user._id === SYSTEM_USER_ID
 }
 
 export interface ExternalJob {
@@ -984,6 +1067,9 @@ export interface Workflow {
   isActive: boolean
   createdAt: string
   updatedAt?: string
+  rootTaskTitleTemplate?: string
+  // Sample payload template for triggering this workflow - helps agents/callers know what data to provide
+  samplePayload?: string
 }
 
 // Activity Log Types
@@ -1530,6 +1616,13 @@ export interface ApiKey {
   isActive: boolean
 }
 
+export interface ScopeDefinition {
+  value: string
+  label: string
+  description: string
+  category: string
+}
+
 // API Keys API
 export const apiKeysApi = {
   list: async (): Promise<ApiResponse<ApiKey[]>> => {
@@ -1557,6 +1650,23 @@ export const apiKeysApi = {
     const response = await authFetch(`${API_BASE}/auth/api-keys/${id}/regenerate`, {
       method: 'POST',
     })
+    return handleResponse(response)
+  },
+
+  update: async (
+    id: string,
+    data: { name?: string; description?: string; scopes?: string[]; expiresAt?: string | null; isActive?: boolean }
+  ): Promise<ApiResponse<ApiKey>> => {
+    const response = await authFetch(`${API_BASE}/auth/api-keys/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  getScopes: async (): Promise<ApiResponse<ScopeDefinition[]>> => {
+    const response = await authFetch(`${API_BASE}/auth/api-keys/scopes`)
     return handleResponse(response)
   },
 }
@@ -1874,5 +1984,115 @@ export const documentsApi = {
       sortBy: 'title',
       sortOrder: 'asc',
     })
+  },
+}
+
+// Variable Types (simplified model)
+export interface VariableRecord {
+  _id: string
+  name: string
+  displayName?: string
+  description?: string
+  value: string              // Raw value or JSON string (redacted if encrypted)
+  encrypted: boolean         // If true, value is encrypted at rest
+  createdById?: string | null
+  updatedById?: string | null
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+// Path/value info for nested object keys
+export interface KeyValuePath {
+  path: string               // e.g., "user.profile.name"
+  value: unknown             // The actual value
+  type: 'string' | 'number' | 'boolean' | 'null' | 'object' | 'array'
+}
+
+// Token browser format for variables
+export interface VariableToken {
+  variableId: string
+  name: string
+  description?: string
+  encrypted: boolean
+  isObject: boolean          // True if value is a JSON/YAML object
+  value?: string | null      // For simple (non-object) values
+  paths: KeyValuePath[]      // All paths with values for objects
+}
+
+// Legacy aliases for backwards compatibility
+export type VariablePackage = VariableRecord
+export type Variable = VariableRecord
+export type PackageToken = VariableToken
+
+// Variables API (simplified)
+export const variablePackagesApi = {
+  list: async (params?: { includeInactive?: boolean; search?: string }): Promise<ApiResponse<Variable[]>> => {
+    const searchParams = new URLSearchParams()
+    if (params?.includeInactive) searchParams.append('includeInactive', 'true')
+    if (params?.search) searchParams.append('search', params.search)
+    const queryString = searchParams.toString()
+    const response = await authFetch(`${API_BASE}/variable-packages${queryString ? `?${queryString}` : ''}`)
+    return handleResponse(response)
+  },
+
+  get: async (id: string): Promise<ApiResponse<Variable>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages/${id}`)
+    return handleResponse(response)
+  },
+
+  create: async (data: {
+    name: string
+    displayName?: string
+    description?: string
+    value: string
+    encrypted?: boolean
+  }): Promise<ApiResponse<Variable>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  update: async (id: string, data: Partial<{
+    name: string
+    displayName: string
+    description: string
+    value: string
+    encrypted: boolean
+    isActive: boolean
+  }>): Promise<ApiResponse<Variable>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  delete: async (id: string): Promise<ApiResponse<void>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages/${id}`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
+
+  // Reveal decrypted value
+  reveal: async (id: string): Promise<ApiResponse<{
+    variableId: string
+    variableName: string
+    value: string
+    encrypted: boolean
+  }>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages/${id}/reveal`)
+    return handleResponse(response)
+  },
+
+  // Token browser format
+  getTokens: async (): Promise<ApiResponse<VariableToken[]>> => {
+    const response = await authFetch(`${API_BASE}/variable-packages/tokens/list`)
+    return handleResponse(response)
   },
 }

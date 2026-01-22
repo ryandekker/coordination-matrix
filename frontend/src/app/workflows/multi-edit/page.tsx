@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { MermaidLiveEditor } from '@/components/ui/mermaid-live-editor'
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
+import { ChangePreviewModal } from '@/components/workflows/change-preview-modal'
 import { getAuthHeader } from '@/lib/auth'
 import {
   ArrowLeft,
@@ -50,6 +51,39 @@ interface ImportSummary {
   skipped: number
 }
 
+// Types for detailed diff preview
+interface FieldChange {
+  field: string
+  oldValue: unknown
+  newValue: unknown
+}
+
+interface StepDiff {
+  stepId: string
+  stepName: string
+  stepType: string
+  action: 'add' | 'remove' | 'modify' | 'unchanged'
+  fieldChanges?: FieldChange[]
+}
+
+interface WorkflowDiff {
+  workflowId?: string
+  workflowName: string
+  action: 'create' | 'update' | 'skip'
+  stepCount: number
+  stepDiffs: StepDiff[]
+  metadataChanges?: FieldChange[]
+  warnings?: string[]
+  error?: string
+}
+
+interface StepSummary {
+  added: number
+  modified: number
+  removed: number
+  unchanged: number
+}
+
 const MULTI_WORKFLOW_TEMPLATE = `flowchart TD
 
     %% @workflow: "My New Workflow"
@@ -84,6 +118,7 @@ const MULTI_WORKFLOW_TEMPLATE = `flowchart TD
 
 export default function MultiWorkflowEditPage() {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const idsParam = searchParams.get('ids')
   const workflowIds = idsParam ? idsParam.split(',').filter(Boolean) : []
 
@@ -101,6 +136,13 @@ export default function MultiWorkflowEditPage() {
   const [promptDialogOpen, setPromptDialogOpen] = useState(false)
   const [promptContent, setPromptContent] = useState('')
   const [workflowCount, setWorkflowCount] = useState<number>(0)
+
+  // Change preview modal state
+  const [previewModalOpen, setPreviewModalOpen] = useState(false)
+  const [detailedResults, setDetailedResults] = useState<WorkflowDiff[] | null>(null)
+  const [detailedSummary, setDetailedSummary] = useState<ImportSummary | null>(null)
+  const [stepSummary, setStepSummary] = useState<StepSummary | null>(null)
+  const [isConfirming, setIsConfirming] = useState(false)
 
   // Export workflows (by IDs if provided, or all)
   const handleExport = useCallback(async (ids?: string[]) => {
@@ -146,8 +188,8 @@ export default function MultiWorkflowEditPage() {
     setError(null)
   }, [])
 
-  // Preview or import workflows
-  const handleImport = useCallback(async (dryRun: boolean) => {
+  // Preview (quick dry-run without detailed diffs)
+  const handlePreview = useCallback(async () => {
     if (!mermaidCode.trim()) {
       setError('No Mermaid code to import')
       return
@@ -155,14 +197,46 @@ export default function MultiWorkflowEditPage() {
 
     setIsImporting(true)
     setError(null)
-    setIsDryRun(dryRun)
+    setIsDryRun(true)
     setResultsExpanded(true)
 
     try {
       const response = await fetch(`${API_BASE}/workflows/import-multi`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-        body: JSON.stringify({ mermaid: mermaidCode, dryRun }),
+        body: JSON.stringify({ mermaid: mermaidCode, dryRun: true }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Preview failed: ${response.statusText}`)
+      }
+
+      const result = await response.json()
+      setImportResults(result.data.results)
+      setImportSummary(result.data.summary)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Preview failed')
+    } finally {
+      setIsImporting(false)
+    }
+  }, [mermaidCode])
+
+  // Import with detailed preview modal
+  const handleImportWithPreview = useCallback(async () => {
+    if (!mermaidCode.trim()) {
+      setError('No Mermaid code to import')
+      return
+    }
+
+    setIsImporting(true)
+    setError(null)
+
+    try {
+      // First get detailed diffs
+      const response = await fetch(`${API_BASE}/workflows/import-multi`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify({ mermaid: mermaidCode, dryRun: true, includeStepDiffs: true }),
       })
 
       if (!response.ok) {
@@ -170,20 +244,44 @@ export default function MultiWorkflowEditPage() {
       }
 
       const result = await response.json()
-      setImportResults(result.data.results)
-      setImportSummary(result.data.summary)
-
-      // If not a dry run and successful, refresh the export to get updated IDs
-      if (!dryRun && result.data.summary.created > 0) {
-        // Wait a moment then re-export to update IDs in the editor
-        setTimeout(() => handleExport(), 500)
-      }
+      setDetailedResults(result.data.results)
+      setDetailedSummary(result.data.summary)
+      setStepSummary(result.data.stepSummary || null)
+      setPreviewModalOpen(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed')
     } finally {
       setIsImporting(false)
     }
-  }, [mermaidCode, handleExport])
+  }, [mermaidCode])
+
+  // Confirm import after preview
+  const handleConfirmImport = useCallback(async () => {
+    if (!mermaidCode.trim()) return
+
+    setIsConfirming(true)
+    setError(null)
+
+    try {
+      const response = await fetch(`${API_BASE}/workflows/import-multi`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify({ mermaid: mermaidCode, dryRun: false }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Import failed: ${response.statusText}`)
+      }
+
+      // Redirect to workflows page on success
+      router.push('/workflows')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import failed')
+      setPreviewModalOpen(false)
+    } finally {
+      setIsConfirming(false)
+    }
+  }, [mermaidCode, router])
 
   // Download as file
   const handleDownload = useCallback(() => {
@@ -372,11 +470,11 @@ export default function MultiWorkflowEditPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => handleImport(true)}
+              onClick={handlePreview}
               disabled={isImporting || !mermaidCode.trim()}
               className="gap-1.5"
             >
-              {isImporting && isDryRun ? (
+              {isImporting && isDryRun && !previewModalOpen ? (
                 <RefreshCw className="h-3.5 w-3.5 animate-spin" />
               ) : (
                 <Eye className="h-3.5 w-3.5" />
@@ -386,7 +484,7 @@ export default function MultiWorkflowEditPage() {
             <Button
               variant="default"
               size="sm"
-              onClick={() => handleImport(false)}
+              onClick={handleImportWithPreview}
               disabled={isImporting || !mermaidCode.trim()}
               className="gap-1.5"
             >
@@ -539,6 +637,19 @@ export default function MultiWorkflowEditPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Change Preview Modal */}
+      {detailedResults && detailedSummary && (
+        <ChangePreviewModal
+          open={previewModalOpen}
+          onOpenChange={setPreviewModalOpen}
+          results={detailedResults}
+          summary={detailedSummary}
+          stepSummary={stepSummary || undefined}
+          onConfirm={handleConfirmImport}
+          isConfirming={isConfirming}
+        />
+      )}
     </div>
   )
 }

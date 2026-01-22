@@ -214,6 +214,7 @@ viewsRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       sorting: viewData.sorting || [],
       visibleColumns: viewData.visibleColumns || [],
       columnWidths: viewData.columnWidths,
+      folderId: viewData.folderId ? new ObjectId(viewData.folderId) : null,
       createdById: viewData.createdById ? new ObjectId(viewData.createdById) : null,
       createdAt: now,
       updatedAt: now,
@@ -249,20 +250,15 @@ viewsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
       throw createError('View not found', 404);
     }
 
-    if (existingView.isSystem) {
-      // Only allow updating certain fields on system views
-      const allowedFields = ['visibleColumns', 'columnWidths', 'sorting'];
-      for (const key of Object.keys(updates)) {
-        if (!allowedFields.includes(key)) {
-          delete updates[key];
-        }
-      }
-    }
-
     delete updates._id;
     delete updates.createdAt;
     delete updates.isSystem;
     updates.updatedAt = new Date();
+
+    // Handle folderId - convert to ObjectId or null
+    if ('folderId' in updates) {
+      updates.folderId = updates.folderId ? new ObjectId(updates.folderId) : null;
+    }
 
     // Handle default flag
     if (updates.isDefault === true) {
@@ -294,10 +290,6 @@ viewsRouter.delete('/:id', async (req: Request, res: Response, next: NextFunctio
 
     if (!view) {
       throw createError('View not found', 404);
-    }
-
-    if (view.isSystem) {
-      throw createError('Cannot delete system views', 403);
     }
 
     // Delete associated user preferences

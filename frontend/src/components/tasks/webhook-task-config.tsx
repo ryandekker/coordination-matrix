@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceToNow } from 'date-fns'
 import Link from 'next/link'
@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/select'
 import { Task, WebhookConfig, WebhookMethod, WebhookAttempt, tasksApi } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { TemplateTextarea, TemplateInput } from '@/components/ui/template-textarea'
 
 interface WebhookTaskConfigProps {
   task?: Task | null
@@ -35,13 +36,29 @@ export function WebhookTaskConfig({
   const queryClient = useQueryClient()
   const [isExecuting, setIsExecuting] = useState(false)
   const [isRetrying, setIsRetrying] = useState(false)
+
+  // Headers are stored as a string template to support {{variables}}
+  // The backend will parse and substitute variables at execution time
   const [headersText, setHeadersText] = useState(() => {
+    if (webhookConfig?.headersTemplate) {
+      // New format: string template
+      return webhookConfig.headersTemplate
+    }
     if (webhookConfig?.headers) {
+      // Legacy format: object - convert to string
       return JSON.stringify(webhookConfig.headers, null, 2)
     }
     return '{}'
   })
-  const [headersError, setHeadersError] = useState<string | null>(null)
+
+  // Sync headersText when webhookConfig changes externally
+  useEffect(() => {
+    if (webhookConfig?.headersTemplate) {
+      setHeadersText(webhookConfig.headersTemplate)
+    } else if (webhookConfig?.headers) {
+      setHeadersText(JSON.stringify(webhookConfig.headers, null, 2))
+    }
+  }, [webhookConfig?.headersTemplate, webhookConfig?.headers])
 
   const isWebhookTask = task?.taskType === 'external'
   const canRetry = task?.status === 'failed' && isWebhookTask
@@ -86,22 +103,16 @@ export function WebhookTaskConfig({
     }
   }
 
+  // Store headers as a template string - no JSON validation needed
+  // Variables like {{_apiKey}} are resolved at execution time
   const handleHeadersChange = (value: string) => {
     setHeadersText(value)
-    try {
-      const parsed = JSON.parse(value)
-      if (typeof parsed !== 'object' || Array.isArray(parsed)) {
-        setHeadersError('Headers must be a JSON object')
-        return
-      }
-      setHeadersError(null)
-      onConfigChange({
-        ...webhookConfig!,
-        headers: parsed,
-      })
-    } catch {
-      setHeadersError('Invalid JSON')
-    }
+    onConfigChange({
+      ...webhookConfig!,
+      headersTemplate: value,
+      // Clear legacy headers field when using template
+      headers: undefined,
+    })
   }
 
   const getStatusColor = (status: string) => {
@@ -150,95 +161,72 @@ export function WebhookTaskConfig({
           )}
         </div>
 
-        {/* Template Variables Help */}
-        <div className="text-[10px] bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded px-2 py-1.5 text-blue-800 dark:text-blue-200">
-          <p className="font-medium mb-1">Template Variables (from task.metadata.inputPayload)</p>
-          <div className="space-y-0.5 font-mono opacity-90">
-            <p><span className="text-blue-600 dark:text-blue-300">System:</span> {`{{_apiUrl}}`}, {`{{_apiKey}}`}, {`{{_workflowRunId}}`}</p>
-            <p><span className="text-blue-600 dark:text-blue-300">This task:</span> {`{{title}}`}, {`{{status}}`}, {`{{tags}}`}, {`{{summary}}`}</p>
-            <p><span className="text-blue-600 dark:text-blue-300">Callbacks:</span> {`{{systemWebhookUrl}}`}, {`{{callbackSecret}}`}, {`{{taskId}}`}</p>
-            <p><span className="text-blue-600 dark:text-blue-300">Prev step:</span> {`{{output}}`}, {`{{output.field}}`}, {`{{response.field}}`}</p>
+        {/* URL and Method */}
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">URL</label>
+          <div className="flex gap-2">
+            <Select
+              value={webhookConfig?.method || 'POST'}
+              onValueChange={(val) =>
+                onConfigChange({
+                  ...webhookConfig!,
+                  method: val as WebhookMethod,
+                })
+              }
+            >
+              <SelectTrigger className="h-8 w-24 text-sm flex-shrink-0">
+                <SelectValue placeholder="Method" />
+              </SelectTrigger>
+              <SelectContent>
+                {HTTP_METHODS.map((method) => (
+                  <SelectItem key={method} value={method}>
+                    {method}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <TemplateInput
+              value={webhookConfig?.url || ''}
+              onChange={(url) =>
+                onConfigChange({
+                  ...webhookConfig!,
+                  url,
+                })
+              }
+              placeholder="https://api.example.com/webhook"
+              showTokenBrowser={true}
+            />
           </div>
         </div>
 
-        {/* URL and Method */}
-        <div className="grid grid-cols-[100px_1fr] gap-2">
-          <Select
-            value={webhookConfig?.method || 'POST'}
-            onValueChange={(val) =>
-              onConfigChange({
-                ...webhookConfig!,
-                method: val as WebhookMethod,
-              })
-            }
-          >
-            <SelectTrigger className="h-8 text-sm">
-              <SelectValue placeholder="Method" />
-            </SelectTrigger>
-            <SelectContent>
-              {HTTP_METHODS.map((method) => (
-                <SelectItem key={method} value={method}>
-                  {method}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Input
-            value={webhookConfig?.url || ''}
-            onChange={(e) =>
-              onConfigChange({
-                ...webhookConfig!,
-                url: e.target.value,
-              })
-            }
-            placeholder="https://api.example.com/webhook"
-            className="h-8 text-sm"
-          />
-        </div>
-
-        {/* Headers */}
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Headers (JSON)</label>
-          <textarea
-            value={headersText}
-            onChange={(e) => handleHeadersChange(e.target.value)}
-            placeholder='{"Authorization": "Bearer token"}'
-            rows={3}
-            className={cn(
-              'flex w-full rounded-md border bg-background px-3 py-1.5 text-xs font-mono',
-              'placeholder:text-muted-foreground resize-y transition-colors',
-              'focus-visible:outline-none',
-              headersError
-                ? 'border-destructive focus-visible:border-destructive'
-                : 'border-input focus-visible:border-primary'
-            )}
-          />
-          {headersError && (
-            <p className="text-[10px] text-destructive">{headersError}</p>
-          )}
-        </div>
+        {/* Headers - stored as template string to support {{variables}} */}
+        <TemplateTextarea
+          label="Headers (JSON with variables)"
+          description="Use {{variable}} syntax for dynamic values"
+          value={headersText}
+          onChange={handleHeadersChange}
+          placeholder={'{\n  "Authorization": "Bearer {{_apiKey}}",\n  "Content-Type": "application/json"\n}'}
+          minHeight="60px"
+          maxHeight="120px"
+          showTokenBrowser={true}
+        />
 
         {/* Body (only for non-GET methods) */}
         {webhookConfig?.method !== 'GET' && (
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Request Body</label>
-            <textarea
-              value={webhookConfig?.body || ''}
-              onChange={(e) =>
-                onConfigChange({
-                  ...webhookConfig!,
-                  body: e.target.value,
-                })
-              }
-              placeholder='{"key": "value"}'
-              rows={4}
-              className={cn(
-                'flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs font-mono',
-                'placeholder:text-muted-foreground resize-y transition-colors',
-                'focus-visible:outline-none focus-visible:border-primary'
-              )}
-            />
-          </div>
+          <TemplateTextarea
+            label="Request Body"
+            value={webhookConfig?.body || ''}
+            onChange={(body) =>
+              onConfigChange({
+                ...webhookConfig!,
+                body,
+              })
+            }
+            placeholder={'{\n  "taskId": "{{taskId}}",\n  "data": {{output}}\n}'}
+            minHeight="80px"
+            maxHeight="200px"
+            showTokenBrowser={true}
+          />
         )}
 
         {/* Advanced Options */}

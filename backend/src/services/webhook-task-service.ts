@@ -2,7 +2,7 @@ import { ObjectId, Collection } from 'mongodb';
 import { getDb } from '../db/connection.js';
 import { Task, WebhookAttempt, TaskStatus } from '../types/index.js';
 import { eventBus, publishTaskEvent } from './event-bus.js';
-import { resolveTemplateVariables, TemplateContext } from './workflow/template-utils.js';
+import { resolveTemplateWithPackages, TemplateContext } from './workflow/template-utils.js';
 
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_DELAY_MS = 1000;
@@ -136,8 +136,8 @@ class WebhookTaskService {
       apiKey: process.env.MATRIX_API_KEY,
     };
 
-    // Resolve template variables in URL
-    const resolvedUrl = resolveTemplateVariables(config.url, templateContext);
+    // Resolve template variables in URL (with variable package support)
+    const resolvedUrl = await resolveTemplateWithPackages(config.url, templateContext);
 
     // Resolve template variables in headers
     const resolvedHeaders: Record<string, string> = {
@@ -145,14 +145,14 @@ class WebhookTaskService {
     };
     if (config.headers) {
       for (const [key, value] of Object.entries(config.headers)) {
-        resolvedHeaders[key] = resolveTemplateVariables(value, templateContext);
+        resolvedHeaders[key] = await resolveTemplateWithPackages(value, templateContext);
       }
     }
 
     // Resolve template variables in body
     let resolvedBody: string | undefined;
     if (config.body && config.method !== 'GET') {
-      resolvedBody = resolveTemplateVariables(config.body, templateContext);
+      resolvedBody = await resolveTemplateWithPackages(config.body, templateContext);
     }
 
     // Create new attempt record with resolved request details

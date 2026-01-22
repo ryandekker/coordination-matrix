@@ -52,7 +52,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { EditableCell } from './editable-cell'
-import { Task, FieldConfig, LookupValue, User, Workflow, tasksApi } from '@/lib/api'
+import { Task, FieldConfig, LookupValue, User, Workflow, tasksApi, isSystemUser } from '@/lib/api'
 import { useTaskChildren, useUpdateTask, useDeleteTask, useBulkUpdateTasks, useBulkDeleteTasks, useLookups, useCreateTask } from '@/hooks/use-tasks'
 import { formatDateTime, cn } from '@/lib/utils'
 import { TASK_TYPE_CONFIG, getTaskTypeConfig } from '@/lib/task-type-config'
@@ -155,7 +155,7 @@ const BulkActionsBar = memo(function BulkActionsBar({
             <SelectItem value="__unassign__">
               <UserChip user={null} size="sm" />
             </SelectItem>
-            {users.map((user) => (
+            {users.filter(user => !isSystemUser(user)).map((user) => (
               <SelectItem key={user._id} value={user._id}>
                 <UserChip user={user} size="sm" />
               </SelectItem>
@@ -1463,6 +1463,25 @@ export function TaskDataTable({
     // Handle number fields
     if (fieldConfig.fieldType === 'number') {
       return <div className="text-center">{value?.toString() || '0'}</div>
+    }
+
+    // Handle workflowStage - truncate to single line with max width
+    if (fieldConfig.fieldPath === 'workflowStage' && value) {
+      const stageValue = value.toString()
+      return (
+        <TooltipProvider>
+          <Tooltip delayDuration={300}>
+            <TooltipTrigger asChild>
+              <div className="text-center truncate max-w-[150px] mx-auto">
+                {stageValue}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{stageValue}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )
     }
 
     if (value === null || value === undefined || value === '') {

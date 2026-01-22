@@ -430,28 +430,18 @@ function FindDocumentConfig({
         <>
           <div className="space-y-1">
             <label className="text-sm font-medium">Search Prompt</label>
-            <div className="flex gap-1">
-              <Textarea
-                value={step.findDocumentConfig?.searchPrompt || ''}
-                onChange={(e) => onUpdate({
-                  findDocumentConfig: { ...step.findDocumentConfig, searchPrompt: e.target.value }
-                })}
-                placeholder='e.g., "Find SOPs about {{input.topic}}" or "Documentation for {{item.productName}}"'
-                className="min-h-[60px] font-mono text-sm"
-              />
-            </div>
             <TokenBrowser
               workflowId={workflowId}
               previousSteps={previousSteps}
               currentStepIndex={stepIndex}
               loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
-              onSelectToken={(token) => {
-                const current = step.findDocumentConfig?.searchPrompt || ''
-                onUpdate({
-                  findDocumentConfig: { ...step.findDocumentConfig, searchPrompt: current + token }
-                })
-              }}
+              onSelectToken={() => {}}
               variant="text"
+              fieldLabel="Search Query"
+              fieldValue={step.findDocumentConfig?.searchPrompt || ''}
+              onFieldValueChange={(value) => onUpdate({
+                findDocumentConfig: { ...step.findDocumentConfig, searchPrompt: value }
+              })}
             />
             <p className="text-xs text-muted-foreground">
               Use template variables like {`{{input.field}}`} to build dynamic search queries from previous step data.
@@ -1071,6 +1061,41 @@ function ExternalStepConfigPanel({
             headersError && "border-destructive"
           )}
         />
+        <div className="flex items-center gap-2 mt-1">
+          <TokenBrowser
+            workflowId={workflowId}
+            previousSteps={previousSteps}
+            currentStepIndex={stepIndex}
+            loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
+            onSelectToken={() => {
+              // Token selection handled by onFieldValueChange
+            }}
+            fieldLabel="Headers"
+            fieldValue={headersText}
+            onFieldValueChange={(value) => {
+              setHeadersText(value)
+              // Also try to parse and save if valid
+              if (!value.trim()) {
+                onUpdate({ externalConfig: { ...step.externalConfig, headers: undefined } })
+                setHeadersError(null)
+              } else {
+                try {
+                  const parsed = JSON.parse(value)
+                  if (typeof parsed === 'object' && !Array.isArray(parsed)) {
+                    onUpdate({ externalConfig: { ...step.externalConfig, headers: parsed } })
+                    setHeadersError(null)
+                  }
+                } catch {
+                  // Allow invalid JSON while typing
+                }
+              }
+            }}
+            variant="text"
+          />
+          <span className="text-xs text-muted-foreground">
+            Browse and insert tokens into headers
+          </span>
+        </div>
         <p className="text-xs text-muted-foreground">
           <strong>Note:</strong> <code className="bg-muted px-1 rounded">Content-Type: application/json</code> is added automatically.
           Add additional headers here (leave empty if none needed).
@@ -1104,16 +1129,20 @@ function ExternalStepConfigPanel({
             previousSteps={previousSteps}
             currentStepIndex={stepIndex}
             loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
-            onSelectToken={(token) => {
-              const current = step.externalConfig?.payloadTemplate || ''
+            onSelectToken={() => {
+              // Token selection handled by onFieldValueChange
+            }}
+            fieldLabel="Payload Template"
+            fieldValue={step.externalConfig?.payloadTemplate || ''}
+            onFieldValueChange={(value) => {
               onUpdate({
-                externalConfig: { ...step.externalConfig, payloadTemplate: current + token }
+                externalConfig: { ...step.externalConfig, payloadTemplate: value }
               })
             }}
             variant="text"
           />
           <span className="text-xs text-muted-foreground">
-            Click to insert token at end of payload
+            Browse and insert tokens into payload
           </span>
         </div>
       </div>
@@ -1479,11 +1508,11 @@ export function StepConfigPanel({
               previousSteps={previousSteps}
               currentStepIndex={stepIndex}
               loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
-              onSelectToken={(token) => {
-                const current = step.titleTemplate || ''
-                onUpdate({ titleTemplate: current + token })
-              }}
+              onSelectToken={() => {}}
               variant="text"
+              fieldLabel="Task Title Template"
+              fieldValue={step.titleTemplate || ''}
+              onFieldValueChange={(value) => onUpdate({ titleTemplate: value })}
             />
           </div>
           <p className="text-xs text-muted-foreground">
@@ -1540,22 +1569,16 @@ export function StepConfigPanel({
                 <Sparkles className="h-4 w-4 text-amber-500" />
                 Additional Instructions
               </label>
-              <Textarea
-                value={step.additionalInstructions || step.prompt || ''}
-                onChange={(e) => onUpdate({ additionalInstructions: e.target.value })}
-                placeholder="Instructions for the AI agent..."
-                className="min-h-[80px] font-mono text-sm"
-              />
               <TokenBrowser
                 workflowId={workflowId}
                 previousSteps={previousSteps}
                 currentStepIndex={stepIndex}
                 loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
-                onSelectToken={(token) => {
-                  const current = step.additionalInstructions || ''
-                  onUpdate({ additionalInstructions: current + token })
-                }}
+                onSelectToken={() => {}}
                 variant="text"
+                fieldLabel="Instructions"
+                fieldValue={step.additionalInstructions || step.prompt || ''}
+                onFieldValueChange={(value) => onUpdate({ additionalInstructions: value })}
               />
             </div>
 

@@ -217,6 +217,15 @@ db.createCollection('views');
 
 db.views.createIndex({ collectionName: 1, isDefault: 1 });
 db.views.createIndex({ createdById: 1 });
+db.views.createIndex({ folderId: 1 });
+
+// ============================================================================
+// VIEW FOLDERS - Folders for organizing saved views
+// ============================================================================
+db.createCollection('view_folders');
+
+db.view_folders.createIndex({ collectionName: 1, sortOrder: 1 });
+db.view_folders.createIndex({ createdById: 1 });
 
 // ============================================================================
 // USERS - Basic user management
@@ -225,6 +234,7 @@ db.createCollection('users');
 
 db.users.createIndex({ email: 1 }, { unique: true, sparse: true });
 db.users.createIndex({ isActive: 1 });
+db.users.createIndex({ isSystem: 1 }, { sparse: true });  // For finding the system user
 
 // ============================================================================
 // TEAMS - Team management
@@ -1168,5 +1178,84 @@ db.document_versions.createIndex({ documentId: 1, version: -1 });
 db.document_versions.createIndex({ documentId: 1, modifiedAt: -1 });
 // Unique constraint: only one version number per document
 db.document_versions.createIndex({ documentId: 1, version: 1 }, { unique: true });
+
+// ============================================================================
+// VARIABLE PACKAGES - Global variable packages with branches for credentials
+// ============================================================================
+db.createCollection('variable_packages', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['name', 'branches', 'createdAt', 'isActive'],
+      properties: {
+        name: {
+          bsonType: 'string',
+          description: 'Package name (unique, used in templates) - required'
+        },
+        displayName: {
+          bsonType: 'string',
+          description: 'Human-readable display name'
+        },
+        description: {
+          bsonType: 'string',
+          description: 'Package description'
+        },
+        // Branch definitions - each branch is a variant of the package
+        // Example: { "personal": { email: "...", password: "enc:..." }, "work": { ... } }
+        branches: {
+          bsonType: 'object',
+          description: 'Map of branch name -> branch data'
+        },
+        // Default branch to use when not specified
+        defaultBranch: {
+          bsonType: 'string',
+          description: 'Default branch name'
+        },
+        // Schema definition for UI and validation
+        // Each field defines: key, displayName, type (string|secret|number|boolean), required, description
+        schema: {
+          bsonType: 'array',
+          items: {
+            bsonType: 'object',
+            properties: {
+              key: { bsonType: 'string' },
+              displayName: { bsonType: 'string' },
+              type: { bsonType: 'string' },
+              required: { bsonType: 'bool' },
+              description: { bsonType: 'string' }
+            }
+          },
+          description: 'Field schema for the package'
+        },
+        // Ownership and audit
+        createdById: {
+          bsonType: ['objectId', 'null'],
+          description: 'User who created this package'
+        },
+        updatedById: {
+          bsonType: ['objectId', 'null'],
+          description: 'User who last updated this package'
+        },
+        isActive: {
+          bsonType: 'bool',
+          description: 'Whether the package is active'
+        },
+        createdAt: {
+          bsonType: 'date',
+          description: 'Creation timestamp'
+        },
+        updatedAt: {
+          bsonType: 'date',
+          description: 'Last update timestamp'
+        }
+      }
+    }
+  }
+});
+
+// Variable package indexes
+db.variable_packages.createIndex({ name: 1 }, { unique: true });
+db.variable_packages.createIndex({ isActive: 1 });
+db.variable_packages.createIndex({ createdById: 1 });
 
 print('Database initialization complete!');

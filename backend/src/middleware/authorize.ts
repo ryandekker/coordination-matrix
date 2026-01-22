@@ -121,6 +121,48 @@ export const SCOPES = {
 } as const;
 
 /**
+ * Scope definitions with metadata for UI display.
+ * Single source of truth for available API key scopes.
+ */
+export const SCOPE_DEFINITIONS = [
+  // Task scopes
+  { value: 'tasks:read', label: 'Read Tasks', description: 'View tasks and task details', category: 'Tasks' },
+  { value: 'tasks:write', label: 'Write Tasks', description: 'Create and update tasks', category: 'Tasks' },
+  { value: 'tasks:delete', label: 'Delete Tasks', description: 'Delete tasks', category: 'Tasks' },
+
+  // User scopes
+  { value: 'users:read', label: 'Read Users', description: 'View user information', category: 'Users' },
+  { value: 'users:write', label: 'Write Users', description: 'Create and update users', category: 'Users' },
+  { value: 'users:delete', label: 'Delete Users', description: 'Delete users', category: 'Users' },
+
+  // Workflow scopes
+  { value: 'workflows:read', label: 'Read Workflows', description: 'View workflows and workflow runs', category: 'Workflows' },
+  { value: 'workflows:write', label: 'Write Workflows', description: 'Create and update workflows', category: 'Workflows' },
+  { value: 'workflows:execute', label: 'Execute Workflows', description: 'Start and manage workflow runs', category: 'Workflows' },
+
+  // View/saved search scopes
+  { value: 'saved-searches:read', label: 'Read Saved Searches', description: 'Access saved searches/views', category: 'Views' },
+  { value: 'saved-searches:write', label: 'Write Saved Searches', description: 'Create and modify saved searches', category: 'Views' },
+
+  // Document scopes
+  { value: 'documents:read', label: 'Read Documents', description: 'View documents and attachments', category: 'Documents' },
+  { value: 'documents:write', label: 'Write Documents', description: 'Upload and modify documents', category: 'Documents' },
+
+  // Webhook scopes
+  { value: 'webhooks:read', label: 'Read Webhooks', description: 'View webhook configurations', category: 'Webhooks' },
+  { value: 'webhooks:write', label: 'Write Webhooks', description: 'Create and update webhooks', category: 'Webhooks' },
+
+  // API key management (typically admin only)
+  { value: 'api-keys:read', label: 'Read API Keys', description: 'View API key information', category: 'API Keys' },
+  { value: 'api-keys:write', label: 'Write API Keys', description: 'Create and manage API keys', category: 'API Keys' },
+
+  // Admin scope
+  { value: 'admin:*', label: 'Admin (All Access)', description: 'Full administrative access to all resources', category: 'Admin' },
+] as const;
+
+export type ScopeDefinition = (typeof SCOPE_DEFINITIONS)[number];
+
+/**
  * Middleware to require specific scopes for API key access.
  * If the request is authenticated via API key, checks that the key has the required scopes.
  * If authenticated via JWT (user token), this check is bypassed (users have implicit full access

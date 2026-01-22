@@ -500,6 +500,22 @@ export interface View {
   sorting: ViewSorting[];
   visibleColumns: string[];
   columnWidths?: Record<string, number>;
+  folderId?: ObjectId | null;
+  createdById?: ObjectId | null;
+  createdAt: Date;
+  updatedAt?: Date;
+}
+
+// ============================================================================
+// View Folder Types
+// ============================================================================
+
+export interface ViewFolder {
+  _id: ObjectId;
+  name: string;
+  collectionName: string;
+  sortOrder: number;
+  isExpanded: boolean;
   createdById?: ObjectId | null;
   createdAt: Date;
   updatedAt?: Date;
@@ -531,6 +547,7 @@ export interface User {
   role: UserRole;
   isActive: boolean;
   isAgent?: boolean;              // Is this user an AI agent?
+  isSystem?: boolean;             // Is this the system user? (for automated workflow tasks)
   agentPrompt?: string;           // Agent's base prompt/persona
   profilePicture?: string;        // URL to profile picture (for humans)
   botColor?: string;              // Custom color for bot users (hex code)
@@ -1269,6 +1286,43 @@ export interface DocumentEvent {
   actorType: 'user' | 'system' | 'daemon';
   timestamp: Date;
   metadata?: Record<string, unknown>;
+}
+
+// ============================================================================
+// Variable Types (Configuration Variables)
+// ============================================================================
+
+/**
+ * Simplified variable model:
+ * - name: unique identifier for use in templates ({{variables.name}} or {{variables.name.path}})
+ * - value: string or JSON/YAML object stored as string
+ * - encrypted: if true, the entire value is encrypted at rest
+ *
+ * Template usage:
+ *   {{variables.api_key}} - returns the raw value
+ *   {{variables.config.database.host}} - traverses into JSON object
+ */
+export interface VariablePackage {
+  _id: ObjectId;
+  name: string;                     // Unique variable name (used in templates)
+  displayName?: string;             // Human-readable display name
+  description?: string;
+
+  // The value - can be a simple string or a JSON/YAML object stored as string
+  // When encrypted=true, this is stored as "enc:..." format
+  value: string;
+
+  // If true, the entire value is encrypted at rest
+  encrypted: boolean;
+
+  // Ownership and audit
+  createdById?: ObjectId | null;
+  updatedById?: ObjectId | null;
+  isActive: boolean;
+
+  // Timestamps
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 // Semantic search types

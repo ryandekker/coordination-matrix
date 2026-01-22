@@ -9,7 +9,7 @@ import { TaskModal } from './task-modal'
 import { ColumnConfigModal } from './column-config-modal'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { useTasks, useTask, useLookups, useFieldConfigs, useViews, useUsers, useWorkflows, useTags, useCreateView, useUpdateView } from '@/hooks/use-tasks'
+import { useTasks, useTask, useLookups, useFieldConfigs, useViews, useViewFolders, useUsers, useWorkflows, useTags, useCreateView, useUpdateView } from '@/hooks/use-tasks'
 import { useEventStream } from '@/hooks/use-event-stream'
 import { Task, View, FieldConfig } from '@/lib/api'
 
@@ -129,6 +129,7 @@ export function TasksPage() {
   const { data: lookupsData } = useLookups()
   const { data: fieldConfigsData } = useFieldConfigs('tasks')
   const { data: viewsData, refetch: refetchViews } = useViews('tasks')
+  const { data: viewFoldersData } = useViewFolders('tasks')
   const { data: usersData } = useUsers()
   const { data: workflowsData } = useWorkflows()
   const { data: tagsData } = useTags()
@@ -158,6 +159,7 @@ export function TasksPage() {
     ? fieldConfigsData.data
     : FALLBACK_FIELD_CONFIGS
   const views = viewsData?.data || []
+  const viewFolders = viewFoldersData?.data || []
   const users = usersData?.data || []
   const workflows = workflowsData?.data || []
   const tags = tagsData?.data || []
@@ -302,7 +304,8 @@ export function TasksPage() {
   const handleSaveSearch = useCallback(async (
     name: string,
     filtersToSave: Record<string, unknown>,
-    sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>
+    sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>,
+    folderId?: string | null
   ) => {
     const newView = await createViewMutation.mutateAsync({
       name,
@@ -310,6 +313,7 @@ export function TasksPage() {
       filters: filtersToSave,
       sorting: sorting || currentSorting,
       visibleColumns: effectiveVisibleColumns,
+      folderId: folderId || undefined,
     })
 
     // Refetch views to update sidebar
@@ -447,16 +451,16 @@ export function TasksPage() {
       </div>
 
       <TaskToolbar
-        views={views}
         currentView={currentView}
+        viewFolders={viewFolders}
         lookups={lookups}
         users={users}
         tasks={tasks}
         availableTags={tags}
+        workflows={workflows}
         filters={filters}
         search={search}
         sorting={currentSorting}
-        onViewChange={handleViewChange}
         onFilterChange={handleFilterChange}
         onSearchChange={handleSearchChange}
         onOpenColumnConfig={handleOpenColumnConfig}

@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { TagInput } from '@/components/ui/tag-input'
+import { TemplateTextarea } from '@/components/ui/template-textarea'
 import { Task, LookupValue, User, Workflow, WebhookConfig, TaskType } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { WebhookTaskConfig } from '../webhook-task-config'
@@ -117,38 +118,44 @@ export function EditDetailsDrawer({
 
         <div className="overflow-y-auto p-4 space-y-6">
           {/* Summary */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Summary</label>
-            <textarea
-              {...register('summary')}
-              placeholder="Task summary..."
-              rows={3}
-              className={cn(
-                'flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm',
-                'placeholder:text-muted-foreground resize-y',
-                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
-              )}
-            />
-          </div>
+          <Controller
+            name="summary"
+            control={control}
+            render={({ field }) => (
+              <TemplateTextarea
+                label="Summary"
+                value={field.value as string || ''}
+                onChange={field.onChange}
+                placeholder="Task summary... Use {{variable}} for dynamic values"
+                minHeight="80px"
+                maxHeight="150px"
+                showTokenBrowser={true}
+                workflowId={task.workflowId || undefined}
+                taskOnly={!task.workflowRunId}
+              />
+            )}
+          />
 
           {/* Extra Prompt (for agent tasks) */}
           {currentTaskType === 'agent' && (
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Extra Prompt</label>
-              <p className="text-xs text-muted-foreground">
-                Additional context or instructions for the AI agent
-              </p>
-              <textarea
-                {...register('extraPrompt')}
-                placeholder="Additional instructions for the agent..."
-                rows={4}
-                className={cn(
-                  'flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm',
-                  'placeholder:text-muted-foreground resize-y',
-                  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
-                )}
-              />
-            </div>
+            <Controller
+              name="extraPrompt"
+              control={control}
+              render={({ field }) => (
+                <TemplateTextarea
+                  label="Extra Prompt"
+                  description="Additional context or instructions for the AI agent"
+                  value={field.value as string || ''}
+                  onChange={field.onChange}
+                  placeholder="Additional instructions for the agent... Use {{variable}} for dynamic values"
+                  minHeight="100px"
+                  maxHeight="200px"
+                  showTokenBrowser={true}
+                  workflowId={task.workflowId || undefined}
+                  taskOnly={!task.workflowRunId}
+                />
+              )}
+            />
           )}
 
           {/* Workflow & Stage */}

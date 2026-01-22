@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -43,8 +43,11 @@ import {
   XCircle,
   PauseCircle,
   Play,
+  Variable,
+  Lock,
 } from 'lucide-react'
-import { workflowRunsApi } from '@/lib/api'
+import { workflowRunsApi, variablePackagesApi, VariableToken, KeyValuePath } from '@/lib/api'
+import { TemplateEditor } from '@/components/ui/template-editor'
 
 // ============================================================================
 // Types
@@ -67,6 +70,12 @@ interface TokenBrowserDialogProps {
   onSelectToken: (token: string) => void
   wrapInBraces?: boolean
   forJoinInputPath?: boolean
+  // Field editing support
+  fieldLabel?: string
+  fieldValue?: string
+  onFieldValueChange?: (value: string) => void
+  // Task-only mode - shows system variables and variable packages without workflow context
+  taskOnly?: boolean
 }
 
 interface WorkflowRun {
@@ -443,6 +452,10 @@ export function TokenBrowserDialog({
   onSelectToken,
   wrapInBraces = true,
   forJoinInputPath = false,
+  fieldLabel,
+  fieldValue,
+  onFieldValueChange,
+  taskOnly = false,
 }: TokenBrowserDialogProps) {
   // State
   const [selectedCategory, setSelectedCategory] = useState<CategoryId>('system')
@@ -459,12 +472,18 @@ export function TokenBrowserDialog({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Fetch available runs when dialog opens
+  // Variables state
+  const [variableTokens, setVariableTokens] = useState<VariableToken[]>([])
+  const [variablesLoading, setVariablesLoading] = useState(false)
+  const [variablesError, setVariablesError] = useState<string | null>(null)
+  const [expandedVariables, setExpandedVariables] = useState<Set<string>>(new Set())
+
+  // Fetch available runs when dialog opens (skip in taskOnly mode)
   useEffect(() => {
-    if (open && workflowId && runs.length === 0) {
+    if (open && workflowId && !taskOnly && runs.length === 0) {
       fetchRuns()
     }
-  }, [open, workflowId])
+  }, [open, workflowId, taskOnly])
 
   // Fetch run data when run is selected
   useEffect(() => {
@@ -472,6 +491,39 @@ export function TokenBrowserDialog({
       fetchRunData(selectedRunId)
     }
   }, [selectedRunId])
+
+  // Fetch variable tokens when dialog opens
+  useEffect(() => {
+    if (open && variableTokens.length === 0 && !variablesLoading && !variablesError) {
+      fetchVariableTokens()
+    }
+  }, [open, variableTokens.length, variablesLoading, variablesError])
+
+  const fetchVariableTokens = async () => {
+    setVariablesLoading(true)
+    setVariablesError(null)
+    try {
+      const response = await variablePackagesApi.getTokens()
+      setVariableTokens(response.data || [])
+    } catch (err) {
+      console.error('Failed to fetch variable tokens:', err)
+      setVariablesError(err instanceof Error ? err.message : 'Failed to load variables')
+    } finally {
+      setVariablesLoading(false)
+    }
+  }
+
+  const toggleVariableExpanded = (variableName: string) => {
+    setExpandedVariables(prev => {
+      const next = new Set(prev)
+      if (next.has(variableName)) {
+        next.delete(variableName)
+      } else {
+        next.add(variableName)
+      }
+      return next
+    })
+  }
 
   const fetchRuns = async () => {
     if (!workflowId) return
@@ -575,28 +627,43 @@ export function TokenBrowserDialog({
 
   // Build categories list
   const categories = useMemo(() => {
-    const cats: Array<{ id: CategoryId; name: string; icon: React.ElementType; color: string; hasData?: boolean }> = [
-      { id: 'system', name: 'System', icon: Zap, color: 'text-yellow-500', hasData: !!runContext },
-      { id: 'trigger', name: 'Trigger', icon: Zap, color: 'text-orange-500', hasData: !!runContext },
-    ]
+    const cats: Array<{ id: CategoryId; name: string; icon: React.ElementType; color: string; hasData?: boolean }> = []
 
-    if (loopVariable) {
+    // In taskOnly mode, always show system and variables (they're available without workflow context)
+    // In workflow mode, show system only if we have run context
+    if (taskOnly || runContext) {
+      cats.push({ id: 'system', name: 'System', icon: Zap, color: 'text-yellow-500', hasData: taskOnly || !!runContext })
+    }
+
+    // Trigger data only available with workflow run context
+    if (!taskOnly && runContext) {
+      cats.push({ id: 'trigger', name: 'Trigger', icon: Zap, color: 'text-orange-500', hasData: !!runContext })
+    }
+
+    // Variables are always available
+    cats.push({ id: 'variables', name: 'Variables', icon: Variable, color: 'text-violet-500', hasData: variableTokens.length > 0 })
+
+    // Loop variable only in workflow context
+    if (!taskOnly && loopVariable) {
       cats.push({ id: 'loop', name: `Loop: {{${loopVariable}}}`, icon: Repeat, color: 'text-green-500' })
     }
 
-    for (const step of previousSteps) {
-      const hasData = taskData.has(step.id)
-      cats.push({
-        id: step.id,
-        name: step.name,
-        icon: getStepIcon(step.stepType),
-        color: getStepColor(step.stepType),
-        hasData,
-      })
+    // Previous steps only in workflow context
+    if (!taskOnly) {
+      for (const step of previousSteps) {
+        const hasData = taskData.has(step.id)
+        cats.push({
+          id: step.id,
+          name: step.name,
+          icon: getStepIcon(step.stepType),
+          color: getStepColor(step.stepType),
+          hasData,
+        })
+      }
     }
 
     return cats
-  }, [previousSteps, loopVariable, taskData, runContext])
+  }, [previousSteps, loopVariable, taskData, runContext, variableTokens.length, taskOnly])
 
   // Helper to format example value for display
   const formatExampleValue = (value: unknown): string | undefined => {
@@ -620,12 +687,17 @@ export function TokenBrowserDialog({
   // Get tokens for selected category
   const getTokensForCategory = (categoryId: CategoryId): Token[] => {
     if (categoryId === 'system') {
-      return [
+      // Base API URL from window location
+      const apiUrl = typeof window !== 'undefined'
+        ? `${window.location.origin}/api`
+        : '/api'
+
+      const tokens: Token[] = [
         {
           path: '_apiUrl',
           description: 'Base API URL for internal calls',
           type: 'string',
-          example: runContext?.apiUrl,
+          example: runContext?.apiUrl || apiUrl,
         },
         {
           path: '_apiKey',
@@ -634,42 +706,50 @@ export function TokenBrowserDialog({
           example: '(injected at runtime)',
         },
         {
-          path: '_workflowRunId',
-          description: 'Current workflow run ID',
-          type: 'string',
-          example: runContext?.workflowRunId,
-        },
-        {
-          path: 'workflowRunId',
-          description: 'Current workflow run ID (alias)',
-          type: 'string',
-          example: runContext?.workflowRunId,
-        },
-        {
-          path: 'stepId',
-          description: 'Current step ID',
-          type: 'string',
-          example: '(varies per step)',
-        },
-        {
           path: 'taskId',
           description: 'Current task ID',
           type: 'string',
           example: '(varies per task)',
         },
-        {
-          path: 'systemWebhookUrl',
-          description: 'URL for external callbacks',
-          type: 'string',
-          example: runContext?.systemWebhookUrl,
-        },
-        {
-          path: 'callbackSecret',
-          description: 'Secret for callback authentication',
-          type: 'string',
-          example: runContext?.callbackSecret ? `${runContext.callbackSecret.substring(0, 12)}...` : undefined,
-        },
       ]
+
+      // Workflow-specific tokens (only if in workflow context)
+      if (!taskOnly) {
+        tokens.push(
+          {
+            path: '_workflowRunId',
+            description: 'Current workflow run ID',
+            type: 'string',
+            example: runContext?.workflowRunId,
+          },
+          {
+            path: 'workflowRunId',
+            description: 'Current workflow run ID (alias)',
+            type: 'string',
+            example: runContext?.workflowRunId,
+          },
+          {
+            path: 'stepId',
+            description: 'Current step ID',
+            type: 'string',
+            example: '(varies per step)',
+          },
+          {
+            path: 'systemWebhookUrl',
+            description: 'URL for external callbacks',
+            type: 'string',
+            example: runContext?.systemWebhookUrl,
+          },
+          {
+            path: 'callbackSecret',
+            description: 'Secret for callback authentication',
+            type: 'string',
+            example: runContext?.callbackSecret ? `${runContext.callbackSecret.substring(0, 12)}...` : undefined,
+          }
+        )
+      }
+
+      return tokens
     }
 
     if (categoryId === 'trigger') {
@@ -708,6 +788,12 @@ export function TokenBrowserDialog({
       }
 
       return tokens
+    }
+
+    if (categoryId === 'variables') {
+      // Variables are rendered specially in the UI with expandable items
+      // Return empty array here as we handle rendering directly
+      return []
     }
 
     if (categoryId === 'loop' && loopVariable) {
@@ -783,34 +869,67 @@ export function TokenBrowserDialog({
 
   // Get run data for selected step
   const selectedStepData = useMemo(() => {
-    if (selectedCategory === 'system' || selectedCategory === 'trigger' || selectedCategory === 'loop') {
+    if (selectedCategory === 'system' || selectedCategory === 'trigger' || selectedCategory === 'loop' || selectedCategory === 'variables' || selectedCategory.startsWith('variable:')) {
       return null
     }
     return taskData.get(selectedCategory) || null
   }, [selectedCategory, taskData])
 
   // Token expression state - editable text field
-  const [tokenExpression, setTokenExpression] = useState('')
+  // Use fieldValue as the source of truth when provided (external field mode)
+  const isExternalFieldMode = fieldValue !== undefined && onFieldValueChange !== undefined
+  const [internalExpression, setInternalExpression] = useState('')
 
-  // Handle token selection - append to expression
+  // The actual expression being edited
+  const tokenExpression = isExternalFieldMode ? fieldValue : internalExpression
+  const setTokenExpression = isExternalFieldMode ? onFieldValueChange : setInternalExpression
+
+  // Track cursor position for insertion
+  const editorRef = useRef<{ focus: () => void; selectionStart: number | null; setSelectionRange: (start: number, end: number) => void }>(null)
+  const [cursorPosition, setCursorPosition] = useState<number | null>(null)
+
+  const handleCursorChange = useCallback(() => {
+    if (editorRef.current) {
+      setCursorPosition(editorRef.current.selectionStart)
+    }
+  }, [])
+
+  // Handle token selection - insert at cursor position
   const handleSelectToken = (path: string) => {
     const token = wrapInBraces ? `{{${path}}}` : path
-    setTokenExpression(prev => prev + token)
+    const currentValue = tokenExpression || ''
+    const insertPos = cursorPosition ?? currentValue.length
+    const newValue = currentValue.slice(0, insertPos) + token + currentValue.slice(insertPos)
+    setTokenExpression(newValue)
+
+    // Update cursor position
+    const newCursorPos = insertPos + token.length
+    setCursorPosition(newCursorPos)
+
+    // Focus and set cursor position
+    setTimeout(() => {
+      if (editorRef.current) {
+        editorRef.current.focus()
+        editorRef.current.setSelectionRange(newCursorPos, newCursorPos)
+      }
+    }, 0)
   }
 
   const handleInsertToken = () => {
     if (!tokenExpression.trim()) return
     onSelectToken(tokenExpression)
     onOpenChange(false)
-    setTokenExpression('')
+    if (!isExternalFieldMode) {
+      setInternalExpression('')
+    }
   }
 
-  // Clear expression when dialog closes
+  // Clear internal expression when dialog closes (only for non-external mode)
   useEffect(() => {
-    if (!open) {
-      setTokenExpression('')
+    if (!open && !isExternalFieldMode) {
+      setInternalExpression('')
     }
-  }, [open])
+  }, [open, isExternalFieldMode])
 
   // Filter categories by search
   const filteredCategories = useMemo(() => {
@@ -934,12 +1053,179 @@ export function TokenBrowserDialog({
                           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                         </div>
                       )}
-                      {!loading && filteredTokens.length === 0 && (
+
+                      {/* Special rendering for Variables category - expandable items */}
+                      {selectedCategory === 'variables' && !loading && (
+                        <>
+                          {variablesLoading && (
+                            <div className="flex items-center justify-center py-8">
+                              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                            </div>
+                          )}
+                          {variablesError && (
+                            <div className="text-center py-4 text-sm text-amber-600">
+                              {variablesError}
+                              <button
+                                className="ml-2 underline hover:no-underline"
+                                onClick={() => {
+                                  setVariablesError(null)
+                                  fetchVariableTokens()
+                                }}
+                              >
+                                Retry
+                              </button>
+                            </div>
+                          )}
+                          {!variablesLoading && !variablesError && variableTokens.length === 0 && (
+                            <div className="text-center py-8 text-sm text-muted-foreground">
+                              No variables defined.{' '}
+                              <a href="/settings/variables" className="underline hover:no-underline" target="_blank">
+                                Create one
+                              </a>
+                            </div>
+                          )}
+                          {!variablesLoading && !variablesError && variableTokens.map(v => {
+                            const isExpanded = expandedVariables.has(v.name)
+                            const tokenPath = `variables.${v.name}`
+
+                            // Helper to format a value for display
+                            const formatValue = (value: unknown, maxLen = 50): string => {
+                              if (value === null) return 'null'
+                              if (value === undefined) return 'undefined'
+                              if (typeof value === 'string') {
+                                return value.length > maxLen ? `"${value.substring(0, maxLen)}..."` : `"${value}"`
+                              }
+                              if (typeof value === 'number' || typeof value === 'boolean') {
+                                return String(value)
+                              }
+                              if (Array.isArray(value)) {
+                                return `[${value.length} items]`
+                              }
+                              if (typeof value === 'object') {
+                                const keys = Object.keys(value)
+                                return `{${keys.length} keys}`
+                              }
+                              return String(value)
+                            }
+
+                            return (
+                              <div key={v.variableId} className="border rounded-md overflow-hidden">
+                                {/* Variable header - always clickable to insert */}
+                                <div className="flex items-center">
+                                  {v.isObject && v.paths.length > 0 && (
+                                    <button
+                                      onClick={() => toggleVariableExpanded(v.name)}
+                                      className="p-2 hover:bg-muted"
+                                    >
+                                      {isExpanded ? (
+                                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                      ) : (
+                                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                                      )}
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => handleSelectToken(tokenPath)}
+                                    className={cn(
+                                      'flex-1 text-left px-3 py-2.5 transition-colors',
+                                      !v.isObject && 'pl-10',
+                                      selectedPath === tokenPath ? 'bg-primary/10' : 'hover:bg-muted/50'
+                                    )}
+                                  >
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <code className="text-xs font-mono bg-violet-500/10 text-violet-700 dark:text-violet-300 px-1.5 py-0.5 rounded">
+                                        {wrapInBraces ? `{{${tokenPath}}}` : tokenPath}
+                                      </code>
+                                      {v.encrypted && (
+                                        <Badge variant="outline" className="text-[10px] px-1 gap-0.5">
+                                          <Lock className="h-2.5 w-2.5" />
+                                          encrypted
+                                        </Badge>
+                                      )}
+                                      {v.isObject && (
+                                        <Badge variant="outline" className="text-[10px] px-1">
+                                          object
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    {v.description && (
+                                      <p className="text-xs text-muted-foreground mt-1">{v.description}</p>
+                                    )}
+                                    {/* Show simple value for non-object variables */}
+                                    {!v.isObject && v.value !== null && v.value !== undefined && (
+                                      <div className="mt-1.5 flex items-center gap-1">
+                                        <span className="text-[10px] text-muted-foreground/70 font-medium uppercase tracking-wide">
+                                          Value:
+                                        </span>
+                                        <code className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">
+                                          {formatValue(v.value, 60)}
+                                        </code>
+                                      </div>
+                                    )}
+                                  </button>
+                                </div>
+
+                                {/* Expanded paths with values */}
+                                {isExpanded && v.isObject && v.paths.length > 0 && (
+                                  <div className="border-t bg-muted/20">
+                                    {v.paths.map((pathItem: KeyValuePath) => {
+                                      const keyPath = `${tokenPath}.${pathItem.path}`
+                                      // Determine indentation based on path depth
+                                      const depth = (pathItem.path.match(/\./g) || []).length + (pathItem.path.match(/\[/g) || []).length
+                                      const indent = 10 + depth * 12
+                                      const isExpandableType = pathItem.type === 'object' || pathItem.type === 'array'
+
+                                      return (
+                                        <button
+                                          key={pathItem.path}
+                                          onClick={() => handleSelectToken(keyPath)}
+                                          className={cn(
+                                            'w-full text-left pr-3 py-2 transition-colors border-b last:border-b-0',
+                                            selectedPath === keyPath ? 'bg-primary/10' : 'hover:bg-muted/50'
+                                          )}
+                                          style={{ paddingLeft: `${indent}px` }}
+                                        >
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            <code className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">
+                                              .{pathItem.path}
+                                            </code>
+                                            <Badge variant="outline" className="text-[9px] px-1">
+                                              {pathItem.type}
+                                            </Badge>
+                                          </div>
+                                          {/* Show value preview */}
+                                          {!isExpandableType && (
+                                            <div className="mt-1 flex items-center gap-1">
+                                              <code className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400 break-all">
+                                                {formatValue(pathItem.value, 80)}
+                                              </code>
+                                            </div>
+                                          )}
+                                          {isExpandableType && (
+                                            <div className="mt-1 flex items-center gap-1">
+                                              <code className="text-[11px] font-mono text-muted-foreground">
+                                                {formatValue(pathItem.value, 80)}
+                                              </code>
+                                            </div>
+                                          )}
+                                        </button>
+                                      )
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </>
+                      )}
+
+                      {/* Standard token rendering for other categories */}
+                      {selectedCategory !== 'variables' && !loading && filteredTokens.length === 0 && (
                         <div className="text-center py-8 text-sm text-muted-foreground">
                           No tokens available
                         </div>
                       )}
-                      {!loading && filteredTokens.map(token => (
+                      {selectedCategory !== 'variables' && !loading && filteredTokens.map(token => (
                         <button
                           key={token.path}
                           onClick={() => handleSelectToken(token.path)}
@@ -1139,33 +1425,61 @@ export function TokenBrowserDialog({
 
         {/* Footer - editable token expression */}
         <div className="px-4 py-3 border-t bg-muted/30 flex-shrink-0 space-y-2">
-          <div className="flex items-center gap-2">
-            <Input
-              value={tokenExpression}
-              onChange={(e) => setTokenExpression(e.target.value)}
-              placeholder="Click tokens above to build expression, or type directly..."
-              className="flex-1 font-mono text-sm h-9"
+          {fieldLabel && (
+            <div className="text-xs font-medium text-muted-foreground">{fieldLabel}</div>
+          )}
+          <div className="flex gap-2">
+            <TemplateEditor
+              ref={editorRef}
+              value={tokenExpression || ''}
+              onChange={setTokenExpression}
+              onSelect={handleCursorChange}
+              onClick={handleCursorChange}
+              onKeyUp={handleCursorChange}
+              placeholder="Click tokens above to insert, or type directly..."
+              className="flex-1"
+              minHeight="80px"
+              maxHeight="120px"
             />
-            <Button
-              onClick={() => setTokenExpression('')}
-              variant="ghost"
-              size="sm"
-              className="h-9 px-2"
-              disabled={!tokenExpression}
-            >
-              Clear
-            </Button>
-            <Button
-              onClick={handleInsertToken}
-              disabled={!tokenExpression.trim()}
-              size="sm"
-              className="h-9"
-            >
-              Insert
-            </Button>
+            <div className="flex flex-col gap-1">
+              <Button
+                onClick={() => {
+                  if (isExternalFieldMode) {
+                    setTokenExpression('')
+                  } else {
+                    setInternalExpression('')
+                  }
+                }}
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2"
+                disabled={!tokenExpression}
+              >
+                Clear
+              </Button>
+              {!isExternalFieldMode && (
+                <Button
+                  onClick={handleInsertToken}
+                  disabled={!tokenExpression.trim()}
+                  size="sm"
+                  className="h-8"
+                >
+                  Insert
+                </Button>
+              )}
+              {isExternalFieldMode && (
+                <Button
+                  onClick={() => onOpenChange(false)}
+                  size="sm"
+                  className="h-8"
+                >
+                  Done
+                </Button>
+              )}
+            </div>
           </div>
           <p className="text-[10px] text-muted-foreground">
-            Click tokens to append them. You can also type text between tokens like: <code className="bg-muted px-1 rounded">Hello {'{{name}}'}, your order {'{{orderId}}'} is ready</code>
+            Click tokens to insert at cursor. You can also type text between tokens like: <code className="bg-muted px-1 rounded">Hello {'{{name}}'}, your order {'{{orderId}}'} is ready</code>
           </p>
         </div>
       </DialogContent>

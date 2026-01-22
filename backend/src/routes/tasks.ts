@@ -682,6 +682,9 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       }
     }
 
+    // Capture triggerWorkflowId for flow tasks
+    const triggerWorkflowId = taskData.triggerWorkflowId ? toObjectId(taskData.triggerWorkflowId) : null;
+
     const newTask: Document = {
       title: taskData.title,
       summary: taskData.summary || '',
@@ -710,21 +713,77 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
     };
 
     const result = await db.collection('tasks').insertOne(newTask);
-    const insertedTask = await db.collection<Task>('tasks').findOne({ _id: result.insertedId });
+    let insertedTask = await db.collection<Task>('tasks').findOne({ _id: result.insertedId });
+
+    // Get actor from request body, or fall back to authenticated user
+    const actorId = taskData.createdById
+      ? toObjectId(taskData.createdById)
+      : req.user?.userId
+        ? toObjectId(req.user.userId)
+        : null;
 
     // Publish task.created event unless silent
     if (!silent && insertedTask) {
-      // Get actor from request body, or fall back to authenticated user
-      const actorId = taskData.createdById
-        ? toObjectId(taskData.createdById)
-        : req.user?.userId
-          ? toObjectId(req.user.userId)
-          : null;
-
       await publishTaskEvent('task.created', insertedTask, {
         actorId,
         actorType: 'user',
       });
+    }
+
+    // Handle workflow trigger for flow tasks: if triggerWorkflowId was set, start that workflow
+    if (triggerWorkflowId && insertedTask) {
+      try {
+        console.log(`[Tasks] Creating flow task ${insertedTask._id} - triggering workflow ${triggerWorkflowId}`);
+
+        // Build input payload from task metadata (which contains flowInputPayloadTemplate resolved values)
+        // or fallback to task title/summary
+        const inputPayload: Record<string, unknown> = {
+          title: insertedTask.title,
+          summary: insertedTask.summary,
+        };
+
+        // If flowInputPayloadTemplate was stored in metadata, try to parse it as the input payload
+        if (insertedTask.metadata?.flowInputPayloadTemplate) {
+          try {
+            // The template should have been resolved before saving, but if it's still a string, try to parse it
+            const templateStr = insertedTask.metadata.flowInputPayloadTemplate as string;
+            const parsed = JSON.parse(templateStr);
+            Object.assign(inputPayload, parsed);
+          } catch {
+            // If parsing fails, just use title/summary
+            console.log(`[Tasks] Could not parse flowInputPayloadTemplate, using defaults`);
+          }
+        }
+
+        // Start the workflow with this task as the trigger
+        const { run } = await workflowExecutionService.startWorkflow(
+          {
+            workflowId: triggerWorkflowId.toString(),
+            triggerTaskId: insertedTask._id.toString(),
+            triggerContext: {
+              taskTitle: insertedTask.title,
+              taskSummary: insertedTask.summary,
+              ...(insertedTask.metadata || {}),
+            },
+            inputPayload,
+          },
+          actorId
+        );
+
+        console.log(`[Tasks] Started workflow run ${run._id} from flow task ${insertedTask._id}`);
+
+        // Update the task with the spawned workflow run ID
+        await db.collection<Task>('tasks').updateOne(
+          { _id: insertedTask._id },
+          { $set: { spawnedWorkflowRunId: run._id } }
+        );
+
+        // Refresh the task to include the spawnedWorkflowRunId
+        insertedTask = await db.collection<Task>('tasks').findOne({ _id: result.insertedId });
+      } catch (workflowError) {
+        console.error(`[Tasks] Failed to trigger workflow ${triggerWorkflowId} from flow task ${result.insertedId}:`, workflowError);
+        // Don't fail the task creation, just log the error
+      }
     }
 
     res.status(201).json({ data: insertedTask });

@@ -19,219 +19,238 @@ export const migration: Migration = {
 
   async up(db: Db): Promise<void> {
     // Update the documents collection validator to include 'workflow-prompt' type
-    await db.command({
-      collMod: 'documents',
-      validator: {
-        $jsonSchema: {
-          bsonType: 'object',
-          required: ['title', 'content', 'type', 'status', 'version', 'createdAt', 'updatedAt'],
-          properties: {
-            _id: { bsonType: 'objectId' },
+    // Note: This may fail on MongoDB Atlas shared clusters (M0/M2/M5) due to collMod restrictions
+    try {
+      await db.command({
+        collMod: 'documents',
+        validator: {
+          $jsonSchema: {
+            bsonType: 'object',
+            required: ['title', 'content', 'type', 'status', 'version', 'createdAt', 'updatedAt'],
+            properties: {
+              _id: { bsonType: 'objectId' },
 
-            // Core fields
-            title: {
-              bsonType: 'string',
-              minLength: 1,
-              maxLength: 500,
-              description: 'Document title - required'
-            },
-            content: {
-              bsonType: 'string',
-              description: 'Markdown content - required'
-            },
-            summary: {
-              bsonType: ['string', 'null'],
-              maxLength: 2000,
-              description: 'AI-generated or manual summary'
-            },
+              // Core fields
+              title: {
+                bsonType: 'string',
+                minLength: 1,
+                maxLength: 500,
+                description: 'Document title - required'
+              },
+              content: {
+                bsonType: 'string',
+                description: 'Markdown content - required'
+              },
+              summary: {
+                bsonType: ['string', 'null'],
+                maxLength: 2000,
+                description: 'AI-generated or manual summary'
+              },
 
-            // Classification
-            type: {
-              bsonType: 'string',
-              enum: DOCUMENT_TYPES,
-              description: 'Document type - required'
-            },
-            status: {
-              bsonType: 'string',
-              enum: ['draft', 'review', 'approved', 'archived'],
-              description: 'Document status - required'
-            },
-            tags: {
-              bsonType: ['array', 'null'],
-              items: { bsonType: 'string' },
-              description: 'Tags for categorization'
-            },
+              // Classification
+              type: {
+                bsonType: 'string',
+                enum: DOCUMENT_TYPES,
+                description: 'Document type - required'
+              },
+              status: {
+                bsonType: 'string',
+                enum: ['draft', 'review', 'approved', 'archived'],
+                description: 'Document status - required'
+              },
+              tags: {
+                bsonType: ['array', 'null'],
+                items: { bsonType: 'string' },
+                description: 'Tags for categorization'
+              },
 
-            // Ownership
-            createdById: {
-              bsonType: ['objectId', 'null'],
-              description: 'User who created the document'
-            },
-            lastModifiedById: {
-              bsonType: ['objectId', 'null'],
-              description: 'User who last modified the document'
-            },
+              // Ownership
+              createdById: {
+                bsonType: ['objectId', 'null'],
+                description: 'User who created the document'
+              },
+              lastModifiedById: {
+                bsonType: ['objectId', 'null'],
+                description: 'User who last modified the document'
+              },
 
-            // Semantic search
-            embedding: {
-              bsonType: ['array', 'null'],
-              description: 'Vector embedding for semantic search'
-            },
-            embeddingModel: {
-              bsonType: ['string', 'null'],
-              description: 'Model used to generate embedding'
-            },
-            embeddingUpdatedAt: {
-              bsonType: ['date', 'null'],
-              description: 'When embedding was last updated'
-            },
+              // Semantic search
+              embedding: {
+                bsonType: ['array', 'null'],
+                description: 'Vector embedding for semantic search'
+              },
+              embeddingModel: {
+                bsonType: ['string', 'null'],
+                description: 'Model used to generate embedding'
+              },
+              embeddingUpdatedAt: {
+                bsonType: ['date', 'null'],
+                description: 'When embedding was last updated'
+              },
 
-            // Relationships
-            parentDocumentId: {
-              bsonType: ['objectId', 'null'],
-              description: 'Parent document for hierarchies'
-            },
-            relatedTaskIds: {
-              bsonType: ['array', 'null'],
-              items: { bsonType: 'objectId' },
-              description: 'Tasks that reference this document'
-            },
-            workflowRunId: {
-              bsonType: ['objectId', 'null'],
-              description: 'Workflow run that created this document'
-            },
+              // Relationships
+              parentDocumentId: {
+                bsonType: ['objectId', 'null'],
+                description: 'Parent document for hierarchies'
+              },
+              relatedTaskIds: {
+                bsonType: ['array', 'null'],
+                items: { bsonType: 'objectId' },
+                description: 'Tasks that reference this document'
+              },
+              workflowRunId: {
+                bsonType: ['objectId', 'null'],
+                description: 'Workflow run that created this document'
+              },
 
-            // Versioning
-            version: {
-              bsonType: 'int',
-              minimum: 1,
-              description: 'Document version number - required'
-            },
+              // Versioning
+              version: {
+                bsonType: 'int',
+                minimum: 1,
+                description: 'Document version number - required'
+              },
 
-            // Metadata
-            metadata: {
-              bsonType: ['object', 'null'],
-              description: 'Additional metadata'
-            },
+              // Metadata
+              metadata: {
+                bsonType: ['object', 'null'],
+                description: 'Additional metadata'
+              },
 
-            // Timestamps
-            createdAt: {
-              bsonType: 'date',
-              description: 'Creation timestamp - required'
-            },
-            updatedAt: {
-              bsonType: 'date',
-              description: 'Last update timestamp - required'
+              // Timestamps
+              createdAt: {
+                bsonType: 'date',
+                description: 'Creation timestamp - required'
+              },
+              updatedAt: {
+                bsonType: 'date',
+                description: 'Last update timestamp - required'
+              }
             }
           }
-        }
-      },
-      validationLevel: 'moderate',
-      validationAction: 'warn'
-    });
-
-    console.log('[Migration] Added workflow-prompt to document type enum');
+        },
+        validationLevel: 'moderate',
+        validationAction: 'warn'
+      });
+      console.log('[Migration] Added workflow-prompt to document type enum');
+    } catch (error: unknown) {
+      // Handle MongoDB Atlas shared cluster restrictions
+      const mongoError = error as { code?: number; codeName?: string };
+      if (mongoError.code === 8000 && mongoError.codeName === 'AtlasError') {
+        console.log('[Migration] Skipping collMod - not supported on Atlas shared clusters');
+        console.log('[Migration] Schema validation update skipped, but app will still work');
+        return; // Don't throw - migration is considered successful
+      }
+      throw error; // Re-throw other errors
+    }
   },
 
   async down(db: Db): Promise<void> {
     // Revert to original document types (without workflow-prompt)
     const originalTypes = ['sop', 'strategy', 'plan', 'template', 'reference', 'output', 'custom'];
 
-    await db.command({
-      collMod: 'documents',
-      validator: {
-        $jsonSchema: {
-          bsonType: 'object',
-          required: ['title', 'content', 'type', 'status', 'version', 'createdAt', 'updatedAt'],
-          properties: {
-            _id: { bsonType: 'objectId' },
-            title: {
-              bsonType: 'string',
-              minLength: 1,
-              maxLength: 500,
-              description: 'Document title - required'
-            },
-            content: {
-              bsonType: 'string',
-              description: 'Markdown content - required'
-            },
-            summary: {
-              bsonType: ['string', 'null'],
-              maxLength: 2000,
-              description: 'AI-generated or manual summary'
-            },
-            type: {
-              bsonType: 'string',
-              enum: originalTypes,
-              description: 'Document type - required'
-            },
-            status: {
-              bsonType: 'string',
-              enum: ['draft', 'review', 'approved', 'archived'],
-              description: 'Document status - required'
-            },
-            tags: {
-              bsonType: ['array', 'null'],
-              items: { bsonType: 'string' },
-              description: 'Tags for categorization'
-            },
-            createdById: {
-              bsonType: ['objectId', 'null'],
-              description: 'User who created the document'
-            },
-            lastModifiedById: {
-              bsonType: ['objectId', 'null'],
-              description: 'User who last modified the document'
-            },
-            embedding: {
-              bsonType: ['array', 'null'],
-              description: 'Vector embedding for semantic search'
-            },
-            embeddingModel: {
-              bsonType: ['string', 'null'],
-              description: 'Model used to generate embedding'
-            },
-            embeddingUpdatedAt: {
-              bsonType: ['date', 'null'],
-              description: 'When embedding was last updated'
-            },
-            parentDocumentId: {
-              bsonType: ['objectId', 'null'],
-              description: 'Parent document for hierarchies'
-            },
-            relatedTaskIds: {
-              bsonType: ['array', 'null'],
-              items: { bsonType: 'objectId' },
-              description: 'Tasks that reference this document'
-            },
-            workflowRunId: {
-              bsonType: ['objectId', 'null'],
-              description: 'Workflow run that created this document'
-            },
-            version: {
-              bsonType: 'int',
-              minimum: 1,
-              description: 'Document version number - required'
-            },
-            metadata: {
-              bsonType: ['object', 'null'],
-              description: 'Additional metadata'
-            },
-            createdAt: {
-              bsonType: 'date',
-              description: 'Creation timestamp - required'
-            },
-            updatedAt: {
-              bsonType: 'date',
-              description: 'Last update timestamp - required'
+    try {
+      await db.command({
+        collMod: 'documents',
+        validator: {
+          $jsonSchema: {
+            bsonType: 'object',
+            required: ['title', 'content', 'type', 'status', 'version', 'createdAt', 'updatedAt'],
+            properties: {
+              _id: { bsonType: 'objectId' },
+              title: {
+                bsonType: 'string',
+                minLength: 1,
+                maxLength: 500,
+                description: 'Document title - required'
+              },
+              content: {
+                bsonType: 'string',
+                description: 'Markdown content - required'
+              },
+              summary: {
+                bsonType: ['string', 'null'],
+                maxLength: 2000,
+                description: 'AI-generated or manual summary'
+              },
+              type: {
+                bsonType: 'string',
+                enum: originalTypes,
+                description: 'Document type - required'
+              },
+              status: {
+                bsonType: 'string',
+                enum: ['draft', 'review', 'approved', 'archived'],
+                description: 'Document status - required'
+              },
+              tags: {
+                bsonType: ['array', 'null'],
+                items: { bsonType: 'string' },
+                description: 'Tags for categorization'
+              },
+              createdById: {
+                bsonType: ['objectId', 'null'],
+                description: 'User who created the document'
+              },
+              lastModifiedById: {
+                bsonType: ['objectId', 'null'],
+                description: 'User who last modified the document'
+              },
+              embedding: {
+                bsonType: ['array', 'null'],
+                description: 'Vector embedding for semantic search'
+              },
+              embeddingModel: {
+                bsonType: ['string', 'null'],
+                description: 'Model used to generate embedding'
+              },
+              embeddingUpdatedAt: {
+                bsonType: ['date', 'null'],
+                description: 'When embedding was last updated'
+              },
+              parentDocumentId: {
+                bsonType: ['objectId', 'null'],
+                description: 'Parent document for hierarchies'
+              },
+              relatedTaskIds: {
+                bsonType: ['array', 'null'],
+                items: { bsonType: 'objectId' },
+                description: 'Tasks that reference this document'
+              },
+              workflowRunId: {
+                bsonType: ['objectId', 'null'],
+                description: 'Workflow run that created this document'
+              },
+              version: {
+                bsonType: 'int',
+                minimum: 1,
+                description: 'Document version number - required'
+              },
+              metadata: {
+                bsonType: ['object', 'null'],
+                description: 'Additional metadata'
+              },
+              createdAt: {
+                bsonType: 'date',
+                description: 'Creation timestamp - required'
+              },
+              updatedAt: {
+                bsonType: 'date',
+                description: 'Last update timestamp - required'
+              }
             }
           }
-        }
-      },
-      validationLevel: 'moderate',
-      validationAction: 'warn'
-    });
-
-    console.log('[Migration] Reverted document type enum (removed workflow-prompt)');
+        },
+        validationLevel: 'moderate',
+        validationAction: 'warn'
+      });
+      console.log('[Migration] Reverted document type enum (removed workflow-prompt)');
+    } catch (error: unknown) {
+      const mongoError = error as { code?: number; codeName?: string };
+      if (mongoError.code === 8000 && mongoError.codeName === 'AtlasError') {
+        console.log('[Migration] Skipping collMod rollback - not supported on Atlas shared clusters');
+        return;
+      }
+      throw error;
+    }
   },
 };

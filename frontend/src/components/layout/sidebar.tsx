@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { cn } from '@/lib/utils'
@@ -25,10 +25,16 @@ import {
   Activity,
   Tags,
   FileText,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  MoreHorizontal,
+  Pencil,
+  Variable,
 } from 'lucide-react'
 import { Logo } from '@/components/ui/logo'
-import { View } from '@/lib/api'
-import { useViews, useDeleteView } from '@/hooks/use-tasks'
+import { View, ViewFolder } from '@/lib/api'
+import { useViews, useDeleteView, useViewFolders, useCreateViewFolder, useUpdateViewFolder, useDeleteViewFolder, useUpdateView } from '@/hooks/use-tasks'
 import { useAuth } from '@/lib/auth'
 import {
   DropdownMenu,
@@ -38,6 +44,24 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ChangePasswordDialog } from '@/components/auth/change-password-dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 interface NavItem {
   name: string
@@ -63,10 +87,145 @@ const bottomNavigation: NavItem[] = [
 const settingsNavigation: NavItem[] = [
   { name: 'Field Configuration', href: '/settings/fields', icon: Database, exact: true },
   { name: 'Tags', href: '/settings/tags', icon: Tags, exact: true },
+  { name: 'Variables', href: '/settings/variables', icon: Variable, exact: true },
   { name: 'API Keys', href: '/settings/api-keys', icon: Key, exact: true },
   { name: 'Webhooks', href: '/settings/webhooks', icon: Webhook, exact: true },
   { name: 'Appearance', href: '/settings/appearance', icon: Palette, exact: true },
 ]
+
+// View item component
+function ViewItem({
+  view,
+  isActive,
+  onEdit,
+  isInFolder,
+}: {
+  view: View
+  isActive: boolean
+  onEdit: (view: View) => void
+  isInFolder?: boolean
+}) {
+  return (
+    <div className="group relative flex items-center">
+      <Link
+        href={`/tasks?viewId=${view._id}`}
+        className={cn(
+          'flex flex-1 items-center gap-3 rounded-lg py-2 text-sm font-medium transition-colors',
+          isInFolder ? 'px-2' : 'px-3',
+          isActive
+            ? 'bg-primary/10 text-primary border-l-2 border-primary'
+            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+        )}
+      >
+        <Bookmark className="h-4 w-4 flex-shrink-0" />
+        <span className="truncate flex-1">{view.name}</span>
+      </Link>
+      <button
+        className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-muted transition-opacity"
+        onClick={(e) => {
+          e.stopPropagation()
+          onEdit(view)
+        }}
+      >
+        <Pencil className="h-4 w-4 text-muted-foreground" />
+      </button>
+    </div>
+  )
+}
+
+// Folder item component with collapsible views
+function FolderItem({
+  folder,
+  views,
+  isViewActive,
+  onEditView,
+  onRenameFolder,
+  onDeleteFolder,
+}: {
+  folder: ViewFolder
+  views: View[]
+  isViewActive: (view: View) => boolean
+  onEditView: (view: View) => void
+  onRenameFolder: (folder: ViewFolder) => void
+  onDeleteFolder: (folder: ViewFolder) => void
+}) {
+  const [isExpanded, setIsExpanded] = useState(folder.isExpanded)
+  const updateFolder = useUpdateViewFolder()
+
+  const toggleExpanded = useCallback(() => {
+    const newExpanded = !isExpanded
+    setIsExpanded(newExpanded)
+    // Persist expanded state
+    updateFolder.mutate({ id: folder._id, data: { isExpanded: newExpanded } })
+  }, [isExpanded, folder._id, updateFolder])
+
+  const folderViews = views.filter(v => v.folderId === folder._id)
+  const hasViews = folderViews.length > 0
+
+  return (
+    <div className="space-y-0.5">
+      <div className="group relative flex items-center">
+        <button
+          onClick={toggleExpanded}
+          className="flex flex-1 items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+        >
+          {isExpanded ? (
+            <>
+              <ChevronDown className="h-3 w-3 flex-shrink-0" />
+              <FolderOpen className="h-4 w-4 flex-shrink-0" />
+            </>
+          ) : (
+            <>
+              <ChevronRight className="h-3 w-3 flex-shrink-0" />
+              <Folder className="h-4 w-4 flex-shrink-0" />
+            </>
+          )}
+          <span className="truncate flex-1 text-left">{folder.name}</span>
+          {hasViews && (
+            <span className="text-xs text-muted-foreground/60">{folderViews.length}</span>
+          )}
+        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-muted transition-opacity"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-40">
+            <DropdownMenuItem onClick={() => onRenameFolder(folder)}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Rename
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => onDeleteFolder(folder)}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      {isExpanded && hasViews && (
+        <div className="ml-5 pl-2 border-l border-border/50 space-y-0.5">
+          {folderViews.map((view) => (
+            <ViewItem
+              key={view._id}
+              view={view}
+              isActive={isViewActive(view)}
+              onEdit={onEditView}
+              isInFolder
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function Sidebar() {
   const pathname = usePathname()
@@ -77,18 +236,105 @@ export function Sidebar() {
   const [changePasswordOpen, setChangePasswordOpen] = useState(false)
   const { user, logout } = useAuth()
 
+  // Dialog states
+  const [createFolderOpen, setCreateFolderOpen] = useState(false)
+  const [renameFolderOpen, setRenameFolderOpen] = useState(false)
+  const [deleteFolderOpen, setDeleteFolderOpen] = useState(false)
+  const [editViewOpen, setEditViewOpen] = useState(false)
+  const [folderName, setFolderName] = useState('')
+  const [selectedFolder, setSelectedFolder] = useState<ViewFolder | null>(null)
+  const [selectedView, setSelectedView] = useState<View | null>(null)
+  const [editViewName, setEditViewName] = useState('')
+  const [editViewFolderId, setEditViewFolderId] = useState<string | null>(null)
+
   const { data: viewsData } = useViews('tasks')
+  const { data: foldersData } = useViewFolders('tasks')
   const deleteViewMutation = useDeleteView()
+  const createFolderMutation = useCreateViewFolder()
+  const updateFolderMutation = useUpdateViewFolder()
+  const deleteFolderMutation = useDeleteViewFolder()
+  const updateViewMutation = useUpdateView()
 
   // Filter out the default "All Tasks" view since we have that as a static nav item
-  const views = (viewsData?.data || []).filter((v: View) => v.name !== 'All Tasks')
+  const allViews = useMemo(() =>
+    (viewsData?.data || []).filter((v: View) => v.name !== 'All Tasks'),
+    [viewsData?.data]
+  )
 
-  const handleDeleteView = async (e: React.MouseEvent, viewId: string) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (confirm('Are you sure you want to delete this saved search?')) {
-      await deleteViewMutation.mutateAsync(viewId)
-    }
+  const folders = useMemo(() => foldersData?.data || [], [foldersData?.data])
+
+  // Views not in any folder (root-level views)
+  const rootViews = useMemo(() =>
+    allViews.filter((v: View) => !v.folderId),
+    [allViews]
+  )
+
+  const openEditViewDialog = (view: View) => {
+    setSelectedView(view)
+    setEditViewName(view.name)
+    setEditViewFolderId(view.folderId || null)
+    setEditViewOpen(true)
+  }
+
+  const handleEditView = async () => {
+    if (!selectedView || !editViewName.trim()) return
+    await updateViewMutation.mutateAsync({
+      id: selectedView._id,
+      data: {
+        name: editViewName.trim(),
+        folderId: editViewFolderId,
+      },
+    })
+    setSelectedView(null)
+    setEditViewName('')
+    setEditViewFolderId(null)
+    setEditViewOpen(false)
+  }
+
+  const handleDeleteView = async () => {
+    if (!selectedView) return
+    await deleteViewMutation.mutateAsync(selectedView._id)
+    setSelectedView(null)
+    setEditViewOpen(false)
+  }
+
+  const handleCreateFolder = async () => {
+    if (!folderName.trim()) return
+    await createFolderMutation.mutateAsync({
+      name: folderName.trim(),
+      collectionName: 'tasks',
+    })
+    setFolderName('')
+    setCreateFolderOpen(false)
+  }
+
+  const handleRenameFolder = async () => {
+    if (!folderName.trim() || !selectedFolder) return
+    await updateFolderMutation.mutateAsync({
+      id: selectedFolder._id,
+      data: { name: folderName.trim() },
+    })
+    setFolderName('')
+    setSelectedFolder(null)
+    setRenameFolderOpen(false)
+  }
+
+  const handleDeleteFolder = async () => {
+    if (!selectedFolder) return
+    await deleteFolderMutation.mutateAsync({ id: selectedFolder._id, moveViewsToRoot: true })
+    setSelectedFolder(null)
+    setDeleteFolderOpen(false)
+  }
+
+  const openRenameDialog = (folder: ViewFolder) => {
+    setSelectedFolder(folder)
+    setFolderName(folder.name)
+    setRenameFolderOpen(true)
+  }
+
+  const openDeleteDialog = (folder: ViewFolder) => {
+    setSelectedFolder(folder)
+    setDeleteFolderOpen(true)
   }
 
   const isStaticItemActive = (item: NavItem) => {
@@ -108,10 +354,12 @@ export function Sidebar() {
     return normalizedPathname.startsWith(normalizedItemPath)
   }
 
-  const isViewActive = (view: View) => {
+  const isViewActive = useCallback((view: View) => {
     const normalizedPathname = pathname.replace(/\/$/, '') || '/'
     return normalizedPathname === '/tasks' && currentViewId === view._id
-  }
+  }, [pathname, currentViewId])
+
+  const hasContent = allViews.length > 0 || folders.length > 0
 
   return (
     <div className="flex h-full w-64 flex-col border-r bg-card">
@@ -144,11 +392,11 @@ export function Sidebar() {
         </div>
 
         {/* Saved Searches Section */}
-        {views.length > 0 && (
-          <div className="mt-4">
+        <div className="mt-4">
+          <div className="flex items-center justify-between">
             <button
               onClick={() => setSavedSearchesExpanded(!savedSearchesExpanded)}
-              className="flex w-full items-center gap-2 px-3 py-2 text-xs font-semibold uppercase text-muted-foreground hover:text-foreground"
+              className="flex items-center gap-2 px-3 py-2 text-xs font-semibold uppercase text-muted-foreground hover:text-foreground"
             >
               {savedSearchesExpanded ? (
                 <ChevronDown className="h-3 w-3" />
@@ -158,49 +406,49 @@ export function Sidebar() {
               Saved Searches
             </button>
             {savedSearchesExpanded && (
-              <div className="mt-1 space-y-1">
-                {views.map((view) => {
-                  const isActive = isViewActive(view)
-                  return (
-                    <div key={view._id} className="group relative">
-                      <Link
-                        href={`/tasks?viewId=${view._id}`}
-                        className={cn(
-                          'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                          isActive
-                            ? 'bg-primary/10 text-primary border-l-2 border-primary'
-                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                        )}
-                      >
-                        <Bookmark className="h-4 w-4" />
-                        <span className="truncate flex-1">{view.name}</span>
-                        {view.isSystem && (
-                          <span className="text-xs opacity-50">System</span>
-                        )}
-                      </Link>
-                      {!view.isSystem && (
-                        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button
-                            onClick={(e) => handleDeleteView(e, view._id)}
-                            className={cn(
-                              'p-1 rounded',
-                              isActive
-                                ? 'hover:bg-destructive/20 text-destructive'
-                                : 'hover:bg-destructive/20 text-destructive'
-                            )}
-                            title="Delete saved search"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
+              <button
+                onClick={() => setCreateFolderOpen(true)}
+                className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                title="Create folder"
+              >
+                <FolderPlus className="h-4 w-4" />
+              </button>
             )}
           </div>
-        )}
+          {savedSearchesExpanded && (
+            <div className="mt-1 space-y-0.5">
+              {/* Folders */}
+              {folders.map((folder) => (
+                <FolderItem
+                  key={folder._id}
+                  folder={folder}
+                  views={allViews}
+                  isViewActive={isViewActive}
+                  onEditView={openEditViewDialog}
+                  onRenameFolder={openRenameDialog}
+                  onDeleteFolder={openDeleteDialog}
+                />
+              ))}
+
+              {/* Root-level views (not in any folder) */}
+              {rootViews.map((view) => (
+                <ViewItem
+                  key={view._id}
+                  view={view}
+                  isActive={isViewActive(view)}
+                  onEdit={openEditViewDialog}
+                />
+              ))}
+
+              {/* Empty state */}
+              {!hasContent && (
+                <p className="px-3 py-2 text-xs text-muted-foreground">
+                  No saved searches yet
+                </p>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Bottom Navigation */}
         <div className="mt-4 space-y-1 border-t pt-4">
@@ -298,6 +546,157 @@ export function Sidebar() {
           onOpenChange={setChangePasswordOpen}
         />
       </div>
+
+      {/* Create Folder Dialog */}
+      <Dialog open={createFolderOpen} onOpenChange={setCreateFolderOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create Folder</DialogTitle>
+            <DialogDescription>
+              Create a new folder to organize your saved searches.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Input
+              placeholder="Folder name"
+              value={folderName}
+              onChange={(e) => setFolderName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleCreateFolder()
+                }
+              }}
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateFolderOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateFolder} disabled={!folderName.trim()}>
+              Create
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rename Folder Dialog */}
+      <Dialog open={renameFolderOpen} onOpenChange={setRenameFolderOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename Folder</DialogTitle>
+            <DialogDescription>
+              Enter a new name for this folder.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Input
+              placeholder="Folder name"
+              value={folderName}
+              onChange={(e) => setFolderName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleRenameFolder()
+                }
+              }}
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenameFolderOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleRenameFolder} disabled={!folderName.trim()}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Folder Dialog */}
+      <Dialog open={deleteFolderOpen} onOpenChange={setDeleteFolderOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Folder</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete the folder "{selectedFolder?.name}"?
+              Views in this folder will be moved to the root level.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteFolderOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteFolder}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit View Dialog */}
+      <Dialog open={editViewOpen} onOpenChange={setEditViewOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Saved Search</DialogTitle>
+            <DialogDescription>
+              Update the name or folder for this saved search.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="view-name">Name</Label>
+              <Input
+                id="view-name"
+                placeholder="Search name"
+                value={editViewName}
+                onChange={(e) => setEditViewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleEditView()
+                  }
+                }}
+                autoFocus
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="view-folder">Folder</Label>
+              <Select
+                value={editViewFolderId || 'none'}
+                onValueChange={(value) => setEditViewFolderId(value === 'none' ? null : value)}
+              >
+                <SelectTrigger id="view-folder">
+                  <SelectValue placeholder="Select a folder" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No folder</SelectItem>
+                  {folders.map((folder) => (
+                    <SelectItem key={folder._id} value={folder._id}>
+                      {folder.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter className="flex justify-between sm:justify-between">
+            <Button
+              variant="destructive"
+              onClick={handleDeleteView}
+            >
+              Delete
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setEditViewOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleEditView} disabled={!editViewName.trim()}>
+                Save
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

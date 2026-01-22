@@ -91,6 +91,9 @@ export interface Workflow {
 
   // Dynamic title template for the root task - supports {{input.field}} variables
   rootTaskTitleTemplate?: string
+
+  // Sample payload template for triggering this workflow - helps agents/callers know what data to provide
+  samplePayload?: string
 }
 
 export interface WorkflowEditorProps {

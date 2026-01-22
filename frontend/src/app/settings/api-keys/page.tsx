@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, MoreHorizontal, Copy, RefreshCw, Trash2, Eye, Key } from 'lucide-react'
+import { Plus, MoreHorizontal, Copy, RefreshCw, Trash2, Eye, Key, Pencil } from 'lucide-react'
 import {
   Table,
   TableBody,
@@ -48,7 +48,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { formatDateTime } from '@/lib/utils'
-import { apiKeysApi, usersApi, type ApiKey } from '@/lib/api'
+import { apiKeysApi, usersApi, type ApiKey, type ScopeDefinition } from '@/lib/api'
 
 interface User {
   _id: string
@@ -58,16 +58,10 @@ interface User {
   isActive: boolean
 }
 
-const AVAILABLE_SCOPES = [
-  { value: 'tasks:read', label: 'Read Tasks', description: 'View tasks and task details' },
-  { value: 'tasks:write', label: 'Write Tasks', description: 'Create and update tasks' },
-  { value: 'saved-searches:read', label: 'Read Saved Searches', description: 'Access saved searches/views' },
-  { value: 'saved-searches:write', label: 'Write Saved Searches', description: 'Create and modify saved searches' },
-]
-
 export default function ApiKeysPage() {
   const queryClient = useQueryClient()
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [editingKey, setEditingKey] = useState<ApiKey | null>(null)
   const [isKeyRevealModalOpen, setIsKeyRevealModalOpen] = useState(false)
   const [revealedKey, setRevealedKey] = useState<string | null>(null)
   const [keyToDelete, setKeyToDelete] = useState<ApiKey | null>(null)
@@ -90,15 +84,28 @@ export default function ApiKeysPage() {
     queryFn: () => usersApi.list(),
   })
 
+  const { data: scopesData } = useQuery({
+    queryKey: ['api-key-scopes'],
+    queryFn: apiKeysApi.getScopes,
+  })
+
   const createMutation = useMutation({
     mutationFn: (data: { name: string; description?: string; scopes: string[] }) => apiKeysApi.create(data),
     onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['api-keys'] })
-      setIsCreateModalOpen(false)
+      closeModal()
       // Show the key reveal modal with the new key
       setRevealedKey(response.data.key || null)
       setIsKeyRevealModalOpen(true)
-      resetForm()
+    },
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: { name?: string; description?: string; scopes?: string[] } }) =>
+      apiKeysApi.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['api-keys'] })
+      closeModal()
     },
   })
 
@@ -123,6 +130,14 @@ export default function ApiKeysPage() {
 
   const apiKeys = apiKeysData?.data || []
   const users = usersData?.data || []
+  const availableScopes = scopesData?.data || []
+
+  // Group scopes by category for better UI organization
+  const scopesByCategory = availableScopes.reduce((acc, scope) => {
+    if (!acc[scope.category]) acc[scope.category] = []
+    acc[scope.category].push(scope)
+    return acc
+  }, {} as Record<string, ScopeDefinition[]>)
 
   const resetForm = () => {
     setFormData({
@@ -133,15 +148,51 @@ export default function ApiKeysPage() {
     })
   }
 
-  const handleCreateSubmit = (e: React.FormEvent) => {
+  const closeModal = () => {
+    setIsModalOpen(false)
+    setEditingKey(null)
+    resetForm()
+  }
+
+  const openCreateModal = () => {
+    resetForm()
+    setEditingKey(null)
+    setIsModalOpen(true)
+  }
+
+  const openEditModal = (apiKey: ApiKey) => {
+    setFormData({
+      name: apiKey.name,
+      description: apiKey.description || '',
+      userId: '',
+      scopes: [...apiKey.scopes],
+    })
+    setEditingKey(apiKey)
+    setIsModalOpen(true)
+  }
+
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    const payload = {
-      name: formData.name,
-      description: formData.description,
-      scopes: formData.scopes,
-      ...(formData.userId && { userId: formData.userId }),
+    if (editingKey) {
+      // Update existing key
+      updateMutation.mutate({
+        id: editingKey._id,
+        data: {
+          name: formData.name,
+          description: formData.description || undefined,
+          scopes: formData.scopes,
+        },
+      })
+    } else {
+      // Create new key
+      const payload = {
+        name: formData.name,
+        description: formData.description,
+        scopes: formData.scopes,
+        ...(formData.userId && { userId: formData.userId }),
+      }
+      createMutation.mutate(payload)
     }
-    createMutation.mutate(payload)
   }
 
   const handleScopeChange = (scope: string, checked: boolean) => {
@@ -174,7 +225,7 @@ export default function ApiKeysPage() {
             Generate and manage API keys for programmatic access
           </p>
         </div>
-        <Button onClick={() => setIsCreateModalOpen(true)}>
+        <Button onClick={openCreateModal}>
           <Plus className="mr-2 h-4 w-4" />
           Generate New Key
         </Button>
@@ -260,6 +311,10 @@ export default function ApiKeysPage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => openEditModal(apiKey)}>
+                          <Pencil className="mr-2 h-4 w-4" />
+                          Edit
+                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => setKeyToRegenerate(apiKey)}>
                           <RefreshCw className="mr-2 h-4 w-4" />
                           Regenerate
@@ -282,16 +337,18 @@ export default function ApiKeysPage() {
         </Table>
       </div>
 
-      {/* Create API Key Modal */}
-      <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
-        <DialogContent>
+      {/* Create/Edit API Key Modal */}
+      <Dialog open={isModalOpen} onOpenChange={closeModal}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Generate New API Key</DialogTitle>
+            <DialogTitle>{editingKey ? 'Edit API Key' : 'Generate New API Key'}</DialogTitle>
             <DialogDescription>
-              Create a new API key for programmatic access. The key will only be shown once.
+              {editingKey
+                ? 'Update the name, description, or scopes for this API key.'
+                : 'Create a new API key for programmatic access. The key will only be shown once.'}
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleCreateSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Name *</label>
               <Input
@@ -309,56 +366,74 @@ export default function ApiKeysPage() {
                 placeholder="What will this key be used for?"
               />
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Acts As User</label>
-              <Select
-                value={formData.userId || 'none'}
-                onValueChange={(value) => setFormData({ ...formData, userId: value === 'none' ? '' : value })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a user (optional)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No user (API key only)</SelectItem>
-                  {users.map((user) => (
-                    <SelectItem key={user._id} value={user._id}>
-                      {user.displayName}{user.email ? ` (${user.email})` : ''}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                When set, this API key will inherit the selected user&apos;s permissions.
-              </p>
-            </div>
+            {!editingKey && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Acts As User</label>
+                <Select
+                  value={formData.userId || 'none'}
+                  onValueChange={(value) => setFormData({ ...formData, userId: value === 'none' ? '' : value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a user (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No user (API key only)</SelectItem>
+                    {users.map((user) => (
+                      <SelectItem key={user._id} value={user._id}>
+                        {user.displayName}{user.email ? ` (${user.email})` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  When set, this API key will inherit the selected user&apos;s permissions.
+                </p>
+              </div>
+            )}
             <div className="space-y-2">
               <label className="text-sm font-medium">Scopes</label>
-              <div className="space-y-2 border rounded-md p-3">
-                {AVAILABLE_SCOPES.map((scope) => (
-                  <div key={scope.value} className="flex items-start space-x-3">
-                    <Checkbox
-                      id={scope.value}
-                      checked={formData.scopes.includes(scope.value)}
-                      onCheckedChange={(checked) =>
-                        handleScopeChange(scope.value, checked as boolean)
-                      }
-                    />
-                    <div className="space-y-0.5">
-                      <label htmlFor={scope.value} className="text-sm font-medium cursor-pointer">
-                        {scope.label}
-                      </label>
-                      <p className="text-xs text-muted-foreground">{scope.description}</p>
-                    </div>
+              <div className="space-y-4 border rounded-md p-3 max-h-64 overflow-y-auto">
+                {Object.entries(scopesByCategory).map(([category, scopes]) => (
+                  <div key={category} className="space-y-2">
+                    <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      {category}
+                    </h4>
+                    {scopes.map((scope) => (
+                      <div key={scope.value} className="flex items-start space-x-3">
+                        <Checkbox
+                          id={scope.value}
+                          checked={formData.scopes.includes(scope.value)}
+                          onCheckedChange={(checked) =>
+                            handleScopeChange(scope.value, checked as boolean)
+                          }
+                        />
+                        <div className="space-y-0.5">
+                          <label htmlFor={scope.value} className="text-sm font-medium cursor-pointer">
+                            {scope.label}
+                          </label>
+                          <p className="text-xs text-muted-foreground">{scope.description}</p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ))}
               </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setIsCreateModalOpen(false)}>
+              <Button type="button" variant="outline" onClick={closeModal}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={createMutation.isPending || !formData.name}>
-                {createMutation.isPending ? 'Generating...' : 'Generate Key'}
+              <Button
+                type="submit"
+                disabled={createMutation.isPending || updateMutation.isPending || !formData.name}
+              >
+                {editingKey
+                  ? updateMutation.isPending
+                    ? 'Saving...'
+                    : 'Save Changes'
+                  : createMutation.isPending
+                    ? 'Generating...'
+                    : 'Generate Key'}
               </Button>
             </DialogFooter>
           </form>

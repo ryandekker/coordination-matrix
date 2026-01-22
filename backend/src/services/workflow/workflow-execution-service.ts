@@ -19,9 +19,10 @@ import {
   TaskStepConfig,
 } from '../../types/index.js';
 
-import { resolveTemplateVariables, getValueByPath, resolveTitleTemplate, getBaseUrl } from './template-utils.js';
+import { resolveTemplateWithPackages, getValueByPath, resolveTitleTemplateWithPackages, getBaseUrl } from './template-utils.js';
 import { stripUndefined } from './mongo-utils.js';
 import { searchDocuments } from '../embedding-service.js';
+import { SYSTEM_USER_ID, isSystemExecutedTaskType } from '../system-user.js';
 
 type WorkflowRunEventHandler = (event: WorkflowRunEvent) => void | Promise<void>;
 
@@ -290,7 +291,8 @@ class WorkflowExecutionService {
     const defaultTitle = `Workflow: ${workflow.name}`;
     let taskTitle = defaultTitle;
     if (workflow.rootTaskTitleTemplate) {
-      taskTitle = resolveTitleTemplate(workflow.rootTaskTitleTemplate, run.inputPayload, defaultTitle);
+      // Use async version that supports variables with nested interpolation
+      taskTitle = await resolveTitleTemplateWithPackages(workflow.rootTaskTitleTemplate, run.inputPayload, defaultTitle);
     }
 
     // Root tasks always have no parent - they appear at the top level
@@ -555,11 +557,27 @@ class WorkflowExecutionService {
 
     let taskTitle = step.name || `Step ${step.id || 'Unknown'}`;
     if (step.titleTemplate) {
-      taskTitle = resolveTitleTemplate(step.titleTemplate, inputPayload, step.name);
+      // Use async version that supports variables with nested interpolation
+      taskTitle = await resolveTitleTemplateWithPackages(step.titleTemplate, inputPayload, step.name);
     }
 
     // Build stepConfig to preserve original workflow step configuration
     const stepConfig = this.buildStepConfig(step);
+
+    // Determine assignee:
+    // 1. If step has explicit defaultAssigneeId, use that
+    // 2. If run has taskDefaults.assigneeId, use that
+    // 3. If task type is system-executed (webhook, join, etc.), assign to system user
+    // 4. Otherwise leave null (unassigned - awaiting human assignment)
+    let assigneeId: ObjectId | null = null;
+    if (step.defaultAssigneeId) {
+      assigneeId = new ObjectId(step.defaultAssigneeId);
+    } else if (runDefaults.assigneeId) {
+      assigneeId = runDefaults.assigneeId;
+    } else if (isSystemExecutedTaskType(taskType)) {
+      // System-executed task types default to system user when unassigned
+      assigneeId = SYSTEM_USER_ID;
+    }
 
     const task: Omit<Task, '_id'> = {
       title: taskTitle,
@@ -571,9 +589,7 @@ class WorkflowExecutionService {
       executionMode,
       stepConfig,
       ...runDefaults,
-      assigneeId: step.defaultAssigneeId
-        ? new ObjectId(step.defaultAssigneeId)
-        : runDefaults.assigneeId ?? null,
+      assigneeId,
       createdAt: now,
       updatedAt: now,
       metadata: {
@@ -814,12 +830,12 @@ class WorkflowExecutionService {
       inputPayload,
     };
 
-    const endpoint = resolveTemplateVariables(config.endpoint, templateContext);
+    const endpoint = await resolveTemplateWithPackages(config.endpoint, templateContext);
 
     let requestBody: Record<string, unknown> = {};
     if (config.payloadTemplate) {
       try {
-        const resolvedPayload = resolveTemplateVariables(config.payloadTemplate, templateContext);
+        const resolvedPayload = await resolveTemplateWithPackages(config.payloadTemplate, templateContext);
         requestBody = JSON.parse(resolvedPayload);
       } catch (e) {
         console.error(`[WorkflowExecutionService] Failed to parse payload template:`, e);
@@ -842,7 +858,7 @@ class WorkflowExecutionService {
     };
     if (config.headers) {
       for (const [key, value] of Object.entries(config.headers)) {
-        headers[key] = resolveTemplateVariables(value, templateContext);
+        headers[key] = await resolveTemplateWithPackages(value, templateContext);
       }
     }
 
@@ -947,11 +963,11 @@ class WorkflowExecutionService {
       nextForeachStepId,
     };
 
-    const resolvedUrl = resolveTemplateVariables(url!, templateContext);
+    const resolvedUrl = await resolveTemplateWithPackages(url!, templateContext);
     let resolvedBody: string | undefined;
 
     if (bodyTemplate) {
-      resolvedBody = resolveTemplateVariables(bodyTemplate, templateContext);
+      resolvedBody = await resolveTemplateWithPackages(bodyTemplate, templateContext);
     } else if (inputPayload) {
       resolvedBody = JSON.stringify(inputPayload);
     }
@@ -962,7 +978,7 @@ class WorkflowExecutionService {
     };
 
     for (const [key, value] of Object.entries(resolvedHeaders)) {
-      resolvedHeaders[key] = resolveTemplateVariables(value, templateContext);
+      resolvedHeaders[key] = await resolveTemplateWithPackages(value, templateContext);
     }
 
     const startTime = Date.now();
@@ -1140,11 +1156,11 @@ class WorkflowExecutionService {
     };
 
     try {
-      const resolvedUrl = resolveTemplateVariables(config.url, templateContext);
+      const resolvedUrl = await resolveTemplateWithPackages(config.url, templateContext);
       let resolvedBody: string | undefined;
 
       if (config.bodyTemplate) {
-        resolvedBody = resolveTemplateVariables(config.bodyTemplate, templateContext);
+        resolvedBody = await resolveTemplateWithPackages(config.bodyTemplate, templateContext);
       } else if (inputPayload) {
         resolvedBody = JSON.stringify(inputPayload);
       }
@@ -1155,7 +1171,7 @@ class WorkflowExecutionService {
       };
 
       for (const [key, value] of Object.entries(headers)) {
-        headers[key] = resolveTemplateVariables(value, templateContext);
+        headers[key] = await resolveTemplateWithPackages(value, templateContext);
       }
 
       console.log(`[WorkflowExecutionService] Executing webhook: ${config.method || 'POST'} ${resolvedUrl}`);
@@ -1820,7 +1836,7 @@ class WorkflowExecutionService {
         inputPayload,
         ...inputPayload, // Allow direct access to input fields
       };
-      searchPrompt = resolveTemplateVariables(searchPrompt, templateContext);
+      searchPrompt = await resolveTemplateWithPackages(searchPrompt, templateContext);
     }
 
     if (!searchPrompt) {
@@ -1995,7 +2011,7 @@ class WorkflowExecutionService {
         if (!targetField) continue; // Skip empty keys
 
         // Resolve template variables like {{output.data}} or {{item}}
-        const resolvedValue = resolveTemplateVariables(sourceTemplate, templateContext);
+        const resolvedValue = await resolveTemplateWithPackages(sourceTemplate, templateContext);
 
         // Try to parse as JSON if it looks like JSON, otherwise use raw value
         try {

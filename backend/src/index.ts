@@ -31,6 +31,7 @@ import { tasksRouter } from './routes/tasks.js';
 import { lookupsRouter } from './routes/lookups.js';
 import { fieldConfigsRouter } from './routes/field-configs.js';
 import { viewsRouter } from './routes/views.js';
+import { viewFoldersRouter } from './routes/view-folders.js';
 import { usersRouter } from './routes/users.js';
 import { externalJobsRouter } from './routes/external-jobs.js';
 import { workflowsRouter } from './routes/workflows.js';
@@ -43,6 +44,7 @@ import { eventsRouter } from './routes/events.js';
 import { authRouter } from './routes/auth.js';
 import { tagsRouter } from './routes/tags.js';
 import { documentsRouter } from './routes/documents.js';
+import { variablePackagesRouter } from './routes/variable-packages.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { requireAuth } from './middleware/auth.js';
 import { requireScope, SCOPES } from './middleware/authorize.js';
@@ -229,6 +231,7 @@ app.use('/api/field-configs', requireAuth, requireScope(SCOPES.TASKS_READ), fiel
 
 // Views/saved searches
 app.use('/api/views', requireAuth, requireScope(SCOPES.VIEWS_READ), viewsRouter);
+app.use('/api/view-folders', requireAuth, requireScope(SCOPES.VIEWS_READ), viewFoldersRouter);
 
 // Users - admin operations handled within route
 app.use('/api/users', requireAuth, requireScope(SCOPES.USERS_READ), usersRouter);
@@ -262,6 +265,9 @@ app.use('/api/tags', requireAuth, requireScope(SCOPES.TASKS_READ), tagsRouter);
 
 // Documents - separate scope
 app.use('/api/documents', requireAuth, requireScope(SCOPES.DOCUMENTS_READ), documentsRouter);
+
+// Variable packages - configuration data, requires admin for write
+app.use('/api/variable-packages', requireAuth, requireScope(SCOPES.ADMIN), variablePackagesRouter);
 
 // Error handling
 app.use(errorHandler);
