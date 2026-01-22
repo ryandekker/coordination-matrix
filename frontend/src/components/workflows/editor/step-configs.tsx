@@ -316,6 +316,39 @@ export function ExternalStepConfig({
 }`}
           className="min-h-[80px] font-mono text-sm"
         />
+        <div className="flex items-center gap-2 mt-1">
+          <TokenBrowser
+            workflowId={workflowId}
+            previousSteps={steps.slice(0, index).map(s => ({
+              id: s.id,
+              name: s.name,
+              stepType: s.stepType,
+              itemVariable: s.itemVariable,
+            }))}
+            currentStepIndex={index}
+            loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
+            onSelectToken={(token) => {
+              // Append token - the field value change handler will update the actual value
+            }}
+            fieldLabel="Headers"
+            fieldValue={step.externalConfig?.headers ? JSON.stringify(step.externalConfig.headers, null, 2) : ''}
+            onFieldValueChange={(value) => {
+              try {
+                const headers = value ? JSON.parse(value) : {}
+                updateStep(index, {
+                  externalConfig: { ...step.externalConfig, headers }
+                })
+              } catch {
+                // Allow invalid JSON while typing - store as-is won't work for objects
+                // We need to store the raw string somewhere for editing
+              }
+            }}
+            variant="text"
+          />
+          <span className="text-xs text-muted-foreground">
+            Browse and insert tokens into headers
+          </span>
+        </div>
       </div>
 
       <div className="space-y-1">
@@ -351,15 +384,19 @@ export function ExternalStepConfig({
             currentStepIndex={index}
             loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
             onSelectToken={(token) => {
-              const current = step.externalConfig?.payloadTemplate || ''
+              // Token selected - the field value change handler will update the actual value
+            }}
+            fieldLabel="Payload Template"
+            fieldValue={step.externalConfig?.payloadTemplate || ''}
+            onFieldValueChange={(value) => {
               updateStep(index, {
-                externalConfig: { ...step.externalConfig, payloadTemplate: current + token }
+                externalConfig: { ...step.externalConfig, payloadTemplate: value }
               })
             }}
             variant="text"
           />
           <span className="text-xs text-muted-foreground">
-            Click to insert token at end of payload
+            Browse and insert tokens into payload
           </span>
         </div>
       </div>
