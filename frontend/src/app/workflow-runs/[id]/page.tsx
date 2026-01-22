@@ -25,6 +25,7 @@ import {
   GitBranch,
   Repeat,
   Merge,
+  Copy,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -410,7 +411,20 @@ export default function WorkflowRunDetailPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {run.inputPayload && Object.keys(run.inputPayload).length > 0 && (
             <div className="rounded-lg border bg-card p-4">
-              <h2 className="font-semibold mb-2">Input Payload</h2>
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="font-semibold">Input Payload</h2>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(JSON.stringify(run.inputPayload, null, 2))
+                  }}
+                >
+                  <Copy className="h-3 w-3 mr-1" />
+                  Copy
+                </Button>
+              </div>
               <pre className="text-sm bg-muted rounded p-3 overflow-auto max-h-48">
                 {JSON.stringify(run.inputPayload, null, 2)}
               </pre>
@@ -418,7 +432,20 @@ export default function WorkflowRunDetailPage() {
           )}
           {run.outputPayload && Object.keys(run.outputPayload).length > 0 && (
             <div className="rounded-lg border bg-card p-4">
-              <h2 className="font-semibold mb-2">Output Payload</h2>
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="font-semibold">Output Payload</h2>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(JSON.stringify(run.outputPayload, null, 2))
+                  }}
+                >
+                  <Copy className="h-3 w-3 mr-1" />
+                  Copy
+                </Button>
+              </div>
               <pre className="text-sm bg-muted rounded p-3 overflow-auto max-h-48">
                 {JSON.stringify(run.outputPayload, null, 2)}
               </pre>
