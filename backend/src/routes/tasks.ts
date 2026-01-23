@@ -1139,6 +1139,54 @@ tasksRouter.delete('/:id/webhook/retry', async (req: Request, res: Response, nex
   }
 });
 
+// ============================================================================
+// Flow Task Endpoints (for subflow/nested workflow execution)
+// ============================================================================
+
+// POST /api/tasks/:id/flow/execute - Execute (or re-execute) a flow task's subflow
+tasksRouter.post('/:id/flow/execute', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const taskId = req.params.id;
+    const { inputPayload } = req.body;
+    const result = await workflowExecutionService.executeFlowTask(taskId, inputPayload);
+    if (!result.success) {
+      throw createError(result.error || 'Failed to execute flow task', 400);
+    }
+    res.json({ data: result.attempt });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/tasks/:id/flow/retry - Retry a failed flow task
+tasksRouter.post('/:id/flow/retry', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const taskId = req.params.id;
+    const { inputPayload } = req.body;
+    const result = await workflowExecutionService.retryFlowTask(taskId, inputPayload);
+    if (!result.success) {
+      throw createError(result.error || 'Failed to retry flow task', 400);
+    }
+    res.json({ data: result.attempt });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/tasks/:id/flow/status - Get flow task execution status and history
+tasksRouter.get('/:id/flow/status', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const taskId = req.params.id;
+    const result = await workflowExecutionService.getFlowTaskStatus(taskId);
+    if (!result.success) {
+      throw createError(result.error || 'Failed to get flow task status', 404);
+    }
+    res.json({ data: result.status });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // POST /api/tasks/:id/rerun - Rerun a task with step-type-specific behavior
 tasksRouter.post('/:id/rerun', async (req: Request, res: Response, next: NextFunction) => {
   try {

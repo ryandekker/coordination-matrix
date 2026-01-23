@@ -137,6 +137,36 @@ export interface BatchCounters {
   failedCount: number;
 }
 
+// Flow (subflow) execution attempt record - similar to WebhookAttempt
+export interface FlowAttempt {
+  attemptNumber: number;
+  startedAt: Date;
+  completedAt?: Date;
+  status: 'pending' | 'running' | 'success' | 'failed';
+  // Input details
+  inputPayload?: Record<string, unknown>;
+  resolvedInputMapping?: Record<string, string>;
+  // Spawned workflow details
+  spawnedWorkflowRunId?: string;
+  targetWorkflowId?: string;
+  targetWorkflowName?: string;
+  // Result details
+  outputPayload?: Record<string, unknown>;
+  errorMessage?: string;
+  durationMs?: number;
+}
+
+// Flow task configuration (nested workflow execution)
+export interface FlowConfig {
+  // Target workflow
+  workflowId: string;                   // The workflow to execute
+  inputMapping?: Record<string, string>; // Template mapping for input payload
+
+  // Execution tracking
+  attempts?: FlowAttempt[];             // History of execution attempts
+  lastAttemptAt?: Date;                 // When the last attempt was made
+}
+
 // ============================================================================
 // Step Configuration - Original workflow step config stored on task
 // ============================================================================
@@ -323,6 +353,9 @@ export interface Task {
 
   // Webhook task configuration (outbound HTTP calls)
   webhookConfig?: WebhookConfig;
+
+  // Flow task configuration (nested workflow execution)
+  flowConfig?: FlowConfig;
 
   // Decision result (which branch was taken)
   decisionResult?: string;

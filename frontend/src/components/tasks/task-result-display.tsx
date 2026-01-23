@@ -61,7 +61,9 @@ function ResultEntry({
   const [showOutput, setShowOutput] = useState(!isHistorical)
   const [showDetails, setShowDetails] = useState(false)
 
-  const executedAt = new Date(entry.executedAt)
+  // Safely parse dates - handle invalid/missing dates
+  const parsedExecutedAt = entry.executedAt ? new Date(entry.executedAt) : null
+  const executedAt = parsedExecutedAt && !isNaN(parsedExecutedAt.getTime()) ? parsedExecutedAt : new Date()
   const completedAt = entry.completedAt ? new Date(entry.completedAt) : undefined
 
   return (

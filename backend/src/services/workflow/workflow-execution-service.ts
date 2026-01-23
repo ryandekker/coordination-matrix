@@ -17,6 +17,7 @@ import {
   TaskEvent,
   Document,
   TaskStepConfig,
+  FlowAttempt,
 } from '../../types/index.js';
 
 import { resolveTemplateWithPackages, getValueByPath, resolveTitleTemplateWithPackages, getBaseUrl } from './template-utils.js';
@@ -60,10 +61,13 @@ class WorkflowExecutionService {
   }
 
   private async safeHandleTaskEvent(event: TaskEvent): Promise<void> {
-    const eventKey = `${event.task._id}-${event.task.status}-${event.task.updatedAt}`;
+    // Use event.id if available, otherwise generate a key from task data with millisecond precision
+    // This prevents race conditions where multiple events for the same task are processed simultaneously
+    const eventKey = event.id ||
+      `${event.task._id}-${event.task.status}-${new Date(event.task.updatedAt).getTime()}`;
 
     if (this.processedEvents.has(eventKey)) {
-      console.log(`[WorkflowExecutionService] Skipping duplicate event for task ${event.task._id}`);
+      console.log(`[WorkflowExecutionService] Skipping duplicate event for task ${event.task._id} (key: ${eventKey})`);
       return;
     }
     this.processedEvents.add(eventKey);
@@ -1948,15 +1952,29 @@ class WorkflowExecutionService {
   ): Promise<void> {
     console.log(`[WorkflowExecutionService] Executing flow step: ${step.id}`);
 
+    // Determine attempt number based on existing attempts
+    const existingAttempts = flowTask.flowConfig?.attempts || [];
+    const attemptNumber = existingAttempts.length + 1;
+
     if (!step.flowId) {
       console.error(`[WorkflowExecutionService] Flow step ${step.id} has no flowId configured`);
+      const failedAttempt: FlowAttempt = {
+        attemptNumber,
+        startedAt: new Date(),
+        completedAt: new Date(),
+        status: 'failed',
+        errorMessage: 'No target workflow configured for flow step',
+      };
       await this.tasks.updateOne(
         { _id: flowTask._id },
         {
           $set: {
             status: 'failed' as TaskStatus,
             'metadata.error': 'No target workflow configured for flow step',
-          }
+            'flowConfig.workflowId': '',
+            'flowConfig.lastAttemptAt': new Date(),
+          },
+          $push: { 'flowConfig.attempts': failedAttempt }
         }
       );
       return;
@@ -1966,13 +1984,24 @@ class WorkflowExecutionService {
     const targetWorkflow = await this.workflows.findOne({ _id: new ObjectId(step.flowId) });
     if (!targetWorkflow) {
       console.error(`[WorkflowExecutionService] Target workflow ${step.flowId} not found`);
+      const failedAttempt: FlowAttempt = {
+        attemptNumber,
+        startedAt: new Date(),
+        completedAt: new Date(),
+        status: 'failed',
+        targetWorkflowId: step.flowId,
+        errorMessage: `Target workflow ${step.flowId} not found`,
+      };
       await this.tasks.updateOne(
         { _id: flowTask._id },
         {
           $set: {
             status: 'failed' as TaskStatus,
             'metadata.error': `Target workflow ${step.flowId} not found`,
-          }
+            'flowConfig.workflowId': step.flowId,
+            'flowConfig.lastAttemptAt': new Date(),
+          },
+          $push: { 'flowConfig.attempts': failedAttempt }
         }
       );
       return;
@@ -1980,13 +2009,25 @@ class WorkflowExecutionService {
 
     if (!targetWorkflow.isActive) {
       console.error(`[WorkflowExecutionService] Target workflow ${targetWorkflow.name} is not active`);
+      const failedAttempt: FlowAttempt = {
+        attemptNumber,
+        startedAt: new Date(),
+        completedAt: new Date(),
+        status: 'failed',
+        targetWorkflowId: step.flowId,
+        targetWorkflowName: targetWorkflow.name,
+        errorMessage: `Target workflow "${targetWorkflow.name}" is not active`,
+      };
       await this.tasks.updateOne(
         { _id: flowTask._id },
         {
           $set: {
             status: 'failed' as TaskStatus,
             'metadata.error': `Target workflow "${targetWorkflow.name}" is not active`,
-          }
+            'flowConfig.workflowId': step.flowId,
+            'flowConfig.lastAttemptAt': new Date(),
+          },
+          $push: { 'flowConfig.attempts': failedAttempt }
         }
       );
       return;
@@ -2027,8 +2068,19 @@ class WorkflowExecutionService {
       console.log(`[WorkflowExecutionService] No inputMapping, passing through full payload`);
     }
 
-    // Update flow task to in_progress with initial taskResult
+    // Create the initial attempt record
     const now = new Date();
+    const attempt: FlowAttempt = {
+      attemptNumber,
+      startedAt: now,
+      status: 'running',
+      inputPayload: subflowInputPayload,
+      resolvedInputMapping: step.inputMapping,
+      targetWorkflowId: step.flowId,
+      targetWorkflowName: targetWorkflow.name,
+    };
+
+    // Update flow task to in_progress with initial taskResult and attempt record
     await this.tasks.updateOne(
       { _id: flowTask._id },
       {
@@ -2037,6 +2089,10 @@ class WorkflowExecutionService {
           'metadata.targetWorkflowId': step.flowId,
           'metadata.targetWorkflowName': targetWorkflow.name,
           'metadata.subflowInputPayload': subflowInputPayload,
+          // Update flowConfig
+          'flowConfig.workflowId': step.flowId,
+          'flowConfig.inputMapping': step.inputMapping || {},
+          'flowConfig.lastAttemptAt': now,
           // Set initial taskResult showing the flow is starting
           'taskResult.current': {
             id: `flow-${flowTask._id}-${Date.now()}`,
@@ -2053,7 +2109,8 @@ class WorkflowExecutionService {
               nextStep: step.connections?.[0]?.targetStepId || null,
             },
           },
-        }
+        },
+        $push: { 'flowConfig.attempts': attempt }
       }
     );
 
@@ -2070,7 +2127,7 @@ class WorkflowExecutionService {
         parentRun.createdById
       );
 
-      // Link the flow task to the spawned workflow run and update taskResult
+      // Link the flow task to the spawned workflow run and update taskResult + attempt
       await this.tasks.updateOne(
         { _id: flowTask._id },
         {
@@ -2083,6 +2140,8 @@ class WorkflowExecutionService {
               status: 'running',
             },
             'taskResult.current.summary': `Subflow running: ${targetWorkflow.name}`,
+            // Update the latest attempt with the spawned run ID
+            [`flowConfig.attempts.${attemptNumber - 1}.spawnedWorkflowRunId`]: subflowRun._id.toString(),
           }
         }
       );
@@ -2097,6 +2156,7 @@ class WorkflowExecutionService {
     } catch (error) {
       console.error(`[WorkflowExecutionService] Failed to start subflow:`, error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to start subflow';
+      const failedAt = new Date();
       await this.tasks.updateOne(
         { _id: flowTask._id },
         {
@@ -2105,9 +2165,14 @@ class WorkflowExecutionService {
             'metadata.error': errorMessage,
             // Update taskResult with failure info
             'taskResult.current.status': 'failed' as const,
-            'taskResult.current.completedAt': new Date(),
+            'taskResult.current.completedAt': failedAt,
             'taskResult.current.summary': `Failed to start subflow: ${targetWorkflow.name}`,
             'taskResult.current.error': errorMessage,
+            // Update the latest attempt with failure info
+            [`flowConfig.attempts.${attemptNumber - 1}.status`]: 'failed',
+            [`flowConfig.attempts.${attemptNumber - 1}.completedAt`]: failedAt,
+            [`flowConfig.attempts.${attemptNumber - 1}.errorMessage`]: errorMessage,
+            [`flowConfig.attempts.${attemptNumber - 1}.durationMs`]: failedAt.getTime() - now.getTime(),
           }
         }
       );
@@ -2449,27 +2514,53 @@ class WorkflowExecutionService {
       const triggerTask = await this.tasks.findOne({ _id: run.triggerTaskId });
 
       // Check both taskType and stepConfig.stepType for backwards compatibility with older tasks
-      const isFlowTask = triggerTask?.taskType === 'flow' || triggerTask?.stepConfig?.stepType === 'flow';
-      if (isFlowTask) {
+      // Also check if the task has a flowConfig (indicating it's a flow task)
+      const isFlowTask = triggerTask?.taskType === 'flow' ||
+        triggerTask?.stepConfig?.stepType === 'flow' ||
+        triggerTask?.flowConfig?.workflowId;
+      if (isFlowTask && triggerTask) {
         // This is a subflow failure - mark the flow task as failed
+
+        // Find the latest running attempt to update
+        const attempts = triggerTask.flowConfig?.attempts || [];
+        const runningAttemptIndex = attempts.findIndex(a =>
+          a.status === 'running' && a.spawnedWorkflowRunId === run._id.toString()
+        );
+        const attemptIndex = runningAttemptIndex >= 0 ? runningAttemptIndex : attempts.length - 1;
+
+        // Calculate duration if we have a start time
+        const startTime = attemptIndex >= 0 ? attempts[attemptIndex]?.startedAt : null;
+        const durationMs = startTime ? now.getTime() - new Date(startTime).getTime() : undefined;
+        const errorMessage = `Subflow failed: ${failedTask.title}`;
+
+        const updateFields: Record<string, unknown> = {
+          status: 'failed' as TaskStatus,
+          workflowResult,
+          'metadata.error': errorMessage,
+          'metadata.subflowFailed': true,
+          'metadata.subflowFailedAt': now,
+          updatedAt: now,
+          // Update taskResult with failed subflow info
+          'taskResult.current.status': 'failed' as const,
+          'taskResult.current.completedAt': now,
+          'taskResult.current.summary': errorMessage,
+          'taskResult.current.error': `Step "${failedTask.title}" failed`,
+          'taskResult.current.spawnedWorkflow.status': 'failed',
+        };
+
+        // Update the flow attempt if we have one
+        if (attemptIndex >= 0) {
+          updateFields[`flowConfig.attempts.${attemptIndex}.status`] = 'failed';
+          updateFields[`flowConfig.attempts.${attemptIndex}.completedAt`] = now;
+          updateFields[`flowConfig.attempts.${attemptIndex}.errorMessage`] = errorMessage;
+          if (durationMs !== undefined) {
+            updateFields[`flowConfig.attempts.${attemptIndex}.durationMs`] = durationMs;
+          }
+        }
+
         await this.tasks.updateOne(
           { _id: run.triggerTaskId },
-          {
-            $set: {
-              status: 'failed' as TaskStatus,
-              workflowResult,
-              'metadata.error': `Subflow failed: ${failedTask.title}`,
-              'metadata.subflowFailed': true,
-              'metadata.subflowFailedAt': now,
-              updatedAt: now,
-              // Update taskResult with failed subflow info
-              'taskResult.current.status': 'failed' as const,
-              'taskResult.current.completedAt': now,
-              'taskResult.current.summary': `Subflow failed: ${failedTask.title}`,
-              'taskResult.current.error': `Step "${failedTask.title}" failed`,
-              'taskResult.current.spawnedWorkflow.status': 'failed',
-            }
-          }
+          { $set: updateFields }
         );
         console.log(`[WorkflowExecutionService] Flow task ${run.triggerTaskId} failed with subflow error`);
 
@@ -2593,29 +2684,54 @@ class WorkflowExecutionService {
       const triggerTask = await this.tasks.findOne({ _id: run.triggerTaskId });
 
       // Check both taskType and stepConfig.stepType for backwards compatibility with older tasks
-      const isFlowTask = triggerTask?.taskType === 'flow' || triggerTask?.stepConfig?.stepType === 'flow';
-      if (isFlowTask) {
+      // Also check if the task has a flowConfig (indicating it's a flow task)
+      const isFlowTask = triggerTask?.taskType === 'flow' ||
+        triggerTask?.stepConfig?.stepType === 'flow' ||
+        triggerTask?.flowConfig?.workflowId;
+      if (isFlowTask && triggerTask) {
         // This is a subflow completion - mark the flow task as completed
         // and include the output payload in metadata for the next step
+
+        // Find the latest running attempt to update
+        const attempts = triggerTask.flowConfig?.attempts || [];
+        const runningAttemptIndex = attempts.findIndex(a =>
+          a.status === 'running' && a.spawnedWorkflowRunId === run._id.toString()
+        );
+        const attemptIndex = runningAttemptIndex >= 0 ? runningAttemptIndex : attempts.length - 1;
+
+        // Calculate duration if we have a start time
+        const startTime = attemptIndex >= 0 ? attempts[attemptIndex]?.startedAt : null;
+        const durationMs = startTime ? now.getTime() - new Date(startTime).getTime() : undefined;
+
+        const updateFields: Record<string, unknown> = {
+          status: 'completed' as TaskStatus,
+          workflowResult,
+          'metadata.output': outputPayload,
+          'metadata.subflowCompleted': true,
+          'metadata.subflowCompletedAt': now,
+          updatedAt: now,
+          // Update taskResult with completed subflow info
+          'taskResult.current.status': 'success' as const,
+          'taskResult.current.completedAt': now,
+          'taskResult.current.summary': `Subflow completed successfully`,
+          'taskResult.current.output.subflowOutput': outputPayload,
+          'taskResult.current.spawnedWorkflow.status': 'completed',
+          'taskResult.current.spawnedWorkflow.outputPayload': outputPayload,
+        };
+
+        // Update the flow attempt if we have one
+        if (attemptIndex >= 0) {
+          updateFields[`flowConfig.attempts.${attemptIndex}.status`] = 'success';
+          updateFields[`flowConfig.attempts.${attemptIndex}.completedAt`] = now;
+          updateFields[`flowConfig.attempts.${attemptIndex}.outputPayload`] = outputPayload;
+          if (durationMs !== undefined) {
+            updateFields[`flowConfig.attempts.${attemptIndex}.durationMs`] = durationMs;
+          }
+        }
+
         await this.tasks.updateOne(
           { _id: run.triggerTaskId },
-          {
-            $set: {
-              status: 'completed' as TaskStatus,
-              workflowResult,
-              'metadata.output': outputPayload,
-              'metadata.subflowCompleted': true,
-              'metadata.subflowCompletedAt': now,
-              updatedAt: now,
-              // Update taskResult with completed subflow info
-              'taskResult.current.status': 'success' as const,
-              'taskResult.current.completedAt': now,
-              'taskResult.current.summary': `Subflow completed successfully`,
-              'taskResult.current.output.subflowOutput': outputPayload,
-              'taskResult.current.spawnedWorkflow.status': 'completed',
-              'taskResult.current.spawnedWorkflow.outputPayload': outputPayload,
-            }
-          }
+          { $set: updateFields }
         );
         console.log(`[WorkflowExecutionService] Flow task ${run.triggerTaskId} completed with subflow output`);
 
@@ -3659,6 +3775,401 @@ class WorkflowExecutionService {
       console.error(`[WorkflowExecutionService] Failed to create rollback task:`, error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
+  }
+
+  // ============================================================================
+  // Flow Task Execute/Retry Methods
+  // ============================================================================
+
+  /**
+   * Execute or re-execute a flow task (start its subflow).
+   * This can be used to:
+   * - Force trigger a flow that hasn't started yet (pending status)
+   * - Retry a failed flow
+   * - Re-execute a flow with updated input payload
+   *
+   * @param taskId - The ID of the flow task
+   * @param inputPayload - Optional override input payload (uses task's stored payload if not provided)
+   * @returns The flow attempt record
+   */
+  async executeFlowTask(
+    taskId: string,
+    inputPayload?: Record<string, unknown>
+  ): Promise<{ success: boolean; attempt?: FlowAttempt; error?: string }> {
+    console.log(`[WorkflowExecutionService] Executing flow task ${taskId}`);
+
+    const task = await this.tasks.findOne({ _id: new ObjectId(taskId) });
+    if (!task) {
+      return { success: false, error: 'Task not found' };
+    }
+
+    // Check if this is a flow task
+    const isFlowTask = task.taskType === 'flow' ||
+      task.stepConfig?.stepType === 'flow' ||
+      task.flowConfig?.workflowId;
+
+    if (!isFlowTask) {
+      return { success: false, error: 'Task is not a flow task' };
+    }
+
+    // Get the workflow ID from various possible locations
+    const workflowId = task.flowConfig?.workflowId ||
+      task.stepConfig?.flowId ||
+      (task.metadata?.targetWorkflowId as string);
+
+    if (!workflowId) {
+      return { success: false, error: 'Flow task has no target workflow configured' };
+    }
+
+    // Get the target workflow
+    const targetWorkflow = await this.workflows.findOne({ _id: new ObjectId(workflowId) });
+    if (!targetWorkflow) {
+      return { success: false, error: `Target workflow ${workflowId} not found` };
+    }
+
+    if (!targetWorkflow.isActive) {
+      return { success: false, error: `Target workflow "${targetWorkflow.name}" is not active` };
+    }
+
+    // Determine input payload - use provided, or fall back to stored config
+    const finalInputPayload = inputPayload ||
+      (task.metadata?.subflowInputPayload as Record<string, unknown>) ||
+      {};
+
+    // Check existing attempts
+    const existingAttempts = task.flowConfig?.attempts || [];
+    const attemptNumber = existingAttempts.length + 1;
+
+    // Create the attempt record
+    const now = new Date();
+    const attempt: FlowAttempt = {
+      attemptNumber,
+      startedAt: now,
+      status: 'running',
+      inputPayload: finalInputPayload,
+      resolvedInputMapping: task.flowConfig?.inputMapping || task.stepConfig?.inputMapping,
+      targetWorkflowId: workflowId,
+      targetWorkflowName: targetWorkflow.name,
+    };
+
+    // Update task status and add attempt record
+    await this.tasks.updateOne(
+      { _id: task._id },
+      {
+        $set: {
+          status: 'in_progress' as TaskStatus,
+          'metadata.targetWorkflowId': workflowId,
+          'metadata.targetWorkflowName': targetWorkflow.name,
+          'metadata.subflowInputPayload': finalInputPayload,
+          'flowConfig.workflowId': workflowId,
+          'flowConfig.lastAttemptAt': now,
+          'taskResult.current': {
+            id: `flow-${task._id}-${Date.now()}`,
+            status: 'running' as const,
+            summary: `Starting subflow: ${targetWorkflow.name}`,
+            executedAt: now,
+            output: {
+              targetWorkflow: { id: workflowId, name: targetWorkflow.name },
+              inputPayload: finalInputPayload,
+            },
+          },
+        },
+        $push: { 'flowConfig.attempts': attempt }
+      }
+    );
+
+    try {
+      // Find the parent workflow run context (if any)
+      const parentRun = task.workflowRunId
+        ? await this.workflowRuns.findOne({ _id: task.workflowRunId })
+        : null;
+
+      // Start the subflow
+      const { run: subflowRun } = await this.startWorkflow(
+        {
+          workflowId,
+          inputPayload: finalInputPayload,
+          triggerTaskId: task._id.toString(),
+          source: `flow-execute:${task._id}`,
+          externalId: parentRun ? `${parentRun._id}:${task.workflowStepId}` : undefined,
+        },
+        parentRun?.createdById || null
+      );
+
+      // Update task with spawned run info
+      await this.tasks.updateOne(
+        { _id: task._id },
+        {
+          $set: {
+            spawnedWorkflowRunId: subflowRun._id,
+            'metadata.spawnedWorkflowRunId': subflowRun._id.toString(),
+            'taskResult.current.spawnedWorkflow': {
+              runId: subflowRun._id.toString(),
+              status: 'running',
+            },
+            'taskResult.current.summary': `Subflow running: ${targetWorkflow.name}`,
+            [`flowConfig.attempts.${attemptNumber - 1}.spawnedWorkflowRunId`]: subflowRun._id.toString(),
+          }
+        }
+      );
+
+      console.log(`[WorkflowExecutionService] Started subflow ${subflowRun._id} for flow task ${task._id}`);
+
+      // Return updated attempt
+      const updatedAttempt: FlowAttempt = {
+        ...attempt,
+        spawnedWorkflowRunId: subflowRun._id.toString(),
+      };
+
+      return { success: true, attempt: updatedAttempt };
+
+    } catch (error) {
+      console.error(`[WorkflowExecutionService] Failed to start subflow:`, error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to start subflow';
+      const failedAt = new Date();
+
+      await this.tasks.updateOne(
+        { _id: task._id },
+        {
+          $set: {
+            status: 'failed' as TaskStatus,
+            'metadata.error': errorMessage,
+            'taskResult.current.status': 'failed' as const,
+            'taskResult.current.completedAt': failedAt,
+            'taskResult.current.summary': `Failed to start subflow: ${targetWorkflow.name}`,
+            'taskResult.current.error': errorMessage,
+            [`flowConfig.attempts.${attemptNumber - 1}.status`]: 'failed',
+            [`flowConfig.attempts.${attemptNumber - 1}.completedAt`]: failedAt,
+            [`flowConfig.attempts.${attemptNumber - 1}.errorMessage`]: errorMessage,
+            [`flowConfig.attempts.${attemptNumber - 1}.durationMs`]: failedAt.getTime() - now.getTime(),
+          }
+        }
+      );
+
+      return { success: false, error: errorMessage };
+    }
+  }
+
+  /**
+   * Retry a failed flow task.
+   * This is a convenience wrapper around executeFlowTask that validates the task is in a failed state.
+   *
+   * @param taskId - The ID of the flow task
+   * @param inputPayload - Optional override input payload
+   */
+  async retryFlowTask(
+    taskId: string,
+    inputPayload?: Record<string, unknown>
+  ): Promise<{ success: boolean; attempt?: FlowAttempt; error?: string }> {
+    console.log(`[WorkflowExecutionService] Retrying flow task ${taskId}`);
+
+    const task = await this.tasks.findOne({ _id: new ObjectId(taskId) });
+    if (!task) {
+      return { success: false, error: 'Task not found' };
+    }
+
+    // Allow retry from failed, pending, or on_hold status
+    if (!['failed', 'pending', 'on_hold'].includes(task.status)) {
+      return {
+        success: false,
+        error: `Cannot retry flow task in status "${task.status}". Must be failed, pending, or on_hold.`
+      };
+    }
+
+    return this.executeFlowTask(taskId, inputPayload);
+  }
+
+  /**
+   * Get the status of a flow task including its execution history.
+   */
+  async getFlowTaskStatus(taskId: string): Promise<{
+    success: boolean;
+    status?: {
+      taskStatus: string;
+      targetWorkflow?: { id: string; name: string };
+      spawnedWorkflowRunId?: string;
+      spawnedWorkflowStatus?: string;
+      currentAttempt?: FlowAttempt;
+      attemptCount: number;
+      attempts: FlowAttempt[];
+    };
+    error?: string;
+  }> {
+    const task = await this.tasks.findOne({ _id: new ObjectId(taskId) });
+    if (!task) {
+      return { success: false, error: 'Task not found' };
+    }
+
+    const attempts = task.flowConfig?.attempts || [];
+    const currentAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : undefined;
+
+    // Get spawned workflow status if there's one
+    let spawnedWorkflowStatus: string | undefined;
+    if (task.spawnedWorkflowRunId) {
+      const run = await this.workflowRuns.findOne({ _id: task.spawnedWorkflowRunId });
+      spawnedWorkflowStatus = run?.status;
+    }
+
+    return {
+      success: true,
+      status: {
+        taskStatus: task.status,
+        targetWorkflow: task.flowConfig?.workflowId ? {
+          id: task.flowConfig.workflowId,
+          name: (task.metadata?.targetWorkflowName as string) || 'Unknown',
+        } : undefined,
+        spawnedWorkflowRunId: task.spawnedWorkflowRunId?.toString(),
+        spawnedWorkflowStatus,
+        currentAttempt,
+        attemptCount: attempts.length,
+        attempts,
+      }
+    };
+  }
+
+  /**
+   * Recovery method: Check for stuck flow tasks (in_progress but subflow is completed/failed)
+   * and complete them properly.
+   */
+  async recoverStuckFlowTasks(): Promise<{
+    checked: number;
+    recovered: number;
+    errors: string[];
+  }> {
+    console.log('[WorkflowExecutionService] Running stuck flow task recovery...');
+
+    const result = { checked: 0, recovered: 0, errors: [] as string[] };
+
+    // Find flow tasks that are in_progress but have a spawned workflow
+    const stuckCandidates = await this.tasks.find({
+      status: 'in_progress',
+      spawnedWorkflowRunId: { $exists: true, $ne: null },
+      $or: [
+        { taskType: 'flow' },
+        { 'stepConfig.stepType': 'flow' },
+        { 'flowConfig.workflowId': { $exists: true } },
+      ]
+    }).toArray();
+
+    result.checked = stuckCandidates.length;
+    console.log(`[WorkflowExecutionService] Found ${stuckCandidates.length} flow tasks in_progress to check`);
+
+    for (const task of stuckCandidates) {
+      try {
+        if (!task.spawnedWorkflowRunId) continue;
+
+        const subflowRun = await this.workflowRuns.findOne({ _id: task.spawnedWorkflowRunId });
+        if (!subflowRun) {
+          console.log(`[WorkflowExecutionService] Subflow run ${task.spawnedWorkflowRunId} not found for task ${task._id}`);
+          continue;
+        }
+
+        // If subflow is still running, nothing to do
+        if (subflowRun.status === 'running') {
+          continue;
+        }
+
+        console.log(`[WorkflowExecutionService] Found stuck flow task ${task._id} - subflow ${subflowRun._id} is ${subflowRun.status}`);
+
+        if (subflowRun.status === 'completed') {
+          // Complete the flow task with the subflow output
+          const outputPayload = subflowRun.outputPayload || {};
+          const now = new Date();
+
+          await this.tasks.updateOne(
+            { _id: task._id },
+            {
+              $set: {
+                status: 'completed' as TaskStatus,
+                workflowResult: {
+                  status: 'completed',
+                  outputPayload,
+                  completedAt: now,
+                },
+                'metadata.output': outputPayload,
+                'metadata.subflowCompleted': true,
+                'metadata.subflowCompletedAt': now,
+                'metadata.recoveredAt': now,
+                updatedAt: now,
+                'taskResult.current.status': 'success',
+                'taskResult.current.completedAt': now,
+                'taskResult.current.summary': 'Subflow completed (recovered)',
+                'taskResult.current.spawnedWorkflow.status': 'completed',
+                'taskResult.current.spawnedWorkflow.outputPayload': outputPayload,
+              }
+            }
+          );
+
+          // Publish event to advance parent workflow
+          const updatedTask = await this.tasks.findOne({ _id: task._id });
+          if (updatedTask) {
+            await eventBus.publish({
+              type: 'task.status.changed',
+              taskId: updatedTask._id,
+              task: updatedTask,
+              changes: [{ field: 'status', oldValue: 'in_progress', newValue: 'completed' }],
+              actorId: null,
+              actorType: 'system',
+            });
+          }
+
+          result.recovered++;
+          console.log(`[WorkflowExecutionService] Recovered flow task ${task._id} - marked as completed`);
+
+        } else if (subflowRun.status === 'failed' || subflowRun.status === 'cancelled') {
+          // Fail the flow task
+          const now = new Date();
+          const errorMessage = subflowRun.error || `Subflow ${subflowRun.status}`;
+
+          await this.tasks.updateOne(
+            { _id: task._id },
+            {
+              $set: {
+                status: 'failed' as TaskStatus,
+                workflowResult: {
+                  status: 'failed',
+                  error: errorMessage,
+                  completedAt: now,
+                },
+                'metadata.error': errorMessage,
+                'metadata.subflowFailed': true,
+                'metadata.subflowFailedAt': now,
+                'metadata.recoveredAt': now,
+                updatedAt: now,
+                'taskResult.current.status': 'failed',
+                'taskResult.current.completedAt': now,
+                'taskResult.current.summary': `Subflow ${subflowRun.status} (recovered)`,
+                'taskResult.current.error': errorMessage,
+                'taskResult.current.spawnedWorkflow.status': subflowRun.status,
+              }
+            }
+          );
+
+          // Publish event
+          const updatedTask = await this.tasks.findOne({ _id: task._id });
+          if (updatedTask) {
+            await eventBus.publish({
+              type: 'task.status.changed',
+              taskId: updatedTask._id,
+              task: updatedTask,
+              changes: [{ field: 'status', oldValue: 'in_progress', newValue: 'failed' }],
+              actorId: null,
+              actorType: 'system',
+            });
+          }
+
+          result.recovered++;
+          console.log(`[WorkflowExecutionService] Recovered flow task ${task._id} - marked as failed`);
+        }
+      } catch (error) {
+        const errorMsg = `Failed to recover task ${task._id}: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        result.errors.push(errorMsg);
+        console.error(`[WorkflowExecutionService] ${errorMsg}`);
+      }
+    }
+
+    console.log(`[WorkflowExecutionService] Recovery complete: ${result.recovered}/${result.checked} tasks recovered`);
+    return result;
   }
 }
 

@@ -201,6 +201,38 @@ export const tasksApi = {
     return handleResponse(response)
   },
 
+  // Flow task operations (subflow/nested workflow)
+  executeFlow: async (id: string, inputPayload?: Record<string, unknown>): Promise<ApiResponse<FlowAttempt>> => {
+    const response = await authFetch(`${API_BASE}/tasks/${id}/flow/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inputPayload }),
+    })
+    return handleResponse(response)
+  },
+
+  retryFlow: async (id: string, inputPayload?: Record<string, unknown>): Promise<ApiResponse<FlowAttempt>> => {
+    const response = await authFetch(`${API_BASE}/tasks/${id}/flow/retry`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inputPayload }),
+    })
+    return handleResponse(response)
+  },
+
+  getFlowStatus: async (id: string): Promise<ApiResponse<{
+    taskStatus: string
+    targetWorkflow?: { id: string; name: string }
+    spawnedWorkflowRunId?: string
+    spawnedWorkflowStatus?: string
+    currentAttempt?: FlowAttempt
+    attemptCount: number
+    attempts: FlowAttempt[]
+  }>> => {
+    const response = await authFetch(`${API_BASE}/tasks/${id}/flow/status`)
+    return handleResponse(response)
+  },
+
   // Rollback a manual review task to the previous step
   rollback: async (id: string, comment?: string): Promise<ApiResponse<{ success: boolean; message: string; newTaskId?: string }>> => {
     const response = await authFetch(`${API_BASE}/tasks/${id}/rollback`, {
@@ -696,6 +728,33 @@ export interface WebhookConfig {
   nextRetryAt?: string
 }
 
+// Flow (subflow) execution attempt record
+export interface FlowAttempt {
+  attemptNumber: number
+  startedAt: string
+  completedAt?: string
+  status: 'pending' | 'running' | 'success' | 'failed'
+  // Input details
+  inputPayload?: Record<string, unknown>
+  resolvedInputMapping?: Record<string, string>
+  // Spawned workflow details
+  spawnedWorkflowRunId?: string
+  targetWorkflowId?: string
+  targetWorkflowName?: string
+  // Result details
+  outputPayload?: Record<string, unknown>
+  errorMessage?: string
+  durationMs?: number
+}
+
+// Flow task configuration (nested workflow execution)
+export interface FlowConfig {
+  workflowId: string
+  inputMapping?: Record<string, string>
+  attempts?: FlowAttempt[]
+  lastAttemptAt?: string
+}
+
 // Step connection (for decision routing)
 export interface StepConnection {
   targetStepId: string
@@ -880,6 +939,7 @@ export interface Task {
   childStatusSummary?: ChildStatusSummary
   taskType?: TaskType
   webhookConfig?: WebhookConfig
+  flowConfig?: FlowConfig
   batchCounters?: {
     expectedCount?: number
     completedCount?: number

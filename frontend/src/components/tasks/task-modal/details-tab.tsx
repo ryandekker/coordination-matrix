@@ -14,9 +14,10 @@ import {
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { TagInput } from '@/components/ui/tag-input'
-import { Task, LookupValue, User, Workflow, WebhookConfig, TaskType } from '@/lib/api'
+import { Task, LookupValue, User, Workflow, WebhookConfig, TaskType, FlowConfig } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { WebhookTaskConfig } from '../webhook-task-config'
+import { FlowTaskConfig } from '../flow-task-config'
 import { WorkflowTrigger } from '../workflow-trigger'
 import {
   TASK_TYPE_CONFIG,
@@ -375,6 +376,35 @@ export function DetailsTab({
             onConfigChange={onWebhookConfigChange}
           />
         </div>
+      )}
+
+      {/* Flow Configuration (for flow/subflow tasks) */}
+      {(currentTaskType === 'flow' || task.spawnedWorkflowRunId || task.flowConfig) && (
+        <FlowTaskConfig
+          task={task}
+          isEditMode={true}
+          flowConfig={{
+            workflowId: task.flowConfig?.workflowId || task.stepConfig?.flowId || '',
+            inputPayload: task.flowConfig?.inputMapping
+              ? JSON.stringify(task.flowConfig.inputMapping, null, 2)
+              : task.metadata?.subflowInputPayload
+                ? JSON.stringify(task.metadata.subflowInputPayload, null, 2)
+                : undefined,
+          }}
+          onConfigChange={(config) => {
+            // Update task flowConfig when changed
+            updateTask.mutate({
+              id: task._id,
+              data: {
+                flowConfig: {
+                  ...task.flowConfig,
+                  workflowId: config.workflowId,
+                  inputMapping: config.inputPayload ? JSON.parse(config.inputPayload) : undefined,
+                },
+              },
+            })
+          }}
+        />
       )}
 
       {/* ForEach Configuration */}

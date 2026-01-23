@@ -680,4 +680,24 @@ router.post('/:id/execute-step/:stepId', requireAuth, async (req: Request, res: 
   }
 });
 
+// ============================================================================
+// Recover Stuck Flow Tasks
+// POST /api/workflow-runs/recover-stuck-flows
+// Requires authentication (JWT or API key)
+// Checks for flow tasks stuck in in_progress and recovers them if subflow completed
+// ============================================================================
+router.post('/recover-stuck-flows', requireAuth, async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await workflowExecutionService.recoverStuckFlowTasks();
+    res.json({
+      message: `Recovery complete: ${result.recovered}/${result.checked} tasks recovered`,
+      ...result,
+    });
+  } catch (error: unknown) {
+    console.error('[WorkflowRuns] Recover stuck flows error:', error);
+    const message = error instanceof Error ? error.message : 'Failed to recover stuck flows';
+    res.status(500).json({ error: message });
+  }
+});
+
 export default router;
