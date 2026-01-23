@@ -28,7 +28,8 @@ export type TaskType =
   | 'flow'          // Nested workflow
   | 'external'      // Outbound HTTP call with callback
   | 'webhook'       // Outbound HTTP call (fire-and-forget)
-  | 'findDocument'; // Search for a document using semantic search
+  | 'findDocument'  // Search for a document using semantic search
+  | 'code';         // Execute JavaScript code in sandboxed environment
 
 // How the task gets executed
 export type ExecutionMode =
@@ -192,6 +193,109 @@ export interface FindDocumentConfig {
   failIfNotFound?: boolean;
 }
 
+// Available packages that can be injected into the code sandbox
+// Organized by category for easier browsing
+export type CodeSandboxPackage =
+  // === HTTP & Networking ===
+  | 'node-fetch'       // HTTP fetch API (as `fetch`)
+  | 'axios'            // HTTP client
+  | 'qs'               // Query string parsing
+
+  // === Data Manipulation ===
+  | 'lodash'           // Utility functions (as `_`)
+  | 'ramda'            // Functional programming (as `R`)
+  | 'immer'            // Immutable state (as `immer.produce`)
+  | 'deepmerge'        // Deep object merging
+
+  // === String & Text ===
+  | 'validator'        // String validation
+  | 'slugify'          // URL-safe strings
+  | 'change-case'      // Case conversion (camelCase, snake_case, etc.)
+  | 'marked'           // Markdown to HTML
+  | 'sanitize-html'    // HTML sanitization
+
+  // === Numbers & Math ===
+  | 'bignumber.js'     // Arbitrary precision math (as `BigNumber`)
+  | 'decimal.js'       // Decimal arithmetic (as `Decimal`)
+  | 'mathjs'           // Math library (as `math`)
+  | 'currency.js'      // Currency handling (as `currency`)
+
+  // === Date & Time ===
+  | 'date-fns'         // Date manipulation (as `dateFns`)
+  | 'dayjs'            // Lightweight date library
+  | 'luxon'            // Modern date library (as `luxon.DateTime`, etc.)
+  | 'ms'               // Millisecond conversion
+
+  // === JSON & Data Formats ===
+  | 'jsonpath-plus'    // JSONPath querying (as `JSONPath`)
+  | 'json5'            // Extended JSON (as `JSON5`)
+  | 'yaml'             // YAML parsing (as `YAML`)
+  | 'csv-parse'        // CSV parsing (as `csvParse`)
+  | 'csv-stringify'    // CSV generation (as `csvStringify`)
+  | 'papaparse'        // CSV parsing (as `Papa`)
+  | 'fast-xml-parser'  // Fast XML parsing (as `XMLParser`)
+
+  // === Validation & Schema ===
+  | 'zod'              // Schema validation (as `z`)
+  | 'yup'              // Schema validation
+  | 'ajv'              // JSON Schema validation (as `Ajv`)
+
+  // === UUID & IDs ===
+  | 'uuid'             // UUID generation (as `uuid.v4()`, etc.)
+  | 'nanoid'           // Tiny ID generator (as `nanoid.nanoid()`)
+  | 'ulid'             // Sortable unique IDs
+  | 'hashids'          // Obfuscated IDs (as `Hashids`)
+
+  // === Crypto & Security ===
+  | 'crypto-js'        // Crypto functions (as `CryptoJS`)
+  | 'bcryptjs'         // Password hashing (as `bcrypt`)
+  | 'jsonwebtoken'     // JWT handling (as `jwt`)
+  | 'js-base64'        // Base64 utilities (as `Base64`)
+
+  // === Async & Flow Control ===
+  | 'p-limit'          // Limit concurrent promises (as `pLimit`)
+  | 'p-map'            // Concurrent map (as `pMap`)
+  | 'p-retry'          // Promise retry (as `pRetry`)
+  | 'delay'            // Simple delay
+
+  // === Templating ===
+  | 'handlebars'       // Handlebars templates (as `Handlebars`)
+  | 'mustache'         // Mustache templates (as `Mustache`)
+  | 'ejs'              // EJS templates
+
+  // === Comparison & Diff ===
+  | 'fast-json-patch'  // JSON Patch (RFC 6902) (as `jsonPatch`)
+  | 'diff'             // Text diff (as `Diff`)
+
+  // === Encoding & Compression ===
+  | 'pako'             // zlib compression
+  | 'lz-string'        // LZ compression for strings (as `LZString`)
+
+  // === Random & Fake Data ===
+  | '@faker-js/faker'; // Fake data generation (as `faker`)
+
+// Code step configuration - sandboxed JavaScript execution
+export interface CodeStepConfig {
+  // The code to execute (JavaScript/TypeScript)
+  // Receives `input` variable with previous step output
+  // Must return a value (becomes the step output)
+  code: string;
+
+  // Packages to inject into sandbox (subset of CodeSandboxPackage)
+  // Each package is available under its standard name (e.g., _ for lodash)
+  packages?: CodeSandboxPackage[];
+
+  // Execution limits
+  timeout?: number;        // Max execution time in ms (default: 30000)
+  memoryLimit?: number;    // Memory limit in MB (default: 128)
+
+  // Output validation
+  outputSchema?: object;   // JSON Schema to validate output against
+
+  // Error handling
+  continueOnError?: boolean;  // If true, step completes with error in output instead of failing
+}
+
 // Complete workflow step configuration stored on task for rerun/visibility
 export interface TaskStepConfig {
   // Step identification
@@ -245,6 +349,9 @@ export interface TaskStepConfig {
 
   // FindDocument step config
   findDocumentConfig?: FindDocumentConfig;
+
+  // Code step config
+  codeConfig?: CodeStepConfig;
 
   // Input aggregation config
   inputPath?: string;
@@ -304,6 +411,13 @@ export interface TaskResultEntry {
     runId: string;
     status: string;
     outputPayload?: unknown;
+  };
+
+  // Code step result
+  codeExecution?: {
+    logs: string[];
+    executionTimeMs: number;
+    packages: string[];
   };
 }
 
@@ -831,7 +945,8 @@ export type WorkflowStepType =
   | 'foreach'       // Fan-out iteration (spawns subtasks)
   | 'join'          // Fan-in synchronization (awaits boundary conditions)
   | 'flow'          // Nested workflow
-  | 'findDocument'; // Search for a document using semantic search
+  | 'findDocument'  // Search for a document using semantic search
+  | 'code';         // Execute JavaScript code in sandboxed environment
 
 export interface WorkflowStep {
   id: string;
@@ -919,6 +1034,9 @@ export interface WorkflowStep {
     storeAs?: string;                   // Variable name to store result (default: 'document')
     failIfNotFound?: boolean;           // Fail the step if no document found (default: false)
   };
+
+  // Code step config - sandboxed JavaScript execution
+  codeConfig?: CodeStepConfig;
 }
 
 export interface Workflow {

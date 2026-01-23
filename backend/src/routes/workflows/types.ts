@@ -10,7 +10,8 @@ import { ObjectId } from 'mongodb';
 // - foreach: Fan-out loop over collection (spawns subtasks)
 // - join: Fan-in aggregation point (awaits boundary conditions)
 // - flow: Delegate to another workflow (nested)
-export type WorkflowStepType = 'trigger' | 'agent' | 'manual' | 'external' | 'decision' | 'foreach' | 'join' | 'flow';
+// - code: Execute JavaScript code in a sandboxed environment
+export type WorkflowStepType = 'trigger' | 'agent' | 'manual' | 'external' | 'decision' | 'foreach' | 'join' | 'flow' | 'code';
 
 // Connection between steps (for non-linear flows)
 export interface StepConnection {
@@ -39,6 +40,19 @@ export interface JoinBoundary {
   minPercent?: number;        // Minimum percentage (default: 100)
   maxWaitMs?: number;         // Maximum time to wait
   failOnTimeout?: boolean;    // Fail or continue with partial results
+}
+
+// Available packages for code sandbox
+export type CodeSandboxPackage = 'lodash' | 'date-fns' | 'uuid' | 'zod' | 'jsonpath-plus';
+
+// Code step configuration
+export interface CodeStepConfig {
+  code: string;                       // JavaScript code to execute
+  packages?: CodeSandboxPackage[];    // Packages to inject into sandbox
+  timeout?: number;                   // Max execution time in ms (default: 30000)
+  memoryLimit?: number;               // Memory limit in MB (default: 128)
+  outputSchema?: object;              // JSON Schema for output validation
+  continueOnError?: boolean;          // Complete with error in output instead of failing
 }
 
 export interface WorkflowStep {
@@ -85,6 +99,9 @@ export interface WorkflowStep {
   inputSource?: string;             // Step ID to get input from (default: previous step)
   inputPath?: string;               // JSONPath to extract input from source step
 
+  // Code step configuration
+  codeConfig?: CodeStepConfig;
+
   // Legacy fields (kept for compatibility)
   execution?: 'automated' | 'manual';
   type?: 'automated' | 'manual';
@@ -110,4 +127,4 @@ export interface Workflow {
 }
 
 // Valid step types for normalization
-export const VALID_STEP_TYPES: WorkflowStepType[] = ['trigger', 'agent', 'manual', 'external', 'decision', 'foreach', 'join', 'flow'];
+export const VALID_STEP_TYPES: WorkflowStepType[] = ['trigger', 'agent', 'manual', 'external', 'decision', 'foreach', 'join', 'flow', 'code'];

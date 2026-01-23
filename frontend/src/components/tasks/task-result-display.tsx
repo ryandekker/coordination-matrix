@@ -16,6 +16,8 @@ import {
   FileText,
   Workflow,
   Layers,
+  Code,
+  Terminal,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -68,7 +70,7 @@ function ResultEntry({
 
   return (
     <div className={cn(
-      "border rounded-lg overflow-hidden",
+      "border rounded-lg overflow-hidden min-w-0",
       isHistorical && "opacity-75"
     )}>
       {/* Header */}
@@ -109,7 +111,7 @@ function ResultEntry({
       )}
 
       {/* Type-specific results */}
-      <div className="p-3 space-y-3">
+      <div className="p-3 space-y-3 min-w-0 overflow-x-auto">
         {/* Webhook Response */}
         {entry.webhookResponse && (
           <div className="space-y-2">
@@ -289,9 +291,53 @@ function ResultEntry({
           </div>
         )}
 
+        {/* Code Execution Result */}
+        {entry.codeExecution && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <Code className="h-3.5 w-3.5" />
+              Code Execution
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="p-2 bg-muted/50 rounded">
+                <div className="text-muted-foreground">Execution Time</div>
+                <div className="font-mono">{entry.codeExecution.executionTimeMs}ms</div>
+              </div>
+              <div className="p-2 bg-muted/50 rounded">
+                <div className="text-muted-foreground">Packages</div>
+                <div className="font-mono">
+                  {entry.codeExecution.packages.length > 0
+                    ? entry.codeExecution.packages.join(', ')
+                    : 'None'}
+                </div>
+              </div>
+            </div>
+            {entry.codeExecution.logs && entry.codeExecution.logs.length > 0 && (
+              <div className="text-xs">
+                <button
+                  type="button"
+                  onClick={() => setShowDetails(!showDetails)}
+                  className="flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                >
+                  {showDetails ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                  <Terminal className="h-3 w-3" />
+                  Console Output ({entry.codeExecution.logs.length} lines)
+                </button>
+                {showDetails && (
+                  <div className="mt-2 p-2 bg-zinc-900 dark:bg-zinc-950 rounded max-h-48 overflow-auto">
+                    <pre className="text-xs text-zinc-100 font-mono whitespace-pre-wrap">
+                      {entry.codeExecution.logs.join('\n')}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Generic Output */}
         {entry.output !== undefined && entry.output !== null && !entry.webhookResponse && !entry.aggregatedResults && (
-          <div className="space-y-2">
+          <div className="space-y-2 min-w-0">
             <button
               type="button"
               onClick={() => setShowOutput(!showOutput)}
@@ -301,7 +347,7 @@ function ResultEntry({
               Output Data
             </button>
             {showOutput && (
-              <div className="max-h-64 overflow-auto">
+              <div className="max-h-64 overflow-auto border rounded bg-muted/30 p-2">
                 <JsonViewer
                   data={entry.output as Record<string, unknown>}
                   defaultExpanded={true}

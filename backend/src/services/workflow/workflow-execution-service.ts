@@ -24,6 +24,7 @@ import { resolveTemplateWithPackages, getValueByPath, resolveTitleTemplateWithPa
 import { stripUndefined } from './mongo-utils.js';
 import { searchDocuments } from '../embedding-service.js';
 import { SYSTEM_USER_ID, isSystemExecutedTaskType } from '../system-user.js';
+import { executeCode as executeCodeSandbox } from './code-executor.js';
 
 type WorkflowRunEventHandler = (event: WorkflowRunEvent) => void | Promise<void>;
 
@@ -428,6 +429,10 @@ class WorkflowExecutionService {
       case 'findDocument':
         await this.executeFindDocument(run, workflow, step, task, inputPayload);
         break;
+
+      case 'code':
+        await this.executeCodeStep(run, workflow, step, task, inputPayload);
+        break;
     }
 
     return task;
@@ -527,6 +532,11 @@ class WorkflowExecutionService {
     // FindDocument step config
     if (step.findDocumentConfig) {
       config.findDocumentConfig = step.findDocumentConfig;
+    }
+
+    // Code step config
+    if (step.codeConfig) {
+      config.codeConfig = step.codeConfig;
     }
 
     // Input aggregation config (only inputPath is on WorkflowStep - inputSource is runtime)
@@ -763,6 +773,7 @@ class WorkflowExecutionService {
       'join': 'join',
       'flow': 'flow',
       'findDocument': 'findDocument',
+      'code': 'code',
     };
     return mapping[stepType] || 'agent';
   }
@@ -786,6 +797,7 @@ class WorkflowExecutionService {
       'join': 'immediate',
       'flow': 'automated',
       'findDocument': 'immediate',
+      'code': 'immediate',  // Code executes immediately in sandbox
     };
     return mapping[step.stepType] || 'automated';
   }
@@ -1933,6 +1945,171 @@ class WorkflowExecutionService {
             'metadata.error': error instanceof Error ? error.message : 'Search failed',
             'metadata.mode': 'dynamic',
             'metadata.searchPrompt': searchPrompt,
+          }
+        }
+      );
+    }
+  }
+
+  // ============================================================================
+  // Code Step Execution (Sandboxed JavaScript)
+  // ============================================================================
+
+  /**
+   * Execute a code step - runs JavaScript in a sandboxed vm2 environment.
+   *
+   * The code receives the previous step's output as `input` and can use
+   * a configurable set of npm packages (lodash, date-fns, etc.).
+   */
+  private async executeCodeStep(
+    _run: WorkflowRun,
+    _workflow: Workflow,
+    step: WorkflowStep,
+    codeTask: Task,
+    inputPayload?: Record<string, unknown>
+  ): Promise<void> {
+    const config = step.codeConfig;
+    console.log(`[WorkflowExecutionService] Executing code step: ${step.id}`);
+
+    if (!config || !config.code) {
+      console.warn(`[WorkflowExecutionService] Code step ${step.id} has no code to execute`);
+      await this.tasks.updateOne(
+        { _id: codeTask._id },
+        {
+          $set: {
+            status: 'failed' as TaskStatus,
+            'metadata.error': 'No code provided in codeConfig',
+          }
+        }
+      );
+      return;
+    }
+
+    const now = new Date();
+    const resultId = `code-${codeTask._id}-${Date.now()}`;
+
+    try {
+      // Execute the code in the sandbox
+      const result = await executeCodeSandbox(
+        config.code,
+        inputPayload || {},
+        {
+          packages: config.packages,
+          timeout: config.timeout,
+          outputSchema: config.outputSchema,
+        }
+      );
+
+      const codeExecutionResult = {
+        logs: result.logs,
+        executionTimeMs: result.executionTimeMs,
+        packages: config.packages || [],
+      };
+
+      if (result.success) {
+        // Code executed successfully
+        await this.tasks.updateOne(
+          { _id: codeTask._id },
+          {
+            $set: {
+              status: 'completed' as TaskStatus,
+              'metadata.output': result.output,
+              'metadata.executionTimeMs': result.executionTimeMs,
+              'metadata.logs': result.logs,
+              'metadata.packages': config.packages || [],
+              // Populate taskResult for UI display
+              'taskResult.current': {
+                id: resultId,
+                status: 'success' as const,
+                output: result.output,
+                summary: `Code executed successfully in ${result.executionTimeMs}ms`,
+                executedAt: now,
+                completedAt: new Date(),
+                durationMs: result.executionTimeMs,
+                codeExecution: codeExecutionResult,
+              },
+            }
+          }
+        );
+        console.log(`[WorkflowExecutionService] Code step ${step.id} completed successfully in ${result.executionTimeMs}ms`);
+      } else {
+        // Code execution failed
+        if (config.continueOnError) {
+          // Complete with error in output instead of failing
+          await this.tasks.updateOne(
+            { _id: codeTask._id },
+            {
+              $set: {
+                status: 'completed' as TaskStatus,
+                'metadata.output': null,
+                'metadata.error': result.error,
+                'metadata.executionTimeMs': result.executionTimeMs,
+                'metadata.logs': result.logs,
+                'metadata.packages': config.packages || [],
+                // Populate taskResult for UI display
+                'taskResult.current': {
+                  id: resultId,
+                  status: 'partial' as const,
+                  output: null,
+                  error: result.error,
+                  summary: `Code completed with error (continueOnError=true)`,
+                  executedAt: now,
+                  completedAt: new Date(),
+                  durationMs: result.executionTimeMs,
+                  codeExecution: codeExecutionResult,
+                },
+              }
+            }
+          );
+          console.log(`[WorkflowExecutionService] Code step ${step.id} completed with error (continueOnError=true): ${result.error}`);
+        } else {
+          // Fail the task
+          await this.tasks.updateOne(
+            { _id: codeTask._id },
+            {
+              $set: {
+                status: 'failed' as TaskStatus,
+                'metadata.error': result.error,
+                'metadata.executionTimeMs': result.executionTimeMs,
+                'metadata.logs': result.logs,
+                'metadata.packages': config.packages || [],
+                // Populate taskResult for UI display
+                'taskResult.current': {
+                  id: resultId,
+                  status: 'failed' as const,
+                  output: null,
+                  error: result.error,
+                  summary: `Code execution failed`,
+                  executedAt: now,
+                  completedAt: new Date(),
+                  durationMs: result.executionTimeMs,
+                  codeExecution: codeExecutionResult,
+                },
+              }
+            }
+          );
+          console.error(`[WorkflowExecutionService] Code step ${step.id} failed: ${result.error}`);
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unexpected error during code execution';
+      console.error(`[WorkflowExecutionService] Code step ${step.id} threw unexpected error:`, error);
+      await this.tasks.updateOne(
+        { _id: codeTask._id },
+        {
+          $set: {
+            status: 'failed' as TaskStatus,
+            'metadata.error': errorMessage,
+            // Populate taskResult for UI display
+            'taskResult.current': {
+              id: resultId,
+              status: 'failed' as const,
+              output: null,
+              error: errorMessage,
+              summary: 'Unexpected error during code execution',
+              executedAt: now,
+              completedAt: new Date(),
+            },
           }
         }
       );

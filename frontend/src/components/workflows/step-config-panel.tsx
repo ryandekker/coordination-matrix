@@ -5,6 +5,13 @@ import { getAuthHeader } from '@/lib/auth'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -30,7 +37,7 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import { cn } from '@/lib/utils'
-import { Search, X, FileText, Check, ChevronsUpDown } from 'lucide-react'
+import { Search, X, FileText, Check, ChevronsUpDown, Maximize2, Play, Terminal, Package } from 'lucide-react'
 import {
   Bot,
   User,
@@ -55,9 +62,49 @@ import {
   ChevronUp,
   ChevronDown,
   FileSearch,
+  Code,
 } from 'lucide-react'
 
-type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow' | 'findDocument'
+type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow' | 'findDocument' | 'code'
+
+// Available packages for the code sandbox - matches backend CodeSandboxPackage type
+type CodeSandboxPackage =
+  // HTTP & Networking
+  | 'node-fetch' | 'axios' | 'qs'
+  // Data Manipulation
+  | 'lodash' | 'ramda' | 'immer' | 'deepmerge'
+  // String & Text
+  | 'validator' | 'slugify' | 'change-case' | 'marked' | 'sanitize-html'
+  // Numbers & Math
+  | 'bignumber.js' | 'decimal.js' | 'mathjs' | 'currency.js'
+  // Date & Time
+  | 'date-fns' | 'dayjs' | 'luxon' | 'ms'
+  // JSON & Data Formats
+  | 'jsonpath-plus' | 'json5' | 'yaml' | 'csv-parse' | 'csv-stringify' | 'papaparse' | 'fast-xml-parser'
+  // Validation & Schema
+  | 'zod' | 'yup' | 'ajv'
+  // UUID & IDs
+  | 'uuid' | 'nanoid' | 'ulid' | 'hashids'
+  // Crypto & Security
+  | 'crypto-js' | 'bcryptjs' | 'jsonwebtoken' | 'js-base64'
+  // Async & Flow Control
+  | 'p-limit' | 'p-map' | 'p-retry' | 'delay'
+  // Templating
+  | 'handlebars' | 'mustache' | 'ejs'
+  // Comparison & Diff
+  | 'fast-json-patch' | 'diff'
+  // Encoding & Compression
+  | 'pako' | 'lz-string'
+  // Random & Fake Data
+  | '@faker-js/faker'
+
+// Code step configuration
+interface CodeStepConfig {
+  code: string
+  packages?: CodeSandboxPackage[]
+  timeout?: number
+  continueOnError?: boolean
+}
 
 interface StepConnection {
   targetStepId: string
@@ -132,6 +179,7 @@ interface WorkflowStep {
   hitlPhase?: string
   branches?: { condition: string | null; targetStepId: string }[]
   findDocumentConfig?: FindDocumentConfig
+  codeConfig?: CodeStepConfig
 }
 
 interface LoopScope {
@@ -174,6 +222,7 @@ const STEP_TYPES: { type: WorkflowStepType; label: string; description: string; 
   { type: 'join', label: 'Join', description: 'Aggregate results', icon: Merge, color: 'text-indigo-500', bgColor: 'bg-indigo-500/10' },
   { type: 'flow', label: 'Flow', description: 'Nested workflow', icon: WorkflowIcon, color: 'text-pink-500', bgColor: 'bg-pink-500/10' },
   { type: 'findDocument', label: 'Find Document', description: 'Search documents', icon: FileSearch, color: 'text-cyan-500', bgColor: 'bg-cyan-500/10' },
+  { type: 'code', label: 'Code', description: 'Run JavaScript', icon: Code, color: 'text-emerald-500', bgColor: 'bg-emerald-500/10' },
 ]
 
 function getStepTypeInfo(stepType?: WorkflowStepType) {
@@ -1379,6 +1428,717 @@ function DecisionStepConfig({
   )
 }
 
+// Available packages for the code sandbox with metadata
+const CODE_PACKAGES: Array<{ value: CodeSandboxPackage; label: string; description: string; sandboxName: string; category: string }> = [
+  // HTTP & Networking
+  { value: 'node-fetch', label: 'fetch', description: 'HTTP fetch API', sandboxName: 'fetch', category: 'HTTP & Networking' },
+  { value: 'axios', label: 'axios', description: 'Full-featured HTTP client', sandboxName: 'axios', category: 'HTTP & Networking' },
+  { value: 'qs', label: 'qs', description: 'Query string parsing/stringify', sandboxName: 'qs', category: 'HTTP & Networking' },
+
+  // Data Manipulation
+  { value: 'lodash', label: 'Lodash', description: 'Utility functions', sandboxName: '_', category: 'Data Manipulation' },
+  { value: 'ramda', label: 'Ramda', description: 'Functional programming', sandboxName: 'R', category: 'Data Manipulation' },
+  { value: 'immer', label: 'Immer', description: 'Immutable state updates', sandboxName: 'immer', category: 'Data Manipulation' },
+  { value: 'deepmerge', label: 'deepmerge', description: 'Deep object merging', sandboxName: 'deepmerge', category: 'Data Manipulation' },
+
+  // String & Text
+  { value: 'validator', label: 'validator', description: 'String validation (email, URL)', sandboxName: 'validator', category: 'String & Text' },
+  { value: 'slugify', label: 'slugify', description: 'URL-safe strings', sandboxName: 'slugify', category: 'String & Text' },
+  { value: 'change-case', label: 'change-case', description: 'Case conversion', sandboxName: 'changeCase', category: 'String & Text' },
+  { value: 'marked', label: 'marked', description: 'Markdown to HTML', sandboxName: 'marked', category: 'String & Text' },
+  { value: 'sanitize-html', label: 'sanitize-html', description: 'HTML sanitization', sandboxName: 'sanitizeHtml', category: 'String & Text' },
+
+  // Numbers & Math
+  { value: 'bignumber.js', label: 'BigNumber', description: 'Arbitrary precision math', sandboxName: 'BigNumber', category: 'Numbers & Math' },
+  { value: 'decimal.js', label: 'Decimal', description: 'Decimal arithmetic', sandboxName: 'Decimal', category: 'Numbers & Math' },
+  { value: 'mathjs', label: 'math.js', description: 'Math library', sandboxName: 'math', category: 'Numbers & Math' },
+  { value: 'currency.js', label: 'currency.js', description: 'Currency handling', sandboxName: 'currency', category: 'Numbers & Math' },
+
+  // Date & Time
+  { value: 'date-fns', label: 'date-fns', description: 'Date manipulation', sandboxName: 'dateFns', category: 'Date & Time' },
+  { value: 'dayjs', label: 'Day.js', description: 'Lightweight date library', sandboxName: 'dayjs', category: 'Date & Time' },
+  { value: 'luxon', label: 'Luxon', description: 'Modern date library', sandboxName: 'luxon', category: 'Date & Time' },
+  { value: 'ms', label: 'ms', description: 'Millisecond conversion', sandboxName: 'ms', category: 'Date & Time' },
+
+  // JSON & Data Formats
+  { value: 'jsonpath-plus', label: 'JSONPath', description: 'Query JSON data', sandboxName: 'JSONPath', category: 'JSON & Data Formats' },
+  { value: 'json5', label: 'JSON5', description: 'Extended JSON', sandboxName: 'JSON5', category: 'JSON & Data Formats' },
+  { value: 'yaml', label: 'YAML', description: 'YAML parsing', sandboxName: 'YAML', category: 'JSON & Data Formats' },
+  { value: 'csv-parse', label: 'CSV Parse', description: 'CSV parsing', sandboxName: 'csvParse', category: 'JSON & Data Formats' },
+  { value: 'csv-stringify', label: 'CSV Stringify', description: 'CSV generation', sandboxName: 'csvStringify', category: 'JSON & Data Formats' },
+  { value: 'papaparse', label: 'PapaParse', description: 'Full-featured CSV parsing', sandboxName: 'Papa', category: 'JSON & Data Formats' },
+  { value: 'fast-xml-parser', label: 'XML Parser', description: 'Fast XML parsing', sandboxName: 'XMLParser', category: 'JSON & Data Formats' },
+
+  // Validation & Schema
+  { value: 'zod', label: 'Zod', description: 'TypeScript-first validation', sandboxName: 'z', category: 'Validation & Schema' },
+  { value: 'yup', label: 'Yup', description: 'Schema validation', sandboxName: 'yup', category: 'Validation & Schema' },
+  { value: 'ajv', label: 'Ajv', description: 'JSON Schema validation', sandboxName: 'Ajv', category: 'Validation & Schema' },
+
+  // UUID & IDs
+  { value: 'uuid', label: 'UUID', description: 'UUID generation', sandboxName: 'uuid', category: 'UUID & IDs' },
+  { value: 'nanoid', label: 'nanoid', description: 'Tiny unique ID generator', sandboxName: 'nanoid', category: 'UUID & IDs' },
+  { value: 'ulid', label: 'ULID', description: 'Sortable unique IDs', sandboxName: 'ulid', category: 'UUID & IDs' },
+  { value: 'hashids', label: 'Hashids', description: 'Obfuscated IDs from numbers', sandboxName: 'Hashids', category: 'UUID & IDs' },
+
+  // Crypto & Security
+  { value: 'crypto-js', label: 'CryptoJS', description: 'Crypto functions (MD5, SHA, AES)', sandboxName: 'CryptoJS', category: 'Crypto & Security' },
+  { value: 'bcryptjs', label: 'bcrypt', description: 'Password hashing', sandboxName: 'bcrypt', category: 'Crypto & Security' },
+  { value: 'jsonwebtoken', label: 'JWT', description: 'JWT signing/verification', sandboxName: 'jwt', category: 'Crypto & Security' },
+  { value: 'js-base64', label: 'Base64', description: 'Base64 encode/decode', sandboxName: 'Base64', category: 'Crypto & Security' },
+
+  // Async & Flow Control
+  { value: 'p-limit', label: 'p-limit', description: 'Limit concurrent promises', sandboxName: 'pLimit', category: 'Async & Flow Control' },
+  { value: 'p-map', label: 'p-map', description: 'Concurrent map with limit', sandboxName: 'pMap', category: 'Async & Flow Control' },
+  { value: 'p-retry', label: 'p-retry', description: 'Retry failed promises', sandboxName: 'pRetry', category: 'Async & Flow Control' },
+  { value: 'delay', label: 'delay', description: 'Simple delay/sleep', sandboxName: 'delay', category: 'Async & Flow Control' },
+
+  // Templating
+  { value: 'handlebars', label: 'Handlebars', description: 'Handlebars templates', sandboxName: 'Handlebars', category: 'Templating' },
+  { value: 'mustache', label: 'Mustache', description: 'Mustache templates', sandboxName: 'Mustache', category: 'Templating' },
+  { value: 'ejs', label: 'EJS', description: 'EJS templates', sandboxName: 'ejs', category: 'Templating' },
+
+  // Comparison & Diff
+  { value: 'fast-json-patch', label: 'JSON Patch', description: 'JSON Patch (RFC 6902)', sandboxName: 'jsonPatch', category: 'Comparison & Diff' },
+  { value: 'diff', label: 'Diff', description: 'Text diff', sandboxName: 'Diff', category: 'Comparison & Diff' },
+
+  // Encoding & Compression
+  { value: 'pako', label: 'pako', description: 'zlib compression', sandboxName: 'pako', category: 'Encoding & Compression' },
+  { value: 'lz-string', label: 'LZ-String', description: 'LZ compression for strings', sandboxName: 'LZString', category: 'Encoding & Compression' },
+
+  // Random & Fake Data
+  { value: '@faker-js/faker', label: 'Faker', description: 'Generate fake data', sandboxName: 'faker', category: 'Random & Fake Data' },
+]
+
+// Default code template that actually runs
+const DEFAULT_CODE = `// Access input data from previous step or trigger
+const data = input || {};
+
+// Process the data
+const result = {
+  processed: true,
+  timestamp: new Date().toISOString(),
+  inputKeys: Object.keys(data),
+};
+
+// Log for debugging (visible in test output)
+console.log('Processing input:', data);
+
+return result;`
+
+// Test input source type
+type TestInputSource = 'manual' | 'previous_run'
+
+// Workflow run for selection
+interface WorkflowRunOption {
+  _id: string
+  status: string
+  createdAt: string
+  inputPayload?: Record<string, unknown>
+}
+
+// Execution context from a workflow run
+interface ExecutionContext {
+  trigger: Record<string, unknown>
+  input: unknown
+  steps: Record<string, unknown>
+  runStatus?: string
+  workflowName?: string
+}
+
+// Code step configuration component
+function CodeStepConfigPanel({
+  step,
+  stepIndex,
+  workflowId,
+  previousSteps,
+  isInLoop,
+  loopScope,
+  onUpdate,
+}: {
+  step: WorkflowStep
+  stepIndex: number
+  workflowId?: string
+  previousSteps: { id: string; name: string; stepType?: WorkflowStepType; itemVariable?: string }[]
+  isInLoop: boolean
+  loopScope?: LoopScope | null
+  onUpdate: (updates: Partial<WorkflowStep>) => void
+}) {
+  const [packageSelectorOpen, setPackageSelectorOpen] = useState(false)
+  const [codeModalOpen, setCodeModalOpen] = useState(false)
+  const [testResult, setTestResult] = useState<{ output?: unknown; logs?: string[]; error?: string } | null>(null)
+  const [isRunningTest, setIsRunningTest] = useState(false)
+
+  // Test input state
+  const [testInputSource, setTestInputSource] = useState<TestInputSource>('manual')
+  const [manualInput, setManualInput] = useState('{}')
+  const [manualTrigger, setManualTrigger] = useState('{}')
+  const [manualSteps, setManualSteps] = useState('{}')
+
+  // Previous run selection
+  const [workflowRuns, setWorkflowRuns] = useState<WorkflowRunOption[]>([])
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const [loadedContext, setLoadedContext] = useState<ExecutionContext | null>(null)
+  const [loadingRuns, setLoadingRuns] = useState(false)
+  const [loadingContext, setLoadingContext] = useState(false)
+
+  const codeConfig = step.codeConfig || { code: DEFAULT_CODE }
+  const selectedPackages = codeConfig.packages || []
+
+  // Initialize with default code if empty
+  useEffect(() => {
+    if (!step.codeConfig?.code) {
+      onUpdate({ codeConfig: { ...codeConfig, code: DEFAULT_CODE } })
+    }
+  }, []) // Only run once on mount
+
+  // Load workflow runs when switching to previous_run source
+  useEffect(() => {
+    if (testInputSource === 'previous_run' && workflowId && workflowRuns.length === 0) {
+      loadWorkflowRuns()
+    }
+  }, [testInputSource, workflowId])
+
+  // Load context when run is selected
+  useEffect(() => {
+    if (selectedRunId && workflowId) {
+      loadRunContext(selectedRunId)
+    }
+  }, [selectedRunId])
+
+  const loadWorkflowRuns = async () => {
+    if (!workflowId) return
+    setLoadingRuns(true)
+    try {
+      const response = await fetch(`${API_BASE}/workflows/${workflowId}/runs?limit=20`, {
+        headers: getAuthHeader(),
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setWorkflowRuns(data.data || [])
+      }
+    } catch (err) {
+      console.error('Failed to load workflow runs:', err)
+    } finally {
+      setLoadingRuns(false)
+    }
+  }
+
+  const loadRunContext = async (runId: string) => {
+    if (!workflowId) return
+    setLoadingContext(true)
+    try {
+      const response = await fetch(
+        `${API_BASE}/workflows/${workflowId}/runs/${runId}/context?stepId=${step.id}`,
+        { headers: getAuthHeader() }
+      )
+      if (response.ok) {
+        const data = await response.json()
+        setLoadedContext(data.data)
+      }
+    } catch (err) {
+      console.error('Failed to load run context:', err)
+    } finally {
+      setLoadingContext(false)
+    }
+  }
+
+  const togglePackage = (pkg: CodeSandboxPackage) => {
+    const newPackages = selectedPackages.includes(pkg)
+      ? selectedPackages.filter(p => p !== pkg)
+      : [...selectedPackages, pkg]
+    onUpdate({
+      codeConfig: { ...codeConfig, packages: newPackages.length > 0 ? newPackages : undefined }
+    })
+  }
+
+  const removePackage = (pkg: CodeSandboxPackage) => {
+    const newPackages = selectedPackages.filter(p => p !== pkg)
+    onUpdate({
+      codeConfig: { ...codeConfig, packages: newPackages.length > 0 ? newPackages : undefined }
+    })
+  }
+
+  // Get current test context based on source
+  const getTestContext = (): { input: unknown; trigger: unknown; steps: Record<string, unknown> } => {
+    if (testInputSource === 'previous_run' && loadedContext) {
+      return {
+        input: loadedContext.input,
+        trigger: loadedContext.trigger,
+        steps: loadedContext.steps,
+      }
+    }
+
+    // Manual input mode
+    try {
+      return {
+        input: JSON.parse(manualInput || '{}'),
+        trigger: JSON.parse(manualTrigger || '{}'),
+        steps: JSON.parse(manualSteps || '{}'),
+      }
+    } catch {
+      return { input: {}, trigger: {}, steps: {} }
+    }
+  }
+
+  // Test code execution
+  const runTest = async () => {
+    setIsRunningTest(true)
+    setTestResult(null)
+    try {
+      const context = getTestContext()
+
+      const response = await fetch(`${API_BASE}/workflows/test-code`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeader(),
+        },
+        body: JSON.stringify({
+          code: codeConfig.code,
+          input: context.input,
+          trigger: context.trigger,
+          steps: context.steps,
+          packages: selectedPackages,
+          timeout: codeConfig.timeout,
+        }),
+      })
+
+      const result = await response.json()
+      if (response.ok) {
+        setTestResult(result)
+      } else {
+        setTestResult({ error: result.error || 'Test failed' })
+      }
+    } catch (err) {
+      setTestResult({ error: err instanceof Error ? err.message : 'Test failed' })
+    } finally {
+      setIsRunningTest(false)
+    }
+  }
+
+  // Inline code editor component (reusable for both inline and modal)
+  const CodeEditor = ({ minHeight = '200px' }: { minHeight?: string }) => (
+    <Textarea
+      value={codeConfig.code || ''}
+      onChange={(e) => onUpdate({
+        codeConfig: { ...codeConfig, code: e.target.value }
+      })}
+      placeholder={DEFAULT_CODE}
+      className={`font-mono text-sm`}
+      style={{ minHeight }}
+    />
+  )
+
+  // Test input panel component (reusable in modal)
+  const TestInputPanel = () => (
+    <div className="space-y-3">
+      {/* Source selector */}
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          variant={testInputSource === 'manual' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setTestInputSource('manual')}
+          className="flex-1"
+        >
+          Manual JSON
+        </Button>
+        <Button
+          type="button"
+          variant={testInputSource === 'previous_run' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setTestInputSource('previous_run')}
+          className="flex-1"
+          disabled={!workflowId}
+        >
+          From Run
+        </Button>
+      </div>
+
+      {testInputSource === 'manual' ? (
+        <div className="space-y-3">
+          {/* Manual input fields */}
+          <div className="space-y-1">
+            <label className="text-xs font-medium flex items-center gap-1">
+              <code className="bg-muted px-1 rounded">input</code>
+              <span className="text-muted-foreground font-normal">- Previous step output</span>
+            </label>
+            <Textarea
+              value={manualInput}
+              onChange={(e) => setManualInput(e.target.value)}
+              placeholder='{"data": "from previous step"}'
+              className="font-mono text-xs h-20 resize-none"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium flex items-center gap-1">
+              <code className="bg-muted px-1 rounded">trigger</code>
+              <span className="text-muted-foreground font-normal">- Workflow trigger payload</span>
+            </label>
+            <Textarea
+              value={manualTrigger}
+              onChange={(e) => setManualTrigger(e.target.value)}
+              placeholder='{"workflowInput": "data"}'
+              className="font-mono text-xs h-16 resize-none"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium flex items-center gap-1">
+              <code className="bg-muted px-1 rounded">steps</code>
+              <span className="text-muted-foreground font-normal">- All step outputs by ID</span>
+            </label>
+            <Textarea
+              value={manualSteps}
+              onChange={(e) => setManualSteps(e.target.value)}
+              placeholder='{"step-1": {"output": "data"}}'
+              className="font-mono text-xs h-16 resize-none"
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {/* Workflow run selector */}
+          <div className="space-y-1">
+            <label className="text-xs font-medium">Select a workflow run</label>
+            {loadingRuns ? (
+              <div className="text-xs text-muted-foreground p-2">Loading runs...</div>
+            ) : workflowRuns.length === 0 ? (
+              <div className="text-xs text-muted-foreground p-2">
+                No runs found. Run the workflow first to test with real data.
+              </div>
+            ) : (
+              <Select value={selectedRunId || ''} onValueChange={setSelectedRunId}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="Select a run..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {workflowRuns.map((run) => (
+                    <SelectItem key={run._id} value={run._id} className="text-xs">
+                      <span className={cn(
+                        'inline-block w-2 h-2 rounded-full mr-2',
+                        run.status === 'completed' ? 'bg-green-500' :
+                        run.status === 'running' ? 'bg-blue-500' :
+                        run.status === 'failed' ? 'bg-red-500' : 'bg-gray-500'
+                      )} />
+                      {new Date(run.createdAt).toLocaleString()} - {run.status}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          {/* Loaded context preview */}
+          {loadingContext ? (
+            <div className="text-xs text-muted-foreground p-2">Loading context...</div>
+          ) : loadedContext ? (
+            <div className="space-y-2 text-xs">
+              <div className="bg-muted/50 rounded p-2">
+                <p className="font-medium mb-1">Loaded Context:</p>
+                <div className="space-y-1">
+                  <p><code className="bg-muted px-1 rounded">input</code>: {JSON.stringify(loadedContext.input).slice(0, 50)}...</p>
+                  <p><code className="bg-muted px-1 rounded">trigger</code>: {JSON.stringify(loadedContext.trigger).slice(0, 50)}...</p>
+                  <p><code className="bg-muted px-1 rounded">steps</code>: {Object.keys(loadedContext.steps).length} step outputs</p>
+                </div>
+              </div>
+            </div>
+          ) : selectedRunId ? (
+            <div className="text-xs text-muted-foreground p-2">Select a run to load its context</div>
+          ) : null}
+        </div>
+      )}
+    </div>
+  )
+
+  return (
+    <div className="space-y-3 border-t pt-3">
+      <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg p-3 text-sm">
+        <div className="flex items-start gap-2">
+          <Code className="h-4 w-4 text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
+          <div className="text-emerald-800 dark:text-emerald-200">
+            <p className="font-medium">JavaScript Code Execution</p>
+            <p className="text-xs mt-1">
+              Executes JavaScript in a sandboxed environment. Access data via
+              <code className="bg-emerald-100 dark:bg-emerald-900 px-1 mx-1 rounded">input</code>
+              (previous step output) or
+              <code className="bg-emerald-100 dark:bg-emerald-900 px-1 mx-1 rounded">trigger</code>
+              (workflow trigger payload).
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Packages Selection - Searchable Multi-Select */}
+      <div className="space-y-2">
+        <label className="text-sm font-medium flex items-center gap-2">
+          <Package className="h-4 w-4 text-muted-foreground" />
+          NPM Packages
+        </label>
+
+        {/* Selected packages as badges */}
+        {selectedPackages.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {selectedPackages.map((pkg) => {
+              const pkgInfo = CODE_PACKAGES.find(p => p.value === pkg)
+              return (
+                <Badge
+                  key={pkg}
+                  variant="secondary"
+                  className="gap-1 pr-1"
+                >
+                  <code className="text-xs">{pkgInfo?.sandboxName || pkg}</code>
+                  <button
+                    type="button"
+                    onClick={() => removePackage(pkg)}
+                    className="ml-1 hover:bg-muted rounded-full p-0.5"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Package selector popover */}
+        <Popover open={packageSelectorOpen} onOpenChange={setPackageSelectorOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full justify-start text-muted-foreground"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              {selectedPackages.length === 0 ? 'Add packages...' : 'Add more packages...'}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[300px] p-0" align="start">
+            <Command>
+              <CommandInput placeholder="Search packages..." />
+              <CommandList>
+                <CommandEmpty>No packages found.</CommandEmpty>
+                <CommandGroup>
+                  {CODE_PACKAGES.map((pkg) => (
+                    <CommandItem
+                      key={pkg.value}
+                      value={pkg.label}
+                      onSelect={() => {
+                        togglePackage(pkg.value)
+                      }}
+                    >
+                      <Check
+                        className={cn(
+                          'mr-2 h-4 w-4',
+                          selectedPackages.includes(pkg.value) ? 'opacity-100' : 'opacity-0'
+                        )}
+                      />
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{pkg.label}</span>
+                          <code className="text-xs text-muted-foreground">{pkg.sandboxName}</code>
+                        </div>
+                        <p className="text-xs text-muted-foreground">{pkg.description}</p>
+                      </div>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      {/* Code Editor */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium flex items-center gap-2">
+            <Code className="h-4 w-4 text-muted-foreground" />
+            JavaScript Code
+          </label>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setCodeModalOpen(true)}
+            className="h-7 px-2"
+          >
+            <Maximize2 className="h-4 w-4 mr-1" />
+            Expand
+          </Button>
+        </div>
+        <CodeEditor minHeight="150px" />
+        <p className="text-xs text-muted-foreground mt-1">
+          Access data using <code className="bg-muted px-1 rounded">input</code>, <code className="bg-muted px-1 rounded">trigger</code>, or <code className="bg-muted px-1 rounded">steps.stepId</code>
+        </p>
+      </div>
+
+      {/* Code Modal Dialog */}
+      <Dialog open={codeModalOpen} onOpenChange={setCodeModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Code className="h-5 w-5" />
+              Code Editor - {step.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 grid grid-cols-2 gap-4 min-h-0 overflow-hidden">
+            {/* Left side - Code editor */}
+            <div className="flex flex-col gap-2 min-h-0">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium">Code</label>
+                <div className="flex items-center gap-1">
+                  {selectedPackages.length > 0 && (
+                    <div className="flex gap-1">
+                      {selectedPackages.map(pkg => {
+                        const pkgInfo = CODE_PACKAGES.find(p => p.value === pkg)
+                        return (
+                          <Badge key={pkg} variant="outline" className="text-xs">
+                            {pkgInfo?.sandboxName}
+                          </Badge>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <Textarea
+                value={codeConfig.code || ''}
+                onChange={(e) => onUpdate({
+                  codeConfig: { ...codeConfig, code: e.target.value }
+                })}
+                className="flex-1 font-mono text-sm min-h-[400px] resize-none"
+              />
+              <p className="text-xs text-muted-foreground">
+                Access data: <code className="bg-muted px-1 rounded">input</code>, <code className="bg-muted px-1 rounded">trigger</code>, <code className="bg-muted px-1 rounded">steps.stepId</code>
+              </p>
+            </div>
+
+            {/* Right side - Test panel */}
+            <div className="flex flex-col gap-2 min-h-0 overflow-hidden">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium flex items-center gap-2">
+                  <Terminal className="h-4 w-4" />
+                  Test
+                </label>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={runTest}
+                  disabled={isRunningTest || (testInputSource === 'previous_run' && !loadedContext)}
+                  className="h-7"
+                >
+                  <Play className="h-3 w-3 mr-1" />
+                  {isRunningTest ? 'Running...' : 'Run Test'}
+                </Button>
+              </div>
+
+              {/* Test input panel */}
+              <div className="border rounded-lg p-3 bg-muted/20">
+                <TestInputPanel />
+              </div>
+
+              {/* Test results */}
+              <div className="flex-1 min-h-0 overflow-auto">
+                {testResult && (
+                  <div className="space-y-2">
+                    {testResult.error ? (
+                      <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
+                        <p className="text-sm font-medium text-red-800 dark:text-red-200">Error</p>
+                        <pre className="text-xs text-red-700 dark:text-red-300 mt-1 whitespace-pre-wrap">{testResult.error}</pre>
+                      </div>
+                    ) : (
+                      <>
+                        {testResult.logs && testResult.logs.length > 0 && (
+                          <div className="bg-muted/50 rounded-lg p-3">
+                            <p className="text-sm font-medium flex items-center gap-2">
+                              <Terminal className="h-4 w-4" />
+                              Console Output
+                            </p>
+                            <pre className="text-xs mt-1 whitespace-pre-wrap font-mono">
+                              {testResult.logs.join('\n')}
+                            </pre>
+                          </div>
+                        )}
+                        <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg p-3">
+                          <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">Result</p>
+                          <pre className="text-xs text-emerald-700 dark:text-emerald-300 mt-1 whitespace-pre-wrap font-mono">
+                            {JSON.stringify(testResult.output, null, 2)}
+                          </pre>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+                {!testResult && (
+                  <div className="h-full flex items-center justify-center text-muted-foreground text-sm p-4">
+                    Click &quot;Run Test&quot; to execute your code
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Advanced Options */}
+      <div className="space-y-2 border-t pt-3">
+        <label className="text-sm font-medium">Advanced Options</label>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Timeout (ms)</label>
+            <Input
+              type="number"
+              value={codeConfig.timeout || ''}
+              onChange={(e) => onUpdate({
+                codeConfig: { ...codeConfig, timeout: e.target.value ? parseInt(e.target.value) : undefined }
+              })}
+              placeholder="30000"
+              className="font-mono text-sm h-8"
+            />
+          </div>
+          <div className="space-y-1 flex items-end">
+            <div className="flex items-center gap-2 h-8">
+              <input
+                type="checkbox"
+                id={`continueOnError-${step.id}`}
+                checked={codeConfig.continueOnError || false}
+                onChange={(e) => onUpdate({
+                  codeConfig: { ...codeConfig, continueOnError: e.target.checked }
+                })}
+                className="h-4 w-4 rounded"
+              />
+              <label htmlFor={`continueOnError-${step.id}`} className="text-sm">
+                Continue on error
+              </label>
+            </div>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          If &quot;Continue on error&quot; is checked, the step will complete even if the code throws an error,
+          with the error stored in the output.
+        </p>
+      </div>
+
+      {/* Info box about available features */}
+      <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-2 text-sm">
+        <div className="flex items-start gap-2">
+          <Info className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+          <div className="text-blue-800 dark:text-blue-200 text-xs">
+            <p className="font-medium">Available in Sandbox</p>
+            <ul className="mt-1 space-y-0.5">
+              <li><code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">input</code> - Previous step&apos;s output</li>
+              <li><code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">trigger</code> - Original workflow trigger payload</li>
+              <li><code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">steps</code> - Object with outputs from all previous steps (by step ID)</li>
+              <li><code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">console.log()</code> - Logs captured in output</li>
+              <li><code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">return value</code> - Becomes step output</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function StepConfigPanel({
   step,
   stepIndex,
@@ -1890,6 +2650,19 @@ export function StepConfigPanel({
         {/* FindDocument configuration */}
         {step.stepType === 'findDocument' && (
           <FindDocumentConfig
+            step={step}
+            stepIndex={stepIndex}
+            workflowId={workflowId}
+            previousSteps={previousSteps}
+            isInLoop={isInLoop}
+            loopScope={loopScope}
+            onUpdate={onUpdate}
+          />
+        )}
+
+        {/* Code step configuration */}
+        {step.stepType === 'code' && (
+          <CodeStepConfigPanel
             step={step}
             stepIndex={stepIndex}
             workflowId={workflowId}

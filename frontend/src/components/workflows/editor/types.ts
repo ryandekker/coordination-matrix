@@ -7,7 +7,47 @@
 // - join: Fan-in aggregation point
 // - flow: Delegate to another workflow (nested)
 // - findDocument: Search for documents using semantic search
-export type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow' | 'findDocument'
+// - code: Execute JavaScript code in a sandboxed environment
+export type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow' | 'findDocument' | 'code'
+
+// Available packages for code sandbox - matches backend CodeSandboxPackage type
+export type CodeSandboxPackage =
+  // HTTP & Networking
+  | 'node-fetch' | 'axios' | 'qs'
+  // Data Manipulation
+  | 'lodash' | 'ramda' | 'immer' | 'deepmerge'
+  // String & Text
+  | 'validator' | 'slugify' | 'change-case' | 'marked' | 'sanitize-html'
+  // Numbers & Math
+  | 'bignumber.js' | 'decimal.js' | 'mathjs' | 'currency.js'
+  // Date & Time
+  | 'date-fns' | 'dayjs' | 'luxon' | 'ms'
+  // JSON & Data Formats
+  | 'jsonpath-plus' | 'json5' | 'yaml' | 'csv-parse' | 'csv-stringify' | 'papaparse' | 'fast-xml-parser'
+  // Validation & Schema
+  | 'zod' | 'yup' | 'ajv'
+  // UUID & IDs
+  | 'uuid' | 'nanoid' | 'ulid' | 'hashids'
+  // Crypto & Security
+  | 'crypto-js' | 'bcryptjs' | 'jsonwebtoken' | 'js-base64'
+  // Async & Flow Control
+  | 'p-limit' | 'p-map' | 'p-retry' | 'delay'
+  // Templating
+  | 'handlebars' | 'mustache' | 'ejs'
+  // Comparison & Diff
+  | 'fast-json-patch' | 'diff'
+  // Encoding & Compression
+  | 'pako' | 'lz-string'
+  // Random & Fake Data
+  | '@faker-js/faker'
+
+// Code step configuration
+export interface CodeStepConfig {
+  code: string                        // JavaScript code to execute
+  packages?: CodeSandboxPackage[]     // Packages to inject into sandbox
+  timeout?: number                    // Max execution time in ms (default: 30000)
+  continueOnError?: boolean           // Complete with error in output instead of failing
+}
 
 // Connection between steps (for non-linear flows)
 export interface StepConnection {
@@ -71,6 +111,9 @@ export interface WorkflowStep {
   // Flow fields (nested workflow)
   flowId?: string
   inputMapping?: Record<string, string>
+
+  // Code step configuration
+  codeConfig?: CodeStepConfig
 
   // Legacy compatibility
   execution?: 'automated' | 'manual'

@@ -893,6 +893,13 @@ export interface TaskResultEntry {
     status: string
     outputPayload?: unknown
   }
+
+  // Code step result
+  codeExecution?: {
+    logs: string[]
+    executionTimeMs: number
+    packages: string[]
+  }
 }
 
 // Task result with history
@@ -1088,7 +1095,7 @@ export interface ExternalJob {
 }
 
 // Workflow step types
-export type WorkflowStepType = 'task' | 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow' | 'findDocument'
+export type WorkflowStepType = 'task' | 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow' | 'findDocument' | 'code'
 export type ExecutionMode = 'automated' | 'manual'
 
 export interface DecisionBranch {

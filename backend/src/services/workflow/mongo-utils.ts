@@ -14,7 +14,7 @@ export const VALID_TASK_TYPES = new Set([
   // Legacy types
   'standard', 'decision', 'foreach', 'join', 'external', 'subflow',
   // Current types
-  'flow', 'trigger', 'agent', 'manual', 'webhook', 'findDocument'
+  'flow', 'trigger', 'agent', 'manual', 'webhook', 'findDocument', 'code'
 ]);
 
 /**

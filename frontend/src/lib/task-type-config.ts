@@ -10,6 +10,7 @@ import {
   Bot,
   User,
   Network,
+  Code,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -50,6 +51,7 @@ export const TASK_TYPE_TO_STEP_TYPE: Record<string, string> = {
   foreach: 'foreach',
   join: 'join',
   manual: 'manual',
+  code: 'code',
 }
 
 // Central configuration for all task types
@@ -127,6 +129,14 @@ export const TASK_TYPE_CONFIG: Record<string, TaskTypeConfig> = {
     hexColor: '#A855F7',
     description: 'Human task',
   },
+  code: {
+    icon: Code,
+    label: 'Code',
+    color: 'text-emerald-500',
+    bgColor: 'bg-emerald-50 dark:bg-emerald-950/30',
+    hexColor: '#10B981',
+    description: 'Execute JavaScript code',
+  },
 }
 
 // Workflow step type configuration (for workflow editor)
@@ -187,6 +197,14 @@ export const WORKFLOW_STEP_TYPE_CONFIG: Record<string, TaskTypeConfig> = {
     bgColor: 'bg-pink-50 dark:bg-pink-950/30',
     hexColor: '#EC4899',
     description: 'Nested workflow',
+  },
+  code: {
+    icon: Code,
+    label: 'Code',
+    color: 'text-emerald-500',
+    bgColor: 'bg-emerald-50 dark:bg-emerald-950/30',
+    hexColor: '#10B981',
+    description: 'Execute JavaScript code',
   },
 }
 

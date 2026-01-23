@@ -6,6 +6,7 @@ import { Workflow, WorkflowStep, VALID_STEP_TYPES } from './types.js';
 import { parseMermaidToSteps, generateMermaidFromSteps } from './mermaid-parser.js';
 import { handleExportMulti, handleImportMulti } from './multi-workflow.js';
 import { aiPromptRoutes } from './ai-prompts.js';
+import { executeCode } from '../../services/workflow/code-executor.js';
 
 export const workflowsRouter = Router();
 
@@ -323,6 +324,152 @@ workflowsRouter.post('/generate-mermaid', async (req: Request, res: Response, ne
     const mermaidDiagram = generateMermaidFromSteps(steps, name);
 
     res.json({ data: { mermaidDiagram } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/workflows/test-code - Test code execution in sandbox
+workflowsRouter.post('/test-code', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { code, input, trigger, steps, packages, timeout } = req.body;
+
+    if (!code || typeof code !== 'string') {
+      throw createError('code is required', 400);
+    }
+
+    // Build execution context - supports both simple input and full context
+    const context = trigger !== undefined || steps !== undefined
+      ? { input: input || {}, trigger: trigger || {}, steps: steps || {} }
+      : input || {};
+
+    // Execute the code in sandbox
+    const result = await executeCode(code, context, {
+      packages: packages || [],
+      timeout: timeout || 5000, // Shorter timeout for testing (5s)
+    });
+
+    if (result.success) {
+      res.json({
+        output: result.output,
+        logs: result.logs,
+      });
+    } else {
+      res.status(400).json({
+        error: result.error,
+        logs: result.logs,
+      });
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/workflows/:workflowId/runs/:runId/context - Get execution context from a workflow run
+// Returns trigger payload and step outputs for testing code steps
+workflowsRouter.get('/:workflowId/runs/:runId/context', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { workflowId, runId } = req.params;
+    const { stepId } = req.query; // Optional: get context as of a specific step
+
+    if (!ObjectId.isValid(workflowId) || !ObjectId.isValid(runId)) {
+      throw createError('Invalid workflow or run ID', 400);
+    }
+
+    // Get the workflow run
+    const run = await db.collection('workflow_runs').findOne({
+      _id: new ObjectId(runId),
+      workflowId: new ObjectId(workflowId),
+    });
+
+    if (!run) {
+      throw createError('Workflow run not found', 404);
+    }
+
+    // Get the workflow to map step IDs to names
+    const workflow = await db.collection<Workflow>('workflows').findOne({
+      _id: new ObjectId(workflowId),
+    });
+
+    // Get all completed tasks for this run to extract step outputs
+    const tasks = await db.collection('tasks').find({
+      workflowRunId: new ObjectId(runId),
+      status: { $in: ['completed', 'on_hold'] },
+    }).sort({ completedAt: 1 }).toArray();
+
+    // Build step outputs map (by step ID)
+    const steps: Record<string, unknown> = {};
+    let previousStepOutput: unknown = null;
+
+    for (const task of tasks) {
+      const taskStepId = task.workflowStage;
+      if (!taskStepId) continue;
+
+      // If stepId is specified, only include steps before it
+      if (stepId && taskStepId === stepId) {
+        break;
+      }
+
+      // Get the step's output from result or metadata
+      const output = task.result?.current?.output ?? task.metadata?.output ?? task.metadata;
+      steps[taskStepId] = output;
+      previousStepOutput = output;
+
+      // Also store by step name for convenience
+      const stepDef = workflow?.steps?.find((s: WorkflowStep) => s.id === taskStepId);
+      if (stepDef?.name) {
+        steps[stepDef.name] = output;
+      }
+    }
+
+    res.json({
+      data: {
+        trigger: run.inputPayload || {},
+        input: previousStepOutput || run.inputPayload || {},
+        steps,
+        runStatus: run.status,
+        workflowName: workflow?.name,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/workflows/:workflowId/runs - List recent runs for a workflow (for test input selection)
+workflowsRouter.get('/:workflowId/runs', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { workflowId } = req.params;
+    const { limit = '10', status } = req.query;
+
+    if (!ObjectId.isValid(workflowId)) {
+      throw createError('Invalid workflow ID', 400);
+    }
+
+    const filter: Record<string, unknown> = {
+      workflowId: new ObjectId(workflowId),
+    };
+
+    if (status) {
+      filter.status = status;
+    }
+
+    const runs = await db.collection('workflow_runs')
+      .find(filter)
+      .sort({ createdAt: -1 })
+      .limit(Math.min(parseInt(limit as string, 10), 50))
+      .project({
+        _id: 1,
+        status: 1,
+        createdAt: 1,
+        completedAt: 1,
+        inputPayload: 1,
+      })
+      .toArray();
+
+    res.json({ data: runs });
   } catch (error) {
     next(error);
   }

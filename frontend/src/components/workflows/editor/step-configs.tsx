@@ -45,10 +45,11 @@ import {
   Zap,
   Check,
   ChevronsUpDown,
+  Code,
 } from 'lucide-react'
 import { TokenBrowser } from '../token-browser'
 import { PromptSelector } from './prompt-selector'
-import type { WorkflowStep, LoopScope, WorkflowStepType } from './types'
+import type { WorkflowStep, LoopScope, WorkflowStepType, CodeSandboxPackage } from './types'
 import type { Workflow as ApiWorkflow } from '@/lib/api'
 
 interface StepConfigProps {
@@ -1267,5 +1268,201 @@ export function FlowStepConfig({
         </div>
       </div>
     </>
+  )
+}
+
+// Available packages for the code sandbox
+const CODE_PACKAGES: Array<{ value: CodeSandboxPackage; label: string; description: string; sandboxName: string }> = [
+  { value: 'lodash', label: 'Lodash', description: 'Data manipulation utilities', sandboxName: '_' },
+  { value: 'date-fns', label: 'date-fns', description: 'Date manipulation', sandboxName: 'dateFns' },
+  { value: 'uuid', label: 'UUID', description: 'Generate unique IDs', sandboxName: 'uuid' },
+  { value: 'zod', label: 'Zod', description: 'Schema validation', sandboxName: 'z' },
+  { value: 'jsonpath-plus', label: 'JSONPath', description: 'Query JSON data', sandboxName: 'JSONPath' },
+]
+
+// Code step configuration
+export function CodeStepConfig({
+  step,
+  index,
+  steps,
+  updateStep,
+  workflowId,
+  isInLoop,
+  loopScope,
+}: StepConfigProps) {
+  const codeConfig = step.codeConfig || { code: '' }
+  const selectedPackages = codeConfig.packages || []
+
+  const togglePackage = (pkg: CodeSandboxPackage) => {
+    const current = selectedPackages
+    const newPackages = current.includes(pkg)
+      ? current.filter(p => p !== pkg)
+      : [...current, pkg]
+    updateStep(index, {
+      codeConfig: { ...codeConfig, packages: newPackages.length > 0 ? newPackages : undefined }
+    })
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg p-3 text-sm">
+        <div className="flex items-start gap-2">
+          <Code className="h-4 w-4 text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
+          <div className="text-emerald-800 dark:text-emerald-200">
+            <p className="font-medium">JavaScript Code Execution</p>
+            <p className="text-xs mt-1">
+              Executes JavaScript in a sandboxed environment. Access the previous step&apos;s output via
+              <code className="bg-emerald-100 dark:bg-emerald-900 px-1 mx-1 rounded">input</code>
+              and return a value to pass to the next step.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Packages Selection */}
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Available Packages</label>
+        <p className="text-xs text-muted-foreground">
+          Lodash and date-fns are included by default. Select additional packages to use.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          {CODE_PACKAGES.map((pkg) => (
+            <div
+              key={pkg.value}
+              className={cn(
+                'flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors',
+                selectedPackages.includes(pkg.value) || pkg.value === 'lodash' || pkg.value === 'date-fns'
+                  ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-700'
+                  : 'bg-muted/30 border-border hover:border-emerald-300'
+              )}
+              onClick={() => {
+                // lodash and date-fns are always included
+                if (pkg.value !== 'lodash' && pkg.value !== 'date-fns') {
+                  togglePackage(pkg.value)
+                }
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={selectedPackages.includes(pkg.value) || pkg.value === 'lodash' || pkg.value === 'date-fns'}
+                disabled={pkg.value === 'lodash' || pkg.value === 'date-fns'}
+                onChange={() => {}}
+                className="h-4 w-4 rounded"
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{pkg.label}</p>
+                <p className="text-xs text-muted-foreground truncate">{pkg.description}</p>
+              </div>
+              <code className="text-xs bg-muted px-1 rounded flex-shrink-0">{pkg.sandboxName}</code>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Code Editor */}
+      <div className="space-y-1">
+        <label className="text-sm font-medium flex items-center gap-2">
+          <Code className="h-4 w-4 text-muted-foreground" />
+          JavaScript Code
+        </label>
+        <Textarea
+          value={codeConfig.code || ''}
+          onChange={(e) => updateStep(index, {
+            codeConfig: { ...codeConfig, code: e.target.value }
+          })}
+          placeholder={`// Access previous step output via 'input'
+// Return a value to pass to the next step
+
+const items = input.data || [];
+const processed = _.map(items, item => ({
+  ...item,
+  processedAt: dateFns.format(new Date(), 'yyyy-MM-dd'),
+}));
+
+return {
+  items: processed,
+  count: processed.length,
+};`}
+          className="min-h-[200px] font-mono text-sm"
+        />
+        <div className="flex items-center gap-2 mt-2">
+          <TokenBrowser
+            workflowId={workflowId}
+            previousSteps={steps.slice(0, index).map(s => ({
+              id: s.id,
+              name: s.name,
+              stepType: s.stepType,
+              itemVariable: s.itemVariable,
+            }))}
+            currentStepIndex={index}
+            loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
+            onSelectToken={(token) => {
+              const current = codeConfig.code || ''
+              updateStep(index, { codeConfig: { ...codeConfig, code: current + token } })
+            }}
+            variant="text"
+          />
+          <span className="text-xs text-muted-foreground">
+            Insert token reference
+          </span>
+        </div>
+      </div>
+
+      {/* Advanced Options */}
+      <div className="space-y-2 border-t pt-3">
+        <label className="text-sm font-medium">Advanced Options</label>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Timeout (ms)</label>
+            <Input
+              type="number"
+              value={codeConfig.timeout || ''}
+              onChange={(e) => updateStep(index, {
+                codeConfig: { ...codeConfig, timeout: e.target.value ? parseInt(e.target.value) : undefined }
+              })}
+              placeholder="30000"
+              className="font-mono text-sm h-9"
+            />
+          </div>
+          <div className="space-y-1 flex items-end">
+            <div className="flex items-center gap-2 h-9">
+              <input
+                type="checkbox"
+                id={`continueOnError-${step.id}`}
+                checked={codeConfig.continueOnError || false}
+                onChange={(e) => updateStep(index, {
+                  codeConfig: { ...codeConfig, continueOnError: e.target.checked }
+                })}
+                className="h-4 w-4 rounded"
+              />
+              <label htmlFor={`continueOnError-${step.id}`} className="text-sm">
+                Continue on error
+              </label>
+            </div>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          If &quot;Continue on error&quot; is checked, the step will complete even if the code throws an error,
+          with the error stored in the output.
+        </p>
+      </div>
+
+      {/* Info box about available features */}
+      <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-2 text-sm">
+        <div className="flex items-start gap-2">
+          <Info className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+          <div className="text-blue-800 dark:text-blue-200 text-xs">
+            <p className="font-medium">Available in Sandbox</p>
+            <ul className="mt-1 space-y-0.5">
+              <li><code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">input</code> - Previous step&apos;s output</li>
+              <li><code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">_</code> - Lodash (always available)</li>
+              <li><code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">dateFns</code> - date-fns (always available)</li>
+              <li><code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">console.log()</code> - Logs captured in task metadata</li>
+              <li><code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">return value</code> - Becomes step output</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }

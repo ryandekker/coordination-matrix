@@ -22,6 +22,7 @@ import {
   MousePointerClick,
   Layers,
   FileSearch,
+  Code,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -31,7 +32,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { ScrollArea } from '@/components/ui/scroll-area'
 
-type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow' | 'findDocument'
+type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow' | 'findDocument' | 'code'
 
 interface StepConnection {
   targetStepId: string
@@ -100,6 +101,7 @@ const STEP_TYPES: { type: WorkflowStepType; label: string; description: string; 
   { type: 'join', label: 'Join', description: 'Aggregate', icon: Merge, color: 'text-indigo-500' },
   { type: 'flow', label: 'Flow', description: 'Nested workflow', icon: WorkflowIcon, color: 'text-pink-500' },
   { type: 'findDocument', label: 'Find Document', description: 'Search documents', icon: FileSearch, color: 'text-cyan-500' },
+  { type: 'code', label: 'Code', description: 'Run JavaScript', icon: Code, color: 'text-emerald-500' },
 ]
 
 function detectLoopScopes(steps: WorkflowStep[]): LoopScope[] {

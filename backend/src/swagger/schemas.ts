@@ -69,7 +69,7 @@ export const schemas = {
       workflowId: { $ref: '#/components/schemas/ObjectId', nullable: true },
       workflowRunId: { $ref: '#/components/schemas/ObjectId', nullable: true },
       workflowStepId: { type: 'string', nullable: true },
-      taskType: { type: 'string', enum: ['flow', 'trigger', 'agent', 'manual', 'decision', 'foreach', 'join', 'external', 'webhook'], description: 'Type of task for workflow execution' },
+      taskType: { type: 'string', enum: ['flow', 'trigger', 'agent', 'manual', 'decision', 'foreach', 'join', 'external', 'webhook', 'findDocument', 'code'], description: 'Type of task for workflow execution' },
       executionMode: { type: 'string', enum: ['manual', 'automated', 'immediate', 'external_callback'] },
       expectedQuantity: { type: 'integer', description: 'Expected number of subtasks/results' },
       assigneeId: { $ref: '#/components/schemas/ObjectId', nullable: true },
@@ -126,13 +126,30 @@ export const schemas = {
   // Workflow schemas
   WorkflowStepType: {
     type: 'string',
-    enum: ['trigger', 'agent', 'manual', 'external', 'webhook', 'decision', 'foreach', 'join', 'flow'],
+    enum: ['trigger', 'agent', 'manual', 'external', 'webhook', 'decision', 'foreach', 'join', 'flow', 'findDocument', 'code'],
     description: 'Type of workflow step - maps 1:1 to TaskType',
   },
   TaskType: {
     type: 'string',
-    enum: ['flow', 'trigger', 'agent', 'manual', 'decision', 'foreach', 'join', 'external', 'webhook'],
+    enum: ['flow', 'trigger', 'agent', 'manual', 'decision', 'foreach', 'join', 'external', 'webhook', 'findDocument', 'code'],
     description: 'Type of task - maps 1:1 to WorkflowStepType',
+  },
+  CodeSandboxPackage: {
+    type: 'string',
+    enum: ['lodash', 'date-fns', 'uuid', 'zod', 'jsonpath-plus'],
+    description: 'Available packages for code sandbox execution',
+  },
+  CodeStepConfig: {
+    type: 'object',
+    required: ['code'],
+    properties: {
+      code: { type: 'string', description: 'JavaScript code to execute. Receives `input` variable with previous step output.' },
+      packages: { type: 'array', items: { $ref: '#/components/schemas/CodeSandboxPackage' }, description: 'Packages to inject into sandbox' },
+      timeout: { type: 'integer', default: 30000, description: 'Max execution time in ms' },
+      memoryLimit: { type: 'integer', default: 128, description: 'Memory limit in MB (for documentation)' },
+      outputSchema: { type: 'object', description: 'JSON Schema to validate output against' },
+      continueOnError: { type: 'boolean', default: false, description: 'Complete with error in output instead of failing' },
+    },
   },
   WorkflowStep: {
     type: 'object',
@@ -150,6 +167,8 @@ export const schemas = {
       awaitStepId: { type: 'string', description: 'For join: Step ID to await' },
       joinBoundary: { type: 'object', description: 'For join: boundary conditions' },
       expectedCountPath: { type: 'string', description: 'For join: JSONPath to expected count' },
+      findDocumentConfig: { type: 'object', description: 'For findDocument: search configuration' },
+      codeConfig: { $ref: '#/components/schemas/CodeStepConfig', description: 'For code: sandboxed JavaScript execution' },
       config: { type: 'object' },
     },
   },

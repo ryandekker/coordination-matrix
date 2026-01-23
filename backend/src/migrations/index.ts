@@ -27,6 +27,7 @@ import { migration as addWorkflowPromptType } from './2026-01-10-001-add-workflo
 import { migration as addFailedStatusLookup } from './2026-01-14-001-add-failed-status-lookup.js';
 import { migration as addWorkflowRequestsCollection } from './2026-01-14-002-add-workflow-requests-collection.js';
 import { migration as addSystemUser } from './2026-01-21-001-add-system-user.js';
+import { migration as addCodeTaskType } from './2026-01-23-001-add-code-task-type.js';
 
 // Register all migrations in order
 export const migrations: Migration[] = [
@@ -49,4 +50,5 @@ export const migrations: Migration[] = [
   addFailedStatusLookup,
   addWorkflowRequestsCollection,
   addSystemUser,
+  addCodeTaskType,
 ];

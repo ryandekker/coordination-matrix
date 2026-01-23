@@ -106,7 +106,7 @@ const WorkflowApiDocs = dynamic(
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
 // Updated step types - aligned with workflow-editor
-type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow' | 'findDocument'
+type WorkflowStepType = 'agent' | 'external' | 'manual' | 'decision' | 'foreach' | 'join' | 'flow' | 'findDocument' | 'code'
 
 interface StepConnection {
   targetStepId: string
