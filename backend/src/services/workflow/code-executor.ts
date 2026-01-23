@@ -6,7 +6,8 @@
  */
 
 import { VM } from 'vm2';
-import type { CodeStepConfig, CodeSandboxPackage } from '../../types/index.js';
+import type { CodeStepConfig, CodeSandboxPackage, CodeVariableMapping } from '../../types/index.js';
+import { getBaseUrl, loadPackageContext, getValueByPathWithBrackets } from './template-utils.js';
 
 // === HTTP & Networking ===
 import fetch from 'node-fetch';
@@ -103,6 +104,8 @@ export interface CodeExecutionContext {
   input?: unknown;        // Output from previous step
   trigger?: unknown;      // Original workflow trigger payload
   steps?: Record<string, unknown>;  // Outputs from all previous steps (keyed by step ID)
+  // Allow additional properties to be passed as direct variables
+  [key: string]: unknown;
 }
 
 // Package registry - maps package names to their implementations
@@ -220,13 +223,108 @@ function createSafeConsole(logs: string[]): Record<string, (...args: unknown[]) 
 }
 
 /**
- * Build the sandbox object with injected packages
+ * Get a value from an object by dot-notation path
  */
-function buildSandbox(
+function getValueByPath(obj: unknown, path: string): unknown {
+  const parts = path.split('.');
+  let current: unknown = obj;
+
+  for (const part of parts) {
+    if (current && typeof current === 'object' && part in (current as Record<string, unknown>)) {
+      current = (current as Record<string, unknown>)[part];
+    } else {
+      return undefined;
+    }
+  }
+
+  return current;
+}
+
+/**
+ * System variables that are always available (don't require context path)
+ * These match the token browser's system variables
+ */
+function getSystemVariableValue(path: string): unknown {
+  // Handle both with and without underscore prefix
+  const normalizedPath = path.startsWith('_') ? path : `_${path}`;
+
+  switch (normalizedPath.toLowerCase()) {
+    case '_apiurl':
+      return getBaseUrl();
+    case '_apikey':
+      return process.env.MATRIX_API_KEY || process.env.API_KEY || '';
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Resolve variable mappings from context and variable packages
+ * Maps variable names to their resolved values from:
+ * 1. System variables (e.g., _apiUrl, _apiKey)
+ * 2. Variable packages from database (e.g., variables.myPackage.someKey)
+ * 3. Context paths (e.g., trigger.someValue, input.data)
+ */
+async function resolveVariables(
+  variables: CodeVariableMapping[],
+  context: CodeExecutionContext
+): Promise<Record<string, unknown>> {
+  const resolved: Record<string, unknown> = {};
+
+  // Load variable packages from database
+  const packageContext = await loadPackageContext();
+
+  // Build a combined context object for path resolution
+  const fullContext: Record<string, unknown> = {
+    input: context.input,
+    trigger: context.trigger,
+    steps: context.steps || {},
+    // Include variable packages in the resolution context
+    variables: packageContext.variables,
+  };
+
+  for (const variable of variables) {
+    // 1. Check if it's a system variable (no dot path, starts with _ or is a known system var)
+    if (!variable.path.includes('.')) {
+      const systemValue = getSystemVariableValue(variable.path);
+      if (systemValue !== undefined) {
+        resolved[variable.name] = systemValue;
+        continue;
+      }
+    }
+
+    // 2. Check if it's a variable package reference (e.g., "variables.packageName.key")
+    if (variable.path.startsWith('variables.')) {
+      // Use bracket-aware path resolution to support both dot and bracket notation
+      const value = getValueByPathWithBrackets(fullContext, variable.path);
+      if (value !== undefined) {
+        resolved[variable.name] = value;
+        continue;
+      }
+    }
+
+    // 3. Otherwise, resolve from context path (trigger.*, input.*, steps.*)
+    const value = getValueByPath(fullContext, variable.path);
+    if (value !== undefined) {
+      resolved[variable.name] = value;
+    }
+  }
+
+  return resolved;
+}
+
+/**
+ * Build the sandbox object with injected packages and resolved variables
+ */
+async function buildSandbox(
   context: CodeExecutionContext,
   packages: CodeSandboxPackage[],
+  variables: CodeVariableMapping[],
   logs: string[]
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
+  // Resolve variable mappings from context paths and variable packages
+  const resolvedVariables = await resolveVariables(variables, context);
+
   const sandbox: Record<string, unknown> = {
     // Input data - previous step output
     input: context.input,
@@ -265,6 +363,8 @@ function buildSandbox(
     clearTimeout,
     setInterval,
     clearInterval,
+    // Inject resolved variables from config
+    ...resolvedVariables,
   };
 
   // Inject requested packages
@@ -313,15 +413,17 @@ export async function executeCode(
   const logs: string[] = [];
 
   // Support both simple input and full context object
+  // If the input has 'input', 'trigger', or 'steps' keys, treat it as a full context object
   const context: CodeExecutionContext = (
-    input && typeof input === 'object' && ('trigger' in input || 'steps' in input)
+    input && typeof input === 'object' && ('input' in input || 'trigger' in input || 'steps' in input)
   ) ? input as CodeExecutionContext : { input };
 
   const packages = (config.packages || []) as CodeSandboxPackage[];
+  const variables = config.variables || [];
   const timeout = config.timeout ?? DEFAULT_TIMEOUT_MS;
 
   try {
-    const sandbox = buildSandbox(context, packages, logs);
+    const sandbox = await buildSandbox(context, packages, variables, logs);
 
     const vm = new VM({
       timeout,

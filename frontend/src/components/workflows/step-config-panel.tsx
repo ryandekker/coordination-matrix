@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/select'
 import { TokenBrowser } from './token-browser'
 import { PromptSelector } from './editor/prompt-selector'
+import { JsonViewer } from '@/components/ui/json-viewer'
 import {
   Popover,
   PopoverContent,
@@ -98,10 +99,17 @@ type CodeSandboxPackage =
   // Random & Fake Data
   | '@faker-js/faker'
 
+// Variable mapping for code steps
+interface CodeVariableMapping {
+  name: string   // Variable name available in code (e.g., "apiUrl")
+  path: string   // Context path to resolve (e.g., "trigger._API_URL")
+}
+
 // Code step configuration
 interface CodeStepConfig {
   code: string
   packages?: CodeSandboxPackage[]
+  variables?: CodeVariableMapping[]
   timeout?: number
   continueOnError?: boolean
 }
@@ -1525,9 +1533,6 @@ console.log('Processing input:', data);
 
 return result;`
 
-// Test input source type
-type TestInputSource = 'manual' | 'previous_run'
-
 // Workflow run for selection
 interface WorkflowRunOption {
   _id: string
@@ -1568,18 +1573,65 @@ function CodeStepConfigPanel({
   const [testResult, setTestResult] = useState<{ output?: unknown; logs?: string[]; error?: string } | null>(null)
   const [isRunningTest, setIsRunningTest] = useState(false)
 
-  // Test input state
-  const [testInputSource, setTestInputSource] = useState<TestInputSource>('manual')
-  const [manualInput, setManualInput] = useState('{}')
-  const [manualTrigger, setManualTrigger] = useState('{}')
-  const [manualSteps, setManualSteps] = useState('{}')
-
-  // Previous run selection
+  // Previous run selection for testing
   const [workflowRuns, setWorkflowRuns] = useState<WorkflowRunOption[]>([])
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [loadedContext, setLoadedContext] = useState<ExecutionContext | null>(null)
   const [loadingRuns, setLoadingRuns] = useState(false)
   const [loadingContext, setLoadingContext] = useState(false)
+
+  // Get variables from step config (stored, not component state)
+  const configVariables = step.codeConfig?.variables || []
+
+  // Add a new variable mapping from a token path - saves to step config
+  const addVariableMapping = (tokenPath: string) => {
+    // Generate a suggested variable name from the path
+    // e.g., "input.user.id" -> "userId", "trigger._API_URL" -> "apiUrl"
+    const parts = tokenPath.split('.')
+    let suggestedName = parts.length > 1
+      ? parts.slice(1).map((p, i) => i === 0 ? p : p.charAt(0).toUpperCase() + p.slice(1)).join('')
+      : parts[0]
+
+    // Clean up names starting with underscore (like _API_URL -> apiUrl)
+    if (suggestedName.startsWith('_')) {
+      suggestedName = suggestedName.slice(1).toLowerCase()
+        .replace(/_([a-z])/g, (_, c) => c.toUpperCase())
+    }
+
+    const newVariable: CodeVariableMapping = { name: suggestedName, path: tokenPath }
+    const currentConfig = step.codeConfig || { code: DEFAULT_CODE }
+    onUpdate({
+      codeConfig: {
+        ...currentConfig,
+        variables: [...configVariables, newVariable]
+      }
+    })
+  }
+
+  // Update a variable mapping - saves to step config
+  const updateVariableMapping = (index: number, updates: Partial<CodeVariableMapping>) => {
+    const newVariables = configVariables.map((v, i) => i === index ? { ...v, ...updates } : v)
+    const currentConfig = step.codeConfig || { code: DEFAULT_CODE }
+    onUpdate({
+      codeConfig: { ...currentConfig, variables: newVariables }
+    })
+  }
+
+  // Remove a variable mapping - saves to step config
+  const removeVariableMapping = (index: number) => {
+    const newVariables = configVariables.filter((_, i) => i !== index)
+    const currentConfig = step.codeConfig || { code: DEFAULT_CODE }
+    onUpdate({
+      codeConfig: { ...currentConfig, variables: newVariables.length > 0 ? newVariables : undefined }
+    })
+  }
+
+  // Copy variable name to insert into code
+  const copyVariableToCode = (name: string) => {
+    const currentCode = codeConfig.code || ''
+    const newCode = currentCode ? `${currentCode}\n${name}` : name
+    onUpdate({ codeConfig: { ...codeConfig, code: newCode } })
+  }
 
   const codeConfig = step.codeConfig || { code: DEFAULT_CODE }
   const selectedPackages = codeConfig.packages || []
@@ -1591,12 +1643,12 @@ function CodeStepConfigPanel({
     }
   }, []) // Only run once on mount
 
-  // Load workflow runs when switching to previous_run source
+  // Load workflow runs on mount if workflow exists
   useEffect(() => {
-    if (testInputSource === 'previous_run' && workflowId && workflowRuns.length === 0) {
+    if (workflowId && workflowRuns.length === 0) {
       loadWorkflowRuns()
     }
-  }, [testInputSource, workflowId])
+  }, [workflowId])
 
   // Load context when run is selected
   useEffect(() => {
@@ -1658,35 +1710,16 @@ function CodeStepConfigPanel({
     })
   }
 
-  // Get current test context based on source
-  const getTestContext = (): { input: unknown; trigger: unknown; steps: Record<string, unknown> } => {
-    if (testInputSource === 'previous_run' && loadedContext) {
-      return {
-        input: loadedContext.input,
-        trigger: loadedContext.trigger,
-        steps: loadedContext.steps,
-      }
-    }
-
-    // Manual input mode
-    try {
-      return {
-        input: JSON.parse(manualInput || '{}'),
-        trigger: JSON.parse(manualTrigger || '{}'),
-        steps: JSON.parse(manualSteps || '{}'),
-      }
-    } catch {
-      return { input: {}, trigger: {}, steps: {} }
-    }
-  }
-
   // Test code execution
   const runTest = async () => {
+    if (!loadedContext) {
+      setTestResult({ error: 'Please load a workflow run first to provide context for testing' })
+      return
+    }
+
     setIsRunningTest(true)
     setTestResult(null)
     try {
-      const context = getTestContext()
-
       const response = await fetch(`${API_BASE}/workflows/test-code`, {
         method: 'POST',
         headers: {
@@ -1695,9 +1728,10 @@ function CodeStepConfigPanel({
         },
         body: JSON.stringify({
           code: codeConfig.code,
-          input: context.input,
-          trigger: context.trigger,
-          steps: context.steps,
+          input: loadedContext.input,
+          trigger: loadedContext.trigger,
+          steps: loadedContext.steps,
+          variables: configVariables, // Pass variable mappings (name + path) - resolved at execution
           packages: selectedPackages,
           timeout: codeConfig.timeout,
         }),
@@ -1732,121 +1766,130 @@ function CodeStepConfigPanel({
   // Test input panel component (reusable in modal)
   const TestInputPanel = () => (
     <div className="space-y-3">
-      {/* Source selector */}
-      <div className="flex gap-2">
-        <Button
-          type="button"
-          variant={testInputSource === 'manual' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setTestInputSource('manual')}
-          className="flex-1"
-        >
-          Manual JSON
-        </Button>
-        <Button
-          type="button"
-          variant={testInputSource === 'previous_run' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setTestInputSource('previous_run')}
-          className="flex-1"
-          disabled={!workflowId}
-        >
-          From Run
-        </Button>
+      {/* Variables section - always visible, stored in step config */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium">Variables</label>
+          <TokenBrowser
+            workflowId={workflowId}
+            previousSteps={previousSteps}
+            currentStepIndex={stepIndex}
+            loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
+            onSelectToken={addVariableMapping}
+            wrapInBraces={false}
+          />
+        </div>
+
+        {configVariables.length === 0 ? (
+          <div className="text-xs text-muted-foreground p-3 border border-dashed rounded-md text-center">
+            Click <Plus className="h-3 w-3 inline mx-1" /> to add variables from workflow context.
+            <br />
+            <span className="text-muted-foreground/70">
+              Variables are resolved at runtime from the workflow context.
+            </span>
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {configVariables.map((variable, index) => (
+              <div key={index} className="flex items-center gap-2 p-2 bg-muted/30 rounded-md">
+                <Input
+                  value={variable.name}
+                  onChange={(e) => updateVariableMapping(index, { name: e.target.value })}
+                  placeholder="varName"
+                  className="h-7 text-xs font-mono w-24 flex-shrink-0"
+                />
+                <ArrowRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                <code className="text-[10px] text-muted-foreground truncate flex-1" title={variable.path}>
+                  {variable.path}
+                </code>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 text-destructive hover:text-destructive flex-shrink-0"
+                  onClick={() => removeVariableMapping(index)}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <p className="text-[10px] text-muted-foreground">
+          Values are resolved from context at runtime. Use variable names in code (e.g., <code className="bg-muted px-0.5 rounded">apiUrl</code>).
+        </p>
       </div>
 
-      {testInputSource === 'manual' ? (
-        <div className="space-y-3">
-          {/* Manual input fields */}
-          <div className="space-y-1">
-            <label className="text-xs font-medium flex items-center gap-1">
-              <code className="bg-muted px-1 rounded">input</code>
-              <span className="text-muted-foreground font-normal">- Previous step output</span>
-            </label>
-            <Textarea
-              value={manualInput}
-              onChange={(e) => setManualInput(e.target.value)}
-              placeholder='{"data": "from previous step"}'
-              className="font-mono text-xs h-20 resize-none"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium flex items-center gap-1">
-              <code className="bg-muted px-1 rounded">trigger</code>
-              <span className="text-muted-foreground font-normal">- Workflow trigger payload</span>
-            </label>
-            <Textarea
-              value={manualTrigger}
-              onChange={(e) => setManualTrigger(e.target.value)}
-              placeholder='{"workflowInput": "data"}'
-              className="font-mono text-xs h-16 resize-none"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium flex items-center gap-1">
-              <code className="bg-muted px-1 rounded">steps</code>
-              <span className="text-muted-foreground font-normal">- All step outputs by ID</span>
-            </label>
-            <Textarea
-              value={manualSteps}
-              onChange={(e) => setManualSteps(e.target.value)}
-              placeholder='{"step-1": {"output": "data"}}'
-              className="font-mono text-xs h-16 resize-none"
-            />
-          </div>
+      {/* Workflow run selector for loading context/values */}
+      <div className="space-y-2 border-t pt-3">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium">Load Context from Run</label>
+          {loadedContext && (
+            <Badge variant="outline" className="text-[10px]">
+              Context loaded
+            </Badge>
+          )}
         </div>
-      ) : (
-        <div className="space-y-3">
-          {/* Workflow run selector */}
-          <div className="space-y-1">
-            <label className="text-xs font-medium">Select a workflow run</label>
-            {loadingRuns ? (
-              <div className="text-xs text-muted-foreground p-2">Loading runs...</div>
-            ) : workflowRuns.length === 0 ? (
-              <div className="text-xs text-muted-foreground p-2">
-                No runs found. Run the workflow first to test with real data.
-              </div>
-            ) : (
-              <Select value={selectedRunId || ''} onValueChange={setSelectedRunId}>
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue placeholder="Select a run..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {workflowRuns.map((run) => (
-                    <SelectItem key={run._id} value={run._id} className="text-xs">
-                      <span className={cn(
-                        'inline-block w-2 h-2 rounded-full mr-2',
-                        run.status === 'completed' ? 'bg-green-500' :
-                        run.status === 'running' ? 'bg-blue-500' :
-                        run.status === 'failed' ? 'bg-red-500' : 'bg-gray-500'
-                      )} />
-                      {new Date(run.createdAt).toLocaleString()} - {run.status}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
+        {loadingRuns ? (
+          <div className="text-xs text-muted-foreground p-2">Loading runs...</div>
+        ) : workflowRuns.length === 0 ? (
+          <div className="text-xs text-muted-foreground p-2">
+            {workflowId ? 'No runs found. Run the workflow first.' : 'Save workflow first to load runs.'}
           </div>
+        ) : (
+          <Select value={selectedRunId || ''} onValueChange={setSelectedRunId}>
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue placeholder="Select a run to load values..." />
+            </SelectTrigger>
+            <SelectContent>
+              {workflowRuns.map((run) => (
+                <SelectItem key={run._id} value={run._id} className="text-xs">
+                  <span className={cn(
+                    'inline-block w-2 h-2 rounded-full mr-2',
+                    run.status === 'completed' ? 'bg-green-500' :
+                    run.status === 'running' ? 'bg-blue-500' :
+                    run.status === 'failed' ? 'bg-red-500' : 'bg-gray-500'
+                  )} />
+                  {new Date(run.createdAt).toLocaleString()} - {run.status}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
 
-          {/* Loaded context preview */}
-          {loadingContext ? (
-            <div className="text-xs text-muted-foreground p-2">Loading context...</div>
-          ) : loadedContext ? (
-            <div className="space-y-2 text-xs">
-              <div className="bg-muted/50 rounded p-2">
-                <p className="font-medium mb-1">Loaded Context:</p>
-                <div className="space-y-1">
-                  <p><code className="bg-muted px-1 rounded">input</code>: {JSON.stringify(loadedContext.input).slice(0, 50)}...</p>
-                  <p><code className="bg-muted px-1 rounded">trigger</code>: {JSON.stringify(loadedContext.trigger).slice(0, 50)}...</p>
-                  <p><code className="bg-muted px-1 rounded">steps</code>: {Object.keys(loadedContext.steps).length} step outputs</p>
+        {/* Loaded context preview */}
+        {loadingContext ? (
+          <div className="text-xs text-muted-foreground p-2">Loading context...</div>
+        ) : loadedContext ? (
+          <div className="space-y-2 text-xs">
+            <div className="bg-muted/50 rounded p-2 max-h-[200px] overflow-auto">
+              <div className="space-y-3">
+                <div>
+                  <p className="text-muted-foreground mb-1"><code className="bg-muted px-1 rounded">input</code>:</p>
+                  <div className="pl-2 border-l-2 border-muted">
+                    <JsonViewer data={loadedContext.input} maxInitialDepth={1} />
+                  </div>
                 </div>
+                <div>
+                  <p className="text-muted-foreground mb-1"><code className="bg-muted px-1 rounded">trigger</code>:</p>
+                  <div className="pl-2 border-l-2 border-muted">
+                    <JsonViewer data={loadedContext.trigger} maxInitialDepth={1} />
+                  </div>
+                </div>
+                {Object.keys(loadedContext.steps).length > 0 && (
+                  <div>
+                    <p className="text-muted-foreground mb-1"><code className="bg-muted px-1 rounded">steps</code>:</p>
+                    <div className="pl-2 border-l-2 border-muted">
+                      <JsonViewer data={loadedContext.steps} maxInitialDepth={1} />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
-          ) : selectedRunId ? (
-            <div className="text-xs text-muted-foreground p-2">Select a run to load its context</div>
-          ) : null}
-        </div>
-      )}
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 
@@ -1948,6 +1991,56 @@ function CodeStepConfigPanel({
         </Popover>
       </div>
 
+      {/* Variables - inject context values as named variables */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium flex items-center gap-2">
+            <Zap className="h-4 w-4 text-muted-foreground" />
+            Variables
+          </label>
+          <TokenBrowser
+            workflowId={workflowId}
+            previousSteps={previousSteps}
+            currentStepIndex={stepIndex}
+            loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
+            onSelectToken={addVariableMapping}
+            wrapInBraces={false}
+          />
+        </div>
+
+        {configVariables.length > 0 ? (
+          <div className="space-y-1">
+            {configVariables.map((variable, index) => (
+              <div key={index} className="flex items-center gap-2 p-2 bg-muted/30 rounded-md text-sm">
+                <Input
+                  value={variable.name}
+                  onChange={(e) => updateVariableMapping(index, { name: e.target.value })}
+                  placeholder="varName"
+                  className="h-7 text-xs font-mono w-24 flex-shrink-0"
+                />
+                <ArrowRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                <code className="text-[10px] text-muted-foreground truncate flex-1" title={variable.path}>
+                  {variable.path}
+                </code>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 text-destructive hover:text-destructive flex-shrink-0"
+                  onClick={() => removeVariableMapping(index)}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Add variables to inject context values (e.g., <code className="bg-muted px-1 rounded">trigger._API_URL</code>) as named variables in your code.
+          </p>
+        )}
+      </div>
+
       {/* Code Editor */}
       <div className="space-y-1">
         <div className="flex items-center justify-between">
@@ -1968,7 +2061,7 @@ function CodeStepConfigPanel({
         </div>
         <CodeEditor minHeight="150px" />
         <p className="text-xs text-muted-foreground mt-1">
-          Access data using <code className="bg-muted px-1 rounded">input</code>, <code className="bg-muted px-1 rounded">trigger</code>, or <code className="bg-muted px-1 rounded">steps.stepId</code>
+          Access data via <code className="bg-muted px-1 rounded">input</code>, <code className="bg-muted px-1 rounded">trigger</code>, <code className="bg-muted px-1 rounded">steps.stepName</code>, or use variables defined above.
         </p>
       </div>
 
@@ -1986,20 +2079,18 @@ function CodeStepConfigPanel({
             <div className="flex flex-col gap-2 min-h-0">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium">Code</label>
-                <div className="flex items-center gap-1">
-                  {selectedPackages.length > 0 && (
-                    <div className="flex gap-1">
-                      {selectedPackages.map(pkg => {
-                        const pkgInfo = CODE_PACKAGES.find(p => p.value === pkg)
-                        return (
-                          <Badge key={pkg} variant="outline" className="text-xs">
-                            {pkgInfo?.sandboxName}
-                          </Badge>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
+                {selectedPackages.length > 0 && (
+                  <div className="flex gap-1">
+                    {selectedPackages.map(pkg => {
+                      const pkgInfo = CODE_PACKAGES.find(p => p.value === pkg)
+                      return (
+                        <Badge key={pkg} variant="outline" className="text-xs">
+                          {pkgInfo?.sandboxName}
+                        </Badge>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
               <Textarea
                 value={codeConfig.code || ''}
@@ -2009,7 +2100,7 @@ function CodeStepConfigPanel({
                 className="flex-1 font-mono text-sm min-h-[400px] resize-none"
               />
               <p className="text-xs text-muted-foreground">
-                Access data: <code className="bg-muted px-1 rounded">input</code>, <code className="bg-muted px-1 rounded">trigger</code>, <code className="bg-muted px-1 rounded">steps.stepId</code>
+                Access: <code className="bg-muted px-1 rounded">input</code>, <code className="bg-muted px-1 rounded">trigger</code>, <code className="bg-muted px-1 rounded">steps.stepName</code>, or use variables from the test panel.
               </p>
             </div>
 
@@ -2024,7 +2115,7 @@ function CodeStepConfigPanel({
                   type="button"
                   size="sm"
                   onClick={runTest}
-                  disabled={isRunningTest || (testInputSource === 'previous_run' && !loadedContext)}
+                  disabled={isRunningTest}
                   className="h-7"
                 >
                   <Play className="h-3 w-3 mr-1" />

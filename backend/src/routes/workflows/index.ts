@@ -332,20 +332,24 @@ workflowsRouter.post('/generate-mermaid', async (req: Request, res: Response, ne
 // POST /api/workflows/test-code - Test code execution in sandbox
 workflowsRouter.post('/test-code', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { code, input, trigger, steps, packages, timeout } = req.body;
+    const { code, input, trigger, steps, variables, packages, timeout } = req.body;
 
     if (!code || typeof code !== 'string') {
       throw createError('code is required', 400);
     }
 
-    // Build execution context - supports both simple input and full context
-    const context = trigger !== undefined || steps !== undefined
-      ? { input: input || {}, trigger: trigger || {}, steps: steps || {} }
-      : input || {};
+    // Build execution context
+    const context = {
+      input: input || {},
+      trigger: trigger || {},
+      steps: steps || {},
+    };
 
-    // Execute the code in sandbox
+    // Execute the code in sandbox with variable mappings
+    // Variables are resolved from context paths at execution time
     const result = await executeCode(code, context, {
       packages: packages || [],
+      variables: variables || [], // Array of { name, path } mappings
       timeout: timeout || 5000, // Shorter timeout for testing (5s)
     });
 

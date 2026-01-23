@@ -157,6 +157,74 @@ describe('Code Executor', () => {
       expect(result.success).toBe(true);
       expect(result.output).toBe('axios_available');
     });
+
+    it('should resolve variable mappings from context paths', async () => {
+      // This tests the variable mapping feature - variables are resolved from context paths
+      const result = await executeCode(
+        'return { userId, apiUrl, combined: userId + "_" + apiUrl }',
+        {
+          input: { someData: 'test' },
+          trigger: { _API_URL: 'http://localhost:3000', user: { id: 123 } },
+          steps: {},
+        },
+        {
+          variables: [
+            { name: 'userId', path: 'trigger.user.id' },
+            { name: 'apiUrl', path: 'trigger._API_URL' },
+          ],
+        }
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.output).toEqual({
+        userId: 123,
+        apiUrl: 'http://localhost:3000',
+        combined: '123_http://localhost:3000',
+      });
+    });
+
+    it('should handle missing variable paths gracefully', async () => {
+      // If a variable path doesn't exist, it should just not be defined
+      const result = await executeCode(
+        'return typeof missingVar',
+        {
+          input: {},
+          trigger: {},
+          steps: {},
+        },
+        {
+          variables: [
+            { name: 'missingVar', path: 'trigger.nonexistent.path' },
+          ],
+        }
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.output).toBe('undefined');
+    });
+
+    it('should resolve system variables like _apiUrl without context path', async () => {
+      // System variables (like _apiUrl) should be resolved without needing trigger. prefix
+      const result = await executeCode(
+        'return { apiUrl, isString: typeof apiUrl === "string" }',
+        {
+          input: {},
+          trigger: {},
+          steps: {},
+        },
+        {
+          variables: [
+            { name: 'apiUrl', path: '_apiUrl' },
+          ],
+        }
+      );
+
+      expect(result.success).toBe(true);
+      const output = result.output as { apiUrl: string; isString: boolean };
+      expect(output.isString).toBe(true);
+      // System variable should be resolved (value depends on BASE_URL env var)
+      expect(typeof output.apiUrl).toBe('string');
+    });
   });
 
   describe('getAvailablePackages', () => {

@@ -274,6 +274,12 @@ export type CodeSandboxPackage =
   // === Random & Fake Data ===
   | '@faker-js/faker'; // Fake data generation (as `faker`)
 
+// Variable mapping for code steps - maps a variable name to a context path
+export interface CodeVariableMapping {
+  name: string;   // Variable name available in code (e.g., "apiUrl")
+  path: string;   // Context path to resolve (e.g., "trigger._API_URL")
+}
+
 // Code step configuration - sandboxed JavaScript execution
 export interface CodeStepConfig {
   // The code to execute (JavaScript/TypeScript)
@@ -284,6 +290,10 @@ export interface CodeStepConfig {
   // Packages to inject into sandbox (subset of CodeSandboxPackage)
   // Each package is available under its standard name (e.g., _ for lodash)
   packages?: CodeSandboxPackage[];
+
+  // Variable mappings - inject context values as named variables
+  // e.g., { name: "apiUrl", path: "trigger._API_URL" } makes apiUrl available in code
+  variables?: CodeVariableMapping[];
 
   // Execution limits
   timeout?: number;        // Max execution time in ms (default: 30000)

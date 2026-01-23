@@ -53,6 +53,16 @@ class WorkflowExecutionService {
       }
     });
 
+    // Handle code step reruns when task is set to pending
+    eventBus.subscribe('task.status.changed', async (event: TaskEvent) => {
+      const task = event.task;
+      // Only process code tasks that are part of a workflow and set to pending
+      if (task.taskType === 'code' && task.workflowRunId && task.workflowStepId && task.status === 'pending') {
+        console.log(`[WorkflowExecutionService] Code task ${task._id} set to pending - triggering rerun`);
+        await this.rerunCodeTask(task._id);
+      }
+    });
+
     setInterval(() => {
       this.processedEvents.clear();
     }, 5 * 60 * 1000);
@@ -1988,13 +1998,22 @@ class WorkflowExecutionService {
     const now = new Date();
     const resultId = `code-${codeTask._id}-${Date.now()}`;
 
+    // Build the full execution context with trigger and steps
+    // This allows variable mappings like trigger._API_URL to be resolved
+    const executionContext = {
+      input: inputPayload || {},
+      trigger: _run.inputPayload || {},
+      steps: {}, // TODO: Could populate with previous step outputs if needed
+    };
+
     try {
       // Execute the code in the sandbox
       const result = await executeCodeSandbox(
         config.code,
-        inputPayload || {},
+        executionContext,
         {
           packages: config.packages,
+          variables: config.variables, // Pass variable mappings for resolution
           timeout: config.timeout,
           outputSchema: config.outputSchema,
         }
@@ -2114,6 +2133,56 @@ class WorkflowExecutionService {
         }
       );
     }
+  }
+
+  /**
+   * Rerun a code task that was set back to pending.
+   * Looks up the workflow run and step config to re-execute the code.
+   */
+  async rerunCodeTask(taskId: ObjectId | string): Promise<void> {
+    const id = typeof taskId === 'string' ? new ObjectId(taskId) : taskId;
+    const task = await this.tasks.findOne({ _id: id });
+
+    if (!task) {
+      console.error(`[WorkflowExecutionService] rerunCodeTask: Task ${id} not found`);
+      return;
+    }
+
+    if (task.taskType !== 'code') {
+      console.error(`[WorkflowExecutionService] rerunCodeTask: Task ${id} is not a code task`);
+      return;
+    }
+
+    if (!task.workflowRunId || !task.workflowStepId) {
+      console.error(`[WorkflowExecutionService] rerunCodeTask: Task ${id} is not part of a workflow`);
+      return;
+    }
+
+    const run = await this.workflowRuns.findOne({ _id: task.workflowRunId });
+    if (!run) {
+      console.error(`[WorkflowExecutionService] rerunCodeTask: Workflow run ${task.workflowRunId} not found`);
+      return;
+    }
+
+    const workflow = await this.workflows.findOne({ _id: run.workflowId });
+    if (!workflow) {
+      console.error(`[WorkflowExecutionService] rerunCodeTask: Workflow ${run.workflowId} not found`);
+      return;
+    }
+
+    const step = workflow.steps.find(s => s.id === task.workflowStepId);
+    if (!step) {
+      console.error(`[WorkflowExecutionService] rerunCodeTask: Step ${task.workflowStepId} not found in workflow`);
+      return;
+    }
+
+    // Get the input payload from the task's metadata (set when task was originally created)
+    const inputPayload = task.metadata?.inputPayload as Record<string, unknown> | undefined;
+
+    console.log(`[WorkflowExecutionService] Rerunning code task ${id} for step ${step.name}`);
+
+    // Execute the code step
+    await this.executeCodeStep(run, workflow, step, task, inputPayload);
   }
 
   // ============================================================================

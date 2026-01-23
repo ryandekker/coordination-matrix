@@ -376,6 +376,7 @@ const PACKAGE_CACHE_TTL_MS = 60000; // 1 minute cache
 /**
  * Load all active variables from database
  * Returns decrypted values organized by name
+ * Returns empty context if database is not available (e.g., in tests)
  */
 export async function loadPackageContext(): Promise<PackageContext> {
   const now = Date.now();
@@ -385,7 +386,15 @@ export async function loadPackageContext(): Promise<PackageContext> {
     return packageCache;
   }
 
-  const db = getDb();
+  // Handle case where database is not connected (e.g., in tests)
+  let db;
+  try {
+    db = getDb();
+  } catch {
+    // No database connection - return empty context
+    return { variables: {} };
+  }
+
   const variables = await db
     .collection<VariablePackage>('variable_packages')
     .find({ isActive: true })
