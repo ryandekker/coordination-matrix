@@ -154,7 +154,7 @@ export function MetadataTab({ task, onSave }: MetadataTabProps) {
           rows={16}
           className={cn(
             'flex w-full rounded-md border bg-background px-3 py-2 text-xs font-mono',
-            'placeholder:text-muted-foreground resize-y transition-colors',
+            'placeholder:text-muted-foreground resize-y transition-colors overflow-auto',
             'focus-visible:outline-none',
             metadataError
               ? 'border-destructive focus-visible:border-destructive'

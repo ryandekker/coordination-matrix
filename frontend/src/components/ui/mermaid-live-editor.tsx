@@ -321,7 +321,7 @@ export function MermaidLiveEditor({
                 placeholder={placeholder}
                 spellCheck={false}
                 className={cn(
-                  'flex-1 resize-none py-2 px-3 text-sm font-mono leading-[21px]',
+                  'flex-1 resize-none py-2 px-3 text-sm font-mono leading-[21px] overflow-auto',
                   'bg-transparent border-0 outline-none',
                   'placeholder:text-muted-foreground/50',
                   'focus:ring-0 focus:outline-none'
@@ -401,7 +401,7 @@ export function MermaidLiveEditor({
                   placeholder={placeholder}
                   spellCheck={false}
                   className={cn(
-                    'flex-1 resize-none py-2 px-3 text-sm font-mono leading-[21px]',
+                    'flex-1 resize-none py-2 px-3 text-sm font-mono leading-[21px] overflow-auto',
                     'bg-transparent border-0 outline-none',
                     'placeholder:text-muted-foreground/50',
                     'focus:ring-0 focus:outline-none'

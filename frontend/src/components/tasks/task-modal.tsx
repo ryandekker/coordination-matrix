@@ -604,7 +604,7 @@ export function TaskModal({
               </p>
             )}
           </DialogHeader>
-          <form onSubmit={handleSubmit(onSubmit)} className="flex-1 min-h-0 overflow-y-auto">
+          <form onSubmit={handleSubmit(onSubmit)} className="flex-1 min-h-0 overflow-y-auto pr-4 -mr-4">
             <div className="space-y-3 pb-4">
               {/* Title */}
               <div className="space-y-1">
@@ -1070,7 +1070,7 @@ export function TaskModal({
           </div>
 
           {/* Tab Content - scrollable */}
-          <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto pr-4 -mr-4">
             <TabsContent value={TASK_MODAL_TABS.OUTPUT} className="mt-0">
               <OutputTab task={task} onRollback={task.workflowRunId ? handleRollback : undefined} />
             </TabsContent>

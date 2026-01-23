@@ -569,7 +569,7 @@ export function IntegratedWorkflowView({
   const configPanel = (
     <div className="flex flex-col border rounded-lg bg-background overflow-hidden min-h-0 h-full">
       {selectedStep ? (
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="flex-1 min-h-0 overflow-y-auto pr-4 -mr-4">
           <StepConfigPanel
             step={selectedStep}
             stepIndex={selectedStepIndex}

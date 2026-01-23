@@ -486,7 +486,7 @@ export function EditableCell({
                 if (e.key === 'Enter' && e.metaKey) handleSave()
               }}
               onBlur={handleSave}
-              className="flex min-h-[60px] min-w-[300px] rounded-sm bg-transparent px-1 py-1 text-sm focus-visible:outline-none focus-visible:ring-0 w-full"
+              className="flex min-h-[60px] min-w-[300px] rounded-sm bg-transparent px-1 py-1 text-sm focus-visible:outline-none focus-visible:ring-0 w-full overflow-auto"
             />
           </div>
         )

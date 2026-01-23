@@ -224,6 +224,7 @@ export function TemplateInput({
         {/* Highlighted background layer */}
         <div
           className="absolute inset-0 px-3 py-2 text-sm font-mono pointer-events-none overflow-hidden whitespace-nowrap"
+          style={{ clipPath: 'inset(0 0 0 0 round 6px)' }}
           aria-hidden="true"
         >
           {renderHighlightedValue()}

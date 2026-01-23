@@ -28,6 +28,7 @@ export interface TemplateEditorRef {
  *
  * Highlights {{...}} tokens with a distinctive style while allowing full editing.
  * Uses a layered approach with a transparent textarea over a highlighted div.
+ * The height is driven by content/placeholder to ensure both layers match.
  */
 export const TemplateEditor = forwardRef<TemplateEditorRef, TemplateEditorProps>(function TemplateEditor({
   value,
@@ -43,8 +44,10 @@ export const TemplateEditor = forwardRef<TemplateEditorRef, TemplateEditorProps>
 }, ref) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const highlightRef = useRef<HTMLDivElement>(null)
+  const sizerRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [scrollLeft, setScrollLeft] = useState(0)
+  const [computedHeight, setComputedHeight] = useState<string>(minHeight)
 
   // Expose methods through ref
   useImperativeHandle(ref, () => ({
@@ -72,6 +75,17 @@ export const TemplateEditor = forwardRef<TemplateEditorRef, TemplateEditorProps>
       highlightRef.current.scrollLeft = scrollLeft
     }
   }, [scrollTop, scrollLeft])
+
+  // Measure content height from sizer div and update computed height
+  useEffect(() => {
+    if (sizerRef.current) {
+      const sizerHeight = sizerRef.current.scrollHeight
+      const min = parseInt(minHeight, 10) || 80
+      const max = parseInt(maxHeight, 10) || 200
+      const clampedHeight = Math.max(min, Math.min(sizerHeight, max))
+      setComputedHeight(`${clampedHeight}px`)
+    }
+  }, [value, placeholder, minHeight, maxHeight])
 
   // Render highlighted content
   const renderHighlightedContent = () => {
@@ -126,8 +140,23 @@ export const TemplateEditor = forwardRef<TemplateEditorRef, TemplateEditorProps>
     return parts
   }
 
+  // Content to display (value or placeholder)
+  const displayContent = value || placeholder || ''
+
   return (
     <div className={cn('relative', className)}>
+      {/* Hidden sizer div to measure content height */}
+      <div
+        ref={sizerRef}
+        className="invisible absolute left-0 right-0 p-2 font-mono text-sm whitespace-pre-wrap break-words border border-transparent"
+        style={{ minHeight }}
+        aria-hidden="true"
+      >
+        {displayContent}
+        {/* Extra line for cursor space */}
+        &nbsp;
+      </div>
+
       {/* Highlighted background layer */}
       <div
         ref={highlightRef}
@@ -136,8 +165,8 @@ export const TemplateEditor = forwardRef<TemplateEditorRef, TemplateEditorProps>
           'border border-transparent rounded-md bg-background'
         )}
         style={{
-          minHeight,
-          maxHeight,
+          height: computedHeight,
+          clipPath: 'inset(0 0 0 0 round 6px)',
         }}
         aria-hidden="true"
       >
@@ -156,7 +185,7 @@ export const TemplateEditor = forwardRef<TemplateEditorRef, TemplateEditorProps>
         placeholder=""
         disabled={disabled}
         className={cn(
-          'relative w-full p-2 font-mono text-sm whitespace-pre-wrap resize-none',
+          'relative w-full p-2 font-mono text-sm whitespace-pre-wrap resize-none overflow-auto',
           'border border-input rounded-md bg-transparent',
           'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
           'placeholder:text-muted-foreground',
@@ -165,8 +194,8 @@ export const TemplateEditor = forwardRef<TemplateEditorRef, TemplateEditorProps>
           disabled && 'opacity-50 cursor-not-allowed'
         )}
         style={{
-          minHeight,
-          maxHeight,
+          height: computedHeight,
+          paddingRight: '1rem', // Extra space for scrollbar
         }}
       />
     </div>
