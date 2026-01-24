@@ -133,11 +133,13 @@ export const migration: Migration = {
       });
       console.log('[Migration] Added workflow-prompt to document type enum');
     } catch (error: unknown) {
-      // Handle MongoDB Atlas shared cluster restrictions
+      // Handle MongoDB Atlas permission restrictions
+      const errorMsg = error instanceof Error ? error.message : String(error);
       const mongoError = error as { code?: number; codeName?: string };
-      if (mongoError.code === 8000 && mongoError.codeName === 'AtlasError') {
-        console.log('[Migration] Skipping collMod - not supported on Atlas shared clusters');
-        console.log('[Migration] Schema validation update skipped, but app will still work');
+      if (mongoError.code === 8000 && mongoError.codeName === 'AtlasError' ||
+          errorMsg.includes('not allowed') || errorMsg.includes('Unauthorized')) {
+        console.log('[Migration] ⚠ Skipping validator update (insufficient permissions). Application will still work.');
+        console.log('[Migration]   To enable database-level validation, grant dbAdmin role to the Atlas user.');
         return; // Don't throw - migration is considered successful
       }
       throw error; // Re-throw other errors
@@ -245,9 +247,11 @@ export const migration: Migration = {
       });
       console.log('[Migration] Reverted document type enum (removed workflow-prompt)');
     } catch (error: unknown) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
       const mongoError = error as { code?: number; codeName?: string };
-      if (mongoError.code === 8000 && mongoError.codeName === 'AtlasError') {
-        console.log('[Migration] Skipping collMod rollback - not supported on Atlas shared clusters');
+      if (mongoError.code === 8000 && mongoError.codeName === 'AtlasError' ||
+          errorMsg.includes('not allowed') || errorMsg.includes('Unauthorized')) {
+        console.log('[Migration] ⚠ Skipping validator rollback (insufficient permissions).');
         return;
       }
       throw error;

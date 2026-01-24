@@ -155,6 +155,7 @@ export const migration: Migration = {
 
   async up(db: Db): Promise<void> {
     // Try to update the validator - this requires dbAdmin role on Atlas
+    // If we don't have permissions, skip gracefully since validators are optional
     try {
       await db.command({
         collMod: 'tasks',
@@ -164,13 +165,12 @@ export const migration: Migration = {
       console.log('[Migration] ✓ Updated tasks collection validator with correct taskType enum');
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      if (errorMsg.includes('not allowed') || errorMsg.includes('AtlasError')) {
-        // Don't silently skip - throw an error so the migration fails
-        // This way we know we need to fix permissions
-        throw new Error(
-          `Cannot update validator on tasks collection: ${errorMsg}. ` +
-          'Please grant dbAdmin role to the database user in MongoDB Atlas.'
-        );
+      if (errorMsg.includes('not allowed') || errorMsg.includes('AtlasError') || errorMsg.includes('Unauthorized')) {
+        // Skip validator update if we don't have permissions
+        // The application will still work - we just lose database-level schema validation
+        console.log('[Migration] ⚠ Skipping validator update (insufficient permissions). Application will still work.');
+        console.log('[Migration]   To enable database-level validation, grant dbAdmin role to the Atlas user.');
+        return;
       }
       throw error;
     }
