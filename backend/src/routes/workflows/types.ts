@@ -121,6 +121,9 @@ export interface Workflow {
   rootTaskTitleTemplate?: string;
   // Sample payload template for triggering this workflow - helps agents/callers know what data to provide
   samplePayload?: string;
+  // Organization and display
+  folderId?: ObjectId | null;  // Reference to workflow folder
+  color?: string;              // Pastel hex color for visual identification
   createdAt: Date;
   updatedAt: Date;
   createdById?: ObjectId | null;

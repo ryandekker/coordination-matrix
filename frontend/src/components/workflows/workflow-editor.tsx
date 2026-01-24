@@ -38,6 +38,7 @@ import {
   TabsTrigger,
 } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
+import { authFetch } from '@/lib/api'
 import {
   Plus,
   Trash2,
@@ -58,7 +59,15 @@ import {
   RefreshCw,
   ArrowRightFromLine,
   ArrowDown,
+  Folder,
+  FolderPlus,
+  History,
+  Palette,
+  FileText,
+  Settings,
+  ToggleLeft,
 } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { TokenBrowser } from './token-browser'
 import { WorkflowWebhook } from './workflow-webhook'
 import { TemplateTextarea } from '@/components/ui/template-textarea'
@@ -80,6 +89,45 @@ import {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
+// Types for folders and runs
+interface WorkflowFolder {
+  _id: string
+  name: string
+  description?: string
+  sortOrder: number
+  isExpanded: boolean
+}
+
+interface WorkflowRunBrief {
+  _id: string
+  status: string
+  inputPayload?: Record<string, unknown>
+  createdAt: string
+}
+
+// Fetch functions
+async function fetchWorkflowFolders(): Promise<{ data: WorkflowFolder[] }> {
+  const response = await authFetch(`${API_BASE}/workflow-folders`)
+  if (!response.ok) throw new Error('Failed to fetch folders')
+  return response.json()
+}
+
+async function createWorkflowFolder(data: { name: string }): Promise<{ data: WorkflowFolder }> {
+  const response = await authFetch(`${API_BASE}/workflow-folders`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!response.ok) throw new Error('Failed to create folder')
+  return response.json()
+}
+
+async function fetchWorkflowRuns(workflowId: string): Promise<{ data: WorkflowRunBrief[] }> {
+  const response = await authFetch(`${API_BASE}/workflow-runs?workflowId=${workflowId}&limit=10`)
+  if (!response.ok) throw new Error('Failed to fetch runs')
+  return response.json()
+}
+
 const workflowSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   description: z.string().optional(),
@@ -87,6 +135,16 @@ const workflowSchema = z.object({
 })
 
 type WorkflowFormData = z.infer<typeof workflowSchema>
+
+// Settings section IDs for navigation
+const SETTINGS_SECTIONS = [
+  { id: 'general', label: 'General', icon: Settings },
+  { id: 'title', label: 'Title Template', icon: MessageSquare },
+  { id: 'status', label: 'Status', icon: ToggleLeft },
+  { id: 'organization', label: 'Organization', icon: Folder },
+  { id: 'color', label: 'Color', icon: Palette },
+  { id: 'payload', label: 'Sample Payload', icon: FileCode },
+] as const
 
 export function WorkflowEditor({
   workflow,
@@ -98,6 +156,8 @@ export function WorkflowEditor({
   const [rootTaskTitleTemplate, setRootTaskTitleTemplate] = useState('')
   const [samplePayload, setSamplePayload] = useState('')
   const [mermaidCode, setMermaidCode] = useState('')
+  const [selectedColor, setSelectedColor] = useState<string | undefined>(undefined)
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
   const [mermaidError, setMermaidError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState('integrated')
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
@@ -108,9 +168,45 @@ export function WorkflowEditor({
   const [availableWorkflows, setAvailableWorkflows] = useState<ApiWorkflow[]>([])
   const [loadingWorkflows, setLoadingWorkflows] = useState(false)
 
+  // New folder creation
+  const [newFolderName, setNewFolderName] = useState('')
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false)
+
+  // Settings section scroll
+  const [activeSettingsSection, setActiveSettingsSection] = useState('general')
+  const settingsContainerRef = useRef<HTMLDivElement>(null)
+
+  const queryClient = useQueryClient()
+
   // Fetch users for default assignee dropdown
   const { data: usersData } = useUsers()
   const users = usersData?.data || []
+
+  // Fetch workflow folders
+  const { data: foldersData } = useQuery({
+    queryKey: ['workflow-folders'],
+    queryFn: fetchWorkflowFolders,
+  })
+  const folders = foldersData?.data || []
+
+  // Fetch recent runs for this workflow (only if editing existing workflow)
+  const { data: runsData } = useQuery({
+    queryKey: ['workflow-runs', workflow?._id],
+    queryFn: () => fetchWorkflowRuns(workflow!._id!),
+    enabled: !!workflow?._id,
+  })
+  const recentRuns = runsData?.data || []
+
+  // Create folder mutation
+  const createFolderMutation = useMutation({
+    mutationFn: createWorkflowFolder,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['workflow-folders'] })
+      setSelectedFolderId(data.data._id)
+      setNewFolderName('')
+      setIsCreatingFolder(false)
+    },
+  })
 
   const {
     register,
@@ -161,6 +257,8 @@ export function WorkflowEditor({
       setMermaidCode(workflow.mermaidDiagram || '')
       setRootTaskTitleTemplate(workflow.rootTaskTitleTemplate || '')
       setSamplePayload(workflow.samplePayload || '')
+      setSelectedColor(workflow.color || undefined)
+      setSelectedFolderId(workflow.folderId || null)
     } else {
       reset({
         name: '',
@@ -171,6 +269,8 @@ export function WorkflowEditor({
       setMermaidCode('')
       setRootTaskTitleTemplate('')
       setSamplePayload('')
+      setSelectedColor(undefined)
+      setSelectedFolderId(null)
     }
   }, [workflow, reset])
 
@@ -317,6 +417,8 @@ export function WorkflowEditor({
       description: data.description || '',
       rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
       samplePayload: samplePayload || undefined,
+      color: selectedColor,
+      folderId: selectedFolderId,
     }
     onSave(workflowData)
   }
@@ -512,144 +614,355 @@ export function WorkflowEditor({
             )}
 
             {/* Settings Tab */}
-            <TabsContent value="settings" className="flex-1 overflow-auto mt-0">
-              <div className="space-y-4 p-4 bg-muted/30 rounded-lg max-w-2xl">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Description</label>
-                  <Input
-                    {...register('description')}
-                    placeholder="Brief description of this workflow"
-                  />
+            <TabsContent value="settings" className="flex-1 overflow-hidden mt-0">
+              <div className="flex h-full">
+                {/* Settings Navigation Sidebar */}
+                <div className="w-36 flex-shrink-0 border-r pr-2 mr-4 space-y-1">
+                  {SETTINGS_SECTIONS.map((section) => {
+                    const Icon = section.icon
+                    return (
+                      <button
+                        key={section.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveSettingsSection(section.id)
+                          const el = document.getElementById(`settings-${section.id}`)
+                          const container = settingsContainerRef.current
+                          if (el && container) {
+                            // Scroll within the container, not the whole page
+                            const containerRect = container.getBoundingClientRect()
+                            const elRect = el.getBoundingClientRect()
+                            const scrollTop = el.offsetTop - container.offsetTop
+                            container.scrollTo({ top: scrollTop, behavior: 'smooth' })
+                          }
+                        }}
+                        className={cn(
+                          'w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm text-left transition-colors',
+                          activeSettingsSection === section.id
+                            ? 'bg-primary/10 text-primary font-medium'
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                        )}
+                      >
+                        <Icon className="h-3.5 w-3.5 flex-shrink-0" />
+                        <span className="truncate">{section.label}</span>
+                      </button>
+                    )
+                  })}
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-sm font-medium flex items-center gap-2">
-                    <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                    Root Task Title Template
-                    <span className="text-xs text-muted-foreground">(optional)</span>
-                  </label>
-                  <div className="flex gap-1">
-                    <Input
-                      value={rootTaskTitleTemplate}
-                      onChange={(e) => setRootTaskTitleTemplate(e.target.value)}
-                      placeholder={`e.g., "Process Order: {{input.orderId}}"`}
-                      className="font-mono text-sm h-9"
+                {/* Settings Content */}
+                <div
+                  ref={settingsContainerRef}
+                  className="flex-1 overflow-auto space-y-4 pr-2 max-w-2xl"
+                >
+                  {/* General Section */}
+                  <div id="settings-general" className="space-y-3 p-4 bg-muted/30 rounded-lg">
+                    <h3 className="text-sm font-medium flex items-center gap-2">
+                      <Settings className="h-4 w-4 text-muted-foreground" />
+                      General
+                    </h3>
+                    <div className="space-y-2">
+                      <label className="text-sm">Description</label>
+                      <Input
+                        {...register('description')}
+                        placeholder="Brief description of this workflow"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Title Template Section */}
+                  <div id="settings-title" className="space-y-3 p-4 bg-muted/30 rounded-lg">
+                    <h3 className="text-sm font-medium flex items-center gap-2">
+                      <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                      Root Task Title Template
+                      <span className="text-xs text-muted-foreground font-normal">(optional)</span>
+                    </h3>
+                    <div className="flex gap-1">
+                      <Input
+                        value={rootTaskTitleTemplate}
+                        onChange={(e) => setRootTaskTitleTemplate(e.target.value)}
+                        placeholder={`e.g., "Process Order: {{input.orderId}}"`}
+                        className="font-mono text-sm h-9"
+                      />
+                      <TokenBrowser
+                        workflowId={workflow?._id}
+                        previousSteps={[]}
+                        currentStepIndex={0}
+                        onSelectToken={() => {}}
+                        fieldLabel="Root Task Title"
+                        fieldValue={rootTaskTitleTemplate}
+                        onFieldValueChange={setRootTaskTitleTemplate}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Dynamic title for the workflow&apos;s parent task. Use {`{{input.field}}`} for input data.
+                      Defaults to &quot;Workflow: {watch('name') || '{name}'}&quot;.
+                    </p>
+                  </div>
+
+                  {/* Status Section */}
+                  <div id="settings-status" className="space-y-3 p-4 bg-muted/30 rounded-lg">
+                    <h3 className="text-sm font-medium flex items-center gap-2">
+                      <ToggleLeft className="h-4 w-4 text-muted-foreground" />
+                      Status
+                    </h3>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="isActive"
+                        checked={watch('isActive')}
+                        onCheckedChange={(checked) => setValue('isActive', !!checked)}
+                      />
+                      <label htmlFor="isActive" className="text-sm">
+                        Active - workflow can be triggered
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Organization Section */}
+                  <div id="settings-organization" className="space-y-3 p-4 bg-muted/30 rounded-lg">
+                    <h3 className="text-sm font-medium flex items-center gap-2">
+                      <Folder className="h-4 w-4 text-muted-foreground" />
+                      Organization
+                    </h3>
+                    <div className="space-y-2">
+                      <label className="text-sm">Folder</label>
+                      <div className="flex gap-2">
+                        <Select
+                          value={selectedFolderId || 'none'}
+                          onValueChange={(val) => setSelectedFolderId(val === 'none' ? null : val)}
+                        >
+                          <SelectTrigger className="flex-1">
+                            <SelectValue placeholder="No folder" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">No folder</SelectItem>
+                            {folders.map((folder) => (
+                              <SelectItem key={folder._id} value={folder._id}>
+                                {folder.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {!isCreatingFolder ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => setIsCreatingFolder(true)}
+                            title="Create new folder"
+                          >
+                            <FolderPlus className="h-4 w-4" />
+                          </Button>
+                        ) : (
+                          <div className="flex gap-1">
+                            <Input
+                              value={newFolderName}
+                              onChange={(e) => setNewFolderName(e.target.value)}
+                              placeholder="Folder name"
+                              className="w-32"
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && newFolderName.trim()) {
+                                  e.preventDefault()
+                                  createFolderMutation.mutate({ name: newFolderName.trim() })
+                                } else if (e.key === 'Escape') {
+                                  setIsCreatingFolder(false)
+                                  setNewFolderName('')
+                                }
+                              }}
+                            />
+                            <Button
+                              type="button"
+                              variant="default"
+                              size="sm"
+                              disabled={!newFolderName.trim() || createFolderMutation.isPending}
+                              onClick={() => createFolderMutation.mutate({ name: newFolderName.trim() })}
+                            >
+                              {createFolderMutation.isPending ? '...' : 'Add'}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setIsCreatingFolder(false)
+                                setNewFolderName('')
+                              }}
+                            >
+                              ✕
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Organize workflows into folders for easier navigation
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Color Section */}
+                  <div id="settings-color" className="space-y-3 p-4 bg-muted/30 rounded-lg">
+                    <h3 className="text-sm font-medium flex items-center gap-2">
+                      <Palette className="h-4 w-4 text-muted-foreground" />
+                      Color
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Optional color to identify this workflow in lists
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedColor(undefined)}
+                        className={cn(
+                          'w-7 h-7 rounded-full border-2 flex items-center justify-center',
+                          !selectedColor ? 'border-primary ring-2 ring-primary ring-offset-2' : 'border-muted hover:border-muted-foreground'
+                        )}
+                        title="No color"
+                      >
+                        <span className="text-xs text-muted-foreground">✕</span>
+                      </button>
+                      {[
+                        { name: 'Sky', value: '#BAE6FD' },
+                        { name: 'Lavender', value: '#DDD6FE' },
+                        { name: 'Rose', value: '#FECDD3' },
+                        { name: 'Mint', value: '#A7F3D0' },
+                        { name: 'Peach', value: '#FED7AA' },
+                        { name: 'Coral', value: '#FECACA' },
+                        { name: 'Lemon', value: '#FEF08A' },
+                        { name: 'Periwinkle', value: '#C7D2FE' },
+                        { name: 'Aqua', value: '#99F6E4' },
+                        { name: 'Stone', value: '#D6D3D1' },
+                      ].map(color => (
+                        <button
+                          key={color.value}
+                          type="button"
+                          onClick={() => setSelectedColor(color.value)}
+                          className={cn(
+                            'w-7 h-7 rounded-full border',
+                            selectedColor === color.value ? 'ring-2 ring-primary ring-offset-2 border-black/20' : 'border-black/10 hover:border-black/30'
+                          )}
+                          style={{ backgroundColor: color.value }}
+                          title={color.name}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Sample Payload Section */}
+                  <div id="settings-payload" className="space-y-3 p-4 bg-muted/30 rounded-lg">
+                    <h3 className="text-sm font-medium flex items-center gap-2">
+                      <FileCode className="h-4 w-4 text-muted-foreground" />
+                      Sample Payload
+                      <span className="text-xs text-muted-foreground font-normal">(optional)</span>
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Define a sample JSON payload that shows what data this workflow expects when triggered.
+                    </p>
+                    {/* Fill from previous run */}
+                    {recentRuns.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <History className="h-4 w-4 text-muted-foreground" />
+                        <Select
+                          onValueChange={(runId) => {
+                            const run = recentRuns.find(r => r._id === runId)
+                            if (run?.inputPayload) {
+                              setSamplePayload(JSON.stringify(run.inputPayload, null, 2))
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="flex-1 h-8 text-xs">
+                            <SelectValue placeholder="Fill from previous run..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {recentRuns.map((run) => (
+                              <SelectItem key={run._id} value={run._id}>
+                                <span className="font-mono text-xs">
+                                  {new Date(run.createdAt).toLocaleDateString()} - {run.status}
+                                </span>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    <TemplateTextarea
+                      value={samplePayload}
+                      onChange={setSamplePayload}
+                      placeholder={'{\n  "orderId": "ORD-12345",\n  "customerName": "John Doe",\n  "items": [\n    { "sku": "ABC123", "quantity": 2 }\n  ]\n}'}
+                      minHeight="120px"
+                      maxHeight="300px"
+                      showTokenBrowser={false}
                     />
-                    <TokenBrowser
+                    <p className="text-xs text-muted-foreground">
+                      Access payload fields in templates using {`{{input.fieldName}}`}, e.g., {`{{input.orderId}}`}
+                    </p>
+                  </div>
+
+                  {/* AI Prompt Helper Section */}
+                  <div className="border-t pt-4 mt-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Sparkles className="h-4 w-4 text-purple-500" />
+                      <h3 className="text-sm font-medium">AI Workflow Generation</h3>
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-3">
+                      Generate workflow definitions using AI. Copy the prompt below and paste it into your AI tool,
+                      or use the context endpoint to build custom integrations.
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={async () => {
+                          try {
+                            const response = await fetch(`${API_BASE}/workflows/ai-prompt?format=mermaid&includeContext=true`, {
+                              headers: getAuthHeader(),
+                            })
+                            const data = await response.json()
+                            await navigator.clipboard.writeText(data.data.prompt)
+                            // Could add a toast notification here
+                          } catch (err) {
+                            console.error('Failed to copy AI prompt:', err)
+                          }
+                        }}
+                      >
+                        <Sparkles className="h-3 w-3" />
+                        Copy AI Prompt (Mermaid)
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={async () => {
+                          try {
+                            const response = await fetch(`${API_BASE}/workflows/ai-prompt?format=json&includeContext=true`, {
+                              headers: getAuthHeader(),
+                            })
+                            const data = await response.json()
+                            await navigator.clipboard.writeText(data.data.prompt)
+                          } catch (err) {
+                            console.error('Failed to copy AI prompt:', err)
+                          }
+                        }}
+                      >
+                        <Sparkles className="h-3 w-3" />
+                        Copy AI Prompt (JSON)
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      API: <code className="bg-muted px-1 rounded">GET /api/workflows/ai-prompt-context</code> for structured context data.
+                    </p>
+                  </div>
+
+                  {/* Webhook Trigger Section */}
+                  <div className="border-t pt-4 mt-4">
+                    <WorkflowWebhook
                       workflowId={workflow?._id}
-                      previousSteps={[]}
-                      currentStepIndex={0}
-                      onSelectToken={() => {}}
-                      fieldLabel="Root Task Title"
-                      fieldValue={rootTaskTitleTemplate}
-                      onFieldValueChange={setRootTaskTitleTemplate}
+                      workflowName={watch('name')}
                     />
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Dynamic title for the workflow&apos;s parent task. Use {`{{input.field}}`} for input data.
-                    Defaults to &quot;Workflow: {watch('name') || '{name}'}&quot;.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2 pt-2">
-                  <Checkbox
-                    id="isActive"
-                    checked={watch('isActive')}
-                    onCheckedChange={(checked) => setValue('isActive', !!checked)}
-                  />
-                  <label htmlFor="isActive" className="text-sm font-medium">
-                    Active
-                  </label>
-                </div>
-
-                {/* Sample Payload Section */}
-                <div className="space-y-2 pt-4 border-t">
-                  <label className="text-sm font-medium flex items-center gap-2">
-                    <FileCode className="h-4 w-4 text-muted-foreground" />
-                    Sample Payload
-                    <span className="text-xs text-muted-foreground">(optional)</span>
-                  </label>
-                  <p className="text-xs text-muted-foreground">
-                    Define a sample JSON payload that shows what data this workflow expects when triggered.
-                    This helps agents and API callers know what data to provide.
-                  </p>
-                  <TemplateTextarea
-                    value={samplePayload}
-                    onChange={setSamplePayload}
-                    placeholder={'{\n  "orderId": "ORD-12345",\n  "customerName": "John Doe",\n  "items": [\n    { "sku": "ABC123", "quantity": 2 }\n  ]\n}'}
-                    minHeight="120px"
-                    maxHeight="300px"
-                    showTokenBrowser={false}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Access payload fields in templates using {`{{input.fieldName}}`}, e.g., {`{{input.orderId}}`}
-                  </p>
-                </div>
-
-                {/* AI Prompt Helper Section */}
-                <div className="border-t pt-4 mt-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Sparkles className="h-4 w-4 text-purple-500" />
-                    <h3 className="text-sm font-medium">AI Workflow Generation</h3>
-                  </div>
-                  <p className="text-xs text-muted-foreground mb-3">
-                    Generate workflow definitions using AI. Copy the prompt below and paste it into your AI tool,
-                    or use the context endpoint to build custom integrations.
-                  </p>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="gap-1.5"
-                      onClick={async () => {
-                        try {
-                          const response = await fetch(`${API_BASE}/workflows/ai-prompt?format=mermaid&includeContext=true`, {
-                            headers: getAuthHeader(),
-                          })
-                          const data = await response.json()
-                          await navigator.clipboard.writeText(data.data.prompt)
-                          // Could add a toast notification here
-                        } catch (err) {
-                          console.error('Failed to copy AI prompt:', err)
-                        }
-                      }}
-                    >
-                      <Sparkles className="h-3 w-3" />
-                      Copy AI Prompt (Mermaid)
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="gap-1.5"
-                      onClick={async () => {
-                        try {
-                          const response = await fetch(`${API_BASE}/workflows/ai-prompt?format=json&includeContext=true`, {
-                            headers: getAuthHeader(),
-                          })
-                          const data = await response.json()
-                          await navigator.clipboard.writeText(data.data.prompt)
-                        } catch (err) {
-                          console.error('Failed to copy AI prompt:', err)
-                        }
-                      }}
-                    >
-                      <Sparkles className="h-3 w-3" />
-                      Copy AI Prompt (JSON)
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-2">
-                    API: <code className="bg-muted px-1 rounded">GET /api/workflows/ai-prompt-context</code> for structured context data.
-                  </p>
-                </div>
-
-                {/* Webhook Trigger Section */}
-                <div className="border-t pt-4 mt-4">
-                  <WorkflowWebhook
-                    workflowId={workflow?._id}
-                    workflowName={watch('name')}
-                  />
                 </div>
               </div>
             </TabsContent>

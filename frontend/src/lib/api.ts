@@ -1137,6 +1137,9 @@ export interface Workflow {
   rootTaskTitleTemplate?: string
   // Sample payload template for triggering this workflow - helps agents/callers know what data to provide
   samplePayload?: string
+  // Organization and display
+  folderId?: string | null
+  color?: string  // Pastel hex color for visual identification
 }
 
 // Activity Log Types

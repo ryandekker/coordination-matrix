@@ -1410,6 +1410,43 @@ export function TaskDataTable({
         )
       }
 
+      // For workflow references, show name with color indicator
+      if (fieldConfig.referenceCollection === 'workflows') {
+        // Try to find workflow in workflows array
+        if (currentId) {
+          const workflow = workflows.find(w => w._id === currentId)
+          if (workflow) {
+            return (
+              <div className="flex items-center justify-center gap-1.5">
+                {workflow.color && (
+                  <div
+                    className="w-2.5 h-2.5 rounded-full flex-shrink-0 border border-black/10"
+                    style={{ backgroundColor: workflow.color }}
+                  />
+                )}
+                <span className="truncate max-w-[120px]">{workflow.name}</span>
+              </div>
+            )
+          }
+        }
+        // Fallback to resolved ref
+        const resolvedWorkflow = ref as { name?: string; color?: string } | undefined
+        if (resolvedWorkflow?.name) {
+          return (
+            <div className="flex items-center justify-center gap-1.5">
+              {resolvedWorkflow.color && (
+                <div
+                  className="w-2.5 h-2.5 rounded-full flex-shrink-0 border border-black/10"
+                  style={{ backgroundColor: resolvedWorkflow.color }}
+                />
+              )}
+              <span className="truncate max-w-[120px]">{resolvedWorkflow.name}</span>
+            </div>
+          )
+        }
+        return <span className="block text-center text-muted-foreground">-</span>
+      }
+
       // For other references (teams, etc.), show displayName or name
       const refDisplay = ref as { displayName?: string; name?: string } | undefined
       if (refDisplay?.displayName || refDisplay?.name) {

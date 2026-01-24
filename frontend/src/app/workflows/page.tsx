@@ -37,6 +37,9 @@ import {
   Search,
   X,
   Book,
+  Folder,
+  FolderOpen,
+  Circle,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -163,6 +166,14 @@ interface StepCounts {
   other: number
 }
 
+interface WorkflowFolder {
+  _id: string
+  name: string
+  description?: string
+  sortOrder: number
+  isExpanded: boolean
+}
+
 interface WorkflowData {
   _id: string
   name: string
@@ -171,6 +182,8 @@ interface WorkflowData {
   steps?: WorkflowStep[]
   stages?: string[]  // Legacy format - simple stage names
   mermaidDiagram?: string
+  folderId?: string | null
+  color?: string
   createdAt: string
   updatedAt?: string
 }
@@ -183,9 +196,25 @@ interface BriefWorkflowData {
   isActive: boolean
   stepCounts: StepCounts
   mermaidDiagram?: string
+  folderId?: string | null
+  color?: string
   createdAt: string
   updatedAt?: string
 }
+
+// Pastel color palette for workflows
+const WORKFLOW_COLORS = [
+  { name: 'Sky', value: '#BAE6FD' },
+  { name: 'Lavender', value: '#DDD6FE' },
+  { name: 'Rose', value: '#FECDD3' },
+  { name: 'Mint', value: '#A7F3D0' },
+  { name: 'Peach', value: '#FED7AA' },
+  { name: 'Coral', value: '#FECACA' },
+  { name: 'Lemon', value: '#FEF08A' },
+  { name: 'Periwinkle', value: '#C7D2FE' },
+  { name: 'Aqua', value: '#99F6E4' },
+  { name: 'Stone', value: '#D6D3D1' },
+] as const
 
 interface WorkflowStats {
   runCount: number
@@ -207,6 +236,41 @@ async function fetchWorkflows(): Promise<{ data: BriefWorkflowData[] }> {
     throw new Error('Failed to fetch workflows')
   }
   return response.json()
+}
+
+async function fetchWorkflowFolders(): Promise<{ data: WorkflowFolder[] }> {
+  const response = await authFetch(`${API_BASE}/workflow-folders`)
+  if (!response.ok) {
+    throw new Error('Failed to fetch workflow folders')
+  }
+  return response.json()
+}
+
+async function createWorkflowFolder(data: Partial<WorkflowFolder>): Promise<{ data: WorkflowFolder }> {
+  const response = await authFetch(`${API_BASE}/workflow-folders`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!response.ok) throw new Error('Failed to create folder')
+  return response.json()
+}
+
+async function updateWorkflowFolder(id: string, data: Partial<WorkflowFolder>): Promise<{ data: WorkflowFolder }> {
+  const response = await authFetch(`${API_BASE}/workflow-folders/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!response.ok) throw new Error('Failed to update folder')
+  return response.json()
+}
+
+async function deleteWorkflowFolder(id: string): Promise<void> {
+  const response = await authFetch(`${API_BASE}/workflow-folders/${id}`, {
+    method: 'DELETE',
+  })
+  if (!response.ok) throw new Error('Failed to delete folder')
 }
 
 async function fetchWorkflowById(id: string): Promise<{ data: WorkflowData }> {
@@ -348,12 +412,34 @@ export default function WorkflowsPage() {
   // Filter and selection state
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null) // null = all, 'unfiled' = no folder
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+  // Initialize collapsed folders from localStorage (tracks COLLAPSED folders)
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set()
+    try {
+      const stored = localStorage.getItem('workflow-collapsed-folders')
+      return stored ? new Set(JSON.parse(stored)) : new Set()
+    } catch {
+      return new Set()
+    }
+  })
+
+  // Folder management state
+  const [folderDialogOpen, setFolderDialogOpen] = useState(false)
+  const [editingFolder, setEditingFolder] = useState<WorkflowFolder | null>(null)
+  const [newFolderName, setNewFolderName] = useState('')
+  const [deleteFolderConfirm, setDeleteFolderConfirm] = useState<WorkflowFolder | null>(null)
 
   const { data: workflowsData, isLoading, error } = useQuery({
     queryKey: ['workflows'],
     queryFn: fetchWorkflows,
+  })
+
+  const { data: foldersData } = useQuery({
+    queryKey: ['workflow-folders'],
+    queryFn: fetchWorkflowFolders,
   })
 
   const { data: statsData } = useQuery({
@@ -369,6 +455,7 @@ export default function WorkflowsPage() {
   })
 
   const users = usersData?.data || []
+  const folders = foldersData?.data || []
   // Use the data directly from query to avoid creating new object references
   const statsMap = statsData?.data
 
@@ -455,6 +542,49 @@ export default function WorkflowsPage() {
       queryClient.invalidateQueries({ queryKey: ['workflows'] })
       setRowSelection({})
       setBulkDeleteConfirm(false)
+    },
+  })
+
+  // Folder mutations
+  const createFolderMutation = useMutation({
+    mutationFn: createWorkflowFolder,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflow-folders'] })
+      setFolderDialogOpen(false)
+      setNewFolderName('')
+    },
+  })
+
+  const updateFolderMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<WorkflowFolder> }) =>
+      updateWorkflowFolder(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflow-folders'] })
+      setEditingFolder(null)
+      setNewFolderName('')
+    },
+  })
+
+  const deleteFolderMutation = useMutation({
+    mutationFn: deleteWorkflowFolder,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflow-folders'] })
+      queryClient.invalidateQueries({ queryKey: ['workflows'] })
+      setDeleteFolderConfirm(null)
+      if (selectedFolderId === deleteFolderConfirm?._id) {
+        setSelectedFolderId(null)
+      }
+    },
+  })
+
+  // Bulk move to folder
+  const bulkMoveToFolderMutation = useMutation({
+    mutationFn: async ({ ids, folderId }: { ids: string[]; folderId: string | null }) => {
+      await Promise.all(ids.map(id => updateWorkflow(id, { folderId })))
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflows'] })
+      setRowSelection({})
     },
   })
 
@@ -548,8 +678,82 @@ export default function WorkflowsPage() {
       )
     }
 
+    // Apply folder filter
+    if (selectedFolderId === 'unfiled') {
+      result = result.filter(w => !w.folderId)
+    } else if (selectedFolderId) {
+      result = result.filter(w => w.folderId === selectedFolderId)
+    }
+
     return result
-  }, [workflowsData?.data, statsMap, searchQuery, statusFilter, loadedSteps])
+  }, [workflowsData?.data, statsMap, searchQuery, statusFilter, selectedFolderId, loadedSteps])
+
+  // Group workflows by folder when no folder filter is selected
+  const workflowsByFolder = useMemo(() => {
+    // Only compute when showing all folders (no folder filter)
+    if (selectedFolderId !== null) return null
+
+    const grouped: { folder: WorkflowFolder | null; workflows: WorkflowListItem[] }[] = []
+
+    // Get workflows in each folder
+    const folderMap = new Map<string | null, WorkflowListItem[]>()
+    folderMap.set(null, []) // Unfiled
+
+    for (const folder of folders) {
+      folderMap.set(folder._id, [])
+    }
+
+    for (const workflow of workflows) {
+      const folderId = workflow.folderId || null
+      if (!folderMap.has(folderId)) {
+        folderMap.set(folderId, [])
+      }
+      folderMap.get(folderId)!.push(workflow)
+    }
+
+    // Build result: folders first (sorted by sortOrder), then unfiled
+    for (const folder of folders.sort((a, b) => a.sortOrder - b.sortOrder)) {
+      const folderWorkflows = folderMap.get(folder._id) || []
+      if (folderWorkflows.length > 0) {
+        grouped.push({ folder, workflows: folderWorkflows })
+      }
+    }
+
+    // Add unfiled workflows at the end
+    const unfiledWorkflows = folderMap.get(null) || []
+    if (unfiledWorkflows.length > 0 || grouped.length === 0) {
+      grouped.push({ folder: null, workflows: unfiledWorkflows })
+    }
+
+    return grouped
+  }, [workflows, folders, selectedFolderId])
+
+  // Toggle folder expansion (tracks collapsed folders - default is expanded)
+  const toggleFolderExpanded = useCallback((folderId: string | null) => {
+    const key = folderId || '__unfiled__'
+    setExpandedFolders(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      // Persist to localStorage
+      try {
+        localStorage.setItem('workflow-collapsed-folders', JSON.stringify(Array.from(next)))
+      } catch {
+        // Ignore storage errors
+      }
+      return next
+    })
+  }, [])
+
+  // Check if folder is expanded (default to expanded, set tracks collapsed folders)
+  const isFolderExpanded = useCallback((folderId: string | null) => {
+    const key = folderId || '__unfiled__'
+    // expandedFolders tracks COLLAPSED folders (confusing name, but keeps state minimal)
+    return !expandedFolders.has(key)
+  }, [expandedFolders])
 
   // Get selected workflow IDs
   const selectedWorkflowIds = useMemo(() => {
@@ -698,12 +902,21 @@ export default function WorkflowsPage() {
       accessorKey: 'name',
       header: 'Workflow',
       cell: ({ row }) => (
-        <button
-          className="font-medium text-left hover:underline focus:outline-none focus:underline"
-          onClick={() => openEditEditor(row.original)}
-        >
-          {row.original.name}
-        </button>
+        <div className="flex items-center gap-2">
+          {row.original.color && (
+            <div
+              className="w-3 h-3 rounded-full flex-shrink-0 border border-black/10"
+              style={{ backgroundColor: row.original.color }}
+              title="Workflow color"
+            />
+          )}
+          <button
+            className="font-medium text-left hover:underline focus:outline-none focus:underline"
+            onClick={() => openEditEditor(row.original)}
+          >
+            {row.original.name}
+          </button>
+        </div>
       ),
     },
     {
@@ -949,12 +1162,66 @@ export default function WorkflowsPage() {
           </SelectContent>
         </Select>
 
+        {/* Folder filter */}
+        <Select value={selectedFolderId || 'all'} onValueChange={(v) => setSelectedFolderId(v === 'all' ? null : v)}>
+          <SelectTrigger className="w-[160px]">
+            <div className="flex items-center gap-2">
+              <Folder className="h-3 w-3" />
+              <SelectValue placeholder="Folder" />
+            </div>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Folders</SelectItem>
+            <SelectItem value="unfiled">No Folder</SelectItem>
+            {folders.map(folder => (
+              <SelectItem key={folder._id} value={folder._id}>
+                <div className="flex items-center gap-2">
+                  <FolderOpen className="h-3 w-3 text-muted-foreground" />
+                  {folder.name}
+                </div>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {/* Create Folder */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => { setEditingFolder(null); setNewFolderName(''); setFolderDialogOpen(true); }}
+        >
+          <Folder className="h-4 w-4 mr-1" />
+          New Folder
+        </Button>
+
+        {/* Manage existing folders */}
+        {folders.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm">
+                <Settings2 className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              {folders.map(folder => (
+                <DropdownMenuItem
+                  key={folder._id}
+                  onClick={() => { setEditingFolder(folder); setNewFolderName(folder.name); setFolderDialogOpen(true); }}
+                >
+                  <Pencil className="h-4 w-4 mr-2" />
+                  Edit "{folder.name}"
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
         {/* Clear filters */}
-        {(searchQuery || statusFilter !== 'all') && (
+        {(searchQuery || statusFilter !== 'all' || selectedFolderId) && (
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => { setSearchQuery(''); setStatusFilter('all'); }}
+            onClick={() => { setSearchQuery(''); setStatusFilter('all'); setSelectedFolderId(null); }}
           >
             <X className="h-4 w-4 mr-1" />
             Clear
@@ -994,6 +1261,32 @@ export default function WorkflowsPage() {
               <Pause className="h-4 w-4 mr-1" />
               Disable
             </Button>
+            {/* Move to folder dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Folder className="h-4 w-4 mr-1" />
+                  Move to Folder
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem
+                  onClick={() => bulkMoveToFolderMutation.mutate({ ids: selectedWorkflowIds, folderId: null })}
+                >
+                  No Folder
+                </DropdownMenuItem>
+                {folders.length > 0 && <DropdownMenuSeparator />}
+                {folders.map(folder => (
+                  <DropdownMenuItem
+                    key={folder._id}
+                    onClick={() => bulkMoveToFolderMutation.mutate({ ids: selectedWorkflowIds, folderId: folder._id })}
+                  >
+                    <FolderOpen className="h-4 w-4 mr-2 text-muted-foreground" />
+                    {folder.name}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               variant="outline"
               size="sm"
@@ -1062,64 +1355,184 @@ export default function WorkflowsPage() {
               ))}
             </TableHeader>
             <TableBody>
-              {table.getRowModel().rows.map(row => {
-                const isExpanded = expandedRows.has(row.original._id)
-                const isLoading = loadingSteps.has(row.original._id)
-                const steps = row.original.steps || []
-                return (
-                  <React.Fragment key={row.id}>
-                    <TableRow>
-                      {row.getVisibleCells().map(cell => (
-                        <TableCell
-                          key={cell.id}
-                          className={cell.column.id === 'select' ? 'w-12 pr-0' : undefined}
-                        >
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                    {isExpanded && (
-                      <TableRow className="bg-muted/30 hover:bg-muted/30">
-                        <TableCell colSpan={columns.length} className="p-0">
-                          <div className="px-4 py-3">
-                            {isLoading ? (
-                              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-                                Loading steps...
-                              </div>
-                            ) : steps.length > 0 ? (
-                              <table className="w-full text-sm">
-                                <thead>
-                                  <tr className="text-left text-muted-foreground">
-                                    <th className="pb-2 pl-1 w-8">#</th>
-                                    <th className="pb-2 w-8"></th>
-                                    <th className="pb-2">Step Name</th>
-                                    <th className="pb-2 w-24">Type</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {steps.map((step, idx) => (
-                                    <tr key={step.id || idx} className="border-t border-border/50">
-                                      <td className="py-1.5 pl-1 text-muted-foreground">{idx + 1}</td>
-                                      <td className="py-1.5">{getStepTypeIcon(step.stepType, step.execution, step.type)}</td>
-                                      <td className="py-1.5">{step.name}</td>
-                                      <td className="py-1.5 text-muted-foreground capitalize">
-                                        {step.stepType || (step.execution === 'manual' || step.type === 'manual' ? 'manual' : 'agent')}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
+              {workflowsByFolder ? (
+                // Grouped view - show folders with nested workflows
+                workflowsByFolder.map(({ folder, workflows: folderWorkflows }) => {
+                  const folderId = folder?._id || null
+                  const folderKey = folderId || '__unfiled__'
+                  const isExpanded = isFolderExpanded(folderId)
+                  const folderRows = table.getRowModel().rows.filter(row =>
+                    (row.original.folderId || null) === folderId
+                  )
+
+                  return (
+                    <React.Fragment key={folderKey}>
+                      {/* Folder header row */}
+                      <TableRow
+                        className="bg-muted/50 hover:bg-muted/60 cursor-pointer"
+                        onClick={() => toggleFolderExpanded(folderId)}
+                      >
+                        <TableCell colSpan={columns.length} className="py-2">
+                          <div className="flex items-center gap-2">
+                            {isExpanded ? (
+                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
                             ) : (
-                              <div className="text-sm text-muted-foreground italic">No steps defined</div>
+                              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                            )}
+                            {folder && (
+                              <FolderOpen className="h-4 w-4 text-amber-500" />
+                            )}
+                            <span className={cn("font-medium", !folder && "text-muted-foreground")}>
+                              {folder ? folder.name : 'No Folder'}
+                            </span>
+                            <Badge variant="secondary" className="ml-1">
+                              {folderWorkflows.length}
+                            </Badge>
+                            {folder && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0 ml-auto opacity-0 group-hover:opacity-100"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setEditingFolder(folder)
+                                  setNewFolderName(folder.name)
+                                  setFolderDialogOpen(true)
+                                }}
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
                             )}
                           </div>
                         </TableCell>
                       </TableRow>
-                    )}
-                  </React.Fragment>
-                )
-              })}
+
+                      {/* Folder contents */}
+                      {isExpanded && folderRows.map(row => {
+                        const isWorkflowExpanded = expandedRows.has(row.original._id)
+                        const isLoading = loadingSteps.has(row.original._id)
+                        const steps = row.original.steps || []
+                        return (
+                          <React.Fragment key={row.id}>
+                            <TableRow className="bg-background">
+                              {row.getVisibleCells().map(cell => (
+                                <TableCell
+                                  key={cell.id}
+                                  className={cn(
+                                    cell.column.id === 'select' ? 'w-12 pr-0' : undefined,
+                                    cell.column.id === 'name' ? 'pl-8' : undefined
+                                  )}
+                                >
+                                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                            {isWorkflowExpanded && (
+                              <TableRow className="bg-muted/30 hover:bg-muted/30">
+                                <TableCell colSpan={columns.length} className="p-0">
+                                  <div className="px-4 py-3 ml-6">
+                                    {isLoading ? (
+                                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+                                        Loading steps...
+                                      </div>
+                                    ) : steps.length > 0 ? (
+                                      <table className="w-full text-sm">
+                                        <thead>
+                                          <tr className="text-left text-muted-foreground">
+                                            <th className="pb-2 pl-1 w-8">#</th>
+                                            <th className="pb-2 w-8"></th>
+                                            <th className="pb-2">Step Name</th>
+                                            <th className="pb-2 w-24">Type</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {steps.map((step, idx) => (
+                                            <tr key={step.id || idx} className="border-t border-border/50">
+                                              <td className="py-1.5 pl-1 text-muted-foreground">{idx + 1}</td>
+                                              <td className="py-1.5">{getStepTypeIcon(step.stepType, step.execution, step.type)}</td>
+                                              <td className="py-1.5">{step.name}</td>
+                                              <td className="py-1.5 text-muted-foreground capitalize">
+                                                {step.stepType || (step.execution === 'manual' || step.type === 'manual' ? 'manual' : 'agent')}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    ) : (
+                                      <div className="text-sm text-muted-foreground italic">No steps defined</div>
+                                    )}
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </React.Fragment>
+                        )
+                      })}
+                    </React.Fragment>
+                  )
+                })
+              ) : (
+                // Flat view - when a folder filter is selected
+                table.getRowModel().rows.map(row => {
+                  const isExpanded = expandedRows.has(row.original._id)
+                  const isLoading = loadingSteps.has(row.original._id)
+                  const steps = row.original.steps || []
+                  return (
+                    <React.Fragment key={row.id}>
+                      <TableRow>
+                        {row.getVisibleCells().map(cell => (
+                          <TableCell
+                            key={cell.id}
+                            className={cell.column.id === 'select' ? 'w-12 pr-0' : undefined}
+                          >
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                      {isExpanded && (
+                        <TableRow className="bg-muted/30 hover:bg-muted/30">
+                          <TableCell colSpan={columns.length} className="p-0">
+                            <div className="px-4 py-3">
+                              {isLoading ? (
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+                                  Loading steps...
+                                </div>
+                              ) : steps.length > 0 ? (
+                                <table className="w-full text-sm">
+                                  <thead>
+                                    <tr className="text-left text-muted-foreground">
+                                      <th className="pb-2 pl-1 w-8">#</th>
+                                      <th className="pb-2 w-8"></th>
+                                      <th className="pb-2">Step Name</th>
+                                      <th className="pb-2 w-24">Type</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {steps.map((step, idx) => (
+                                      <tr key={step.id || idx} className="border-t border-border/50">
+                                        <td className="py-1.5 pl-1 text-muted-foreground">{idx + 1}</td>
+                                        <td className="py-1.5">{getStepTypeIcon(step.stepType, step.execution, step.type)}</td>
+                                        <td className="py-1.5">{step.name}</td>
+                                        <td className="py-1.5 text-muted-foreground capitalize">
+                                          {step.stepType || (step.execution === 'manual' || step.type === 'manual' ? 'manual' : 'agent')}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              ) : (
+                                <div className="text-sm text-muted-foreground italic">No steps defined</div>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </React.Fragment>
+                  )
+                })
+              )}
             </TableBody>
           </Table>
         </div>
@@ -1321,6 +1734,90 @@ export default function WorkflowsPage() {
         onClose={() => setIsApiDocsOpen(false)}
         workflows={workflows.map(w => ({ _id: w._id, name: w.name }))}
       />
+
+      {/* Folder Create/Edit Dialog */}
+      <Dialog open={folderDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          setFolderDialogOpen(false)
+          setEditingFolder(null)
+          setNewFolderName('')
+        }
+      }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{editingFolder ? 'Edit Folder' : 'Create Folder'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">Folder Name</label>
+              <Input
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                placeholder="e.g., Sales, Operations"
+                className="mt-1"
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            {editingFolder && (
+              <Button
+                variant="outline"
+                className="text-destructive hover:text-destructive mr-auto"
+                onClick={() => {
+                  setFolderDialogOpen(false)
+                  setDeleteFolderConfirm(editingFolder)
+                }}
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                Delete
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => {
+              setFolderDialogOpen(false)
+              setEditingFolder(null)
+              setNewFolderName('')
+            }}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (!newFolderName.trim()) return
+                if (editingFolder) {
+                  updateFolderMutation.mutate({ id: editingFolder._id, data: { name: newFolderName.trim() } })
+                } else {
+                  createFolderMutation.mutate({ name: newFolderName.trim() })
+                }
+              }}
+              disabled={!newFolderName.trim() || createFolderMutation.isPending || updateFolderMutation.isPending}
+            >
+              {(createFolderMutation.isPending || updateFolderMutation.isPending) ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Folder Confirmation */}
+      <AlertDialog open={!!deleteFolderConfirm} onOpenChange={(open) => !open && setDeleteFolderConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Folder: {deleteFolderConfirm?.name}</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this folder? Workflows in this folder will be moved to &quot;Unfiled&quot;.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => deleteFolderConfirm && deleteFolderMutation.mutate(deleteFolderConfirm._id)}
+              disabled={deleteFolderMutation.isPending}
+            >
+              {deleteFolderMutation.isPending ? 'Deleting...' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

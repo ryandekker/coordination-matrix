@@ -17,14 +17,22 @@ workflowsRouter.use(aiPromptRoutes);
 // Query params:
 //   - includeInactive: 'true' to include inactive workflows
 //   - brief: 'true' to return step counts instead of full steps array (for faster list views)
+//   - folderId: filter by folder (use 'null' for unfiled workflows)
 workflowsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { includeInactive, brief } = req.query;
+    const { includeInactive, brief, folderId } = req.query;
 
     const filter: Record<string, unknown> = {};
     if (includeInactive !== 'true') {
       filter.isActive = true;
+    }
+
+    // Filter by folder
+    if (folderId === 'null') {
+      filter.folderId = { $in: [null, undefined] };
+    } else if (folderId) {
+      filter.folderId = new ObjectId(folderId as string);
     }
 
     const workflows = await db
@@ -186,7 +194,7 @@ function ensureStepIds(steps: WorkflowStep[]): WorkflowStep[] {
 workflowsRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { name, description, steps, mermaidDiagram, isActive } = req.body;
+    const { name, description, steps, mermaidDiagram, isActive, folderId, color } = req.body;
 
     if (!name) {
       throw createError('name is required', 400);
@@ -199,6 +207,8 @@ workflowsRouter.post('/', async (req: Request, res: Response, next: NextFunction
       isActive: isActive ?? true,
       steps: ensureStepIds(steps || []),
       mermaidDiagram: mermaidDiagram || '',
+      folderId: folderId ? new ObjectId(folderId) : null,
+      color: color || undefined,
       createdAt: now,
       updatedAt: now,
       createdById: req.body.createdById ? new ObjectId(req.body.createdById) : null,
@@ -226,6 +236,11 @@ workflowsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
 
     if (updates.steps) {
       updates.steps = ensureStepIds(updates.steps);
+    }
+
+    // Handle folderId conversion
+    if ('folderId' in updates) {
+      updates.folderId = updates.folderId ? new ObjectId(updates.folderId) : null;
     }
 
     const result = await db.collection<Workflow>('workflows').findOneAndUpdate(
@@ -281,6 +296,8 @@ workflowsRouter.post('/:id/duplicate', async (req: Request, res: Response, next:
       isActive: false,
       steps: original.steps.map((step) => ({ ...step, id: new ObjectId().toString() })),
       mermaidDiagram: original.mermaidDiagram,
+      folderId: original.folderId || null,
+      color: original.color,
       createdAt: now,
       updatedAt: now,
       createdById: req.body.createdById ? new ObjectId(req.body.createdById) : null,

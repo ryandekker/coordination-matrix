@@ -457,8 +457,54 @@ const userResult = db.users.insertMany(users);
 const userIds = Object.values(userResult.insertedIds);
 
 // ============================================================================
-// SAMPLE WORKFLOWS
+// WORKFLOW FOLDERS
 // ============================================================================
+
+const workflowFolderContentId = ObjectId();
+const workflowFolderEngineeringId = ObjectId();
+
+const workflowFolders = [
+  {
+    _id: workflowFolderContentId,
+    name: 'Content',
+    description: 'Content creation and publishing workflows',
+    sortOrder: 0,
+    isExpanded: true,
+    createdById: userIds[0],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    _id: workflowFolderEngineeringId,
+    name: 'Engineering',
+    description: 'Software development workflows',
+    sortOrder: 1,
+    isExpanded: true,
+    createdById: userIds[0],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+];
+
+db.workflow_folders.insertMany(workflowFolders);
+
+// ============================================================================
+// SAMPLE WORKFLOWS (with folder assignments and pastel colors)
+// ============================================================================
+
+// Pastel color palette for workflows
+const WORKFLOW_COLORS = {
+  sky: '#BAE6FD',       // pastel blue
+  lavender: '#DDD6FE', // pastel purple
+  rose: '#FECDD3',     // pastel pink
+  mint: '#A7F3D0',     // pastel green
+  peach: '#FED7AA',    // pastel orange
+  coral: '#FECACA',    // pastel red
+  lemon: '#FEF08A',    // pastel yellow
+  periwinkle: '#C7D2FE', // pastel indigo
+  aqua: '#99F6E4',     // pastel teal
+  stone: '#D6D3D1',    // pastel gray
+};
 
 const workflows = [
   {
@@ -466,6 +512,8 @@ const workflows = [
     description: 'Standard workflow for AI-assisted content generation',
     isActive: true,
     stages: ['Draft', 'Review', 'Approved', 'Published'],
+    folderId: workflowFolderContentId,
+    color: WORKFLOW_COLORS.sky,
     createdAt: new Date(),
     updatedAt: new Date(),
   },
@@ -474,6 +522,8 @@ const workflows = [
     description: 'Workflow for tracking and resolving bugs',
     isActive: true,
     stages: ['Reported', 'Investigating', 'Fix in Progress', 'Testing', 'Deployed'],
+    folderId: workflowFolderEngineeringId,
+    color: WORKFLOW_COLORS.coral,
     createdAt: new Date(),
     updatedAt: new Date(),
   },
@@ -482,6 +532,8 @@ const workflows = [
     description: 'Workflow for new feature development',
     isActive: true,
     stages: ['Planning', 'Design', 'Development', 'Code Review', 'QA', 'Released'],
+    folderId: workflowFolderEngineeringId,
+    color: WORKFLOW_COLORS.mint,
     createdAt: new Date(),
     updatedAt: new Date(),
   },

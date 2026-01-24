@@ -244,12 +244,21 @@ db.createCollection('teams');
 db.teams.createIndex({ name: 1 }, { unique: true });
 
 // ============================================================================
+// WORKFLOW FOLDERS - Organize workflows into folders
+// ============================================================================
+db.createCollection('workflow_folders');
+
+db.workflow_folders.createIndex({ sortOrder: 1 });
+db.workflow_folders.createIndex({ createdById: 1 });
+
+// ============================================================================
 // WORKFLOWS - Workflow definitions
 // ============================================================================
 db.createCollection('workflows');
 
 db.workflows.createIndex({ name: 1 });
 db.workflows.createIndex({ isActive: 1 });
+db.workflows.createIndex({ folderId: 1 });
 
 // ============================================================================
 // WORKFLOW RUNS - Workflow execution instances

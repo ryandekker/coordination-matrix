@@ -137,6 +137,10 @@ export interface Workflow {
 
   // Sample payload template for triggering this workflow - helps agents/callers know what data to provide
   samplePayload?: string
+
+  // Organization and display
+  folderId?: string | null  // Reference to workflow folder
+  color?: string            // Pastel hex color for visual identification
 }
 
 export interface WorkflowEditorProps {

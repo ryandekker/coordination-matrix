@@ -679,6 +679,37 @@ export interface ViewFolder {
 }
 
 // ============================================================================
+// Workflow Folder Types
+// ============================================================================
+
+export interface WorkflowFolder {
+  _id: ObjectId;
+  name: string;
+  description?: string;
+  sortOrder: number;
+  isExpanded: boolean;
+  createdById?: ObjectId | null;
+  createdAt: Date;
+  updatedAt?: Date;
+}
+
+// Pastel color palette for workflows (softer than UI colors)
+export const WORKFLOW_COLORS = [
+  { name: 'Sky', value: '#BAE6FD' },      // pastel blue
+  { name: 'Lavender', value: '#DDD6FE' }, // pastel purple
+  { name: 'Rose', value: '#FECDD3' },     // pastel pink
+  { name: 'Mint', value: '#A7F3D0' },     // pastel green
+  { name: 'Peach', value: '#FED7AA' },    // pastel orange
+  { name: 'Coral', value: '#FECACA' },    // pastel red
+  { name: 'Lemon', value: '#FEF08A' },    // pastel yellow
+  { name: 'Periwinkle', value: '#C7D2FE' }, // pastel indigo
+  { name: 'Aqua', value: '#99F6E4' },     // pastel teal
+  { name: 'Stone', value: '#D6D3D1' },    // pastel gray
+] as const;
+
+export type WorkflowColor = typeof WORKFLOW_COLORS[number]['value'];
+
+// ============================================================================
 // User Preference Types
 // ============================================================================
 
@@ -1059,6 +1090,10 @@ export interface Workflow {
 
   // Dynamic title template for the root task - supports {{input.field}} variables
   rootTaskTitleTemplate?: string;
+
+  // Organization and display
+  folderId?: ObjectId | null;  // Reference to workflow folder
+  color?: string;              // Pastel hex color (e.g., "#BAE6FD")
 
   createdAt: Date;
   updatedAt: Date;
