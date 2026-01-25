@@ -6,6 +6,8 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useUsers } from '@/hooks/use-tasks'
 import { workflowsApi, Workflow as ApiWorkflow } from '@/lib/api'
+import { useGroupContext } from '@/lib/group-context'
+import { Users } from 'lucide-react'
 import { getAuthHeader } from '@/lib/auth'
 import {
   Dialog,
@@ -199,6 +201,7 @@ export function WorkflowEditor({
   const [mermaidCode, setMermaidCode] = useState('')
   const [selectedColor, setSelectedColor] = useState<string | undefined>(undefined)
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null)
   const [mermaidError, setMermaidError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState('integrated')
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
@@ -222,6 +225,9 @@ export function WorkflowEditor({
   // Fetch users for default assignee dropdown
   const { data: usersData } = useUsers()
   const users = usersData?.data || []
+
+  // Get groups from context
+  const { groups, currentGroupId } = useGroupContext()
 
   // Fetch workflow folders
   const { data: foldersData } = useQuery({
@@ -300,6 +306,7 @@ export function WorkflowEditor({
       setSamplePayload(workflow.samplePayload || '')
       setSelectedColor(workflow.color || undefined)
       setSelectedFolderId(workflow.folderId || null)
+      setSelectedGroupId(workflow.groupId || null)
     } else {
       reset({
         name: '',
@@ -312,8 +319,10 @@ export function WorkflowEditor({
       setSamplePayload('')
       setSelectedColor(undefined)
       setSelectedFolderId(null)
+      // Default to current group for new workflows
+      setSelectedGroupId(currentGroupId || null)
     }
-  }, [workflow, reset])
+  }, [workflow, reset, currentGroupId])
 
   // Fetch available workflows for Flow step type (nested workflows)
   useEffect(() => {
@@ -460,6 +469,7 @@ export function WorkflowEditor({
       samplePayload: samplePayload || undefined,
       color: selectedColor,
       folderId: selectedFolderId,
+      groupId: selectedGroupId,
     }
     onSave(workflowData)
   }
@@ -765,6 +775,39 @@ export function WorkflowEditor({
                       <Folder className="h-4 w-4 text-muted-foreground" />
                       Organization
                     </h3>
+
+                    {/* Group selector */}
+                    <div className="space-y-2">
+                      <label className="text-sm">Group</label>
+                      <Select
+                        value={selectedGroupId || 'none'}
+                        onValueChange={(val) => setSelectedGroupId(val === 'none' ? null : val)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select group" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              <Users className="h-3.5 w-3.5" />
+                              <span>No group (admin only)</span>
+                            </div>
+                          </SelectItem>
+                          {groups.map((group) => (
+                            <SelectItem key={group._id} value={group._id}>
+                              <div className="flex items-center gap-2">
+                                <Users className="h-3.5 w-3.5" />
+                                <span>{group.displayName}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Which group this workflow belongs to
+                      </p>
+                    </div>
+
                     <div className="space-y-2">
                       <label className="text-sm">Folder</label>
                       <div className="flex gap-2">

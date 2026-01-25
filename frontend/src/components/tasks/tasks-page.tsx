@@ -97,7 +97,7 @@ export function TasksPage() {
   const projectIdFromUrl = searchParams.get('projectId')  // For filtering by project
 
   // Get projects from group context
-  const { projects, currentGroupId } = useGroupContext()
+  const { projects, groups, currentGroupId } = useGroupContext()
 
   const [selectedView, setSelectedView] = useState<string | null>(null)
   const [filters, setFilters] = useState<Record<string, unknown>>({})
@@ -491,6 +491,7 @@ export function TasksPage() {
         lookups={lookups}
         users={users}
         workflows={workflows}
+        groups={groups}
         visibleColumns={effectiveVisibleColumns}
         sortBy={sortBy}
         sortOrder={sortOrder}

@@ -1120,6 +1120,8 @@ export interface Task {
   extraPrompt?: string
   status: string
   urgency?: string
+  groupId?: string | null
+  projectId?: string | null
   parentId: string | null
   workflowId?: string | null
   workflowRunId?: string | null
