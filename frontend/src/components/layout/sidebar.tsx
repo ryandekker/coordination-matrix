@@ -28,6 +28,7 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  FolderKanban,
   MoreHorizontal,
   Pencil,
   Variable,
@@ -85,6 +86,8 @@ const bottomNavigation: NavItem[] = [
 ]
 
 const settingsNavigation: NavItem[] = [
+  { name: 'Groups', href: '/settings/groups', icon: Users, exact: true },
+  { name: 'Projects', href: '/settings/projects', icon: FolderKanban, exact: true },
   { name: 'Field Configuration', href: '/settings/fields', icon: Database, exact: true },
   { name: 'Tags', href: '/settings/tags', icon: Tags, exact: true },
   { name: 'Variables', href: '/settings/variables', icon: Variable, exact: true },
