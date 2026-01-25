@@ -154,6 +154,7 @@ export function parseMermaidToStepsWithWarnings(mermaid: string): ParseMermaidRe
 
       if (classType) {
         const classToType: Record<string, WorkflowStepType> = {
+          'trigger': 'trigger',
           'agent': 'agent',
           'manual': 'manual',
           'external': 'external',
@@ -162,6 +163,8 @@ export function parseMermaidToStepsWithWarnings(mermaid: string): ParseMermaidRe
           'foreach': 'foreach',
           'join': 'join',
           'flow': 'flow',
+          'code': 'code',
+          'findDocument': 'findDocument',
         };
         stepType = classToType[classType] || 'agent';
       } else if (lowerText.startsWith('ext:') || lowerText.startsWith('api:') || lowerText.startsWith('webhook:')) {
@@ -417,10 +420,14 @@ export function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string):
     }
 
     switch (step.stepType) {
+      case 'trigger':
+        lines.push(`    ${nodeId}>"${nodeName}"]`);
+        break;
       case 'agent':
         lines.push(`    ${nodeId}["${nodeName}"]`);
         break;
       case 'external':
+      case 'webhook':
         lines.push(`    ${nodeId}{{"${nodeName}"}}`);
         break;
       case 'manual':
@@ -437,6 +444,12 @@ export function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string):
         break;
       case 'flow':
         lines.push(`    ${nodeId}[["Run: ${nodeName}"]]`);
+        break;
+      case 'code':
+        lines.push(`    ${nodeId}[/"${nodeName}"/]`);
+        break;
+      case 'findDocument':
+        lines.push(`    ${nodeId}[("${nodeName}")]`);
         break;
       default:
         const execution = step.execution || step.type || 'automated';
@@ -485,6 +498,7 @@ export function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string):
   }
 
   lines.push('');
+  lines.push('    classDef trigger fill:#6B7280,color:#fff');
   lines.push('    classDef agent fill:#3B82F6,color:#fff');
   lines.push('    classDef external fill:#F97316,color:#fff');
   lines.push('    classDef manual fill:#8B5CF6,color:#fff');
@@ -492,9 +506,11 @@ export function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string):
   lines.push('    classDef foreach fill:#10B981,color:#fff');
   lines.push('    classDef join fill:#6366F1,color:#fff');
   lines.push('    classDef flow fill:#EC4899,color:#fff');
+  lines.push('    classDef code fill:#0EA5E9,color:#fff');
+  lines.push('    classDef findDocument fill:#14B8A6,color:#fff');
 
   const classGroups: Record<string, string[]> = {
-    agent: [], external: [], manual: [], decision: [], foreach: [], join: [], flow: [],
+    trigger: [], agent: [], external: [], manual: [], decision: [], foreach: [], join: [], flow: [], code: [], findDocument: [],
   };
 
   for (let i = 0; i < steps.length; i++) {
@@ -502,13 +518,17 @@ export function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string):
     const nodeId = step.id || `step${i}`;
 
     switch (step.stepType) {
+      case 'trigger': classGroups.trigger.push(nodeId); break;
       case 'agent': classGroups.agent.push(nodeId); break;
       case 'external': classGroups.external.push(nodeId); break;
+      case 'webhook': classGroups.external.push(nodeId); break;
       case 'manual': classGroups.manual.push(nodeId); break;
       case 'decision': classGroups.decision.push(nodeId); break;
       case 'foreach': classGroups.foreach.push(nodeId); break;
       case 'join': classGroups.join.push(nodeId); break;
       case 'flow': classGroups.flow.push(nodeId); break;
+      case 'code': classGroups.code.push(nodeId); break;
+      case 'findDocument': classGroups.findDocument.push(nodeId); break;
       default:
         const execution = step.execution || step.type || 'automated';
         if (execution === 'manual') {
@@ -585,11 +605,16 @@ export function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId
     let nodeClass: string;
 
     switch (step.stepType) {
+      case 'trigger':
+        nodeShape = `${nodeId}>"${nodeName}"]`;
+        nodeClass = 'trigger';
+        break;
       case 'agent':
         nodeShape = `${nodeId}["${nodeName}"]`;
         nodeClass = 'agent';
         break;
       case 'external':
+      case 'webhook':
         nodeShape = `${nodeId}{{"${nodeName}"}}`;
         nodeClass = 'external';
         break;
@@ -612,6 +637,14 @@ export function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId
       case 'flow':
         nodeShape = `${nodeId}[["Run: ${nodeName}"]]`;
         nodeClass = 'flow';
+        break;
+      case 'code':
+        nodeShape = `${nodeId}[/"${nodeName}"/]`;
+        nodeClass = 'code';
+        break;
+      case 'findDocument':
+        nodeShape = `${nodeId}[("${nodeName}")]`;
+        nodeClass = 'findDocument';
         break;
       default:
         nodeShape = `${nodeId}["${nodeName}"]`;

@@ -84,7 +84,51 @@ When importing, only `name` and `steps` are required:
 
 ## Step Types Reference
 
-The system supports 7 distinct step types. Each has a unique visual representation in Mermaid diagrams.
+The system supports **11 distinct step types**. Each has a unique visual representation in Mermaid diagrams and specific execution modes.
+
+### Step Type Quick Reference
+
+| Step Type | Execution Mode | Mermaid Shape | Use Case |
+|-----------|---------------|---------------|----------|
+| `trigger` | immediate | `>"text"]` | Entry point / workflow start |
+| `agent` | automated | `["text"]` | AI-powered tasks |
+| `manual` | manual | `("text")` | Human-in-the-loop tasks |
+| `external` | external_callback | `{{"text"}}` | External API with callback |
+| `webhook` | automated | `{{"text"}}` | Outbound HTTP (no callback) |
+| `decision` | immediate | `{"text"}` | Conditional routing |
+| `foreach` | immediate | `[["Each: text"]]` | Fan-out iteration |
+| `join` | immediate | `[["Join: text"]]` | Fan-in synchronization |
+| `flow` | automated | `[["Run: text"]]` | Nested workflow |
+| `code` | automated | `[/"text"/]` | JavaScript code execution |
+| `findDocument` | automated | `[(text)]` | Semantic document search |
+
+### 0. Trigger Step (`trigger`)
+
+Entry point that fires once to begin workflow execution. Typically the first step.
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `id` | string | Yes | Unique identifier |
+| `name` | string | Yes | Display name |
+| `stepType` | `"trigger"` | Yes | Step type |
+
+**Execution Mode:** immediate (runs instantly)
+**Mermaid Shape:** Asymmetric `>"text"]`
+
+```json
+{
+  "id": "start",
+  "name": "Start Workflow",
+  "stepType": "trigger"
+}
+```
+
+```mermaid
+start>"Start Workflow"]
+class start trigger
+```
+
+---
 
 ### 1. Agent Step (`agent`)
 
@@ -407,6 +451,152 @@ runSubworkflow[["Run: Run Validation"]]
 
 ---
 
+### 9. Code Step (`code`)
+
+Execute JavaScript code in a sandboxed vm2 environment.
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `id` | string | Yes | Unique identifier |
+| `name` | string | Yes | Display name |
+| `stepType` | `"code"` | Yes | Step type |
+| `codeConfig` | object | Yes | Code execution configuration |
+
+**codeConfig properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `code` | string | - | JavaScript code to execute (receives `input` variable, must return a value) |
+| `packages` | string[] | [] | Packages to inject into sandbox |
+| `variables` | array | [] | Variable mappings: `{name, path}` to inject context values |
+| `timeout` | number | 30000 | Max execution time in ms |
+| `memoryLimit` | number | 128 | Memory limit in MB |
+| `outputSchema` | object | - | JSON Schema to validate output |
+| `continueOnError` | boolean | false | Complete with error in output instead of failing |
+
+**Available Sandbox Packages (35+):**
+- **HTTP:** node-fetch (as `fetch`), axios, qs
+- **Data:** lodash (as `_`), ramda (as `R`), immer, deepmerge
+- **Strings:** validator, slugify, change-case, marked, sanitize-html
+- **Numbers:** bignumber.js (as `BigNumber`), decimal.js (as `Decimal`), mathjs (as `math`), currency.js
+- **Dates:** date-fns (as `dateFns`), dayjs, luxon, ms
+- **JSON/Data:** jsonpath-plus (as `JSONPath`), json5, yaml, csv-parse, csv-stringify, papaparse (as `Papa`), fast-xml-parser (as `XMLParser`)
+- **Validation:** zod (as `z`), yup, ajv (as `Ajv`)
+- **IDs:** uuid, nanoid, ulid, hashids (as `Hashids`)
+- **Crypto:** crypto-js (as `CryptoJS`), bcryptjs (as `bcrypt`), jsonwebtoken (as `jwt`), js-base64 (as `Base64`)
+- **Async:** p-limit, p-map, p-retry, delay
+- **Templating:** handlebars, mustache, ejs
+- **Other:** fast-json-patch (as `jsonPatch`), diff (as `Diff`), pako, lz-string, @faker-js/faker (as `faker`)
+
+**Mermaid Shape:** Parallelogram `[/"text"/]`
+
+```json
+{
+  "id": "transform",
+  "name": "Transform Data",
+  "stepType": "code",
+  "codeConfig": {
+    "code": "const results = input.items.map(i => ({ name: i.name.toUpperCase(), id: i.id })); return { processed: results, count: results.length };",
+    "packages": ["lodash"],
+    "timeout": 30000
+  }
+}
+```
+
+**Advanced example with variable injection:**
+```json
+{
+  "id": "fetchAndProcess",
+  "name": "Fetch and Process",
+  "stepType": "code",
+  "codeConfig": {
+    "code": "const response = await fetch(apiUrl + '/data/' + input.id); const data = await response.json(); return { data, timestamp: new Date().toISOString() };",
+    "packages": ["node-fetch"],
+    "variables": [
+      { "name": "apiUrl", "path": "trigger._API_URL" }
+    ],
+    "timeout": 60000,
+    "continueOnError": true
+  }
+}
+```
+
+```mermaid
+transform[/"Transform Data"/]
+class transform code
+```
+
+---
+
+### 10. FindDocument Step (`findDocument`)
+
+Search for documents using semantic search or fetch by specific ID.
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `id` | string | Yes | Unique identifier |
+| `name` | string | Yes | Display name |
+| `stepType` | `"findDocument"` | Yes | Step type |
+| `findDocumentConfig` | object | Yes | Document search configuration |
+
+**findDocumentConfig properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `mode` | `"static"` \| `"dynamic"` | "dynamic" | Static fetches by ID, dynamic searches |
+| `documentId` | string | - | Specific document ID (for static mode) |
+| `searchPrompt` | string | - | Search query template (for dynamic mode, supports `{{variable}}`) |
+| `documentTypes` | string[] | - | Filter by document type (e.g., "workflow-prompt", "reference") |
+| `documentStatus` | string[] | - | Filter by status |
+| `tags` | string[] | - | Filter by tags |
+| `limit` | number | 1 | Max results to return |
+| `minScore` | number | 0.5 | Minimum similarity threshold (0-1) |
+| `storeAs` | string | - | Variable name to store result |
+| `failIfNotFound` | boolean | false | Fail step if no documents found |
+
+**Mermaid Shape:** Cylinder `[(text)]`
+
+```json
+{
+  "id": "findContext",
+  "name": "Find Related Documents",
+  "stepType": "findDocument",
+  "findDocumentConfig": {
+    "mode": "dynamic",
+    "searchPrompt": "Find documentation about {{input.topic}}",
+    "documentTypes": ["workflow-prompt", "reference"],
+    "limit": 3,
+    "minScore": 0.5,
+    "storeAs": "contextDocs"
+  }
+}
+```
+
+**Static mode example (fetch specific document):**
+```json
+{
+  "id": "getTemplate",
+  "name": "Get Email Template",
+  "stepType": "findDocument",
+  "findDocumentConfig": {
+    "mode": "static",
+    "documentId": "doc_12345",
+    "failIfNotFound": true
+  }
+}
+```
+
+```mermaid
+findContext[("Find Related Documents")]
+class findContext findDocument
+```
+
+**Output:**
+- `documents`: Array of found documents with id, title, type, score
+- The document content is available for subsequent steps
+
+---
+
 ## Template Variables
 
 The system supports variable interpolation using `{{variable}}` syntax in:
@@ -414,19 +604,42 @@ The system supports variable interpolation using `{{variable}}` syntax in:
 - `rootTaskTitleTemplate`
 - External/webhook URLs and payloads
 - Input mappings
+- Code step variable injection
+- FindDocument searchPrompt
 
 ### Available Variables
 
 | Variable | Context | Description |
 |----------|---------|-------------|
 | `{{input.path}}` | All steps | Access input payload by path |
+| `{{fieldName}}` | All steps | Direct lookup (shorthand for `{{input.fieldName}}`) |
+| `{{trigger.payload.path}}` | All steps | Access original trigger payload from any step |
 | `{{item}}` or `{{_item}}` | ForEach children | Current item being processed |
+| `{{customVar}}` | ForEach children | Custom item variable (if `itemVariable` is set) |
 | `{{_index}}` | ForEach children | Zero-based index of current item |
 | `{{_total}}` | ForEach children | Total number of items |
+| `{{variables.name}}` | All steps | Access stored variable packages |
+| `{{variables.name.path}}` | All steps | Nested path in variable package |
+| `{{variables.name[key].path}}` | All steps | Dynamic key access with bracket notation |
 | `{{callbackUrl}}` | External steps | System-generated callback URL |
-| `{{systemWebhookUrl}}` | External steps | Alias for callbackUrl |
 | `{{callbackSecret}}` | External steps | Secret for callback authentication |
+| `{{systemWebhookUrl}}` | External steps | Smart callback URL (routes to foreach if available) |
 | `{{foreachWebhookUrl}}` | External with ForEach | URL for streaming items to ForEach |
+| `{{workflowRunId}}` | All steps | Current workflow run ID |
+| `{{stepId}}` | All steps | Current step ID |
+| `{{taskId}}` | All steps | Current task ID |
+| `{{_apiUrl}}` | All steps | Base API URL |
+| `{{_apiKey}}` | All steps | API key for callbacks |
+
+### Nested Interpolation
+
+Variables support nested interpolation for dynamic key access:
+
+```
+{{variables.config[{{input.environment}}].database.host}}
+```
+
+This first resolves `{{input.environment}}` (e.g., "production"), then accesses `variables.config.production.database.host`.
 
 ### Path Syntax
 
@@ -521,6 +734,7 @@ The Coordination Matrix workflow system uses standard Mermaid `flowchart TD` syn
 Always include all class definitions at the end of the diagram:
 
 ```mermaid
+classDef trigger fill:#6B7280,color:#fff
 classDef agent fill:#3B82F6,color:#fff
 classDef manual fill:#8B5CF6,color:#fff
 classDef external fill:#F97316,color:#fff
@@ -528,19 +742,25 @@ classDef decision fill:#F59E0B,color:#fff
 classDef foreach fill:#10B981,color:#fff
 classDef join fill:#6366F1,color:#fff
 classDef flow fill:#EC4899,color:#fff
+classDef code fill:#0EA5E9,color:#fff
+classDef findDocument fill:#14B8A6,color:#fff
 ```
 
 ### Shape-to-Type Mapping
 
 | Mermaid Shape | Syntax | Step Type | Color |
 |---------------|--------|-----------|-------|
+| Asymmetric | `>"text"]` | trigger | Gray #6B7280 |
 | Rectangle | `["text"]` | agent | Blue #3B82F6 |
 | Round/Stadium | `("text")` | manual | Purple #8B5CF6 |
 | Hexagon | `{{"text"}}` | external | Orange #F97316 |
+| Hexagon | `{{"text"}}` | webhook | Orange #F97316 |
 | Diamond | `{"text"}` | decision | Amber #F59E0B |
 | Subroutine | `[["Each: text"]]` | foreach | Green #10B981 |
 | Subroutine | `[["Join: text"]]` | join | Indigo #6366F1 |
 | Subroutine | `[["Run: text"]]` | flow | Pink #EC4899 |
+| Parallelogram | `[/"text"/]` | code | Cyan #0EA5E9 |
+| Cylinder | `[(text)]` | findDocument | Teal #14B8A6 |
 
 ### Preserving Configuration in Mermaid
 
@@ -917,7 +1137,7 @@ interface WorkflowStep {
   // Required
   id: string;
   name: string;
-  stepType: 'agent' | 'manual' | 'external' | 'webhook' | 'decision' | 'foreach' | 'join' | 'flow';
+  stepType: 'trigger' | 'agent' | 'manual' | 'external' | 'webhook' | 'decision' | 'foreach' | 'join' | 'flow' | 'code' | 'findDocument';
 
   // Optional - Common
   description?: string;
@@ -926,6 +1146,14 @@ interface WorkflowStep {
   // Optional - Agent/Manual
   additionalInstructions?: string;
   defaultAssigneeId?: string;
+  promptDocumentIds?: string[];  // IDs of workflow-prompt documents to prepend
+
+  // Optional - Input Configuration (unified model for all step types)
+  inputConfig?: {
+    source: 'previous' | 'trigger' | string;  // Where to get input
+    mapping?: Record<string, string>;          // Field mapping with templates
+    extractPath?: string;                      // Simple path extraction
+  };
 
   // Optional - External
   externalConfig?: {
@@ -934,6 +1162,8 @@ interface WorkflowStep {
     headers?: Record<string, string>;
     payloadTemplate?: string;
     responseMapping?: Record<string, string>;
+    waitForCallback?: boolean;       // true to wait, false for fire-and-forget
+    successStatusCodes?: number[];
   };
 
   // Optional - Webhook
@@ -970,6 +1200,31 @@ interface WorkflowStep {
   // Optional - Flow
   flowId?: string;
   inputMapping?: Record<string, string>;
+
+  // Optional - Code
+  codeConfig?: {
+    code: string;                              // JavaScript code to execute
+    packages?: string[];                       // Packages to inject into sandbox
+    variables?: Array<{name: string; path: string}>;  // Variable mappings
+    timeout?: number;                          // Max execution time in ms (default: 30000)
+    memoryLimit?: number;                      // Memory limit in MB (default: 128)
+    outputSchema?: object;                     // JSON Schema for output validation
+    continueOnError?: boolean;                 // Complete with error instead of failing
+  };
+
+  // Optional - FindDocument
+  findDocumentConfig?: {
+    mode?: 'static' | 'dynamic';               // Static fetches by ID, dynamic searches
+    documentId?: string;                       // Specific document ID (static mode)
+    searchPrompt?: string;                     // Search query template (dynamic mode)
+    documentTypes?: string[];                  // Filter by document type
+    documentStatus?: string[];                 // Filter by status
+    tags?: string[];                           // Filter by tags
+    limit?: number;                            // Max results (default: 1)
+    minScore?: number;                         // Minimum similarity threshold
+    storeAs?: string;                          // Variable name for result
+    failIfNotFound?: boolean;                  // Fail step if no documents found
+  };
 
   // Optional - Input Control
   inputSource?: string;

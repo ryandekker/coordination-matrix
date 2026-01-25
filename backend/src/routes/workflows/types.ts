@@ -11,7 +11,8 @@ import { ObjectId } from 'mongodb';
 // - join: Fan-in aggregation point (awaits boundary conditions)
 // - flow: Delegate to another workflow (nested)
 // - code: Execute JavaScript code in a sandboxed environment
-export type WorkflowStepType = 'trigger' | 'agent' | 'manual' | 'external' | 'webhook' | 'decision' | 'foreach' | 'join' | 'flow' | 'code';
+// - findDocument: Search for documents using semantic search or fetch by ID
+export type WorkflowStepType = 'trigger' | 'agent' | 'manual' | 'external' | 'webhook' | 'decision' | 'foreach' | 'join' | 'flow' | 'code' | 'findDocument';
 
 // Connection between steps (for non-linear flows)
 export interface StepConnection {
@@ -53,6 +54,20 @@ export interface CodeStepConfig {
   memoryLimit?: number;               // Memory limit in MB (default: 128)
   outputSchema?: object;              // JSON Schema for output validation
   continueOnError?: boolean;          // Complete with error in output instead of failing
+}
+
+// FindDocument step configuration
+export interface FindDocumentConfig {
+  mode?: 'static' | 'dynamic';        // Static fetches by ID, dynamic searches
+  documentId?: string;                // Specific document ID (for static mode)
+  searchPrompt?: string;              // Search query template (for dynamic mode)
+  documentTypes?: string[];           // Filter by document type
+  documentStatus?: string[];          // Filter by status
+  tags?: string[];                    // Filter by tags
+  limit?: number;                     // Max results (default: 1)
+  minScore?: number;                  // Minimum similarity threshold
+  storeAs?: string;                   // Variable name for result
+  failIfNotFound?: boolean;           // Fail step if no documents found
 }
 
 // Webhook step configuration
@@ -126,6 +141,9 @@ export interface WorkflowStep {
   // Code step configuration
   codeConfig?: CodeStepConfig;
 
+  // FindDocument step configuration
+  findDocumentConfig?: FindDocumentConfig;
+
   // Legacy fields (kept for compatibility)
   execution?: 'automated' | 'manual';
   type?: 'automated' | 'manual';
@@ -154,4 +172,4 @@ export interface Workflow {
 }
 
 // Valid step types for normalization
-export const VALID_STEP_TYPES: WorkflowStepType[] = ['trigger', 'agent', 'manual', 'external', 'webhook', 'decision', 'foreach', 'join', 'flow', 'code'];
+export const VALID_STEP_TYPES: WorkflowStepType[] = ['trigger', 'agent', 'manual', 'external', 'webhook', 'decision', 'foreach', 'join', 'flow', 'code', 'findDocument'];
