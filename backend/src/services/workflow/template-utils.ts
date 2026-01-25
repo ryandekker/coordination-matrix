@@ -648,3 +648,59 @@ export function resolveTemplateWithPackagesSync(
 
   return result;
 }
+
+/**
+ * Resolve a single template value expression like "{{output.field}}" or "{{item.name}}"
+ * Returns the extracted value (not a string), preserving the original type.
+ *
+ * This is used for input mapping where we want to extract actual values,
+ * not string representations.
+ */
+export async function resolveTemplateValue(
+  template: string,
+  sourceData: Record<string, unknown>,
+  triggerData?: Record<string, unknown>
+): Promise<unknown> {
+  // If the template is just a simple variable reference like "{{output.field}}"
+  // extract the path and return the actual value
+  const simpleMatch = template.match(/^\{\{([^}]+)\}\}$/);
+  if (simpleMatch) {
+    const path = simpleMatch[1].trim();
+
+    // Handle special prefixes
+    if (path.startsWith('trigger.')) {
+      return getValueByPath(triggerData || {}, path.substring(8));
+    }
+    if (path.startsWith('input.')) {
+      return getValueByPath(sourceData, path.substring(6));
+    }
+
+    // Direct path lookup in source data
+    return getValueByPath(sourceData, path);
+  }
+
+  // If the template contains multiple variables or text,
+  // resolve it as a string template
+  const result = template.replace(/\{\{([^}]+)\}\}/g, (_match, path) => {
+    const trimmedPath = path.trim();
+
+    let value: unknown;
+    if (trimmedPath.startsWith('trigger.')) {
+      value = getValueByPath(triggerData || {}, trimmedPath.substring(8));
+    } else if (trimmedPath.startsWith('input.')) {
+      value = getValueByPath(sourceData, trimmedPath.substring(6));
+    } else {
+      value = getValueByPath(sourceData, trimmedPath);
+    }
+
+    if (value === undefined || value === null) {
+      return '';
+    }
+    if (typeof value === 'object') {
+      return JSON.stringify(value);
+    }
+    return String(value);
+  });
+
+  return result;
+}

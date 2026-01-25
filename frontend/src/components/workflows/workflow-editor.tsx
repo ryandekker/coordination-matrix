@@ -75,17 +75,8 @@ import { TemplateTextarea } from '@/components/ui/template-textarea'
 // Import types, constants, and utilities from editor module
 import type { WorkflowStep, WorkflowStepType, Workflow, WorkflowEditorProps, LoopScope } from './editor/types'
 import { STEP_TYPES, getStepTypeInfo } from './editor/constants'
-import { detectLoopScopes, generateMermaidFromSteps, buildInputPath, parseInputPath } from './editor/utils'
-import {
-  AgentStepConfig,
-  ExternalStepConfig,
-  ManualStepConfig,
-  ForEachStepConfig,
-  JoinStepConfig,
-  DecisionStepConfig,
-  FlowStepConfig,
-  InputSourceConfig,
-} from './editor/step-configs'
+import { detectLoopScopes, generateMermaidFromSteps } from './editor/utils'
+import { StepConfigPanel } from './step-config-panel'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
@@ -1170,173 +1161,26 @@ export function WorkflowEditor({
                             </Button>
                           </div>
 
-                          {/* Step Details (Expanded) */}
+                          {/* Step Details (Expanded) - uses unified StepConfigPanel */}
                           <CollapsibleContent>
-                            <div className="border-t px-4 py-3 space-y-3 bg-muted/20">
-                              {/* Task Title Template - available for all step types */}
-                              <div className="space-y-1">
-                                <label className="text-sm font-medium flex items-center gap-2">
-                                  <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                                  Task Title Template
-                                  <span className="text-xs text-muted-foreground">(optional)</span>
-                                </label>
-                                <div className="flex gap-1">
-                                  <Input
-                                    value={step.titleTemplate || ''}
-                                    onChange={(e) => updateStep(index, { titleTemplate: e.target.value })}
-                                    placeholder={`e.g., "Review: {{item.name}}" or "Process {{input.customerName}}"`}
-                                    className="font-mono text-sm"
-                                  />
-                                  <TokenBrowser
-                                    workflowId={workflow?._id}
-                                    previousSteps={steps.slice(0, index).map(s => ({
-                                      id: s.id,
-                                      name: s.name,
-                                      stepType: s.stepType,
-                                      itemVariable: s.itemVariable,
-                                    }))}
-                                    currentStepIndex={index}
-                                    loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
-                                    onSelectToken={() => {}}
-                                    fieldLabel="Task Title"
-                                    fieldValue={step.titleTemplate || ''}
-                                    onFieldValueChange={(value) => updateStep(index, { titleTemplate: value })}
-                                    variant="text"
-                                  />
-                                </div>
-                                <p className="text-xs text-muted-foreground">
-                                  Dynamic title for tasks created from this step. Use {`{{input.field}}`} for input data{isInLoop ? `, {{${loopScope?.foreachStep.itemVariable || 'item'}}} for loop items, {{_index}} for position` : ''}.
-                                  If empty, uses the step name.
-                                </p>
-                              </div>
-
-                              {/* Agent step configuration */}
-                              {(step.stepType === 'agent' || (!step.stepType && step.execution !== 'manual')) && (
-                                <AgentStepConfig
-                                  step={step}
-                                  index={index}
-                                  steps={steps}
-                                  updateStep={updateStep}
-                                  users={users}
-                                  workflowId={workflow?._id}
-                                  isInLoop={isInLoop}
-                                  loopScope={loopScope}
-                                />
-                              )}
-
-                              {/* External step configuration */}
-                              {step.stepType === 'external' && (
-                                <ExternalStepConfig
-                                  step={step}
-                                  index={index}
-                                  steps={steps}
-                                  updateStep={updateStep}
-                                  users={users}
-                                  workflowId={workflow?._id}
-                                  isInLoop={isInLoop}
-                                  loopScope={loopScope}
-                                />
-                              )}
-
-                              {/* Manual step configuration */}
-                              {step.stepType === 'manual' && (
-                                <ManualStepConfig
-                                  step={step}
-                                  index={index}
-                                  steps={steps}
-                                  updateStep={updateStep}
-                                  users={users}
-                                  workflowId={workflow?._id}
-                                  isInLoop={isInLoop}
-                                  loopScope={loopScope}
-                                />
-                              )}
-
-                              {/* ForEach configuration */}
-                              {step.stepType === 'foreach' && (
-                                <ForEachStepConfig
-                                  step={step}
-                                  index={index}
-                                  steps={steps}
-                                  updateStep={updateStep}
-                                  users={users}
-                                  workflowId={workflow?._id}
-                                  isInLoop={isInLoop}
-                                  loopScope={loopScope}
-                                  setSteps={setSteps}
-                                />
-                              )}
-
-                              {/* Join configuration */}
-                              {step.stepType === 'join' && (
-                                <JoinStepConfig
-                                  step={step}
-                                  index={index}
-                                  steps={steps}
-                                  updateStep={updateStep}
-                                  users={users}
-                                  workflowId={workflow?._id}
-                                  isInLoop={isInLoop}
-                                  loopScope={loopScope}
-                                />
-                              )}
-
-                              {/* Decision configuration */}
-                              {step.stepType === 'decision' && (
-                                <DecisionStepConfig
-                                  step={step}
-                                  index={index}
-                                  steps={steps}
-                                  updateStep={updateStep}
-                                  users={users}
-                                  workflowId={workflow?._id}
-                                  isInLoop={isInLoop}
-                                  loopScope={loopScope}
-                                />
-                              )}
-
-                              {/* Flow configuration (nested workflow) */}
-                              {step.stepType === 'flow' && (
-                                <FlowStepConfig
-                                  step={step}
-                                  index={index}
-                                  steps={steps}
-                                  updateStep={updateStep}
-                                  users={users}
-                                  workflowId={workflow?._id}
-                                  isInLoop={isInLoop}
-                                  loopScope={loopScope}
-                                  availableWorkflows={availableWorkflows}
-                                  loadingWorkflows={loadingWorkflows}
-                                />
-                              )}
-
-                              {/* Input Source - for steps that receive data */}
-                              {index > 0 && step.stepType !== 'foreach' && (
-                                <InputSourceConfig
-                                  step={step}
-                                  index={index}
-                                  steps={steps}
-                                  updateStep={updateStep}
-                                  users={users}
-                                  workflowId={workflow?._id}
-                                  isInLoop={isInLoop}
-                                  loopScope={loopScope}
-                                  getStepTypeInfo={getStepTypeInfo}
-                                  parseInputPath={parseInputPath}
-                                  buildInputPath={buildInputPath}
-                                />
-                              )}
-
-                              {/* Description - for all types */}
-                              <div className="space-y-1">
-                                <label className="text-sm font-medium">Description</label>
-                                <Input
-                                  value={step.description || ''}
-                                  onChange={(e) => updateStep(index, { description: e.target.value })}
-                                  placeholder="Optional description for documentation"
-                                />
-                              </div>
+                            <div className="border-t bg-muted/20">
+                              <StepConfigPanel
+                                step={step}
+                                stepIndex={index}
+                                allSteps={steps}
+                                workflowId={workflow?._id}
+                                users={users}
+                                loopScope={loopScope}
+                                isInLoop={isInLoop}
+                                availableWorkflows={availableWorkflows}
+                                loadingWorkflows={loadingWorkflows}
+                                onUpdate={(updates) => updateStep(index, updates)}
+                                onDelete={() => removeStep(index)}
+                                onMoveUp={() => moveStep(index, index - 1)}
+                                onMoveDown={() => moveStep(index, index + 1)}
+                                onAddStepAfter={() => insertStepAt(index + 1)}
+                                onChangeType={(type) => updateStep(index, { stepType: type })}
+                              />
                             </div>
                           </CollapsibleContent>
                         </div>

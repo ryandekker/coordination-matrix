@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { getAuthHeader } from '@/lib/auth'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
@@ -38,7 +38,8 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import { cn } from '@/lib/utils'
-import { Search, X, FileText, Check, ChevronsUpDown, Maximize2, Play, Terminal, Package } from 'lucide-react'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { Search, X, FileText, Check, ChevronsUpDown, Maximize2, Play, Terminal, Package, Eye, Loader2, RefreshCw, Clock } from 'lucide-react'
 import {
   Bot,
   User,
@@ -129,6 +130,13 @@ interface ExternalConfig {
   successStatusCodes?: number[]
 }
 
+// Unified input configuration for workflow steps
+interface StepInputConfig {
+  source: 'previous' | 'trigger' | string
+  mapping?: Record<string, string>
+  extractPath?: string
+}
+
 interface JoinBoundary {
   minCount?: number
   minPercent?: number
@@ -188,6 +196,7 @@ interface WorkflowStep {
   branches?: { condition: string | null; targetStepId: string }[]
   findDocumentConfig?: FindDocumentConfig
   codeConfig?: CodeStepConfig
+  inputConfig?: StepInputConfig
 }
 
 interface LoopScope {
@@ -219,6 +228,8 @@ interface StepConfigPanelProps {
   onMoveDown: () => void
   onAddStepAfter: () => void
   onChangeType: (type: WorkflowStepType) => void
+  /** Read-only mode - hides edit controls and disables all form inputs */
+  readOnly?: boolean
 }
 
 const STEP_TYPES: { type: WorkflowStepType; label: string; description: string; icon: React.ElementType; color: string; bgColor: string }[] = [
@@ -675,37 +686,8 @@ function FlowStepConfigPanel({
   setFlowSelectorOpen: (open: boolean) => void
   onUpdate: (updates: Partial<WorkflowStep>) => void
 }) {
-  // Initialize inputMapping if it doesn't exist
-  const inputMapping = step.inputMapping || {}
-  const mappingEntries = Object.entries(inputMapping)
-
-  const addMapping = () => {
-    const newMapping = { ...inputMapping, '': '' }
-    onUpdate({ inputMapping: newMapping })
-  }
-
-  const updateMappingKey = (oldKey: string, newKey: string) => {
-    const entries = Object.entries(inputMapping)
-    const newMapping: Record<string, string> = {}
-    for (const [k, v] of entries) {
-      if (k === oldKey) {
-        newMapping[newKey] = v
-      } else {
-        newMapping[k] = v
-      }
-    }
-    onUpdate({ inputMapping: newMapping })
-  }
-
-  const updateMappingValue = (key: string, value: string) => {
-    onUpdate({ inputMapping: { ...inputMapping, [key]: value } })
-  }
-
-  const removeMapping = (key: string) => {
-    const newMapping = { ...inputMapping }
-    delete newMapping[key]
-    onUpdate({ inputMapping: newMapping })
-  }
+  // Flow steps now use InputConfigurationSection for input mapping (consolidated)
+  // Legacy inputMapping field is no longer used here
 
   return (
     <div className="space-y-3 border-t pt-3">
@@ -791,111 +773,12 @@ function FlowStepConfigPanel({
         </p>
       </div>
 
-      {/* Input Mapping Section */}
-      <div className="space-y-2 border-t pt-3 mt-3">
-        <div className="flex items-center justify-between">
-          <label className="text-sm font-medium flex items-center gap-2">
-            <Database className="h-4 w-4 text-muted-foreground" />
-            Input Mapping
-          </label>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={addMapping}
-            className="h-7 text-xs"
-          >
-            <Plus className="h-3 w-3 mr-1" />
-            Add Field
-          </Button>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Map data from previous steps to the subflow&apos;s input. Each field becomes available
-          in the subflow as <code className="bg-muted px-1 rounded">{"{{inputPayload.fieldName}}"}</code>
+      {/* Input Configuration note - refers to unified InputConfigurationSection */}
+      <div className="text-xs text-muted-foreground border-t pt-3 mt-3">
+        <p>
+          Use the <strong>Input Configuration</strong> section below to map data from previous steps
+          to the subflow&apos;s input. Each mapped field becomes available in the subflow.
         </p>
-
-        {mappingEntries.length === 0 ? (
-          <div className="bg-muted/30 rounded-lg p-3 text-sm text-muted-foreground text-center">
-            No input mappings defined. The subflow will receive the full input from the previous step.
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {mappingEntries.map(([key, value], mappingIdx) => (
-              <div key={mappingIdx} className="flex items-center gap-2">
-                <Input
-                  value={key}
-                  onChange={(e) => updateMappingKey(key, e.target.value)}
-                  placeholder="fieldName"
-                  className="w-[140px] font-mono text-sm h-9"
-                />
-                <ArrowRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                <div className="flex-1 flex gap-1">
-                  <Input
-                    value={value}
-                    onChange={(e) => updateMappingValue(key, e.target.value)}
-                    placeholder="{{output.data}} or {{item.field}}"
-                    className="font-mono text-sm h-9"
-                  />
-                  <TokenBrowser
-                    workflowId={workflowId}
-                    previousSteps={previousSteps}
-                    currentStepIndex={stepIndex}
-                    loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
-                    onSelectToken={(token) => updateMappingValue(key, token)}
-                    variant="icon"
-                  />
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-9 w-9 p-0 text-destructive"
-                  onClick={() => removeMapping(key)}
-                >
-                  <Trash2 className="h-3 w-3" />
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Quick add common mappings */}
-        <div className="flex flex-wrap gap-1 mt-2">
-          <span className="text-xs text-muted-foreground">Quick add:</span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-6 text-xs px-2"
-            onClick={() => onUpdate({
-              inputMapping: { ...inputMapping, 'data': '{{output}}' }
-            })}
-          >
-            output
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-6 text-xs px-2"
-            onClick={() => onUpdate({
-              inputMapping: { ...inputMapping, 'title': '{{output.title}}' }
-            })}
-          >
-            output.title
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-6 text-xs px-2"
-            onClick={() => onUpdate({
-              inputMapping: { ...inputMapping, 'item': '{{item}}' }
-            })}
-          >
-            item (loop)
-          </Button>
-        </div>
       </div>
 
       {/* Info about output extraction */}
@@ -2230,6 +2113,730 @@ function CodeStepConfigPanel({
   )
 }
 
+// API Response types for input preview and test execution
+interface InputPreviewResponse {
+  previewSource: 'run' | 'none'
+  workflowRunId?: string
+  runCompletedAt?: string
+  resolvedInput: Record<string, unknown>
+  inputConfig?: StepInputConfig
+  previousStepOutput?: Record<string, unknown>
+}
+
+interface TestExecuteResponse {
+  success: boolean
+  output?: unknown
+  error?: string
+  executionTimeMs: number
+  logs?: string[]
+  requestDetails?: {
+    url: string
+    method: string
+    headers: Record<string, string>
+    body?: unknown
+  }
+  selectedBranch?: {
+    targetStepId: string
+    condition?: string
+    label?: string
+  }
+}
+
+// Internal state for field mapping - allows multiple empty keys during editing
+interface MappingField {
+  id: string
+  fieldName: string
+  value: string
+}
+
+// Input Configuration Section Component
+function InputConfigurationSection({
+  step,
+  stepIndex,
+  allSteps,
+  workflowId,
+  previousSteps,
+  isInLoop,
+  loopScope,
+  onUpdate,
+  readOnly = false,
+}: {
+  step: WorkflowStep
+  stepIndex: number
+  allSteps: WorkflowStep[]
+  workflowId?: string
+  previousSteps: { id: string; name: string; stepType?: WorkflowStepType; itemVariable?: string }[]
+  isInLoop: boolean
+  loopScope?: LoopScope | null
+  onUpdate: (updates: Partial<WorkflowStep>) => void
+  readOnly?: boolean
+}) {
+  // Convert object mapping to array for editing (preserves order, allows duplicate empty keys)
+  const [fields, setFields] = useState<MappingField[]>(() => {
+    const mapping = step.inputConfig?.mapping || {}
+    return Object.entries(mapping).map(([fieldName, value], idx) => ({
+      id: `field-${idx}-${Date.now()}`,
+      fieldName,
+      value,
+    }))
+  })
+
+  // Track if we're in mapping mode
+  const [inputMode, setInputMode] = useState<'previous' | 'mapping'>(() => {
+    const hasMapping = step.inputConfig?.mapping && Object.keys(step.inputConfig.mapping).length > 0
+    return hasMapping ? 'mapping' : 'previous'
+  })
+
+  // Sync from external step changes (e.g., when switching steps)
+  const prevStepId = useRef(step.id)
+  useEffect(() => {
+    if (prevStepId.current !== step.id) {
+      prevStepId.current = step.id
+      const mapping = step.inputConfig?.mapping || {}
+      const newFields = Object.entries(mapping).map(([fieldName, value], idx) => ({
+        id: `field-${idx}-${Date.now()}`,
+        fieldName,
+        value,
+      }))
+      setFields(newFields)
+      setInputMode(newFields.length > 0 ? 'mapping' : 'previous')
+    }
+  }, [step.id, step.inputConfig?.mapping])
+
+  // Convert fields array back to object and update step
+  const updateStepMapping = useCallback((newFields: MappingField[]) => {
+    const mapping: Record<string, string> = {}
+    for (const field of newFields) {
+      // Only include fields with non-empty names
+      if (field.fieldName.trim()) {
+        mapping[field.fieldName.trim()] = field.value
+      }
+    }
+    onUpdate({
+      inputConfig: {
+        ...step.inputConfig,
+        source: step.inputConfig?.source || 'previous',
+        mapping: Object.keys(mapping).length > 0 ? mapping : undefined,
+      }
+    })
+  }, [onUpdate, step.inputConfig])
+
+  const handleModeChange = (mode: 'previous' | 'mapping') => {
+    setInputMode(mode)
+    if (mode === 'previous') {
+      // Clear mapping when switching to previous step mode
+      setFields([])
+      onUpdate({
+        inputConfig: {
+          source: 'previous',
+          mapping: undefined,
+          extractPath: undefined,
+        }
+      })
+    } else {
+      // Initialize with one empty field when switching to mapping mode
+      const newField = { id: `field-${Date.now()}`, fieldName: '', value: '' }
+      setFields([newField])
+      // Don't update step yet - wait for user to fill in the field
+    }
+  }
+
+  const updateField = (id: string, updates: Partial<Pick<MappingField, 'fieldName' | 'value'>>) => {
+    setFields(prev => {
+      const newFields = prev.map(f =>
+        f.id === id ? { ...f, ...updates } : f
+      )
+      // Update step mapping after state change
+      updateStepMapping(newFields)
+      return newFields
+    })
+  }
+
+  const removeField = (id: string) => {
+    setFields(prev => {
+      const newFields = prev.filter(f => f.id !== id)
+      // If no fields left, switch back to previous mode
+      if (newFields.length === 0) {
+        setInputMode('previous')
+        onUpdate({
+          inputConfig: {
+            source: 'previous',
+            mapping: undefined,
+            extractPath: undefined,
+          }
+        })
+      } else {
+        updateStepMapping(newFields)
+      }
+      return newFields
+    })
+  }
+
+  const addField = () => {
+    const newField = { id: `field-${Date.now()}`, fieldName: '', value: '' }
+    setFields(prev => [...prev, newField])
+  }
+
+  return (
+    <div className="space-y-3 border-t pt-3">
+      <div className="flex items-center gap-2">
+        <Database className="h-4 w-4 text-muted-foreground" />
+        <label className="text-sm font-medium">Input Configuration</label>
+      </div>
+
+      {/* Input Mode Selector */}
+      <div className="space-y-1">
+        <label className="text-xs text-muted-foreground">Input Mode</label>
+        <Select
+          value={inputMode}
+          onValueChange={(val) => !readOnly && handleModeChange(val as 'previous' | 'mapping')}
+          disabled={readOnly}
+        >
+          <SelectTrigger className="h-8 text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="previous">
+              <span className="flex items-center gap-2">
+                <ArrowDown className="h-3 w-3" />
+                Previous Step Output
+              </span>
+            </SelectItem>
+            <SelectItem value="mapping">
+              <span className="flex items-center gap-2">
+                <CornerDownRight className="h-3 w-3" />
+                Field Mapping
+              </span>
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          {inputMode === 'previous'
+            ? 'This step receives the full output from the previous step.'
+            : 'Define specific fields to extract from workflow context.'}
+        </p>
+      </div>
+
+      {/* Field Mapping UI - only show when in mapping mode */}
+      {inputMode === 'mapping' && (
+        <div className="space-y-2 bg-muted/30 rounded-lg p-3">
+          <div className="text-xs text-muted-foreground mb-2">
+            Each field creates a property in the step input. Use the token browser to select values.
+          </div>
+
+          {fields.map((field) => (
+            <div key={field.id} className="flex gap-2 items-start">
+              {/* Field Name */}
+              <div className="flex-1 min-w-0">
+                <Input
+                  value={field.fieldName}
+                  onChange={(e) => updateField(field.id, { fieldName: e.target.value })}
+                  placeholder="fieldName"
+                  className="h-8 text-sm font-mono"
+                  disabled={readOnly}
+                />
+              </div>
+
+              <ArrowRight className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-2" />
+
+              {/* Token Value with Browser */}
+              <div className="flex-[2] min-w-0 flex gap-1">
+                <Input
+                  value={field.value}
+                  onChange={(e) => updateField(field.id, { value: e.target.value })}
+                  placeholder="{{output.field}} or {{trigger.data}}"
+                  className="h-8 text-sm font-mono flex-1"
+                  disabled={readOnly}
+                />
+                {!readOnly && (
+                  <TokenBrowser
+                    workflowId={workflowId}
+                    previousSteps={previousSteps}
+                    currentStepIndex={stepIndex}
+                    loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
+                    onSelectToken={(token) => {
+                      // This is only called when closing the dialog in non-external mode
+                      // In external field mode (with fieldValue/onFieldValueChange),
+                      // the TokenBrowserDialog handles insertions directly
+                      updateField(field.id, { value: token })
+                    }}
+                    wrapInBraces={true}
+                    fieldLabel={`Value for "${field.fieldName || 'field'}"`}
+                    fieldValue={field.value}
+                    onFieldValueChange={(newValue) => updateField(field.id, { value: newValue })}
+                  />
+                )}
+              </div>
+
+              {/* Remove Button */}
+              {!readOnly && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0 flex-shrink-0"
+                  onClick={() => removeField(field.id)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          ))}
+
+          {/* Add Field Button */}
+          {!readOnly && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-full h-8 text-xs"
+              onClick={addField}
+            >
+              <Plus className="h-3 w-3 mr-1" />
+              Add Field
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Workflow run option for the selector
+interface WorkflowRunForPreview {
+  _id: string
+  status: string
+  createdAt: string
+  completedAt?: string
+}
+
+// Input Preview Section Component
+function InputPreviewSection({
+  workflowId,
+  stepId,
+  stepIndex,
+  inputConfig,
+  onResolvedInputChange,
+}: {
+  workflowId?: string
+  stepId: string
+  stepIndex: number
+  inputConfig?: StepInputConfig
+  onResolvedInputChange?: (input: Record<string, unknown> | null) => void
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [isLoadingRuns, setIsLoadingRuns] = useState(false)
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false)
+  const [runs, setRuns] = useState<WorkflowRunForPreview[]>([])
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const [preview, setPreview] = useState<InputPreviewResponse | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [runsLoaded, setRunsLoaded] = useState(false)
+
+  // Fetch available workflow runs
+  const fetchRuns = useCallback(async () => {
+    if (!workflowId || runsLoaded) return
+
+    setIsLoadingRuns(true)
+    try {
+      const response = await fetch(`${API_BASE}/workflows/${workflowId}/runs?limit=20`, {
+        headers: getAuthHeader(),
+      })
+      if (response.ok) {
+        const data = await response.json()
+        const runsList = data.data || []
+        setRuns(runsList)
+        // Auto-select the most recent completed run
+        const completedRun = runsList.find((r: WorkflowRunForPreview) => r.status === 'completed')
+        if (completedRun) {
+          setSelectedRunId(completedRun._id)
+        } else if (runsList.length > 0) {
+          setSelectedRunId(runsList[0]._id)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load runs:', err)
+    } finally {
+      setIsLoadingRuns(false)
+      setRunsLoaded(true)
+    }
+  }, [workflowId, runsLoaded])
+
+  // Fetch preview for selected run using current inputConfig
+  const fetchPreview = useCallback(async (runId?: string) => {
+    if (!workflowId) {
+      setError('Workflow must be saved first')
+      return
+    }
+
+    setIsLoadingPreview(true)
+    setError(null)
+    try {
+      const response = await fetch(`${API_BASE}/workflows/${workflowId}/steps/${stepId}/input-preview`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeader(),
+        },
+        body: JSON.stringify({
+          workflowRunId: runId,
+          inputConfig: inputConfig,
+        }),
+      })
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to fetch input preview')
+      }
+      const data = await response.json()
+      const previewData = data.data || data
+      setPreview(previewData)
+      // Notify parent of resolved input for test execution
+      onResolvedInputChange?.(previewData.resolvedInput || null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch preview')
+      onResolvedInputChange?.(null)
+    } finally {
+      setIsLoadingPreview(false)
+    }
+  }, [workflowId, stepId, inputConfig, onResolvedInputChange])
+
+  // Load runs when section opens
+  useEffect(() => {
+    if (isOpen && !runsLoaded) {
+      fetchRuns()
+    }
+  }, [isOpen, runsLoaded, fetchRuns])
+
+  // Fetch preview when run is selected or inputConfig changes
+  useEffect(() => {
+    if (isOpen && selectedRunId && runsLoaded) {
+      fetchPreview(selectedRunId)
+    }
+  }, [isOpen, selectedRunId, runsLoaded, fetchPreview, inputConfig])
+
+  // Don't show for first step
+  if (stepIndex === 0) return null
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="border rounded-lg">
+      <CollapsibleTrigger className="flex items-center justify-between w-full p-3 hover:bg-muted/50 rounded-lg">
+        <div className="flex items-center gap-2">
+          <Eye className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-medium">Input Preview</span>
+          {preview && (
+            <Badge variant="secondary" className="text-xs">
+              <Clock className="h-3 w-3 mr-1" />
+              From run
+            </Badge>
+          )}
+        </div>
+        {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+      </CollapsibleTrigger>
+      <CollapsibleContent className="px-3 pb-3 space-y-3">
+        {/* Run Selector */}
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Select Previous Run</label>
+          {isLoadingRuns ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Loading runs...
+            </div>
+          ) : runs.length === 0 ? (
+            <div className="text-sm text-muted-foreground py-2">
+              No previous runs available. Run the workflow to see input preview.
+            </div>
+          ) : (
+            <Select value={selectedRunId || ''} onValueChange={setSelectedRunId}>
+              <SelectTrigger className="h-8 text-sm w-full">
+                <SelectValue placeholder="Select a run..." />
+              </SelectTrigger>
+              <SelectContent className="max-w-[var(--radix-select-trigger-width)]">
+                {runs.map((run) => (
+                  <SelectItem key={run._id} value={run._id} className="text-xs">
+                    <span className="flex items-center gap-2 truncate">
+                      <span className={cn(
+                        'inline-block w-2 h-2 rounded-full flex-shrink-0',
+                        run.status === 'completed' ? 'bg-green-500' :
+                        run.status === 'running' ? 'bg-blue-500' :
+                        run.status === 'failed' ? 'bg-red-500' : 'bg-gray-500'
+                      )} />
+                      <span className="truncate">
+                        {new Date(run.createdAt).toLocaleDateString()} {new Date(run.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      <span className="flex-shrink-0 text-muted-foreground">({run.status})</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+
+        {/* Preview Content */}
+        {isLoadingPreview ? (
+          <div className="flex items-center justify-center py-4">
+            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+            <span className="text-sm text-muted-foreground">Loading preview...</span>
+          </div>
+        ) : error ? (
+          <div className="text-sm text-red-500 py-2">{error}</div>
+        ) : preview ? (
+          <div className="space-y-3">
+            {preview.previousStepOutput && (
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Previous Step Output</label>
+                <div className="max-h-32 overflow-auto bg-muted/30 rounded p-2">
+                  <JsonViewer data={preview.previousStepOutput} defaultExpanded={false} />
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium">Resolved Input for This Step</label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-xs"
+                  onClick={() => fetchPreview(selectedRunId || undefined)}
+                  disabled={isLoadingPreview}
+                >
+                  <RefreshCw className={cn("h-3 w-3 mr-1", isLoadingPreview && "animate-spin")} />
+                  Recalculate
+                </Button>
+              </div>
+              <div className="max-h-48 overflow-auto bg-muted/30 rounded p-2">
+                <JsonViewer data={preview.resolvedInput} defaultExpanded={true} />
+              </div>
+            </div>
+          </div>
+        ) : selectedRunId ? (
+          <div className="text-sm text-muted-foreground py-2">
+            Select a run to preview input.
+          </div>
+        ) : null}
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+// Test Execution Section Component
+function TestExecutionSection({
+  workflowId,
+  stepId,
+  stepType,
+  stepName,
+  sampleInput,
+}: {
+  workflowId?: string
+  stepId: string
+  stepType?: WorkflowStepType
+  stepName: string
+  sampleInput?: Record<string, unknown> | null
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [isExecuting, setIsExecuting] = useState(false)
+  const [result, setResult] = useState<TestExecuteResponse | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  // Types that can be test-executed
+  const canTestExecute = stepType && ['code', 'decision', 'foreach', 'external', 'findDocument'].includes(stepType)
+
+  // Format the sample input for display
+  const formattedInput = sampleInput ? JSON.stringify(sampleInput, null, 2) : null
+
+  const executeTest = async () => {
+    if (!workflowId) {
+      setError('Workflow must be saved first')
+      return
+    }
+
+    if (!sampleInput) {
+      setError('No sample input available. Open the Input Preview section above and select a previous run.')
+      return
+    }
+
+    setIsExecuting(true)
+    setError(null)
+    setResult(null)
+
+    try {
+      const response = await fetch(`${API_BASE}/workflows/${workflowId}/steps/${stepId}/test-execute`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeader(),
+        },
+        body: JSON.stringify({ inputPayload: sampleInput }),
+      })
+
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || 'Test execution failed')
+      }
+      setResult(data.data || data)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Test execution failed')
+    } finally {
+      setIsExecuting(false)
+    }
+  }
+
+  if (!canTestExecute) {
+    return null
+  }
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="border rounded-lg">
+      <CollapsibleTrigger className="flex items-center justify-between w-full p-3 hover:bg-muted/50 rounded-lg">
+        <div className="flex items-center gap-2">
+          <Play className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-medium">Test Execution</span>
+          {result?.success && (
+            <Badge variant="secondary" className="text-xs bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+              Success
+            </Badge>
+          )}
+          {result && !result.success && (
+            <Badge variant="secondary" className="text-xs bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+              Failed
+            </Badge>
+          )}
+        </div>
+        {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+      </CollapsibleTrigger>
+      <CollapsibleContent className="px-3 pb-3">
+        <div className="space-y-3">
+          {/* Sample Input Display (read-only, from Input Preview section) */}
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Test Input (from Input Preview)</label>
+            {sampleInput ? (
+              <div className="max-h-24 overflow-auto bg-muted/30 rounded p-2">
+                <pre className="text-xs font-mono text-muted-foreground whitespace-pre-wrap">
+                  {formattedInput}
+                </pre>
+              </div>
+            ) : (
+              <div className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-950/30 p-2 rounded flex items-center gap-2">
+                <AlertCircle className="h-3 w-3 flex-shrink-0" />
+                <span>Open the Input Preview section above and select a previous run to load sample input.</span>
+              </div>
+            )}
+          </div>
+
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            onClick={executeTest}
+            disabled={isExecuting || !workflowId || !sampleInput}
+            className="w-full"
+          >
+            {isExecuting ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Executing...
+              </>
+            ) : (
+              <>
+                <Play className="h-4 w-4 mr-2" />
+                Run Test
+              </>
+            )}
+          </Button>
+
+          {error && (
+            <div className="text-sm text-red-500 bg-red-50 dark:bg-red-950/30 p-2 rounded">
+              {error}
+            </div>
+          )}
+
+          {result && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">
+                  Executed in {result.executionTimeMs}ms
+                </span>
+                {result.success ? (
+                  <Badge variant="outline" className="text-green-600 border-green-300">
+                    <Check className="h-3 w-3 mr-1" />
+                    Success
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-red-600 border-red-300">
+                    <AlertCircle className="h-3 w-3 mr-1" />
+                    Failed
+                  </Badge>
+                )}
+              </div>
+
+              {result.error && (
+                <div className="text-sm text-red-500 bg-red-50 dark:bg-red-950/30 p-2 rounded font-mono">
+                  {result.error}
+                </div>
+              )}
+
+              {result.logs && result.logs.length > 0 && (
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Console Output</label>
+                  <div className="bg-gray-900 text-gray-100 p-2 rounded font-mono text-xs max-h-24 overflow-auto">
+                    {result.logs.map((log, i) => (
+                      <div key={i}>{log}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {result.selectedBranch && (
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Selected Branch</label>
+                  <div className="bg-amber-50 dark:bg-amber-950/30 p-2 rounded text-sm">
+                    <div className="flex items-center gap-2">
+                      <GitBranch className="h-4 w-4 text-amber-500" />
+                      <span>{result.selectedBranch.label || result.selectedBranch.targetStepId}</span>
+                    </div>
+                    {result.selectedBranch.condition && (
+                      <code className="text-xs text-muted-foreground block mt-1">
+                        {result.selectedBranch.condition}
+                      </code>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {result.requestDetails && (
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Request Details</label>
+                  <div className="bg-muted p-2 rounded text-xs font-mono space-y-1">
+                    <div>{result.requestDetails.method} {result.requestDetails.url}</div>
+                    {result.requestDetails.body !== undefined && (
+                      <div className="text-muted-foreground truncate">
+                        Body: {String(typeof result.requestDetails.body === 'string'
+                          ? (result.requestDetails.body as string).substring(0, 100)
+                          : JSON.stringify(result.requestDetails.body).substring(0, 100))}...
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {result.output !== undefined && (
+                <div className="space-y-1">
+                  <label className="text-xs font-medium">Output</label>
+                  <div className="max-h-48 overflow-auto">
+                    <JsonViewer data={result.output ?? null} defaultExpanded={true} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
 export function StepConfigPanel({
   step,
   stepIndex,
@@ -2246,8 +2853,11 @@ export function StepConfigPanel({
   onMoveDown,
   onAddStepAfter,
   onChangeType,
+  readOnly = false,
 }: StepConfigPanelProps) {
   const [flowSelectorOpen, setFlowSelectorOpen] = useState(false)
+  // Shared state for resolved input from InputPreviewSection to TestExecutionSection
+  const [sampleInput, setSampleInput] = useState<Record<string, unknown> | null>(null)
   const typeInfo = getStepTypeInfo(step.stepType)
   const TypeIcon = typeInfo.icon
 
@@ -2257,6 +2867,9 @@ export function StepConfigPanel({
     stepType: s.stepType,
     itemVariable: s.itemVariable,
   }))
+
+  // In readOnly mode, use a no-op update function
+  const handleUpdate = readOnly ? () => {} : onUpdate
 
   return (
     <div className="p-4 space-y-4">
@@ -2270,40 +2883,42 @@ export function StepConfigPanel({
               <TypeIcon className={cn('h-4 w-4', typeInfo.color)} />
             </div>
           </div>
-          <div className="flex items-center gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0"
-              onClick={onMoveUp}
-              disabled={stepIndex === 0}
-              title="Move up"
-            >
-              <ChevronUp className="h-4 w-4" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0"
-              onClick={onMoveDown}
-              disabled={stepIndex === allSteps.length - 1}
-              title="Move down"
-            >
-              <ChevronDown className="h-4 w-4" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0 text-destructive"
-              onClick={onDelete}
-              title="Delete step"
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
+          {!readOnly && (
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0"
+                onClick={onMoveUp}
+                disabled={stepIndex === 0}
+                title="Move up"
+              >
+                <ChevronUp className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0"
+                onClick={onMoveDown}
+                disabled={stepIndex === allSteps.length - 1}
+                title="Move down"
+              >
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 text-destructive"
+                onClick={onDelete}
+                title="Delete step"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Name and Type */}
@@ -2312,8 +2927,9 @@ export function StepConfigPanel({
             <label className="text-sm font-medium">Step Name</label>
             <Input
               value={step.name}
-              onChange={(e) => onUpdate({ name: e.target.value })}
+              onChange={(e) => handleUpdate({ name: e.target.value })}
               placeholder="Step name"
+              disabled={readOnly}
             />
           </div>
 
@@ -2321,7 +2937,8 @@ export function StepConfigPanel({
             <label className="text-sm font-medium">Step Type</label>
             <Select
               value={step.stepType}
-              onValueChange={(val) => onChangeType(val as WorkflowStepType)}
+              onValueChange={(val) => !readOnly && onChangeType(val as WorkflowStepType)}
+              disabled={readOnly}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -2350,21 +2967,24 @@ export function StepConfigPanel({
           <div className="flex gap-1">
             <Input
               value={step.titleTemplate || ''}
-              onChange={(e) => onUpdate({ titleTemplate: e.target.value })}
+              onChange={(e) => handleUpdate({ titleTemplate: e.target.value })}
               placeholder={`e.g., "Review: {{item.name}}" or "Process {{input.customerName}}"`}
               className="font-mono text-sm"
+              disabled={readOnly}
             />
-            <TokenBrowser
-              workflowId={workflowId}
-              previousSteps={previousSteps}
-              currentStepIndex={stepIndex}
-              loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
-              onSelectToken={() => {}}
-              variant="text"
-              fieldLabel="Task Title Template"
-              fieldValue={step.titleTemplate || ''}
-              onFieldValueChange={(value) => onUpdate({ titleTemplate: value })}
-            />
+            {!readOnly && (
+              <TokenBrowser
+                workflowId={workflowId}
+                previousSteps={previousSteps}
+                currentStepIndex={stepIndex}
+                loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
+                onSelectToken={() => {}}
+                variant="text"
+                fieldLabel="Task Title Template"
+                fieldValue={step.titleTemplate || ''}
+                onFieldValueChange={(value) => handleUpdate({ titleTemplate: value })}
+              />
+            )}
           </div>
           <p className="text-xs text-muted-foreground">
             Dynamic title for tasks created from this step.
@@ -2393,7 +3013,7 @@ export function StepConfigPanel({
               </label>
               <Select
                 value={step.defaultAssigneeId || '_none'}
-                onValueChange={(val) => onUpdate({ defaultAssigneeId: val === '_none' ? undefined : val })}
+                onValueChange={(val) => handleUpdate({ defaultAssigneeId: val === '_none' ? undefined : val })}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select default assignee" />
@@ -2412,25 +3032,43 @@ export function StepConfigPanel({
             {/* Prompt Library Selector */}
             <PromptSelector
               selectedPromptIds={step.promptDocumentIds || []}
-              onChange={(promptIds) => onUpdate({ promptDocumentIds: promptIds.length > 0 ? promptIds : undefined })}
+              onChange={(promptIds) => handleUpdate({ promptDocumentIds: promptIds.length > 0 ? promptIds : undefined })}
             />
 
             <div className="space-y-1">
               <label className="text-sm font-medium flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-amber-500" />
                 Additional Instructions
+                <span className="text-xs text-muted-foreground">(optional)</span>
               </label>
-              <TokenBrowser
-                workflowId={workflowId}
-                previousSteps={previousSteps}
-                currentStepIndex={stepIndex}
-                loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
-                onSelectToken={() => {}}
-                variant="text"
-                fieldLabel="Instructions"
-                fieldValue={step.additionalInstructions || step.prompt || ''}
-                onFieldValueChange={(value) => onUpdate({ additionalInstructions: value })}
+              <Textarea
+                value={step.additionalInstructions || step.prompt || ''}
+                onChange={(e) => handleUpdate({ additionalInstructions: e.target.value })}
+                placeholder={`Add extra context for the agent if needed. Examples:
+
+• "Focus on security vulnerabilities in this review"
+• "Use the company style guide for formatting"
+• "Include test coverage recommendations"
+
+The agent will receive task context automatically.`}
+                className="min-h-[100px] font-mono text-sm"
+                disabled={readOnly}
               />
+              {!readOnly && (
+                <div className="flex items-center gap-2 mt-2">
+                  <TokenBrowser
+                    workflowId={workflowId}
+                    previousSteps={previousSteps}
+                    currentStepIndex={stepIndex}
+                    loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
+                    onSelectToken={(token) => {
+                      const current = step.additionalInstructions || ''
+                      handleUpdate({ additionalInstructions: current + token })
+                    }}
+                    variant="text"
+                  />
+                </div>
+              )}
             </div>
 
           </div>
@@ -2471,7 +3109,7 @@ export function StepConfigPanel({
               </label>
               <Select
                 value={step.defaultAssigneeId || '_none'}
-                onValueChange={(val) => onUpdate({ defaultAssigneeId: val === '_none' ? undefined : val })}
+                onValueChange={(val) => handleUpdate({ defaultAssigneeId: val === '_none' ? undefined : val })}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select default assignee" />
@@ -2523,7 +3161,7 @@ export function StepConfigPanel({
                 <div className="flex gap-1">
                   <Input
                     value={step.itemsPath || ''}
-                    onChange={(e) => onUpdate({ itemsPath: e.target.value })}
+                    onChange={(e) => handleUpdate({ itemsPath: e.target.value })}
                     placeholder="e.g., output.emails"
                     className="font-mono text-sm"
                   />
@@ -2531,7 +3169,7 @@ export function StepConfigPanel({
                     workflowId={workflowId}
                     previousSteps={previousSteps}
                     currentStepIndex={stepIndex}
-                    onSelectToken={(token) => onUpdate({ itemsPath: token })}
+                    onSelectToken={(token) => handleUpdate({ itemsPath: token })}
                     wrapInBraces={false}
                   />
                 </div>
@@ -2540,7 +3178,7 @@ export function StepConfigPanel({
                 <label className="text-sm font-medium">Item Variable</label>
                 <Input
                   value={step.itemVariable || ''}
-                  onChange={(e) => onUpdate({ itemVariable: e.target.value })}
+                  onChange={(e) => handleUpdate({ itemVariable: e.target.value })}
                   placeholder="e.g., email, item"
                   className="font-mono text-sm"
                 />
@@ -2553,7 +3191,7 @@ export function StepConfigPanel({
                 <Input
                   type="number"
                   value={step.maxItems || ''}
-                  onChange={(e) => onUpdate({ maxItems: parseInt(e.target.value) || undefined })}
+                  onChange={(e) => handleUpdate({ maxItems: parseInt(e.target.value) || undefined })}
                   placeholder="100"
                   className="font-mono text-sm"
                 />
@@ -2563,7 +3201,7 @@ export function StepConfigPanel({
                 <div className="flex gap-1">
                   <Input
                     value={step.expectedCountPath || ''}
-                    onChange={(e) => onUpdate({ expectedCountPath: e.target.value })}
+                    onChange={(e) => handleUpdate({ expectedCountPath: e.target.value })}
                     placeholder="e.g., response.totalItems"
                     className="font-mono text-sm"
                   />
@@ -2571,7 +3209,7 @@ export function StepConfigPanel({
                     workflowId={workflowId}
                     previousSteps={previousSteps}
                     currentStepIndex={stepIndex}
-                    onSelectToken={(token) => onUpdate({ expectedCountPath: token })}
+                    onSelectToken={(token) => handleUpdate({ expectedCountPath: token })}
                     wrapInBraces={false}
                   />
                 </div>
@@ -2600,7 +3238,7 @@ export function StepConfigPanel({
               <div className="flex gap-1">
                 <Input
                   value={step.expectedCountPath || ''}
-                  onChange={(e) => onUpdate({ expectedCountPath: e.target.value })}
+                  onChange={(e) => handleUpdate({ expectedCountPath: e.target.value })}
                   placeholder="response.totalItems"
                   className="font-mono text-sm"
                 />
@@ -2608,7 +3246,7 @@ export function StepConfigPanel({
                   workflowId={workflowId}
                   previousSteps={previousSteps}
                   currentStepIndex={stepIndex}
-                  onSelectToken={(token) => onUpdate({ expectedCountPath: token })}
+                  onSelectToken={(token) => handleUpdate({ expectedCountPath: token })}
                   wrapInBraces={false}
                 />
               </div>
@@ -2626,7 +3264,7 @@ export function StepConfigPanel({
                     min="0"
                     max="100"
                     value={step.joinBoundary?.minPercent ?? step.minSuccessPercent ?? ''}
-                    onChange={(e) => onUpdate({
+                    onChange={(e) => handleUpdate({
                       joinBoundary: {
                         ...step.joinBoundary,
                         minPercent: e.target.value ? parseInt(e.target.value) : undefined
@@ -2643,7 +3281,7 @@ export function StepConfigPanel({
                     type="number"
                     min="0"
                     value={step.joinBoundary?.minCount ?? ''}
-                    onChange={(e) => onUpdate({
+                    onChange={(e) => handleUpdate({
                       joinBoundary: {
                         ...step.joinBoundary,
                         minCount: e.target.value ? parseInt(e.target.value) : undefined
@@ -2662,7 +3300,7 @@ export function StepConfigPanel({
                 type="number"
                 min="0"
                 value={step.joinBoundary?.maxWaitMs ?? ''}
-                onChange={(e) => onUpdate({
+                onChange={(e) => handleUpdate({
                   joinBoundary: {
                     ...step.joinBoundary,
                     maxWaitMs: e.target.value ? parseInt(e.target.value) : undefined
@@ -2678,7 +3316,7 @@ export function StepConfigPanel({
               <div className="flex gap-1">
                 <Input
                   value={step.inputPath || ''}
-                  onChange={(e) => onUpdate({ inputPath: e.target.value })}
+                  onChange={(e) => handleUpdate({ inputPath: e.target.value })}
                   placeholder="e.g., output.analysis"
                   className="font-mono text-sm"
                 />
@@ -2687,7 +3325,7 @@ export function StepConfigPanel({
                   previousSteps={previousSteps}
                   currentStepIndex={stepIndex}
                   loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
-                  onSelectToken={(token) => onUpdate({ inputPath: token })}
+                  onSelectToken={(token) => handleUpdate({ inputPath: token })}
                   wrapInBraces={false}
                 />
               </div>
@@ -2700,7 +3338,7 @@ export function StepConfigPanel({
               <label className="text-sm font-medium">Await Step</label>
               <Select
                 value={step.awaitStepId || '_auto'}
-                onValueChange={(val) => onUpdate({ awaitStepId: val === '_auto' ? undefined : val })}
+                onValueChange={(val) => handleUpdate({ awaitStepId: val === '_auto' ? undefined : val })}
               >
                 <SelectTrigger className="font-mono text-sm">
                   <SelectValue placeholder="Auto-detect" />
@@ -2764,70 +3402,38 @@ export function StepConfigPanel({
           />
         )}
 
-        {/* Input Source - for steps that receive data */}
+        {/* Input Configuration - unified input model for all step types */}
         {stepIndex > 0 && step.stepType !== 'foreach' && (
+          <InputConfigurationSection
+            step={step}
+            stepIndex={stepIndex}
+            allSteps={allSteps}
+            workflowId={workflowId}
+            previousSteps={previousSteps}
+            isInLoop={isInLoop}
+            loopScope={loopScope}
+            onUpdate={handleUpdate}
+            readOnly={readOnly}
+          />
+        )}
+
+        {/* Input Preview and Test Execution - only in workflow editor mode */}
+        {!readOnly && workflowId && stepIndex > 0 && (
           <div className="space-y-2 border-t pt-3">
-            <div className="flex items-center gap-2">
-              <Database className="h-4 w-4 text-muted-foreground" />
-              <label className="text-sm font-medium">Input Data Source</label>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">From Step</label>
-                <Select
-                  value={step.inputSource || 'previous'}
-                  onValueChange={(val) => onUpdate({ inputSource: val })}
-                >
-                  <SelectTrigger className="h-8 text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="previous">
-                      <span className="flex items-center gap-2">
-                        <ArrowDown className="h-3 w-3" />
-                        Previous Step
-                      </span>
-                    </SelectItem>
-                    <SelectItem value="trigger">
-                      <span className="flex items-center gap-2">
-                        <Zap className="h-3 w-3" />
-                        Workflow Trigger
-                      </span>
-                    </SelectItem>
-                    {allSteps.slice(0, stepIndex).map((s, i) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        <span className="text-xs">Step {i + 1}: {s.name}</span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Data Path</label>
-                <div className="flex gap-1">
-                  <Input
-                    value={parseInputPath(step.inputPath).path}
-                    onChange={(e) => {
-                      const newPath = buildInputPath(step.inputSource, e.target.value)
-                      onUpdate({ inputPath: newPath })
-                    }}
-                    placeholder="e.g., output.data"
-                    className="h-8 text-sm font-mono"
-                  />
-                  <TokenBrowser
-                    workflowId={workflowId}
-                    previousSteps={previousSteps}
-                    currentStepIndex={stepIndex}
-                    loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
-                    onSelectToken={(token) => {
-                      const newPath = buildInputPath(step.inputSource, token)
-                      onUpdate({ inputPath: newPath })
-                    }}
-                    wrapInBraces={false}
-                  />
-                </div>
-              </div>
-            </div>
+            <InputPreviewSection
+              workflowId={workflowId}
+              stepId={step.id}
+              stepIndex={stepIndex}
+              inputConfig={step.inputConfig}
+              onResolvedInputChange={setSampleInput}
+            />
+            <TestExecutionSection
+              workflowId={workflowId}
+              stepId={step.id}
+              stepType={step.stepType}
+              stepName={step.name}
+              sampleInput={sampleInput}
+            />
           </div>
         )}
 
@@ -2836,22 +3442,24 @@ export function StepConfigPanel({
           <label className="text-sm font-medium">Description</label>
           <Input
             value={step.description || ''}
-            onChange={(e) => onUpdate({ description: e.target.value })}
+            onChange={(e) => handleUpdate({ description: e.target.value })}
             placeholder="Optional description"
           />
         </div>
 
         {/* Add step after button */}
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={onAddStepAfter}
-          className="w-full"
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Add Step After
-        </Button>
+        {!readOnly && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onAddStepAfter}
+            className="w-full"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Add Step After
+          </Button>
+        )}
     </div>
   )
 }

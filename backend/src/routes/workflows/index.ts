@@ -496,6 +496,456 @@ workflowsRouter.get('/:workflowId/runs', async (req: Request, res: Response, nex
   }
 });
 
+// POST /api/workflows/:workflowId/steps/:stepId/input-preview - Preview input for a step based on a previous run
+// Accepts optional inputConfig in body to preview with unsaved configuration
+workflowsRouter.post('/:workflowId/steps/:stepId/input-preview', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { workflowId, stepId } = req.params;
+    const { workflowRunId, inputConfig: providedInputConfig } = req.body;
+
+    if (!ObjectId.isValid(workflowId)) {
+      throw createError('Invalid workflow ID', 400);
+    }
+
+    // Get the workflow
+    const workflow = await db.collection<Workflow>('workflows').findOne({
+      _id: new ObjectId(workflowId),
+    });
+
+    if (!workflow) {
+      throw createError('Workflow not found', 404);
+    }
+
+    // Find the step
+    const step = workflow.steps?.find(s => s.id === stepId);
+    if (!step) {
+      throw createError('Step not found in workflow', 404);
+    }
+
+    // Get a previous run to use for preview
+    let run;
+    if (workflowRunId && ObjectId.isValid(workflowRunId as string)) {
+      run = await db.collection('workflow_runs').findOne({
+        _id: new ObjectId(workflowRunId as string),
+        workflowId: new ObjectId(workflowId),
+      });
+    } else {
+      // Get the most recent completed run
+      run = await db.collection('workflow_runs').findOne(
+        { workflowId: new ObjectId(workflowId), status: 'completed' },
+        { sort: { completedAt: -1 } }
+      );
+    }
+
+    if (!run) {
+      res.json({
+        data: {
+          previewSource: 'none',
+          message: 'No completed workflow runs available for preview',
+          inputConfig: step.inputConfig,
+        },
+      });
+      return;
+    }
+
+    // Find the step index to determine which previous step's output to use
+    const stepIndex = workflow.steps?.findIndex(s => s.id === stepId) ?? -1;
+
+    let previousStepOutput: Record<string, unknown> = {};
+    let previousStepId: string | null = null;
+
+    if (stepIndex > 0) {
+      // Get output from previous step
+      const prevStep = workflow.steps?.[stepIndex - 1];
+      if (prevStep) {
+        previousStepId = prevStep.id;
+        const prevTask = await db.collection('tasks').findOne({
+          workflowRunId: run._id,
+          workflowStepId: prevStep.id,
+          status: 'completed',
+        }, { sort: { completedAt: -1 } });
+
+        if (prevTask) {
+          // Use stepOutput if available, otherwise fall back to metadata
+          if (prevTask.stepOutput?.data !== undefined) {
+            previousStepOutput = { output: prevTask.stepOutput.data, ...prevTask.stepOutput };
+          } else {
+            previousStepOutput = (prevTask.metadata as Record<string, unknown>) || {};
+            previousStepOutput.output = previousStepOutput.response || previousStepOutput.output || {};
+          }
+        }
+      }
+    } else {
+      // First step - use trigger payload
+      previousStepOutput = run.inputPayload || {};
+    }
+
+    // Resolve the input based on inputConfig
+    // Use provided inputConfig (for previewing unsaved changes) or fall back to saved step config
+    let resolvedInput: Record<string, unknown>;
+    const inputConfig = providedInputConfig || step.inputConfig;
+
+    if (inputConfig) {
+      // Use the new unified input config
+      let sourceData = previousStepOutput;
+
+      if (inputConfig.source === 'trigger') {
+        sourceData = run.inputPayload || {};
+      } else if (inputConfig.source !== 'previous' && inputConfig.source) {
+        // Specific step ID
+        const sourceTask = await db.collection('tasks').findOne({
+          workflowRunId: run._id,
+          workflowStepId: inputConfig.source,
+          status: 'completed',
+        }, { sort: { completedAt: -1 } });
+
+        if (sourceTask?.stepOutput?.data !== undefined) {
+          sourceData = { output: sourceTask.stepOutput.data, ...sourceTask.stepOutput };
+        } else if (sourceTask?.metadata) {
+          sourceData = sourceTask.metadata as Record<string, unknown>;
+        }
+      }
+
+      if (inputConfig.extractPath) {
+        // Simple path extraction
+        const extracted = getNestedValue(sourceData, inputConfig.extractPath);
+        resolvedInput = { _input: extracted, _source: sourceData };
+      } else if (inputConfig.mapping && Object.keys(inputConfig.mapping).length > 0) {
+        // Field mapping
+        resolvedInput = {};
+        const mapping = inputConfig.mapping as Record<string, string>;
+        for (const [key, template] of Object.entries(mapping)) {
+          // Simple template resolution for preview
+          const value = resolveSimpleTemplate(template, sourceData, (run.inputPayload as Record<string, unknown>) || {});
+          resolvedInput[key] = value;
+        }
+      } else {
+        resolvedInput = sourceData;
+      }
+    } else {
+      // No inputConfig - use previous step output directly
+      resolvedInput = previousStepOutput;
+    }
+
+    res.json({
+      data: {
+        previewSource: 'run',
+        workflowRunId: run._id.toString(),
+        runCompletedAt: run.completedAt,
+        runStatus: run.status,
+        previousStepId,
+        previousStepOutput,
+        resolvedInput,
+        inputConfig: inputConfig || null,
+        inputConfigSource: providedInputConfig ? 'provided' : 'saved',
+        // Also include legacy fields for reference
+        legacyInputPath: step.inputPath,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/workflows/:workflowId/steps/:stepId/test-execute - Execute a step with test input
+workflowsRouter.post('/:workflowId/steps/:stepId/test-execute', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { workflowId, stepId } = req.params;
+    const { inputPayload, dryRun } = req.body;
+
+    if (!ObjectId.isValid(workflowId)) {
+      throw createError('Invalid workflow ID', 400);
+    }
+
+    // Get the workflow
+    const workflow = await db.collection<Workflow>('workflows').findOne({
+      _id: new ObjectId(workflowId),
+    });
+
+    if (!workflow) {
+      throw createError('Workflow not found', 404);
+    }
+
+    // Find the step
+    const step = workflow.steps?.find(s => s.id === stepId);
+    if (!step) {
+      throw createError('Step not found in workflow', 404);
+    }
+
+    const stepType = step.stepType || 'agent';
+    const startTime = Date.now();
+
+    // Handle different step types
+    switch (stepType) {
+      case 'code': {
+        if (!step.codeConfig?.code) {
+          throw createError('Code step has no code configured', 400);
+        }
+
+        const result = await executeCode(step.codeConfig.code, {
+          input: inputPayload || {},
+          trigger: {},
+          steps: {},
+        }, {
+          packages: step.codeConfig.packages || [],
+          variables: [], // Would need to resolve these from context
+          timeout: step.codeConfig.timeout || 5000,
+        });
+
+        res.json({
+          data: {
+            success: result.success,
+            output: result.output,
+            error: result.error,
+            logs: result.logs,
+            executionTimeMs: result.executionTimeMs,
+            stepType: 'code',
+          },
+        });
+        break;
+      }
+
+      case 'decision': {
+        // Evaluate conditions against input
+        const connections = step.connections || [];
+        let selectedBranch = null;
+
+        for (const conn of connections) {
+          if (!conn.condition) continue;
+
+          // Simple condition evaluation (for preview purposes)
+          try {
+            const conditionResult = evaluateSimpleCondition(conn.condition, inputPayload || {});
+            if (conditionResult) {
+              selectedBranch = {
+                targetStepId: conn.targetStepId,
+                condition: conn.condition,
+                label: conn.label,
+              };
+              break;
+            }
+          } catch {
+            // Condition evaluation failed, continue to next
+          }
+        }
+
+        // If no branch matched, use default
+        if (!selectedBranch && step.defaultConnection) {
+          selectedBranch = {
+            targetStepId: step.defaultConnection,
+            condition: 'default',
+          };
+        }
+
+        res.json({
+          data: {
+            success: true,
+            output: { selectedBranch },
+            executionTimeMs: Date.now() - startTime,
+            stepType: 'decision',
+          },
+        });
+        break;
+      }
+
+      case 'foreach': {
+        // Extract items from input based on itemsPath
+        const itemsPath = step.itemsPath || 'items';
+        const items = getNestedValue(inputPayload || {}, itemsPath);
+
+        if (!Array.isArray(items)) {
+          res.json({
+            data: {
+              success: false,
+              error: `Items path "${itemsPath}" did not return an array`,
+              output: { extractedValue: items },
+              executionTimeMs: Date.now() - startTime,
+              stepType: 'foreach',
+            },
+          });
+          return;
+        }
+
+        const maxItems = step.maxItems || 100;
+        const limitedItems = items.slice(0, maxItems);
+
+        res.json({
+          data: {
+            success: true,
+            output: {
+              totalItems: items.length,
+              itemsToProcess: limitedItems.length,
+              sampleItems: limitedItems.slice(0, 5), // Show first 5 items as sample
+              itemVariable: step.itemVariable || 'item',
+            },
+            executionTimeMs: Date.now() - startTime,
+            stepType: 'foreach',
+          },
+        });
+        break;
+      }
+
+      case 'webhook':
+      case 'external': {
+        // For webhook/external, show what would be sent
+        const url = step.externalConfig?.endpoint || step.webhookConfig?.url;
+        const method = step.externalConfig?.method || step.webhookConfig?.method || 'POST';
+        const bodyTemplate = step.externalConfig?.payloadTemplate || step.webhookConfig?.bodyTemplate;
+
+        // Resolve the body template
+        let resolvedBody = null;
+        if (bodyTemplate) {
+          try {
+            resolvedBody = resolveSimpleTemplate(bodyTemplate, inputPayload || {}, {});
+          } catch {
+            resolvedBody = bodyTemplate;
+          }
+        }
+
+        if (dryRun) {
+          // Just show what would be sent
+          res.json({
+            data: {
+              success: true,
+              dryRun: true,
+              output: {
+                request: {
+                  url,
+                  method,
+                  headers: step.externalConfig?.headers || step.webhookConfig?.headers,
+                  body: resolvedBody,
+                },
+              },
+              executionTimeMs: Date.now() - startTime,
+              stepType,
+            },
+          });
+        } else {
+          // Actually make the HTTP call
+          // For now, just show the request details
+          res.json({
+            data: {
+              success: true,
+              dryRun: true,
+              message: 'Live HTTP execution not yet implemented in test mode',
+              output: {
+                request: {
+                  url,
+                  method,
+                  headers: step.externalConfig?.headers || step.webhookConfig?.headers,
+                  body: resolvedBody,
+                },
+              },
+              executionTimeMs: Date.now() - startTime,
+              stepType,
+            },
+          });
+        }
+        break;
+      }
+
+      case 'agent':
+      case 'manual':
+        res.json({
+          data: {
+            success: false,
+            error: `Step type "${stepType}" requires human or AI execution and cannot be test-executed`,
+            executionTimeMs: Date.now() - startTime,
+            stepType,
+          },
+        });
+        break;
+
+      default:
+        res.json({
+          data: {
+            success: false,
+            error: `Test execution not supported for step type "${stepType}"`,
+            executionTimeMs: Date.now() - startTime,
+            stepType,
+          },
+        });
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Helper function to get nested value from object by path
+function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
+  const parts = path.split('.');
+  let current: unknown = obj;
+
+  for (const part of parts) {
+    if (current === null || current === undefined) return undefined;
+    if (typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+
+  return current;
+}
+
+// Helper function to resolve simple template expressions
+function resolveSimpleTemplate(
+  template: string,
+  sourceData: Record<string, unknown>,
+  triggerData: Record<string, unknown>
+): unknown {
+  // If it's a simple variable reference like "{{output.field}}"
+  const simpleMatch = template.match(/^\{\{([^}]+)\}\}$/);
+  if (simpleMatch) {
+    const path = simpleMatch[1].trim();
+
+    if (path.startsWith('trigger.')) {
+      return getNestedValue(triggerData, path.substring(8));
+    }
+    if (path.startsWith('input.')) {
+      return getNestedValue(sourceData, path.substring(6));
+    }
+    return getNestedValue(sourceData, path);
+  }
+
+  // Otherwise, replace all template variables with string values
+  return template.replace(/\{\{([^}]+)\}\}/g, (_match, path) => {
+    const trimmedPath = path.trim();
+    let value: unknown;
+
+    if (trimmedPath.startsWith('trigger.')) {
+      value = getNestedValue(triggerData, trimmedPath.substring(8));
+    } else if (trimmedPath.startsWith('input.')) {
+      value = getNestedValue(sourceData, trimmedPath.substring(6));
+    } else {
+      value = getNestedValue(sourceData, trimmedPath);
+    }
+
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'object') return JSON.stringify(value);
+    return String(value);
+  });
+}
+
+// Helper function to evaluate simple conditions
+function evaluateSimpleCondition(condition: string, input: Record<string, unknown>): boolean {
+  // Handle simple equality checks like "output.status == 'approved'"
+  const equalityMatch = condition.match(/^(.+?)\s*===?\s*['"](.+)['"]$/);
+  if (equalityMatch) {
+    const [, path, expected] = equalityMatch;
+    const actual = getNestedValue(input, path.trim());
+    return actual === expected;
+  }
+
+  // Handle simple truthy checks like "output.approved"
+  const truthyMatch = condition.match(/^(.+)$/);
+  if (truthyMatch) {
+    const value = getNestedValue(input, condition.trim());
+    return Boolean(value);
+  }
+
+  return false;
+}
+
 // Re-export types and utilities
 export * from './types.js';
 export { parseMermaidToSteps, generateMermaidFromSteps } from './mermaid-parser.js';

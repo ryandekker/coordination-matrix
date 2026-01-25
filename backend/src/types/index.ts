@@ -306,6 +306,142 @@ export interface CodeStepConfig {
   continueOnError?: boolean;  // If true, step completes with error in output instead of failing
 }
 
+// ============================================================================
+// Unified Step Input/Output Configuration
+// ============================================================================
+
+/**
+ * Unified input configuration for workflow steps.
+ * All step types use this same model to define where their input comes from.
+ *
+ * Input resolution flow:
+ * 1. Determine source (previous step output, trigger payload, or specific step)
+ * 2. If `mapping` is defined, resolve each template to build input object
+ * 3. If `extractPath` is defined (and no mapping), extract that path from source
+ * 4. Otherwise, pass entire source as input
+ */
+export interface StepInputConfig {
+  /**
+   * Where to get input data from:
+   * - 'previous': Output from the immediately previous step (default)
+   * - 'trigger': Initial workflow trigger payload
+   * - '<stepId>': Output from a specific earlier step by ID
+   */
+  source: 'previous' | 'trigger' | string;
+
+  /**
+   * Field mapping using template expressions.
+   * Each key becomes a field in the step input, value is a template expression.
+   *
+   * Examples:
+   * - { "userId": "{{output.user.id}}" }
+   * - { "items": "{{output.data.records}}", "count": "{{output.data.total}}" }
+   * - { "item": "{{item}}", "index": "{{_index}}" } (inside foreach)
+   *
+   * When mapping is defined, the step receives an object with these fields.
+   * If not defined, the step receives the entire source output.
+   */
+  mapping?: Record<string, string>;
+
+  /**
+   * Simple path extraction (alternative to full mapping).
+   * Extracts a single path from the source and passes that as input.
+   *
+   * Examples:
+   * - "output.data" - extracts just the data field
+   * - "output.results[0]" - extracts first result
+   *
+   * Cannot be used together with `mapping`.
+   */
+  extractPath?: string;
+}
+
+/**
+ * Standardized step output that gets passed to subsequent steps.
+ * This is stored on the task after execution completes.
+ */
+export interface StepOutput {
+  /**
+   * Primary output data from step execution.
+   * This is what gets passed to the next step's input.
+   */
+  data: unknown;
+
+  /**
+   * Human-readable summary of what the step produced.
+   */
+  summary?: string;
+
+  /**
+   * Timestamp when output was produced.
+   */
+  producedAt: Date;
+
+  /**
+   * Duration of step execution in milliseconds.
+   */
+  durationMs?: number;
+
+  /**
+   * For webhook/external steps: HTTP response details
+   */
+  httpResponse?: {
+    status: number;
+    headers?: Record<string, string>;
+    body?: unknown;
+  };
+
+  /**
+   * For join steps: aggregated results from child tasks
+   */
+  aggregatedResults?: Array<{
+    taskId: string;
+    stepId?: string;
+    data: unknown;
+    status: 'success' | 'failed';
+  }>;
+
+  /**
+   * For decision steps: which branch was selected
+   */
+  selectedBranch?: {
+    targetStepId: string;
+    condition?: string;
+  };
+
+  /**
+   * For foreach steps: iteration metadata
+   */
+  foreachMeta?: {
+    totalItems: number;
+    itemsPath: string;
+  };
+
+  /**
+   * For code steps: execution logs
+   */
+  logs?: string[];
+
+  /**
+   * For flow steps: nested workflow result
+   */
+  nestedWorkflow?: {
+    runId: string;
+    status: string;
+    output?: unknown;
+  };
+
+  /**
+   * For findDocument steps: found documents
+   */
+  documents?: Array<{
+    id: string;
+    title: string;
+    type: string;
+    score?: number;
+  }>;
+}
+
 // Complete workflow step configuration stored on task for rerun/visibility
 export interface TaskStepConfig {
   // Step identification
@@ -363,7 +499,10 @@ export interface TaskStepConfig {
   // Code step config
   codeConfig?: CodeStepConfig;
 
-  // Input aggregation config
+  // Unified input configuration (new model)
+  inputConfig?: StepInputConfig;
+
+  // Legacy input aggregation config (deprecated - use inputConfig)
   inputPath?: string;
   inputSource?: string;
 }
@@ -520,6 +659,10 @@ export interface Task {
 
   // Standardized task result with history
   taskResult?: TaskResult;
+
+  // Unified step input/output (new model for workflow tasks)
+  stepInput?: Record<string, unknown>;   // Resolved input data received by this step
+  stepOutput?: StepOutput;               // Standardized output produced by this step
 
   // Manual review fields (for manual workflow steps)
   reviewDecision?: ManualReviewDecision;
@@ -1052,7 +1195,10 @@ export interface WorkflowStep {
   flowId?: string;
   inputMapping?: Record<string, string>;
 
-  // Input aggregation
+  // Unified input configuration (new model - use this instead of inputPath/inputMapping)
+  inputConfig?: StepInputConfig;
+
+  // Legacy: Input aggregation (deprecated - use inputConfig)
   inputPath?: string;                   // JSONPath to extract input from previous steps
 
   // FindDocument step config - semantic search for documents or static document reference

@@ -20,7 +20,7 @@ import {
   FlowAttempt,
 } from '../../types/index.js';
 
-import { resolveTemplateWithPackages, getValueByPath, resolveTitleTemplateWithPackages, getBaseUrl } from './template-utils.js';
+import { resolveTemplateWithPackages, getValueByPath, resolveTitleTemplateWithPackages, getBaseUrl, resolveTemplateValue } from './template-utils.js';
 import { stripUndefined } from './mongo-utils.js';
 import { searchDocuments } from '../embedding-service.js';
 import { SYSTEM_USER_ID, isSystemExecutedTaskType } from '../system-user.js';
@@ -610,6 +610,51 @@ class WorkflowExecutionService {
     return config;
   }
 
+  /**
+   * Build a StepOutput object from step execution results.
+   * This standardizes output storage across all step types.
+   */
+  private buildStepOutput(
+    data: unknown,
+    options: {
+      summary?: string;
+      durationMs?: number;
+      httpResponse?: { status: number; headers?: Record<string, string>; body?: unknown };
+      aggregatedResults?: Array<{ taskId: string; stepId?: string; data: unknown; status: 'success' | 'failed' }>;
+      selectedBranch?: { targetStepId: string; condition?: string };
+      foreachMeta?: { totalItems: number; itemsPath: string };
+      logs?: string[];
+      nestedWorkflow?: { runId: string; status: string; output?: unknown };
+      documents?: Array<{ id: string; title: string; type: string; score?: number }>;
+    } = {}
+  ): {
+    data: unknown;
+    summary?: string;
+    producedAt: Date;
+    durationMs?: number;
+    httpResponse?: { status: number; headers?: Record<string, string>; body?: unknown };
+    aggregatedResults?: Array<{ taskId: string; stepId?: string; data: unknown; status: 'success' | 'failed' }>;
+    selectedBranch?: { targetStepId: string; condition?: string };
+    foreachMeta?: { totalItems: number; itemsPath: string };
+    logs?: string[];
+    nestedWorkflow?: { runId: string; status: string; output?: unknown };
+    documents?: Array<{ id: string; title: string; type: string; score?: number }>;
+  } {
+    return {
+      data,
+      summary: options.summary,
+      producedAt: new Date(),
+      durationMs: options.durationMs,
+      httpResponse: options.httpResponse,
+      aggregatedResults: options.aggregatedResults,
+      selectedBranch: options.selectedBranch,
+      foreachMeta: options.foreachMeta,
+      logs: options.logs,
+      nestedWorkflow: options.nestedWorkflow,
+      documents: options.documents,
+    };
+  }
+
   private async createTaskForStep(
     run: WorkflowRun,
     workflow: Workflow,
@@ -668,9 +713,12 @@ class WorkflowExecutionService {
       assigneeId,
       createdAt: now,
       updatedAt: now,
+      // New unified step input field
+      stepInput: inputPayload,
       metadata: {
         stepId: step.id,
         stepType: step.stepType,
+        // Keep inputPayload in metadata for backward compatibility during transition
         inputPayload,
       },
     };
@@ -2079,11 +2127,18 @@ class WorkflowExecutionService {
 
       if (result.success) {
         // Code executed successfully
+        const stepOutput = this.buildStepOutput(result.output, {
+          summary: `Code executed successfully in ${result.executionTimeMs}ms`,
+          durationMs: result.executionTimeMs,
+          logs: result.logs,
+        });
+
         await this.tasks.updateOne(
           { _id: codeTask._id },
           {
             $set: {
               status: 'completed' as TaskStatus,
+              stepOutput,
               'metadata.output': result.output,
               'metadata.executionTimeMs': result.executionTimeMs,
               'metadata.logs': result.logs,
@@ -2331,14 +2386,17 @@ class WorkflowExecutionService {
       return;
     }
 
-    // Build the input payload for the subflow using inputMapping
+    // Build the input payload for the subflow using inputMapping or inputConfig.mapping
     let subflowInputPayload: Record<string, unknown> = {};
 
-    if (step.inputMapping && Object.keys(step.inputMapping).length > 0) {
-      // Use explicit input mapping
-      console.log(`[WorkflowExecutionService] executeFlow: Using inputMapping: ${JSON.stringify(step.inputMapping)}`);
+    // Support both legacy inputMapping and new inputConfig.mapping
+    const effectiveMapping = step.inputMapping || step.inputConfig?.mapping;
 
-      for (const [targetField, sourceValue] of Object.entries(step.inputMapping)) {
+    if (effectiveMapping && Object.keys(effectiveMapping).length > 0) {
+      // Use explicit input mapping
+      console.log(`[WorkflowExecutionService] executeFlow: Using inputMapping: ${JSON.stringify(effectiveMapping)}`);
+
+      for (const [targetField, sourceValue] of Object.entries(effectiveMapping)) {
         if (!targetField) continue; // Skip empty keys
 
         // Only resolve template if the value is a string
@@ -2362,7 +2420,7 @@ class WorkflowExecutionService {
     } else {
       // No explicit mapping - pass through the full input payload
       subflowInputPayload = inputPayload || {};
-      console.log(`[WorkflowExecutionService] No inputMapping, passing through full payload`);
+      console.log(`[WorkflowExecutionService] No inputMapping or inputConfig.mapping, passing through full payload`);
     }
 
     // Create the initial attempt record
@@ -2372,7 +2430,7 @@ class WorkflowExecutionService {
       startedAt: now,
       status: 'running',
       inputPayload: subflowInputPayload,
-      resolvedInputMapping: step.inputMapping,
+      resolvedInputMapping: effectiveMapping,
       targetWorkflowId: step.flowId,
       targetWorkflowName: targetWorkflow.name,
     };
@@ -2388,7 +2446,7 @@ class WorkflowExecutionService {
           'metadata.subflowInputPayload': subflowInputPayload,
           // Update flowConfig
           'flowConfig.workflowId': step.flowId,
-          'flowConfig.inputMapping': step.inputMapping || {},
+          'flowConfig.inputMapping': effectiveMapping || {},
           'flowConfig.lastAttemptAt': now,
           // Set initial taskResult showing the flow is starting
           'taskResult.current': {
@@ -2401,7 +2459,7 @@ class WorkflowExecutionService {
                 id: step.flowId,
                 name: targetWorkflow.name,
               },
-              inputMapping: step.inputMapping || {},
+              inputMapping: effectiveMapping || {},
               inputPayload: subflowInputPayload,
               nextStep: step.connections?.[0]?.targetStepId || null,
             },
@@ -2681,14 +2739,22 @@ class WorkflowExecutionService {
       return;
     }
 
+    // Build output payload from completed task
+    // Priority: stepOutput.data (new) > metadata.response (external API) > metadata.output > empty object
     const taskMetadata = completedTask.metadata || {};
-    // Build outputPayload for the next step:
-    // - Spread taskMetadata at root for direct access to fields
-    // - Set 'output' to the actual output data (not the entire metadata to avoid recursive nesting)
-    //   Priority: response (external API) > existing output > empty object
+    let outputData: unknown;
+
+    if (completedTask.stepOutput?.data !== undefined) {
+      // New unified stepOutput model
+      outputData = completedTask.stepOutput.data;
+    } else {
+      // Fallback to legacy metadata fields
+      outputData = taskMetadata.response || taskMetadata.output || {};
+    }
+
     const outputPayload: Record<string, unknown> = {
       ...taskMetadata,
-      output: taskMetadata.response || taskMetadata.output || {},
+      output: outputData,
     };
 
     for (const nextStepId of nextStepIds) {
@@ -2696,16 +2762,25 @@ class WorkflowExecutionService {
       if (nextStep) {
         console.log(`[WorkflowExecutionService] Creating task for next step: ${nextStep.name} (${nextStep.id})`);
 
-        let stepInputPayload = outputPayload;
-        if (nextStep.inputPath) {
+        // Use new unified input resolution if inputConfig is defined
+        let stepInputPayload: Record<string, unknown>;
+        if (nextStep.inputConfig) {
+          stepInputPayload = await this.resolveStepInput(run, workflow, nextStep, outputPayload);
+          console.log(`[WorkflowExecutionService] Resolved input using inputConfig`);
+        } else if (nextStep.inputPath) {
+          // Fallback to legacy inputPath
           const extractedInput = await this.resolveInputPath(run, nextStep.inputPath, outputPayload);
           if (extractedInput !== undefined) {
             stepInputPayload = {
               ...outputPayload,
               _extractedInput: extractedInput,
             };
-            console.log(`[WorkflowExecutionService] Extracted input using path ${nextStep.inputPath}`);
+            console.log(`[WorkflowExecutionService] Extracted input using legacy path ${nextStep.inputPath}`);
+          } else {
+            stepInputPayload = outputPayload;
           }
+        } else {
+          stepInputPayload = outputPayload;
         }
 
         await this.executeStep(run, workflow, nextStep, rootTask, stepInputPayload);
@@ -2898,6 +2973,79 @@ class WorkflowExecutionService {
     } catch {
       return resolvedString;
     }
+  }
+
+  /**
+   * Resolve step input using the new unified inputConfig model.
+   * Falls back to legacy inputPath/inputSource if inputConfig is not defined.
+   */
+  private async resolveStepInput(
+    run: WorkflowRun,
+    _workflow: Workflow,
+    step: WorkflowStep,
+    previousStepOutput: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    const inputConfig = step.inputConfig;
+
+    // If no inputConfig, use the output from previous step directly
+    // (legacy behavior - also check for inputPath)
+    if (!inputConfig) {
+      if (step.inputPath) {
+        const extracted = await this.resolveInputPath(run, step.inputPath, previousStepOutput);
+        if (extracted !== undefined) {
+          return {
+            ...previousStepOutput,
+            _extractedInput: extracted,
+          };
+        }
+      }
+      return previousStepOutput;
+    }
+
+    // Determine the source data
+    let sourceData: Record<string, unknown>;
+
+    if (inputConfig.source === 'previous') {
+      sourceData = previousStepOutput;
+    } else if (inputConfig.source === 'trigger') {
+      sourceData = run.inputPayload || {};
+    } else {
+      // inputConfig.source is a step ID
+      const sourceTask = await this.tasks.findOne({
+        workflowRunId: run._id,
+        workflowStepId: inputConfig.source,
+        status: 'completed',
+      }, { sort: { createdAt: -1 } });
+
+      if (sourceTask?.stepOutput) {
+        sourceData = { output: sourceTask.stepOutput.data, ...sourceTask.stepOutput };
+      } else if (sourceTask?.metadata) {
+        sourceData = sourceTask.metadata as Record<string, unknown>;
+      } else {
+        // Source step not found or not completed
+        console.warn(`[resolveStepInput] Source step ${inputConfig.source} not found or not completed`);
+        sourceData = {};
+      }
+    }
+
+    // If extractPath is defined, extract that path from source
+    if (inputConfig.extractPath) {
+      const extracted = getValueByPath(sourceData, inputConfig.extractPath);
+      return { _input: extracted, _source: sourceData };
+    }
+
+    // If mapping is defined, resolve each template
+    if (inputConfig.mapping && Object.keys(inputConfig.mapping).length > 0) {
+      const resolved: Record<string, unknown> = {};
+      for (const [key, template] of Object.entries(inputConfig.mapping)) {
+        // Resolve template variables like {{output.field}}
+        resolved[key] = await resolveTemplateValue(template, sourceData, run.inputPayload);
+      }
+      return resolved;
+    }
+
+    // No mapping or extractPath - pass entire source
+    return sourceData;
   }
 
   private async handleStepFailure(

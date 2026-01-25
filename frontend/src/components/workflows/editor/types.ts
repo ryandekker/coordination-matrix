@@ -49,6 +49,13 @@ export interface CodeStepConfig {
   continueOnError?: boolean           // Complete with error in output instead of failing
 }
 
+// Unified input configuration for workflow steps
+export interface StepInputConfig {
+  source: 'previous' | 'trigger' | string  // Where to get input from
+  mapping?: Record<string, string>         // Field mapping with template expressions
+  extractPath?: string                     // Simple path extraction (alternative to mapping)
+}
+
 // Connection between steps (for non-linear flows)
 export interface StepConnection {
   targetStepId: string
@@ -97,7 +104,10 @@ export interface WorkflowStep {
   itemVariable?: string
   maxItems?: number
 
-  // Data flow - general (applies to multiple step types)
+  // Unified input configuration (new model - use this instead of inputSource/inputPath)
+  inputConfig?: StepInputConfig
+
+  // Legacy data flow config (deprecated - use inputConfig)
   inputSource?: string               // Step ID to get input from (default: previous step)
   inputPath?: string                 // JSONPath to extract data from source step
 

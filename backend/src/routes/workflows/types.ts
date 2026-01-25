@@ -11,7 +11,7 @@ import { ObjectId } from 'mongodb';
 // - join: Fan-in aggregation point (awaits boundary conditions)
 // - flow: Delegate to another workflow (nested)
 // - code: Execute JavaScript code in a sandboxed environment
-export type WorkflowStepType = 'trigger' | 'agent' | 'manual' | 'external' | 'decision' | 'foreach' | 'join' | 'flow' | 'code';
+export type WorkflowStepType = 'trigger' | 'agent' | 'manual' | 'external' | 'webhook' | 'decision' | 'foreach' | 'join' | 'flow' | 'code';
 
 // Connection between steps (for non-linear flows)
 export interface StepConnection {
@@ -55,6 +55,24 @@ export interface CodeStepConfig {
   continueOnError?: boolean;          // Complete with error in output instead of failing
 }
 
+// Webhook step configuration
+export interface WebhookConfig {
+  url?: string;
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  headers?: Record<string, string>;
+  bodyTemplate?: string;
+  maxRetries?: number;
+  timeoutMs?: number;
+  successStatusCodes?: number[];
+}
+
+// Unified input configuration for workflow steps
+export interface StepInputConfig {
+  source: 'previous' | 'trigger' | string;  // Where to get input from
+  mapping?: Record<string, string>;         // Field mapping with template expressions
+  extractPath?: string;                     // Simple path extraction (alternative to mapping)
+}
+
 export interface WorkflowStep {
   id: string;
   name: string;
@@ -95,7 +113,13 @@ export interface WorkflowStep {
   flowId?: string;
   inputMapping?: Record<string, string>;
 
-  // Input aggregation
+  // Webhook step configuration
+  webhookConfig?: WebhookConfig;
+
+  // Unified input configuration (new model)
+  inputConfig?: StepInputConfig;
+
+  // Legacy input aggregation (deprecated - use inputConfig)
   inputSource?: string;             // Step ID to get input from (default: previous step)
   inputPath?: string;               // JSONPath to extract input from source step
 
@@ -130,4 +154,4 @@ export interface Workflow {
 }
 
 // Valid step types for normalization
-export const VALID_STEP_TYPES: WorkflowStepType[] = ['trigger', 'agent', 'manual', 'external', 'decision', 'foreach', 'join', 'flow', 'code'];
+export const VALID_STEP_TYPES: WorkflowStepType[] = ['trigger', 'agent', 'manual', 'external', 'webhook', 'decision', 'foreach', 'join', 'flow', 'code'];

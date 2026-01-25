@@ -784,6 +784,52 @@ export interface FindDocumentConfig {
   failIfNotFound?: boolean
 }
 
+// Unified input configuration for workflow steps
+export interface StepInputConfig {
+  source: 'previous' | 'trigger' | string
+  mapping?: Record<string, string>
+  extractPath?: string
+}
+
+// Standardized step output
+export interface StepOutput {
+  data: unknown
+  summary?: string
+  producedAt: string
+  durationMs?: number
+  httpResponse?: {
+    status: number
+    headers?: Record<string, string>
+    body?: unknown
+  }
+  aggregatedResults?: Array<{
+    taskId: string
+    stepId?: string
+    data: unknown
+    status: 'success' | 'failed'
+  }>
+  selectedBranch?: {
+    targetStepId: string
+    condition?: string
+  }
+  foreachMeta?: {
+    totalItems: number
+    itemsPath: string
+  }
+  logs?: string[]
+  nestedWorkflow?: {
+    runId: string
+    status: string
+    output?: unknown
+  }
+  documents?: Array<{
+    id: string
+    title: string
+    type: string
+    score?: number
+  }>
+}
+
 // Complete workflow step configuration stored on task
 export interface TaskStepConfig {
   // Step identification
@@ -837,7 +883,10 @@ export interface TaskStepConfig {
   // FindDocument step config
   findDocumentConfig?: FindDocumentConfig
 
-  // Input aggregation config
+  // Unified input configuration
+  inputConfig?: StepInputConfig
+
+  // Legacy input aggregation config
   inputPath?: string
   inputSource?: string
 }
@@ -970,6 +1019,9 @@ export interface Task {
   stepConfig?: TaskStepConfig
   // Standardized task result with history
   taskResult?: TaskResult
+  // Unified step input/output (new model for workflow tasks)
+  stepInput?: Record<string, unknown>
+  stepOutput?: StepOutput
   // Decision result: which branch was selected
   decisionResult?: string
   // Manual review fields (for manual workflow steps)
@@ -1122,6 +1174,7 @@ export interface WorkflowStep {
   awaitTag?: string               // Join: Tag pattern
   flowId?: string                 // Flow: Target workflow ID (nested workflow)
   inputMapping?: Record<string, string>  // Flow: Input mapping
+  inputConfig?: StepInputConfig   // Unified input configuration
 }
 
 export interface Workflow {
