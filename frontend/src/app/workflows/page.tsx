@@ -20,6 +20,7 @@ import {
   ChevronRight,
   ChevronDown,
   User,
+  Users,
   Bot,
   Plus,
   Pencil,
@@ -184,6 +185,7 @@ interface WorkflowData {
   stages?: string[]  // Legacy format - simple stage names
   mermaidDiagram?: string
   folderId?: string | null
+  groupId?: string | null
   color?: string
   createdAt: string
   updatedAt?: string
@@ -198,6 +200,7 @@ interface BriefWorkflowData {
   stepCounts: StepCounts
   mermaidDiagram?: string
   folderId?: string | null
+  groupId?: string | null
   color?: string
   createdAt: string
   updatedAt?: string
@@ -398,7 +401,7 @@ function formatRelativeTime(date: string | null): string {
 export default function WorkflowsPage() {
   const router = useRouter()
   const queryClient = useQueryClient()
-  const { currentGroupId } = useGroupContext()
+  const { currentGroupId, groups } = useGroupContext()
   const [isEditorOpen, setIsEditorOpen] = useState(false)
   const [editingWorkflow, setEditingWorkflow] = useState<WorkflowData | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<WorkflowData | null>(null)
@@ -587,6 +590,17 @@ export default function WorkflowsPage() {
   const bulkMoveToFolderMutation = useMutation({
     mutationFn: async ({ ids, folderId }: { ids: string[]; folderId: string | null }) => {
       await Promise.all(ids.map(id => updateWorkflow(id, { folderId })))
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflows'] })
+      setRowSelection({})
+    },
+  })
+
+  // Bulk move to group
+  const bulkMoveToGroupMutation = useMutation({
+    mutationFn: async ({ ids, groupId }: { ids: string[]; groupId: string | null }) => {
+      await Promise.all(ids.map(id => updateWorkflow(id, { groupId })))
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workflows'] })
@@ -1293,6 +1307,35 @@ export default function WorkflowsPage() {
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
+            {/* Move to group dropdown - only show if user has multiple groups */}
+            {groups.length > 1 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Users className="h-4 w-4 mr-1" />
+                    Move to Group
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem
+                    onClick={() => bulkMoveToGroupMutation.mutate({ ids: selectedWorkflowIds, groupId: null })}
+                  >
+                    <Users className="h-4 w-4 mr-2 text-muted-foreground" />
+                    No Group
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {groups.map(group => (
+                    <DropdownMenuItem
+                      key={group._id}
+                      onClick={() => bulkMoveToGroupMutation.mutate({ ids: selectedWorkflowIds, groupId: group._id })}
+                    >
+                      <Users className="h-4 w-4 mr-2 text-muted-foreground" />
+                      {group.displayName}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
             <Button
               variant="outline"
               size="sm"

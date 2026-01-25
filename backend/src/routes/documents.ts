@@ -278,7 +278,7 @@ documentsRouter.get('/:id', async (req: Request, res: Response, next: NextFuncti
 });
 
 // POST /api/documents - Create a new document
-documentsRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
+documentsRouter.post('/', loadUserGroups(), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
     const {
@@ -291,6 +291,8 @@ documentsRouter.post('/', async (req: Request, res: Response, next: NextFunction
       parentDocumentId,
       workflowRunId,
       metadata,
+      groupId,
+      projectId,
     } = req.body;
 
     // Validate required fields
@@ -312,6 +314,15 @@ documentsRouter.post('/', async (req: Request, res: Response, next: NextFunction
     const now = new Date();
     const userId = req.user?.userId ? new ObjectId(req.user.userId) : null;
 
+    // Determine groupId - use provided, or fall back to user's primary group
+    let resolvedGroupId: ObjectId | null = null;
+    if (groupId && ObjectId.isValid(groupId)) {
+      resolvedGroupId = new ObjectId(groupId);
+    } else if (req.userGroupIds && req.userGroupIds.length > 0) {
+      // Use user's first (primary) group
+      resolvedGroupId = req.userGroupIds[0];
+    }
+
     const newDocument: Omit<Document, '_id'> = {
       title: title.trim(),
       content,
@@ -319,6 +330,8 @@ documentsRouter.post('/', async (req: Request, res: Response, next: NextFunction
       type,
       status,
       tags: Array.isArray(tags) ? tags.filter((t: unknown) => typeof t === 'string') : [],
+      groupId: resolvedGroupId,
+      projectId: projectId && ObjectId.isValid(projectId) ? new ObjectId(projectId) : null,
       createdById: userId,
       lastModifiedById: userId,
       parentDocumentId: parentDocumentId && ObjectId.isValid(parentDocumentId)

@@ -746,45 +746,47 @@ export function TaskModal({
                 />
               </div>
 
-              {/* Group */}
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Group</label>
-                <Controller
-                  name="groupId"
-                  control={control}
-                  render={({ field }) => (
-                    <Select
-                      value={(field.value as string) || '_none'}
-                      onValueChange={(val) => {
-                        const newGroupId = val === '_none' ? null : val
-                        field.onChange(newGroupId)
-                        // Clear project when group changes
-                        setValue('projectId', null)
-                      }}
-                    >
-                      <SelectTrigger className="h-8 text-sm">
-                        <SelectValue placeholder="Select group" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="_none">
-                          <div className="flex items-center gap-2 text-muted-foreground">
-                            <Users className="h-3.5 w-3.5" />
-                            <span>No group (admin only)</span>
-                          </div>
-                        </SelectItem>
-                        {groups.map((group) => (
-                          <SelectItem key={group._id} value={group._id}>
-                            <div className="flex items-center gap-2">
+              {/* Group - only show if user is in multiple groups */}
+              {groups.length > 1 && (
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Group</label>
+                  <Controller
+                    name="groupId"
+                    control={control}
+                    render={({ field }) => (
+                      <Select
+                        value={(field.value as string) || '_none'}
+                        onValueChange={(val) => {
+                          const newGroupId = val === '_none' ? null : val
+                          field.onChange(newGroupId)
+                          // Clear project when group changes
+                          setValue('projectId', null)
+                        }}
+                      >
+                        <SelectTrigger className="h-8 text-sm">
+                          <SelectValue placeholder="Select group" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="_none">
+                            <div className="flex items-center gap-2 text-muted-foreground">
                               <Users className="h-3.5 w-3.5" />
-                              <span>{group.displayName}</span>
+                              <span>No group (admin only)</span>
                             </div>
                           </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-              </div>
+                          {groups.map((group) => (
+                            <SelectItem key={group._id} value={group._id}>
+                              <div className="flex items-center gap-2">
+                                <Users className="h-3.5 w-3.5" />
+                                <span>{group.displayName}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                </div>
+              )}
 
               {/* Project - only show if a group is selected */}
               {(() => {
@@ -1223,6 +1225,8 @@ export function TaskModal({
                 workflows={workflows}
                 users={users}
                 allTasks={allTasks}
+                groups={groups}
+                projects={projects}
                 webhookConfig={webhookConfig}
                 onWebhookConfigChange={handleWebhookConfigChange}
                 updateTask={updateTask}

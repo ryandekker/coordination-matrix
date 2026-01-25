@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { TagInput } from '@/components/ui/tag-input'
-import { Task, LookupValue, User, Workflow, WebhookConfig, TaskType, FlowConfig } from '@/lib/api'
+import { Task, LookupValue, User, Workflow, WebhookConfig, TaskType, FlowConfig, Group, Project } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { WebhookTaskConfig } from '../webhook-task-config'
 import { FlowTaskConfig } from '../flow-task-config'
@@ -24,6 +24,7 @@ import {
   getTaskTypeConfig,
 } from '@/lib/task-type-config'
 import { StatusPanel } from './status-panel'
+import { Users, FolderKanban } from 'lucide-react'
 
 // Copyable field component
 function CopyableField({ label, value, mono = false }: { label: string; value: string | null | undefined; mono?: boolean }) {
@@ -74,6 +75,8 @@ interface DetailsTabProps {
   workflows: Workflow[]
   users: User[]
   allTasks: Task[]
+  groups: Group[]
+  projects: Project[]
   webhookConfig?: WebhookConfig
   onWebhookConfigChange: (config: WebhookConfig, options?: { skipSave?: boolean }) => void
   updateTask: { mutate: (args: { id: string; data: Partial<Task> }) => void }
@@ -96,6 +99,8 @@ export function DetailsTab({
   workflows,
   users,
   allTasks,
+  groups,
+  projects,
   webhookConfig,
   onWebhookConfigChange,
   updateTask,
@@ -109,6 +114,10 @@ export function DetailsTab({
 }: DetailsTabProps) {
   const selectedWorkflowId = watch('workflowId')
   const currentTaskType = watch('taskType') || 'agent'
+  const selectedGroupId = watch('groupId') as string | null
+
+  // Filter projects by selected group
+  const groupProjects = projects.filter(p => p.groupId === selectedGroupId)
 
   // Get workflow stages for the selected workflow
   const workflowStages = workflows
@@ -155,6 +164,97 @@ export function DetailsTab({
           )}
         </div>
       </div>
+
+      {/* Group & Project - only show if user has multiple groups */}
+      {groups.length > 1 && (
+        <div className="space-y-1">
+          <h4 className="text-sm font-medium">Organization</h4>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Group</label>
+              <Controller
+                name="groupId"
+                control={control}
+                render={({ field }) => (
+                  <Select
+                    value={(field.value as string) || '_none'}
+                    onValueChange={(val) => {
+                      const newGroupId = val === '_none' ? null : val
+                      field.onChange(newGroupId)
+                      // Clear project when group changes and save
+                      setValue('projectId', null)
+                      updateTask.mutate({ id: task._id, data: { groupId: newGroupId, projectId: null } })
+                    }}
+                  >
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Select group" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_none">
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <Users className="h-3.5 w-3.5" />
+                          <span>No group</span>
+                        </div>
+                      </SelectItem>
+                      {groups.map((group) => (
+                        <SelectItem key={group._id} value={group._id}>
+                          <div className="flex items-center gap-2">
+                            <Users className="h-3.5 w-3.5" />
+                            <span>{group.displayName}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            </div>
+
+            {selectedGroupId && groupProjects.length > 0 && (
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Project</label>
+                <Controller
+                  name="projectId"
+                  control={control}
+                  render={({ field }) => (
+                    <Select
+                      value={(field.value as string) || '_none'}
+                      onValueChange={(val) => {
+                        const newProjectId = val === '_none' ? null : val
+                        field.onChange(newProjectId)
+                        updateTask.mutate({ id: task._id, data: { projectId: newProjectId } })
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-sm">
+                        <SelectValue placeholder="Select project" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="_none">
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <FolderKanban className="h-3.5 w-3.5" />
+                            <span>No project</span>
+                          </div>
+                        </SelectItem>
+                        {groupProjects.map((project) => (
+                          <SelectItem key={project._id} value={project._id}>
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="h-2.5 w-2.5 rounded-full flex-shrink-0"
+                                style={{ backgroundColor: project.color || '#888' }}
+                              />
+                              <span>{project.displayName}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Status */}
       <StatusPanel

@@ -2197,6 +2197,8 @@ export const documentsApi = {
     parentDocumentId?: string | null
     workflowRunId?: string | null
     metadata?: Record<string, unknown>
+    groupId?: string
+    projectId?: string
   }): Promise<ApiResponse<Document>> => {
     const response = await authFetch(`${API_BASE}/documents`, {
       method: 'POST',

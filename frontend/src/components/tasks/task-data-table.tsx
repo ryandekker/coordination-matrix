@@ -167,27 +167,29 @@ const BulkActionsBar = memo(function BulkActionsBar({
             ))}
           </SelectContent>
         </Select>
-        <Select onValueChange={(val) => onGroupChange(val === '__none__' ? null : val)} disabled={isUpdating}>
-          <SelectTrigger className="h-8 w-[160px]">
-            <SelectValue placeholder="Move to group" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none__">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Users className="h-3.5 w-3.5" />
-                <span>No group</span>
-              </div>
-            </SelectItem>
-            {groups.map((group) => (
-              <SelectItem key={group._id} value={group._id}>
-                <div className="flex items-center gap-2">
+        {groups.length > 1 && (
+          <Select onValueChange={(val) => onGroupChange(val === '__none__' ? null : val)} disabled={isUpdating}>
+            <SelectTrigger className="h-8 w-[160px]">
+              <SelectValue placeholder="Move to group" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">
+                <div className="flex items-center gap-2 text-muted-foreground">
                   <Users className="h-3.5 w-3.5" />
-                  <span>{group.displayName}</span>
+                  <span>No group</span>
                 </div>
               </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+              {groups.map((group) => (
+                <SelectItem key={group._id} value={group._id}>
+                  <div className="flex items-center gap-2">
+                    <Users className="h-3.5 w-3.5" />
+                    <span>{group.displayName}</span>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
       <div className="h-4 w-px bg-border" />
       <Button

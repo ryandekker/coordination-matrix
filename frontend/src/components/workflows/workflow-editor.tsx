@@ -776,37 +776,39 @@ export function WorkflowEditor({
                       Organization
                     </h3>
 
-                    {/* Group selector */}
-                    <div className="space-y-2">
-                      <label className="text-sm">Group</label>
-                      <Select
-                        value={selectedGroupId || 'none'}
-                        onValueChange={(val) => setSelectedGroupId(val === 'none' ? null : val)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select group" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">
-                            <div className="flex items-center gap-2 text-muted-foreground">
-                              <Users className="h-3.5 w-3.5" />
-                              <span>No group (admin only)</span>
-                            </div>
-                          </SelectItem>
-                          {groups.map((group) => (
-                            <SelectItem key={group._id} value={group._id}>
-                              <div className="flex items-center gap-2">
+                    {/* Group selector - only show if user is in multiple groups */}
+                    {groups.length > 1 && (
+                      <div className="space-y-2">
+                        <label className="text-sm">Group</label>
+                        <Select
+                          value={selectedGroupId || 'none'}
+                          onValueChange={(val) => setSelectedGroupId(val === 'none' ? null : val)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select group" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">
+                              <div className="flex items-center gap-2 text-muted-foreground">
                                 <Users className="h-3.5 w-3.5" />
-                                <span>{group.displayName}</span>
+                                <span>No group (admin only)</span>
                               </div>
                             </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground">
-                        Which group this workflow belongs to
-                      </p>
-                    </div>
+                            {groups.map((group) => (
+                              <SelectItem key={group._id} value={group._id}>
+                                <div className="flex items-center gap-2">
+                                  <Users className="h-3.5 w-3.5" />
+                                  <span>{group.displayName}</span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          Which group this workflow belongs to
+                        </p>
+                      </div>
+                    )}
 
                     <div className="space-y-2">
                       <label className="text-sm">Folder</label>

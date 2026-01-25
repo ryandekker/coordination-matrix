@@ -1,6 +1,6 @@
 import { ObjectId, WithId } from 'mongodb';
 import { getDb } from '../db/connection.js';
-import { Group, GroupMember, GroupRole, GROUP_ROLE_HIERARCHY } from '../types/index.js';
+import { Group, GroupMember, GroupRole, GROUP_ROLE_HIERARCHY, Project } from '../types/index.js';
 
 // Slugify a string for use as a group/project name
 export function slugify(text: string): string {
@@ -75,6 +75,24 @@ class GroupService {
     };
 
     await this.collection.insertOne(group);
+
+    // Create a default project for the group
+    const db = getDb();
+    const projectsCollection = db.collection<Project>('projects');
+    const defaultProject: Project = {
+      _id: new ObjectId(),
+      name: 'default',
+      displayName: 'Default',
+      description: 'Default project for new items',
+      groupId: group._id,
+      status: 'active',
+      color: '#6366F1', // Indigo
+      createdById: creatorObjId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await projectsCollection.insertOne(defaultProject);
+
     return group as WithId<Group>;
   }
 
