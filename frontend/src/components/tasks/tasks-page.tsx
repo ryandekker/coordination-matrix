@@ -127,6 +127,7 @@ export function TasksPage() {
     sortOrder,
     search,
     ...(parentIdFromUrl ? { parentId: parentIdFromUrl } : { rootOnly: true }),
+    ...(currentGroupId ? { groupId: currentGroupId } : {}),
     resolveReferences: true,
     ...filters,
   })

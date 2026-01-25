@@ -86,6 +86,7 @@ import {
 import { cn } from '@/lib/utils'
 import { authFetch } from '@/lib/api'
 import { Checkbox } from '@/components/ui/checkbox'
+import { useGroupContext } from '@/lib/group-context'
 
 // Lazy-load WorkflowEditor to reduce initial bundle size (includes heavy mermaid dependency)
 const WorkflowEditor = dynamic(
@@ -229,9 +230,13 @@ interface WorkflowListItem extends BriefWorkflowData {
   steps?: WorkflowStep[]
 }
 
-async function fetchWorkflows(): Promise<{ data: BriefWorkflowData[] }> {
+async function fetchWorkflows(groupId?: string): Promise<{ data: BriefWorkflowData[] }> {
   // Use brief=true to get step counts instead of full steps array
-  const response = await authFetch(`${API_BASE}/workflows?includeInactive=true&brief=true`)
+  const params = new URLSearchParams({ includeInactive: 'true', brief: 'true' })
+  if (groupId) {
+    params.set('groupId', groupId)
+  }
+  const response = await authFetch(`${API_BASE}/workflows?${params.toString()}`)
   if (!response.ok) {
     throw new Error('Failed to fetch workflows')
   }
@@ -393,6 +398,7 @@ function formatRelativeTime(date: string | null): string {
 export default function WorkflowsPage() {
   const router = useRouter()
   const queryClient = useQueryClient()
+  const { currentGroupId } = useGroupContext()
   const [isEditorOpen, setIsEditorOpen] = useState(false)
   const [editingWorkflow, setEditingWorkflow] = useState<WorkflowData | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<WorkflowData | null>(null)
@@ -433,8 +439,8 @@ export default function WorkflowsPage() {
   const [deleteFolderConfirm, setDeleteFolderConfirm] = useState<WorkflowFolder | null>(null)
 
   const { data: workflowsData, isLoading, error } = useQuery({
-    queryKey: ['workflows'],
-    queryFn: fetchWorkflows,
+    queryKey: ['workflows', currentGroupId],
+    queryFn: () => fetchWorkflows(currentGroupId || undefined),
   })
 
   const { data: foldersData } = useQuery({
