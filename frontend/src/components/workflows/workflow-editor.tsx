@@ -694,7 +694,7 @@ export function WorkflowEditor({
                 {/* Settings Content */}
                 <div
                   ref={settingsContainerRef}
-                  className="flex-1 overflow-y-auto space-y-4 pr-2 max-w-2xl"
+                  className="flex-1 overflow-y-auto space-y-4 pr-2"
                 >
                   {/* General Section */}
                   <div id="settings-general" className="space-y-3 p-4 bg-muted/30 rounded-lg">
