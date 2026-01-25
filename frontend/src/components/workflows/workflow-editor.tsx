@@ -25,6 +25,13 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Badge } from '@/components/ui/badge'
+import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -66,6 +73,13 @@ import {
   FileText,
   Settings,
   ToggleLeft,
+  Copy,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  Play,
+  Pause,
 } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { TokenBrowser } from './token-browser'
@@ -91,9 +105,43 @@ interface WorkflowFolder {
 
 interface WorkflowRunBrief {
   _id: string
-  status: string
+  status: 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
   inputPayload?: Record<string, unknown>
   createdAt: string
+  startedAt?: string
+  completedAt?: string
+  externalId?: string
+  source?: string
+}
+
+// Helper to get status badge variant and icon
+function getRunStatusDisplay(status: WorkflowRunBrief['status']) {
+  switch (status) {
+    case 'completed':
+      return { icon: CheckCircle2, variant: 'default' as const, color: '#22c55e', label: 'Completed' }
+    case 'failed':
+      return { icon: XCircle, variant: 'destructive' as const, color: '#ef4444', label: 'Failed' }
+    case 'running':
+      return { icon: Loader2, variant: 'default' as const, color: '#3b82f6', label: 'Running' }
+    case 'pending':
+      return { icon: Clock, variant: 'secondary' as const, color: '#a1a1aa', label: 'Pending' }
+    case 'paused':
+      return { icon: Pause, variant: 'outline' as const, color: '#f59e0b', label: 'Paused' }
+    case 'cancelled':
+      return { icon: XCircle, variant: 'secondary' as const, color: '#6b7280', label: 'Cancelled' }
+    default:
+      return { icon: Clock, variant: 'secondary' as const, color: '#a1a1aa', label: status }
+  }
+}
+
+// Helper to truncate JSON for preview
+function getPayloadPreview(payload: Record<string, unknown> | undefined, maxLength = 60): string {
+  if (!payload) return '(empty)'
+  const keys = Object.keys(payload)
+  if (keys.length === 0) return '(empty)'
+  const str = JSON.stringify(payload)
+  if (str.length <= maxLength) return str
+  return str.substring(0, maxLength) + '...'
 }
 
 // Fetch functions
@@ -851,31 +899,86 @@ export function WorkflowEditor({
                     <p className="text-xs text-muted-foreground">
                       Define a sample JSON payload that shows what data this workflow expects when triggered.
                     </p>
-                    {/* Fill from previous run */}
+                    {/* Fill from recent run - improved interface */}
                     {recentRuns.length > 0 && (
-                      <div className="flex items-center gap-2">
-                        <History className="h-4 w-4 text-muted-foreground" />
-                        <Select
-                          onValueChange={(runId) => {
-                            const run = recentRuns.find(r => r._id === runId)
-                            if (run?.inputPayload) {
-                              setSamplePayload(JSON.stringify(run.inputPayload, null, 2))
-                            }
-                          }}
-                        >
-                          <SelectTrigger className="flex-1 h-8 text-xs">
-                            <SelectValue placeholder="Fill from previous run..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {recentRuns.map((run) => (
-                              <SelectItem key={run._id} value={run._id}>
-                                <span className="font-mono text-xs">
-                                  {new Date(run.createdAt).toLocaleDateString()} - {run.status}
-                                </span>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <History className="h-3.5 w-3.5" />
+                          <span>Copy from recent run:</span>
+                        </div>
+                        <ScrollArea className="max-h-[180px] border rounded-md">
+                          <div className="divide-y">
+                            {recentRuns.map((run) => {
+                              const statusDisplay = getRunStatusDisplay(run.status)
+                              const StatusIcon = statusDisplay.icon
+                              const hasPayload = run.inputPayload && Object.keys(run.inputPayload).length > 0
+
+                              return (
+                                <div
+                                  key={run._id}
+                                  className={cn(
+                                    "p-2 hover:bg-muted/50 transition-colors",
+                                    !hasPayload && "opacity-50"
+                                  )}
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="flex-1 min-w-0 space-y-1">
+                                      <div className="flex items-center gap-2">
+                                        <Badge
+                                          variant={statusDisplay.variant}
+                                          className="h-5 px-1.5 text-[10px] gap-1"
+                                          color={statusDisplay.color}
+                                        >
+                                          <StatusIcon className={cn(
+                                            "h-3 w-3",
+                                            run.status === 'running' && "animate-spin"
+                                          )} />
+                                          {statusDisplay.label}
+                                        </Badge>
+                                        <span className="text-xs text-muted-foreground">
+                                          {new Date(run.createdAt).toLocaleDateString(undefined, {
+                                            month: 'short',
+                                            day: 'numeric',
+                                            hour: '2-digit',
+                                            minute: '2-digit'
+                                          })}
+                                        </span>
+                                      </div>
+                                      {run.externalId && (
+                                        <div className="text-[10px] text-muted-foreground font-mono truncate">
+                                          ID: {run.externalId}
+                                        </div>
+                                      )}
+                                      <div className="text-[10px] text-muted-foreground font-mono truncate">
+                                        {hasPayload ? getPayloadPreview(run.inputPayload, 50) : '(no input payload)'}
+                                      </div>
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 px-2 text-xs shrink-0"
+                                      disabled={!hasPayload}
+                                      onClick={() => {
+                                        if (run.inputPayload) {
+                                          setSamplePayload(JSON.stringify(run.inputPayload, null, 2))
+                                        }
+                                      }}
+                                    >
+                                      <Copy className="h-3 w-3 mr-1" />
+                                      Use
+                                    </Button>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </ScrollArea>
+                        {recentRuns.length >= 10 && (
+                          <p className="text-[10px] text-muted-foreground">
+                            Showing last 10 runs
+                          </p>
+                        )}
                       </div>
                     )}
                     <TemplateTextarea
