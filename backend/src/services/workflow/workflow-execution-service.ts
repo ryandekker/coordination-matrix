@@ -1774,9 +1774,18 @@ class WorkflowExecutionService {
     decisionTask: Task,
     inputPayload?: Record<string, unknown>
   ): Promise<void> {
+    // For decision steps, use decisionField if set, otherwise fall back to inputPath
+    // This allows users to configure the decision field path using either property
+    const effectiveDecisionField = step.decisionField || step.inputPath;
+
+    console.log(`[WorkflowExecutionService] executeDecision: step=${step.id}, decisionField=${step.decisionField}, inputPath=${step.inputPath}, effective=${effectiveDecisionField}`);
+    console.log(`[WorkflowExecutionService] executeDecision: inputPayload keys: ${Object.keys(inputPayload || {}).join(', ')}`);
+
     let selectedConnection = step.connections?.find(conn => {
       if (!conn.condition) return false;
-      return this.evaluateCondition(conn.condition, inputPayload, step.decisionField);
+      const result = this.evaluateCondition(conn.condition, inputPayload, effectiveDecisionField);
+      console.log(`[WorkflowExecutionService] executeDecision: condition "${conn.condition}" -> ${result}`);
+      return result;
     });
 
     if (!selectedConnection && step.defaultConnection) {
@@ -1805,9 +1814,11 @@ class WorkflowExecutionService {
     // If using decisionField, the condition IS the matched value
     // Otherwise, extract the value part from "field:value" format
     let matchedValue = selectedConnection.condition || '';
-    if (!step.decisionField && matchedValue.includes(':')) {
+    if (!effectiveDecisionField && matchedValue.includes(':')) {
       matchedValue = matchedValue.split(':').slice(1).join(':');
     }
+
+    console.log(`[WorkflowExecutionService] executeDecision: selected path=${selectedConnection.targetStepId}, condition=${selectedConnection.condition}, matchedValue=${matchedValue}`);
 
     // Build stepOutput for decision task so next steps can access decision data via stepOutput.data
     // Pass through the input payload as output, plus the decision metadata
@@ -1817,7 +1828,7 @@ class WorkflowExecutionService {
         selectedPath: selectedConnection.targetStepId,
         condition: selectedConnection.condition,
         matchedValue,
-        decisionField: step.decisionField,
+        decisionField: effectiveDecisionField,
       },
     };
     const decisionStepOutput = this.buildStepOutput(decisionOutput, {
@@ -1838,7 +1849,7 @@ class WorkflowExecutionService {
           'metadata.selectedPath': selectedConnection.targetStepId,
           'metadata.condition': selectedConnection.condition,
           'metadata.matchedValue': matchedValue,
-          'metadata.decisionField': step.decisionField,
+          'metadata.decisionField': effectiveDecisionField,
         },
       }
     );
@@ -2720,16 +2731,29 @@ class WorkflowExecutionService {
       }
     );
 
-    // For decision tasks, use the selected path from metadata instead of all connections
+    // For decision steps, use the selected path from metadata instead of all connections
     // This handles both auto-evaluated decisions and forced decisions
+    // Check both taskType AND stepType for robustness (taskType may be undefined for older tasks)
     let nextStepIds: string[] = [];
-    if (completedTask.taskType === 'decision') {
-      const selectedPath = (completedTask.metadata as Record<string, unknown> | undefined)?.selectedPath as string | undefined;
+    const isDecisionStep = completedTask.taskType === 'decision' || currentStep.stepType === 'decision';
+
+    if (isDecisionStep) {
+      // For decision steps, we MUST use the selectedPath - never fall through to all connections
+      // Re-fetch the task to ensure we have the latest metadata (event may contain stale data)
+      const freshTask = await this.tasks.findOne({ _id: completedTask._id });
+      const selectedPath = (freshTask?.metadata as Record<string, unknown> | undefined)?.selectedPath as string | undefined;
+
       if (selectedPath) {
-        console.log(`[WorkflowExecutionService] Decision task - using selectedPath: ${selectedPath}`);
+        console.log(`[WorkflowExecutionService] Decision step - using selectedPath: ${selectedPath}`);
         nextStepIds = [selectedPath];
       } else {
-        console.log(`[WorkflowExecutionService] Decision task has no selectedPath in metadata!`);
+        // No selected path means the decision hasn't been evaluated yet or failed
+        // Don't fall through to executing all branches - that would be incorrect for a router
+        console.warn(`[WorkflowExecutionService] Decision step ${currentStep.id} has no selectedPath - cannot advance`);
+        console.warn(`[WorkflowExecutionService] Task taskType: ${completedTask.taskType}, Step stepType: ${currentStep.stepType}`);
+        console.warn(`[WorkflowExecutionService] Task metadata: ${JSON.stringify(freshTask?.metadata || completedTask.metadata)}`);
+        // Return early to prevent incorrect routing
+        return;
       }
     } else {
       nextStepIds = currentStep.connections?.map(c => c.targetStepId) || [];
