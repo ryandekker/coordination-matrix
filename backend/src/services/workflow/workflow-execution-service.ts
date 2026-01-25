@@ -1720,11 +1720,26 @@ class WorkflowExecutionService {
         statusReason = `Success threshold not met: ${currentSuccessPercent.toFixed(1)}% < ${minSuccessPercent}%`;
       }
 
+      // Build stepOutput for join task so next steps can access aggregated results via stepOutput.data
+      const joinStepOutput = this.buildStepOutput(
+        { aggregatedResults: results },
+        {
+          summary: statusReason,
+          aggregatedResults: results.map((r, i) => ({
+            taskId: children.filter(c => c.status === 'completed')[i]?._id?.toString() || '',
+            stepId: children.filter(c => c.status === 'completed')[i]?.workflowStepId,
+            data: r,
+            status: 'success' as const,
+          })),
+        }
+      );
+
       await this.tasks.updateOne(
         { _id: joinTaskId },
         {
           $set: {
             status: joinStatus,
+            stepOutput: joinStepOutput,
             'metadata.aggregatedResults': results,
             'metadata.successCount': completedCount,
             'metadata.failedCount': failedCount,
@@ -1794,11 +1809,31 @@ class WorkflowExecutionService {
       matchedValue = matchedValue.split(':').slice(1).join(':');
     }
 
+    // Build stepOutput for decision task so next steps can access decision data via stepOutput.data
+    // Pass through the input payload as output, plus the decision metadata
+    const decisionOutput = {
+      ...inputPayload,
+      _decision: {
+        selectedPath: selectedConnection.targetStepId,
+        condition: selectedConnection.condition,
+        matchedValue,
+        decisionField: step.decisionField,
+      },
+    };
+    const decisionStepOutput = this.buildStepOutput(decisionOutput, {
+      summary: `Decision: ${matchedValue || selectedConnection.targetStepId}`,
+      selectedBranch: {
+        targetStepId: selectedConnection.targetStepId,
+        condition: selectedConnection.condition || undefined,
+      },
+    });
+
     await this.tasks.updateOne(
       { _id: decisionTask._id },
       {
         $set: {
           status: 'completed' as TaskStatus,
+          stepOutput: decisionStepOutput,
           decisionResult: matchedValue || selectedConnection.targetStepId,
           'metadata.selectedPath': selectedConnection.targetStepId,
           'metadata.condition': selectedConnection.condition,
@@ -3274,9 +3309,21 @@ class WorkflowExecutionService {
         const startTime = attemptIndex >= 0 ? attempts[attemptIndex]?.startedAt : null;
         const durationMs = startTime ? now.getTime() - new Date(startTime).getTime() : undefined;
 
+        // Build stepOutput for flow task so next steps can access subflow output via stepOutput.data
+        const flowStepOutput = this.buildStepOutput(outputPayload, {
+          summary: 'Subflow completed successfully',
+          durationMs,
+          nestedWorkflow: {
+            runId: run._id.toString(),
+            status: 'completed',
+            output: outputPayload,
+          },
+        });
+
         const updateFields: Record<string, unknown> = {
           status: 'completed' as TaskStatus,
           workflowResult,
+          stepOutput: flowStepOutput,
           'metadata.output': outputPayload,
           'metadata.subflowCompleted': true,
           'metadata.subflowCompletedAt': now,
@@ -3568,12 +3615,19 @@ class WorkflowExecutionService {
         }
       );
     } else if (items.length > 0) {
+      // Build stepOutput for external task so next steps can access callback data via stepOutput.data
+      const callbackData = items.length === 1 ? items[0] : items;
+      const externalStepOutput = this.buildStepOutput(callbackData, {
+        summary: `External callback received with ${items.length} item(s)`,
+      });
+
       await this.tasks.updateOne(
         { _id: task._id },
         {
           $set: {
             status: 'completed' as TaskStatus,
-            metadata: { ...task.metadata, callbackPayload: items.length === 1 ? items[0] : items },
+            stepOutput: externalStepOutput,
+            metadata: { ...task.metadata, callbackPayload: callbackData },
             updatedAt: new Date(),
           },
         }

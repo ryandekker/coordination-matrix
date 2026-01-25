@@ -35,6 +35,7 @@
     "cli": "node scripts/matrix-cli.mjs",
     "matrix": "node scripts/matrix-cli.mjs",
     "test:workflow": "node scripts/test-workflow-progression.mjs",
+    "test:workflow:tokens": "node scripts/test-token-passing.mjs",
     "daemon": "node scripts/task-daemon.mjs",
     "daemon:stop": "node scripts/task-daemon.mjs --stop",
     "daemon:status": "node scripts/task-daemon.mjs --status",
