@@ -323,10 +323,11 @@ documentsRouter.post('/', loadUserGroups(), async (req: Request, res: Response, 
       resolvedGroupId = req.userGroupIds[0];
     }
 
+    // Build the document object, only including fields that have values
+    // This prevents undefined values from being sent to MongoDB which would fail validation
     const newDocument: Omit<Document, '_id'> = {
       title: title.trim(),
       content,
-      summary: summary?.trim() || undefined,
       type,
       status,
       tags: Array.isArray(tags) ? tags.filter((t: unknown) => typeof t === 'string') : [],
@@ -345,6 +346,18 @@ documentsRouter.post('/', loadUserGroups(), async (req: Request, res: Response, 
       createdAt: now,
       updatedAt: now,
     };
+
+    // Only add optional string fields if they have values
+    if (summary?.trim()) {
+      newDocument.summary = summary.trim();
+    }
+
+    // Debug: log the document being inserted
+    console.log('Inserting document:', JSON.stringify(newDocument, (_key, value) => {
+      if (value instanceof Date) return `Date(${value.toISOString()})`;
+      if (value && value._bsontype === 'ObjectId') return `ObjectId(${value.toString()})`;
+      return value;
+    }, 2));
 
     const result = await db.collection<Document>('documents').insertOne(newDocument as Document);
     const inserted = await db.collection<Document>('documents').findOne({ _id: result.insertedId });
