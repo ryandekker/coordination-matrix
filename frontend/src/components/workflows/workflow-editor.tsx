@@ -135,6 +135,8 @@ const SETTINGS_SECTIONS = [
   { id: 'organization', label: 'Organization', icon: Folder },
   { id: 'color', label: 'Color', icon: Palette },
   { id: 'payload', label: 'Sample Payload', icon: FileCode },
+  { id: 'ai-prompt', label: 'AI Generation', icon: Sparkles },
+  { id: 'webhook', label: 'Webhook', icon: ArrowRightFromLine },
 ] as const
 
 export function WorkflowEditor({
@@ -605,10 +607,10 @@ export function WorkflowEditor({
             )}
 
             {/* Settings Tab */}
-            <TabsContent value="settings" className="flex-1 overflow-hidden mt-0">
-              <div className="flex h-full">
+            <TabsContent value="settings" className="flex-1 overflow-hidden mt-0 min-h-0">
+              <div className="flex h-full min-h-0">
                 {/* Settings Navigation Sidebar */}
-                <div className="w-36 flex-shrink-0 border-r pr-2 mr-4 space-y-1">
+                <div className="w-36 flex-shrink-0 border-r pr-2 mr-4 space-y-1 overflow-y-auto">
                   {SETTINGS_SECTIONS.map((section) => {
                     const Icon = section.icon
                     return (
@@ -620,11 +622,11 @@ export function WorkflowEditor({
                           const el = document.getElementById(`settings-${section.id}`)
                           const container = settingsContainerRef.current
                           if (el && container) {
-                            // Scroll within the container, not the whole page
-                            const containerRect = container.getBoundingClientRect()
-                            const elRect = el.getBoundingClientRect()
-                            const scrollTop = el.offsetTop - container.offsetTop
-                            container.scrollTo({ top: scrollTop, behavior: 'smooth' })
+                            // Calculate the offset of the element within the scroll container
+                            const containerTop = container.getBoundingClientRect().top
+                            const elementTop = el.getBoundingClientRect().top
+                            const scrollOffset = container.scrollTop + (elementTop - containerTop)
+                            container.scrollTo({ top: scrollOffset, behavior: 'smooth' })
                           }
                         }}
                         className={cn(
@@ -644,7 +646,7 @@ export function WorkflowEditor({
                 {/* Settings Content */}
                 <div
                   ref={settingsContainerRef}
-                  className="flex-1 overflow-auto space-y-4 pr-2 max-w-2xl"
+                  className="flex-1 overflow-y-auto space-y-4 pr-2 max-w-2xl"
                 >
                   {/* General Section */}
                   <div id="settings-general" className="space-y-3 p-4 bg-muted/30 rounded-lg">
@@ -890,11 +892,11 @@ export function WorkflowEditor({
                   </div>
 
                   {/* AI Prompt Helper Section */}
-                  <div className="border-t pt-4 mt-4">
-                    <div className="flex items-center gap-2 mb-3">
-                      <Sparkles className="h-4 w-4 text-purple-500" />
-                      <h3 className="text-sm font-medium">AI Workflow Generation</h3>
-                    </div>
+                  <div id="settings-ai-prompt" className="space-y-3 p-4 bg-muted/30 rounded-lg">
+                    <h3 className="text-sm font-medium flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-muted-foreground" />
+                      AI Workflow Generation
+                    </h3>
                     <p className="text-xs text-muted-foreground mb-3">
                       Generate workflow definitions using AI. Copy the prompt below and paste it into your AI tool,
                       or use the context endpoint to build custom integrations.
@@ -948,7 +950,11 @@ export function WorkflowEditor({
                   </div>
 
                   {/* Webhook Trigger Section */}
-                  <div className="border-t pt-4 mt-4">
+                  <div id="settings-webhook" className="space-y-3 p-4 bg-muted/30 rounded-lg">
+                    <h3 className="text-sm font-medium flex items-center gap-2">
+                      <ArrowRightFromLine className="h-4 w-4 text-muted-foreground" />
+                      Webhook Trigger
+                    </h3>
                     <WorkflowWebhook
                       workflowId={workflow?._id}
                       workflowName={watch('name')}
