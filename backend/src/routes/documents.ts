@@ -352,28 +352,25 @@ documentsRouter.post('/', loadUserGroups(), async (req: Request, res: Response, 
       newDocument.summary = summary.trim();
     }
 
-    // Debug: log the document being inserted
-    console.log('Inserting document:', JSON.stringify(newDocument, (_key, value) => {
-      if (value instanceof Date) return `Date(${value.toISOString()})`;
-      if (value && value._bsontype === 'ObjectId') return `ObjectId(${value.toString()})`;
-      return value;
-    }, 2));
-
     const result = await db.collection<Document>('documents').insertOne(newDocument as Document);
     const inserted = await db.collection<Document>('documents').findOne({ _id: result.insertedId });
 
     // Create initial version record
     if (inserted && userId) {
-      await db.collection<DocumentVersion>('document_versions').insertOne({
+      const versionRecord: Partial<DocumentVersion> = {
         documentId: result.insertedId,
         version: 1,
         title: inserted.title,
         content: inserted.content,
-        summary: inserted.summary,
         changeDescription: 'Initial version',
         modifiedById: userId,
         modifiedAt: now,
-      } as DocumentVersion);
+      };
+      // Only include summary if it exists (schema requires string, not undefined)
+      if (inserted.summary) {
+        versionRecord.summary = inserted.summary;
+      }
+      await db.collection<DocumentVersion>('document_versions').insertOne(versionRecord as DocumentVersion);
     }
 
     // Generate embedding asynchronously (don't block response)
