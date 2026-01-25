@@ -58,12 +58,12 @@ const STATUS_CONFIG: Record<WorkflowRunStatus, { icon: React.ElementType; color:
 }
 
 const TASK_STATUS_CONFIG: Record<string, { color: string; bgColor: string }> = {
-  pending: { color: 'text-gray-500', bgColor: 'bg-gray-50' },
-  in_progress: { color: 'text-blue-500', bgColor: 'bg-blue-50' },
-  blocked: { color: 'text-amber-500', bgColor: 'bg-amber-50' },
-  completed: { color: 'text-green-500', bgColor: 'bg-green-50' },
-  failed: { color: 'text-red-500', bgColor: 'bg-red-50' },
-  cancelled: { color: 'text-gray-400', bgColor: 'bg-gray-50' },
+  pending: { color: 'text-gray-500', bgColor: 'bg-gray-50 dark:bg-gray-800/50' },
+  in_progress: { color: 'text-blue-500', bgColor: 'bg-blue-50 dark:bg-blue-950/50' },
+  blocked: { color: 'text-amber-500', bgColor: 'bg-amber-50 dark:bg-amber-950/50' },
+  completed: { color: 'text-green-500', bgColor: 'bg-green-50 dark:bg-green-950/50' },
+  failed: { color: 'text-red-500', bgColor: 'bg-red-50 dark:bg-red-950/50' },
+  cancelled: { color: 'text-gray-400', bgColor: 'bg-gray-50 dark:bg-gray-800/50' },
 }
 
 type TaskType = 'standard' | 'trigger' | 'decision' | 'foreach' | 'join' | 'subflow' | 'external' | 'code' | 'agent' | 'manual' | 'flow'
@@ -377,10 +377,10 @@ export default function WorkflowRunDetailPage() {
                     variant="outline"
                     className={cn(
                       'text-xs',
-                      isCompleted && 'bg-green-50 text-green-700 border-green-300',
-                      isCurrent && 'bg-blue-50 text-blue-700 border-blue-300',
-                      isFailed && 'bg-red-50 text-red-700 border-red-300',
-                      !isCompleted && !isCurrent && !isFailed && 'bg-gray-50 text-gray-500'
+                      isCompleted && 'bg-green-50 dark:bg-green-950/50 text-green-700 dark:text-green-300 border-green-300 dark:border-green-700',
+                      isCurrent && 'bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700',
+                      isFailed && 'bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 border-red-300 dark:border-red-700',
+                      !isCompleted && !isCurrent && !isFailed && 'bg-gray-50 dark:bg-gray-800/50 text-gray-500 dark:text-gray-400'
                     )}
                   >
                     {step.name}

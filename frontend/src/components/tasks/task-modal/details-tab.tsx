@@ -385,11 +385,14 @@ export function DetailsTab({
           isEditMode={true}
           flowConfig={{
             workflowId: task.flowConfig?.workflowId || task.stepConfig?.flowId || '',
+            // Priority: flowConfig.inputMapping > stepConfig.inputMapping > metadata.subflowInputPayload
             inputPayload: task.flowConfig?.inputMapping
               ? JSON.stringify(task.flowConfig.inputMapping, null, 2)
-              : task.metadata?.subflowInputPayload
-                ? JSON.stringify(task.metadata.subflowInputPayload, null, 2)
-                : undefined,
+              : task.stepConfig?.inputMapping
+                ? JSON.stringify(task.stepConfig.inputMapping, null, 2)
+                : task.metadata?.subflowInputPayload
+                  ? JSON.stringify(task.metadata.subflowInputPayload, null, 2)
+                  : undefined,
           }}
           onConfigChange={(config) => {
             // Update task flowConfig when changed

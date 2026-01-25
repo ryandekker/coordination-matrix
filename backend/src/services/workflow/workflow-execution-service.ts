@@ -63,6 +63,58 @@ class WorkflowExecutionService {
       }
     });
 
+    // Handle flow step auto-execution when task is set to pending (for reruns)
+    eventBus.subscribe('task.status.changed', async (event: TaskEvent) => {
+      const task = event.task;
+      // Only process flow tasks that are part of a workflow and set to pending
+      const isFlowTask = task.taskType === 'flow' ||
+        task.stepConfig?.stepType === 'flow' ||
+        task.flowConfig?.workflowId;
+
+      if (isFlowTask && task.workflowRunId && task.status === 'pending') {
+        // Check if this flow task has never been executed (no attempts yet)
+        const hasNoAttempts = !task.flowConfig?.attempts || task.flowConfig.attempts.length === 0;
+
+        if (hasNoAttempts) {
+          console.log(`[WorkflowExecutionService] Flow task ${task._id} set to pending with no previous attempts - auto-executing`);
+          try {
+            await this.executeFlowTask(task._id.toString());
+          } catch (error) {
+            console.error(`[WorkflowExecutionService] Failed to auto-execute flow task ${task._id}:`, error);
+          }
+        }
+      }
+    });
+
+    // Handle flow step auto-execution when task is created with pending status
+    // This catches cases where flow tasks are created but executeFlow wasn't called
+    eventBus.subscribe('task.created', async (event: TaskEvent) => {
+      const task = event.task;
+      // Only process flow tasks that are part of a workflow and created with pending status
+      const isFlowTask = task.taskType === 'flow' ||
+        task.stepConfig?.stepType === 'flow';
+
+      if (isFlowTask && task.workflowRunId && task.status === 'pending') {
+        // Small delay to allow the normal execution flow to complete first
+        // This prevents double-execution when executeFlow is called directly after task creation
+        setTimeout(async () => {
+          // Re-fetch the task to check if it's still pending (not already executing)
+          const currentTask = await this.tasks.findOne({ _id: task._id });
+          if (currentTask && currentTask.status === 'pending') {
+            const hasNoAttempts = !currentTask.flowConfig?.attempts || currentTask.flowConfig.attempts.length === 0;
+            if (hasNoAttempts) {
+              console.log(`[WorkflowExecutionService] Flow task ${task._id} created but not executed - auto-executing`);
+              try {
+                await this.executeFlowTask(task._id.toString());
+              } catch (error) {
+                console.error(`[WorkflowExecutionService] Failed to auto-execute newly created flow task ${task._id}:`, error);
+              }
+            }
+          }
+        }, 500); // 500ms delay to allow normal execution to complete
+      }
+    });
+
     setInterval(() => {
       this.processedEvents.clear();
     }, 5 * 60 * 1000);
@@ -2284,30 +2336,29 @@ class WorkflowExecutionService {
 
     if (step.inputMapping && Object.keys(step.inputMapping).length > 0) {
       // Use explicit input mapping
-      console.log(`[WorkflowExecutionService] Using inputMapping: ${JSON.stringify(step.inputMapping)}`);
+      console.log(`[WorkflowExecutionService] executeFlow: Using inputMapping: ${JSON.stringify(step.inputMapping)}`);
 
-      // Create template context for resolving variables
-      const templateContext = {
-        workflowRunId: parentRun._id,
-        stepId: step.id,
-        taskId: flowTask._id,
-        inputPayload,
-      };
-
-      for (const [targetField, sourceTemplate] of Object.entries(step.inputMapping)) {
+      for (const [targetField, sourceValue] of Object.entries(step.inputMapping)) {
         if (!targetField) continue; // Skip empty keys
 
-        // Resolve template variables like {{output.data}} or {{item}}
-        const resolvedValue = await resolveTemplateWithPackages(sourceTemplate, templateContext);
-
-        // Try to parse as JSON if it looks like JSON, otherwise use raw value
-        try {
-          subflowInputPayload[targetField] = JSON.parse(resolvedValue);
-        } catch {
+        // Only resolve template if the value is a string
+        // Non-string values (arrays, objects, numbers, booleans) are passed through as-is
+        if (typeof sourceValue === 'string') {
+          // Use resolveInputMappingValue which handles {{steps.*}}, {{input.*}}, and other patterns
+          const resolvedValue = await this.resolveInputMappingValue(
+            sourceValue,
+            parentRun._id,
+            step.id,
+            flowTask._id,
+            inputPayload
+          );
           subflowInputPayload[targetField] = resolvedValue;
+        } else {
+          // Pass through non-string values directly
+          subflowInputPayload[targetField] = sourceValue;
         }
       }
-      console.log(`[WorkflowExecutionService] Mapped input payload: ${JSON.stringify(subflowInputPayload).substring(0, 500)}`);
+      console.log(`[WorkflowExecutionService] executeFlow: Resolved input payload: ${JSON.stringify(subflowInputPayload).substring(0, 500)}`);
     } else {
       // No explicit mapping - pass through the full input payload
       subflowInputPayload = inputPayload || {};
@@ -2576,7 +2627,20 @@ class WorkflowExecutionService {
       }
     );
 
-    const nextStepIds = currentStep.connections?.map(c => c.targetStepId) || [];
+    // For decision tasks, use the selected path from metadata instead of all connections
+    // This handles both auto-evaluated decisions and forced decisions
+    let nextStepIds: string[] = [];
+    if (completedTask.taskType === 'decision') {
+      const selectedPath = (completedTask.metadata as Record<string, unknown> | undefined)?.selectedPath as string | undefined;
+      if (selectedPath) {
+        console.log(`[WorkflowExecutionService] Decision task - using selectedPath: ${selectedPath}`);
+        nextStepIds = [selectedPath];
+      } else {
+        console.log(`[WorkflowExecutionService] Decision task has no selectedPath in metadata!`);
+      }
+    } else {
+      nextStepIds = currentStep.connections?.map(c => c.targetStepId) || [];
+    }
     console.log(`[WorkflowExecutionService] Step connections: ${JSON.stringify(currentStep.connections)}`);
 
     if (nextStepIds.length === 0) {
@@ -2721,6 +2785,119 @@ class WorkflowExecutionService {
     }
 
     return getValueByPath(currentPayload, inputPath);
+  }
+
+  /**
+   * Resolve an inputMapping value template.
+   * Handles special patterns like:
+   *   {{steps.stepId.output.field}} - Reference another step's output
+   *   {{input.field}} - Reference the task's input payload
+   *   {{output.field}} - Reference the task's input payload output
+   *   Other patterns - Delegate to resolveTemplateWithPackages
+   */
+  private async resolveInputMappingValue(
+    template: string,
+    workflowRunId: ObjectId,
+    stepId: string,
+    taskId: ObjectId,
+    inputPayload?: Record<string, unknown>
+  ): Promise<unknown> {
+    // Check if the template is a simple variable reference (single {{...}})
+    const simpleVarMatch = template.match(/^\{\{([^}]+)\}\}$/);
+
+    if (simpleVarMatch) {
+      const varPath = simpleVarMatch[1].trim();
+
+      // Handle steps.* references - fetch from completed step task
+      if (varPath.startsWith('steps.')) {
+        const pathParts = varPath.split('.');
+        const targetStepId = pathParts[1];
+        const remainingPath = pathParts.slice(2).join('.');
+
+        const stepTask = await this.tasks.findOne({
+          workflowRunId: workflowRunId,
+          workflowStepId: targetStepId,
+          status: 'completed',
+        });
+
+        if (stepTask?.metadata) {
+          const value = remainingPath
+            ? getValueByPath(stepTask.metadata as Record<string, unknown>, remainingPath)
+            : stepTask.metadata;
+          console.log(`[WorkflowExecutionService] Resolved steps.${targetStepId}.${remainingPath} = ${JSON.stringify(value).substring(0, 200)}`);
+          return value;
+        }
+        console.warn(`[WorkflowExecutionService] Could not resolve steps.${targetStepId} - no completed task found`);
+        return null; // Return null instead of undefined so the field is included with null value
+      }
+
+      // Handle input.* references - fetch from workflow run's original inputPayload
+      if (varPath.startsWith('input.')) {
+        const inputPath = varPath.substring(6); // Remove 'input.' prefix
+        // First try to get from workflow run's inputPayload (original trigger data)
+        const workflowRun = await this.workflowRuns.findOne({ _id: workflowRunId });
+        if (workflowRun?.inputPayload) {
+          const value = getValueByPath(workflowRun.inputPayload as Record<string, unknown>, inputPath);
+          if (value !== undefined) {
+            console.log(`[WorkflowExecutionService] Resolved input.${inputPath} from workflow run = ${JSON.stringify(value).substring(0, 200)}`);
+            return value;
+          }
+        }
+        // Fall back to step's inputPayload if not found in workflow run
+        if (inputPayload) {
+          const value = getValueByPath(inputPayload, inputPath);
+          if (value !== undefined) {
+            console.log(`[WorkflowExecutionService] Resolved input.${inputPath} from step inputPayload = ${JSON.stringify(value).substring(0, 200)}`);
+            return value;
+          }
+        }
+        console.warn(`[WorkflowExecutionService] Could not resolve input.${inputPath} - not found in workflow run or step inputPayload`);
+        return null;
+      }
+
+      // Handle output.* references (from inputPayload.output)
+      if (varPath.startsWith('output.') && inputPayload) {
+        const outputPath = varPath.substring(7); // Remove 'output.' prefix
+        const output = inputPayload.output as Record<string, unknown> | undefined;
+        const value = output ? getValueByPath(output, outputPath) : null;
+        return value !== undefined ? value : null;
+      }
+
+      // Handle direct variable lookup from inputPayload
+      if (inputPayload) {
+        const value = getValueByPath(inputPayload, varPath);
+        if (value !== undefined) {
+          return value;
+        }
+      }
+
+      // If we got here with a simple variable, it means we couldn't resolve it - return null
+      console.warn(`[WorkflowExecutionService] Could not resolve simple variable: ${varPath} -> returning null`);
+      return null;
+    }
+
+    // For complex templates (with multiple variables or mixed content), use standard template resolution
+    const templateContext = {
+      workflowRunId,
+      stepId,
+      taskId,
+      inputPayload,
+    };
+
+    const resolvedString = await resolveTemplateWithPackages(template, templateContext);
+
+    // If the resolved string still contains template markers, return null instead
+    if (resolvedString.includes('{{') && resolvedString.includes('}}')) {
+      console.warn(`[WorkflowExecutionService] Could not resolve template: ${template} -> returning null`);
+      return null;
+    }
+
+    // Try to parse as JSON
+    try {
+      return JSON.parse(resolvedString);
+    } catch {
+      return resolvedString;
+    }
   }
 
   private async handleStepFailure(
@@ -3516,6 +3693,36 @@ class WorkflowExecutionService {
     // Get input payload from decision task metadata
     const inputPayload = (decisionTask.metadata as Record<string, unknown> | undefined)?.inputPayload as Record<string, unknown> | undefined;
 
+    // Check if a task already exists for this step in this workflow run
+    // This prevents duplicate task creation when forcing a decision that was already executed
+    const existingTask = await this.tasks.findOne({
+      workflowRunId: runId,
+      workflowStepId: targetStepId,
+    });
+
+    if (existingTask) {
+      // If the existing task is a flow task in pending status with no attempts,
+      // we should trigger the flow execution instead of skipping entirely
+      const isFlowTask = existingTask.taskType === 'flow' ||
+        existingTask.stepConfig?.stepType === 'flow' ||
+        existingTask.flowConfig?.workflowId;
+      const isPending = existingTask.status === 'pending';
+      const hasNoAttempts = !existingTask.flowConfig?.attempts || existingTask.flowConfig.attempts.length === 0;
+
+      if (isFlowTask && isPending && hasNoAttempts) {
+        console.log(`[WorkflowExecutionService] advanceFromForcedDecision: flow task ${existingTask._id} exists but not executed - triggering execution`);
+        try {
+          await this.executeFlowTask(existingTask._id.toString());
+        } catch (error) {
+          console.error(`[WorkflowExecutionService] advanceFromForcedDecision: failed to execute flow task:`, error);
+        }
+        return;
+      }
+
+      console.log(`[WorkflowExecutionService] advanceFromForcedDecision: task already exists for step ${targetStepId} (status: ${existingTask.status}) - skipping execution`);
+      return;
+    }
+
     // Execute the next step
     console.log(`[WorkflowExecutionService] advanceFromForcedDecision: executing step ${nextStep.id} (${nextStep.name})`);
     await this.executeStep(run, workflow, nextStep, parentTask, inputPayload);
@@ -4077,10 +4284,56 @@ class WorkflowExecutionService {
       return { success: false, error: `Target workflow "${targetWorkflow.name}" is not active` };
     }
 
-    // Determine input payload - use provided, or fall back to stored config
-    const finalInputPayload = inputPayload ||
-      (task.metadata?.subflowInputPayload as Record<string, unknown>) ||
-      {};
+    // Determine input payload - use provided, or resolve inputMapping, or fall back to stored config
+    let finalInputPayload: Record<string, unknown>;
+    const inputMapping = task.flowConfig?.inputMapping || task.stepConfig?.inputMapping;
+    const taskInputPayload = task.metadata?.inputPayload as Record<string, unknown> | undefined;
+
+    if (inputPayload) {
+      // Explicit override provided - use it directly
+      finalInputPayload = inputPayload;
+    } else if (inputMapping && Object.keys(inputMapping).length > 0 && task.workflowRunId) {
+      // Always resolve inputMapping templates - don't trust stored subflowInputPayload
+      // because it may contain stale or unresolved templates from previous attempts
+      console.log(`[WorkflowExecutionService] Resolving inputMapping for flow task ${taskId}: ${JSON.stringify(inputMapping)}`);
+
+      finalInputPayload = {};
+      for (const [targetField, sourceValue] of Object.entries(inputMapping)) {
+        if (!targetField) continue;
+
+        // Only resolve template if the value is a string
+        // Non-string values (arrays, objects, numbers, booleans) are passed through as-is
+        if (typeof sourceValue === 'string') {
+          const resolvedValue = await this.resolveInputMappingValue(
+            sourceValue,
+            task.workflowRunId,
+            task.workflowStepId || '',
+            task._id,
+            taskInputPayload
+          );
+          finalInputPayload[targetField] = resolvedValue;
+        } else {
+          // Pass through non-string values directly
+          finalInputPayload[targetField] = sourceValue;
+        }
+      }
+      console.log(`[WorkflowExecutionService] Resolved input payload: ${JSON.stringify(finalInputPayload).substring(0, 500)}`);
+    } else if (inputMapping && Object.keys(inputMapping).length > 0) {
+      // inputMapping exists but we don't have workflow context - log warning and use as-is
+      console.warn(`[WorkflowExecutionService] Flow task ${taskId} has inputMapping but no workflow context, using raw values`);
+      finalInputPayload = {};
+      for (const [targetField, sourceTemplate] of Object.entries(inputMapping)) {
+        if (!targetField) continue;
+        // Try to use the value directly (without template resolution)
+        finalInputPayload[targetField] = sourceTemplate;
+      }
+    } else if (task.metadata?.subflowInputPayload && Object.keys(task.metadata.subflowInputPayload as Record<string, unknown>).length > 0) {
+      // No inputMapping but we have stored subflowInputPayload - use it
+      finalInputPayload = task.metadata.subflowInputPayload as Record<string, unknown>;
+    } else {
+      // No inputMapping defined - pass through the task's input payload
+      finalInputPayload = taskInputPayload || {};
+    }
 
     // Check existing attempts
     const existingAttempts = task.flowConfig?.attempts || [];
@@ -4099,30 +4352,76 @@ class WorkflowExecutionService {
     };
 
     // Update task status and add attempt record
-    await this.tasks.updateOne(
-      { _id: task._id },
-      {
-        $set: {
-          status: 'in_progress' as TaskStatus,
-          'metadata.targetWorkflowId': workflowId,
-          'metadata.targetWorkflowName': targetWorkflow.name,
-          'metadata.subflowInputPayload': finalInputPayload,
-          'flowConfig.workflowId': workflowId,
-          'flowConfig.lastAttemptAt': now,
-          'taskResult.current': {
-            id: `flow-${task._id}-${Date.now()}`,
-            status: 'running' as const,
-            summary: `Starting subflow: ${targetWorkflow.name}`,
-            executedAt: now,
-            output: {
-              targetWorkflow: { id: workflowId, name: targetWorkflow.name },
-              inputPayload: finalInputPayload,
-            },
-          },
+    // Note: We need to handle the case where flowConfig or taskResult is null (not just undefined)
+    // MongoDB $set can create nested paths for undefined fields, but not for null fields
+    // So we set the entire objects when they might be null
+    const taskResultUpdate = {
+      current: {
+        id: `flow-${task._id}-${Date.now()}`,
+        status: 'running' as const,
+        summary: `Starting subflow: ${targetWorkflow.name}`,
+        executedAt: now,
+        output: {
+          targetWorkflow: { id: workflowId, name: targetWorkflow.name },
+          inputPayload: finalInputPayload,
         },
-        $push: { 'flowConfig.attempts': attempt }
-      }
-    );
+      },
+    };
+
+    if (task.flowConfig === null || task.flowConfig === undefined) {
+      // Initialize flowConfig and taskResult as objects
+      await this.tasks.updateOne(
+        { _id: task._id },
+        {
+          $set: {
+            flowConfig: {
+              workflowId,
+              lastAttemptAt: now,
+              attempts: [attempt],
+            },
+            taskResult: taskResultUpdate,
+            status: 'in_progress' as TaskStatus,
+            'metadata.targetWorkflowId': workflowId,
+            'metadata.targetWorkflowName': targetWorkflow.name,
+            'metadata.subflowInputPayload': finalInputPayload,
+          },
+        }
+      );
+    } else if (task.taskResult === null || task.taskResult === undefined) {
+      // flowConfig exists, but taskResult needs to be initialized
+      await this.tasks.updateOne(
+        { _id: task._id },
+        {
+          $set: {
+            status: 'in_progress' as TaskStatus,
+            'metadata.targetWorkflowId': workflowId,
+            'metadata.targetWorkflowName': targetWorkflow.name,
+            'metadata.subflowInputPayload': finalInputPayload,
+            'flowConfig.workflowId': workflowId,
+            'flowConfig.lastAttemptAt': now,
+            taskResult: taskResultUpdate,
+          },
+          $push: { 'flowConfig.attempts': attempt }
+        }
+      );
+    } else {
+      // Both flowConfig and taskResult exist, can use nested paths
+      await this.tasks.updateOne(
+        { _id: task._id },
+        {
+          $set: {
+            status: 'in_progress' as TaskStatus,
+            'metadata.targetWorkflowId': workflowId,
+            'metadata.targetWorkflowName': targetWorkflow.name,
+            'metadata.subflowInputPayload': finalInputPayload,
+            'flowConfig.workflowId': workflowId,
+            'flowConfig.lastAttemptAt': now,
+            'taskResult.current': taskResultUpdate.current,
+          },
+          $push: { 'flowConfig.attempts': attempt }
+        }
+      );
+    }
 
     try {
       // Find the parent workflow run context (if any)

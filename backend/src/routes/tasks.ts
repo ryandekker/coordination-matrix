@@ -1630,27 +1630,19 @@ tasksRouter.post('/:id/force-decision', async (req: Request, res: Response, next
     // Get the updated task
     const updatedTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
 
-    // Publish event
+    // Publish event - this will trigger onTaskStatusChanged which will call advanceToNextStep
+    // The advanceToNextStep method uses metadata.selectedPath for decision tasks
     await publishTaskEvent('task.status.changed', updatedTask!, {
       actorId,
       actorType: 'user',
       changes: [{ field: 'status', oldValue: decisionTask.status, newValue: 'completed' }],
     });
 
-    // If this is part of a workflow, we need to advance to the next step
-    if (decisionTask.workflowRunId && decisionTask.workflowStepId) {
-      try {
-        // Use the workflow execution service to continue the workflow
-        await workflowExecutionService.advanceFromForcedDecision(
-          decisionTask.workflowRunId,
-          taskId,
-          targetStepId
-        );
-      } catch (workflowError) {
-        console.error('[Tasks] Failed to advance workflow after forced decision:', workflowError);
-        // Don't fail the request, the decision was still forced successfully
-      }
-    }
+    // Note: We no longer call advanceFromForcedDecision here because:
+    // 1. The task.status.changed event triggers onTaskStatusChanged
+    // 2. onTaskStatusChanged calls advanceToNextStep
+    // 3. advanceToNextStep now uses metadata.selectedPath for decision tasks
+    // This prevents duplicate task creation
 
     res.json({
       success: true,
