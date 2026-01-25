@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useDocuments, useCreateDocument, useDeleteDocument } from '@/hooks/use-documents'
+import { useGroupContext } from '@/lib/group-context'
 import { Document, DocumentType, DocumentStatus } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -77,6 +78,7 @@ function getTypeBadge(type: DocumentType) {
 
 export default function DocumentsPage() {
   const router = useRouter()
+  const { currentGroupId } = useGroupContext()
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<DocumentType | 'all'>('all')
   const [statusFilter, setStatusFilter] = useState<DocumentStatus | 'all'>('all')
@@ -93,6 +95,7 @@ export default function DocumentsPage() {
     resolveReferences: true,
     sortBy: 'updatedAt',
     sortOrder: 'desc',
+    groupId: currentGroupId || undefined,
   })
 
   const createDocument = useCreateDocument()

@@ -68,6 +68,7 @@ import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { workflowRunsApi, workflowsApi, WorkflowRun, WorkflowRunStatus, Task, Workflow as WorkflowType } from '@/lib/api'
 import { useFieldConfigs, useLookups } from '@/hooks/use-tasks'
+import { useGroupContext } from '@/lib/group-context'
 import { TaskModal } from '@/components/tasks/task-modal'
 
 const STATUS_CONFIG: Record<WorkflowRunStatus, { icon: React.ElementType; color: string; bgColor: string; label: string; filterable: boolean }> = {
@@ -750,6 +751,7 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
 // List view component
 function WorkflowRunsList() {
   const queryClient = useQueryClient()
+  const { currentGroupId } = useGroupContext()
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [workflowFilter, setWorkflowFilter] = useState<string>('all')
   const [searchQuery, setSearchQuery] = useState<string>('')
@@ -779,12 +781,13 @@ function WorkflowRunsList() {
   })
 
   const { data: runsData, isLoading, error, refetch } = useQuery({
-    queryKey: ['workflow-runs', statusFilter, workflowFilter, dateFrom, dateTo, page],
+    queryKey: ['workflow-runs', statusFilter, workflowFilter, dateFrom, dateTo, page, currentGroupId],
     queryFn: () => workflowRunsApi.list({
       status: statusFilter !== 'all' ? statusFilter as WorkflowRunStatus : undefined,
       workflowId: workflowFilter !== 'all' ? workflowFilter : undefined,
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
+      groupId: currentGroupId || undefined,
       page,
       limit: 20,
     }),

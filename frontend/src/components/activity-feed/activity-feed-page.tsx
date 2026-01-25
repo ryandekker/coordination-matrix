@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { formatDistanceToNow } from 'date-fns'
 import { useRecentActivity } from '@/hooks/use-activity-logs'
 import { useUsers } from '@/hooks/use-tasks'
+import { useGroupContext } from '@/lib/group-context'
 import { ActivityLogEntry, FieldChange, tasksApi, Task } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import {
@@ -165,6 +166,7 @@ function ActivityRow({ entry, users, getTaskName }: ActivityRowProps) {
 export function ActivityFeedPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const { currentGroupId } = useGroupContext()
 
   // Parse filters from URL
   const eventTypeFromUrl = searchParams.get('eventType')
@@ -194,6 +196,7 @@ export function ActivityFeedPage() {
     offset: (page - 1) * limit,
     eventTypes: selectedEventType ? [selectedEventType] : undefined,
     actorId: selectedActorId || undefined,
+    groupId: currentGroupId || undefined,
   })
 
   const entries = data?.data || []

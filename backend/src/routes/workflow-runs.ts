@@ -3,6 +3,9 @@ import { ObjectId } from 'mongodb';
 import { workflowExecutionService } from '../services/workflow-execution-service.js';
 import { StartWorkflowInput, WorkflowRunStatus, WorkflowRequest, WorkflowRequestActorType } from '../types/index.js';
 import { requireAuth } from '../middleware/auth.js';
+import { loadUserGroups } from '../middleware/group-access.js';
+import { isAdmin } from '../middleware/authorize.js';
+import { groupService } from '../services/group-service.js';
 import { getDb } from '../db/connection.js';
 
 // Helper to filter sensitive headers
@@ -132,16 +135,36 @@ router.post('/', requireAuth, async (req: Request, res: Response): Promise<void>
 // List Workflow Runs
 // GET /api/workflow-runs
 // ============================================================================
-router.get('/', requireAuth, async (req: Request, res: Response): Promise<void> => {
+router.get('/', requireAuth, loadUserGroups(), async (req: Request, res: Response): Promise<void> => {
   try {
     const {
       workflowId,
+      groupId,
       status,
       dateFrom,
       dateTo,
       page = '1',
       limit = '20',
     } = req.query;
+
+    // Validate group access if groupId is provided
+    let groupIdObj: ObjectId | undefined;
+    if (groupId && typeof groupId === 'string') {
+      if (!ObjectId.isValid(groupId)) {
+        res.status(400).json({ error: 'Invalid groupId' });
+        return;
+      }
+
+      if (!isAdmin(req)) {
+        const membership = await groupService.getMembership(groupId, req.user!.userId);
+        if (!membership) {
+          res.status(403).json({ error: 'Not a member of this group' });
+          return;
+        }
+      }
+
+      groupIdObj = new ObjectId(groupId);
+    }
 
     // Parse status (can be comma-separated)
     let statusFilter: WorkflowRunStatus | WorkflowRunStatus[] | undefined;
@@ -164,6 +187,7 @@ router.get('/', requireAuth, async (req: Request, res: Response): Promise<void> 
 
     const result = await workflowExecutionService.listWorkflowRuns({
       workflowId: workflowId as string,
+      groupId: groupIdObj,
       status: statusFilter,
       dateFrom: dateFromParsed,
       dateTo: dateToParsed,

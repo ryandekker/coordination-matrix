@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useCallback } from 'react'
-import { Search, Filter, Columns, ChevronDown, X, Bookmark, Tag as TagIcon, ChevronsDownUp, ChevronsUpDown, Archive, Workflow as WorkflowIcon } from 'lucide-react'
+import { Search, Filter, Columns, ChevronDown, X, Bookmark, Tag as TagIcon, ChevronsDownUp, ChevronsUpDown, Archive, Workflow as WorkflowIcon, FolderKanban } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -28,7 +28,7 @@ import {
   DialogFooter,
   DialogDescription,
 } from '@/components/ui/dialog'
-import { View, ViewFolder, LookupValue, User, Task, Tag, Workflow, isSystemUser } from '@/lib/api'
+import { View, ViewFolder, LookupValue, User, Task, Tag, Workflow, Project, isSystemUser } from '@/lib/api'
 import { UserChip } from '@/components/ui/user-chip'
 
 interface TaskToolbarProps {
@@ -39,6 +39,7 @@ interface TaskToolbarProps {
   tasks?: Task[]
   availableTags?: Tag[]
   workflows?: Workflow[]
+  projects?: Project[]
   filters: Record<string, unknown>
   search: string
   sorting?: Array<{ field: string; direction: 'asc' | 'desc' }>
@@ -60,6 +61,7 @@ export function TaskToolbar({
   tasks = [],
   availableTags = [],
   workflows = [],
+  projects = [],
   filters,
   search,
   sorting,
@@ -81,6 +83,7 @@ export function TaskToolbar({
   const [workflowSearchTerm, setWorkflowSearchTerm] = useState('')
   const [assigneeSearchTerm, setAssigneeSearchTerm] = useState('')
   const [tagSearchTerm, setTagSearchTerm] = useState('')
+  const [projectSearchTerm, setProjectSearchTerm] = useState('')
 
   const statusOptions = lookups.task_status || []
   const urgencyOptions = lookups.urgency || []
@@ -109,6 +112,19 @@ export function TaskToolbar({
       t.displayName.toLowerCase().includes(searchLower)
     )
   }, [availableTags, tagSearchTerm])
+
+  // Filter projects by search term (only active projects)
+  const filteredProjects = useMemo(() => {
+    const activeProjects = projects.filter(p => p.status === 'active')
+    if (!projectSearchTerm.trim()) {
+      return activeProjects
+    }
+    const searchLower = projectSearchTerm.toLowerCase()
+    return activeProjects.filter(p =>
+      p.displayName.toLowerCase().includes(searchLower) ||
+      (p.description && p.description.toLowerCase().includes(searchLower))
+    )
+  }, [projects, projectSearchTerm])
 
   // Build workflow data with stages for filtering and display
   const workflowsWithStages = useMemo(() => {
@@ -284,6 +300,14 @@ export function TaskToolbar({
     })
   }, [filters, onFilterChange])
 
+  const handleProjectFilter = useCallback((projectId: string, checked: boolean) => {
+    // Project filter is single-select for now (or could be made multi-select)
+    onFilterChange({
+      ...filters,
+      projectId: checked ? projectId : undefined,
+    })
+  }, [filters, onFilterChange])
+
   const clearAllFilters = useCallback(() => {
     onFilterChange({})
     onSearchChange('')
@@ -360,8 +384,16 @@ export function TaskToolbar({
       result.push({ key: `workflowStage-${stage}`, label: 'Stage', value: stage })
     })
 
+    // Project filter
+    if (filters.projectId) {
+      const project = projects.find((p) => p._id === filters.projectId)
+      if (project) {
+        result.push({ key: `project-${filters.projectId}`, label: 'Project', value: project.displayName, color: project.color })
+      }
+    }
+
     return result
-  }, [search, filters, statusOptions, urgencyOptions, users, availableTags, workflows])
+  }, [search, filters, statusOptions, urgencyOptions, users, availableTags, workflows, projects])
 
   const removeFilter = useCallback((filterKey: string) => {
     if (filterKey === 'search') {
@@ -388,8 +420,11 @@ export function TaskToolbar({
     } else if (filterKey.startsWith('workflowStage-')) {
       const stage = filterKey.replace('workflowStage-', '')
       handleWorkflowStageFilter(stage, false)
+    } else if (filterKey.startsWith('project-')) {
+      const projectId = filterKey.replace('project-', '')
+      handleProjectFilter(projectId, false)
     }
-  }, [onSearchChange, handleStatusFilter, handleUrgencyFilter, handleAssigneeFilter, handleTagFilter, handleIncludeArchivedChange, handleHasWorkflowFilter, handleWorkflowFilter, handleWorkflowStageFilter])
+  }, [onSearchChange, handleStatusFilter, handleUrgencyFilter, handleAssigneeFilter, handleTagFilter, handleIncludeArchivedChange, handleHasWorkflowFilter, handleWorkflowFilter, handleWorkflowStageFilter, handleProjectFilter])
 
   return (
     <div className="space-y-2">
@@ -556,6 +591,53 @@ export function TaskToolbar({
                       style={{ backgroundColor: tag.color }}
                     />
                     {tag.displayName}
+                  </DropdownMenuCheckboxItem>
+                ))
+              )}
+            </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+
+      {/* Project Filter */}
+      {projects.length > 0 && (
+        <DropdownMenu onOpenChange={(open) => { if (!open) setProjectSearchTerm('') }}>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm">
+              <FolderKanban className="mr-2 h-4 w-4" />
+              Project
+              <ChevronDown className="ml-2 h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-56">
+            <div className="px-2 py-1.5">
+              <Input
+                placeholder="Search projects..."
+                value={projectSearchTerm}
+                onChange={(e) => setProjectSearchTerm(e.target.value)}
+                className="h-8"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+              />
+            </div>
+            <DropdownMenuSeparator />
+            <div className="max-h-48 overflow-y-auto">
+              {filteredProjects.length === 0 ? (
+                <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                  No projects found
+                </div>
+              ) : (
+                filteredProjects.map((project) => (
+                  <DropdownMenuCheckboxItem
+                    key={project._id}
+                    checked={filters.projectId === project._id}
+                    onCheckedChange={(checked) => handleProjectFilter(project._id, checked)}
+                  >
+                    <span
+                      className="mr-2 h-3 w-3 rounded"
+                      style={{ backgroundColor: project.color || '#3B82F6' }}
+                    />
+                    {project.displayName}
                   </DropdownMenuCheckboxItem>
                 ))
               )}

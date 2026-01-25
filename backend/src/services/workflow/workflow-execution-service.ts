@@ -4064,6 +4064,7 @@ class WorkflowExecutionService {
 
   async listWorkflowRuns(options: {
     workflowId?: string;
+    groupId?: ObjectId;
     status?: WorkflowRunStatus | WorkflowRunStatus[];
     dateFrom?: Date;
     dateTo?: Date;
@@ -4076,6 +4077,16 @@ class WorkflowExecutionService {
     if (options.workflowId) {
       filter.workflowId = new ObjectId(options.workflowId);
     }
+
+    // Filter by group - workflow runs are linked to workflows which have groupId
+    if (options.groupId) {
+      const workflowIds = await this.workflows
+        .find({ groupId: options.groupId })
+        .project({ _id: 1 })
+        .toArray();
+      filter.workflowId = { $in: workflowIds.map((w) => w._id) };
+    }
+
     if (options.status) {
       filter.status = Array.isArray(options.status)
         ? { $in: options.status }

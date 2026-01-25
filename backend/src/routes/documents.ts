@@ -2,6 +2,9 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { ObjectId } from 'mongodb';
 import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
+import { loadUserGroups } from '../middleware/group-access.js';
+import { isAdmin } from '../middleware/authorize.js';
+import { groupService } from '../services/group-service.js';
 import {
   Document,
   DocumentVersion,
@@ -95,7 +98,17 @@ async function resolveDocumentReferences(doc: Document): Promise<DocumentWithRes
 // Build filter from query params
 function buildFilter(query: Record<string, unknown>): Record<string, unknown> {
   const filter: Record<string, unknown> = {};
-  const { search, type, status, tags, includeArchived, createdById, workflowRunId, parentDocumentId, filters } = query;
+  const { search, type, status, tags, includeArchived, createdById, workflowRunId, parentDocumentId, groupId, projectId, filters } = query;
+
+  // Group filter
+  if (groupId && typeof groupId === 'string' && ObjectId.isValid(groupId)) {
+    filter.groupId = new ObjectId(groupId);
+  }
+
+  // Project filter
+  if (projectId && typeof projectId === 'string' && ObjectId.isValid(projectId)) {
+    filter.projectId = new ObjectId(projectId);
+  }
 
   // Text search
   if (search && typeof search === 'string') {
@@ -167,7 +180,7 @@ function buildFilter(query: Record<string, unknown>): Record<string, unknown> {
 }
 
 // GET /api/documents - List documents with filtering and pagination
-documentsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
+documentsRouter.get('/', loadUserGroups(), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
     const {
@@ -176,12 +189,29 @@ documentsRouter.get('/', async (req: Request, res: Response, next: NextFunction)
       sortBy = 'updatedAt',
       sortOrder = 'desc',
       resolveReferences,
+      groupId,
     } = req.query;
 
     const pageNum = Math.max(1, parseInt(page as string, 10));
     const limitNum = Math.min(200, Math.max(1, parseInt(limit as string, 10)));
     const skip = (pageNum - 1) * limitNum;
     const sort: Record<string, 1 | -1> = { [sortBy as string]: sortOrder === 'asc' ? 1 : -1 };
+
+    // Validate group access if groupId is provided
+    if (groupId && typeof groupId === 'string') {
+      if (!ObjectId.isValid(groupId)) {
+        res.status(400).json({ error: 'Invalid groupId' });
+        return;
+      }
+
+      if (!isAdmin(req)) {
+        const membership = await groupService.getMembership(groupId, req.user!.userId);
+        if (!membership) {
+          res.status(403).json({ error: 'Not a member of this group' });
+          return;
+        }
+      }
+    }
 
     const filter = buildFilter(req.query);
 

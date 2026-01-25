@@ -6,6 +6,7 @@ import { loadUserGroups } from '../middleware/group-access.js';
 import { groupService } from '../services/group-service.js';
 import { projectService } from '../services/project-service.js';
 import { ProjectStatus } from '../types/index.js';
+import { getDb } from '../db/connection.js';
 
 const router = Router();
 
@@ -130,6 +131,89 @@ router.post('/', async (req: Request, res: Response) => {
     }
     console.error('Error creating project:', error);
     res.status(500).json({ error: 'Failed to create project' });
+  }
+});
+
+/**
+ * GET /api/projects/stats
+ * Get task counts per project for the current group.
+ * Query params:
+ * - groupId: Required - get stats for projects in this group
+ */
+router.get('/stats', loadUserGroups(), async (req: Request, res: Response) => {
+  try {
+    const { groupId } = req.query;
+
+    if (!groupId || typeof groupId !== 'string') {
+      res.status(400).json({ error: 'groupId is required' });
+      return;
+    }
+
+    if (!ObjectId.isValid(groupId)) {
+      res.status(400).json({ error: 'Invalid groupId' });
+      return;
+    }
+
+    // Check access to the group
+    if (!isAdmin(req)) {
+      const membership = await groupService.getMembership(groupId, req.user!.userId);
+      if (!membership) {
+        res.status(403).json({ error: 'Not a member of this group' });
+        return;
+      }
+    }
+
+    const db = getDb();
+    const tasksCollection = db.collection('tasks');
+
+    // Aggregate task counts by projectId
+    const pipeline = [
+      {
+        $match: {
+          groupId: new ObjectId(groupId),
+          projectId: { $exists: true, $ne: null },
+        },
+      },
+      {
+        $group: {
+          _id: '$projectId',
+          totalTasks: { $sum: 1 },
+          pendingTasks: {
+            $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] },
+          },
+          inProgressTasks: {
+            $sum: { $cond: [{ $eq: ['$status', 'in_progress'] }, 1, 0] },
+          },
+          completedTasks: {
+            $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] },
+          },
+        },
+      },
+    ];
+
+    const stats = await tasksCollection.aggregate(pipeline).toArray();
+
+    // Convert to a map keyed by projectId
+    const statsMap: Record<string, {
+      totalTasks: number;
+      pendingTasks: number;
+      inProgressTasks: number;
+      completedTasks: number;
+    }> = {};
+
+    for (const stat of stats) {
+      statsMap[stat._id.toString()] = {
+        totalTasks: stat.totalTasks,
+        pendingTasks: stat.pendingTasks,
+        inProgressTasks: stat.inProgressTasks,
+        completedTasks: stat.completedTasks,
+      };
+    }
+
+    res.json({ data: statsMap });
+  } catch (error) {
+    console.error('Error getting project stats:', error);
+    res.status(500).json({ error: 'Failed to get project stats' });
   }
 });
 

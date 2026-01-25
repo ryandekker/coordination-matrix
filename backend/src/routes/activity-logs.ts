@@ -1,6 +1,9 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { ObjectId } from 'mongodb';
 import { createError } from '../middleware/error-handler.js';
+import { loadUserGroups } from '../middleware/group-access.js';
+import { isAdmin } from '../middleware/authorize.js';
+import { groupService } from '../services/group-service.js';
 import { activityLogService } from '../services/activity-log.js';
 
 export const activityLogsRouter = Router();
@@ -50,6 +53,7 @@ activityLogsRouter.get(
 // GET /api/activity-logs/recent - Get recent activity across all tasks
 activityLogsRouter.get(
   '/recent',
+  loadUserGroups(),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const {
@@ -57,7 +61,27 @@ activityLogsRouter.get(
         offset = '0',
         eventTypes,
         actorId,
+        groupId,
       } = req.query;
+
+      // Validate group access if groupId is provided
+      let groupIdObj: ObjectId | undefined;
+      if (groupId && typeof groupId === 'string') {
+        if (!ObjectId.isValid(groupId)) {
+          res.status(400).json({ error: 'Invalid groupId' });
+          return;
+        }
+
+        if (!isAdmin(req)) {
+          const membership = await groupService.getMembership(groupId, req.user!.userId);
+          if (!membership) {
+            res.status(403).json({ error: 'Not a member of this group' });
+            return;
+          }
+        }
+
+        groupIdObj = new ObjectId(groupId);
+      }
 
       const result = await activityLogService.getRecentActivity({
         limit: parseInt(limit as string, 10),
@@ -66,6 +90,7 @@ activityLogsRouter.get(
           ? (Array.isArray(eventTypes) ? eventTypes : [eventTypes]) as string[]
           : undefined,
         actorId: actorId ? toObjectId(actorId as string) : undefined,
+        groupId: groupIdObj,
       });
 
       res.json({

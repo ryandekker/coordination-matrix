@@ -666,6 +666,16 @@ export const projectsApi = {
     })
     return handleResponse(response)
   },
+
+  getStats: async (groupId: string): Promise<ApiResponse<Record<string, {
+    totalTasks: number
+    pendingTasks: number
+    inProgressTasks: number
+    completedTasks: number
+  }>>> => {
+    const response = await authFetch(`${API_BASE}/projects/stats?groupId=${groupId}`)
+    return handleResponse(response)
+  },
 }
 
 // Workflows API
@@ -1453,6 +1463,7 @@ export interface StartWorkflowInput {
 export const workflowRunsApi = {
   list: async (params?: {
     workflowId?: string
+    groupId?: string
     status?: WorkflowRunStatus | WorkflowRunStatus[]
     dateFrom?: string
     dateTo?: string
@@ -1461,6 +1472,7 @@ export const workflowRunsApi = {
   }): Promise<PaginatedResponse<WorkflowRun>> => {
     const searchParams = new URLSearchParams()
     if (params?.workflowId) searchParams.append('workflowId', params.workflowId)
+    if (params?.groupId) searchParams.append('groupId', params.groupId)
     if (params?.status) {
       const statuses = Array.isArray(params.status) ? params.status : [params.status]
       searchParams.append('status', statuses.join(','))
@@ -1699,12 +1711,13 @@ export const activityLogsApi = {
   },
 
   getRecentActivity: async (
-    params?: { limit?: number; offset?: number; eventTypes?: string[]; actorId?: string }
+    params?: { limit?: number; offset?: number; eventTypes?: string[]; actorId?: string; groupId?: string }
   ): Promise<{ data: ActivityLogEntry[]; pagination: { limit: number; offset: number; total: number } }> => {
     const searchParams = new URLSearchParams()
     if (params?.limit) searchParams.append('limit', String(params.limit))
     if (params?.offset) searchParams.append('offset', String(params.offset))
     if (params?.actorId) searchParams.append('actorId', params.actorId)
+    if (params?.groupId) searchParams.append('groupId', params.groupId)
     if (params?.eventTypes) {
       params.eventTypes.forEach(t => searchParams.append('eventTypes', t))
     }
@@ -2133,6 +2146,8 @@ export const documentsApi = {
     workflowRunId?: string
     parentDocumentId?: string | null
     resolveReferences?: boolean
+    groupId?: string
+    projectId?: string
   }): Promise<PaginatedResponse<Document>> => {
     const searchParams = new URLSearchParams()
     if (params?.page) searchParams.append('page', String(params.page))
@@ -2158,6 +2173,8 @@ export const documentsApi = {
       searchParams.append('parentDocumentId', params.parentDocumentId || '__root__')
     }
     if (params?.resolveReferences) searchParams.append('resolveReferences', 'true')
+    if (params?.groupId) searchParams.append('groupId', params.groupId)
+    if (params?.projectId) searchParams.append('projectId', params.projectId)
     const response = await authFetch(`${API_BASE}/documents?${searchParams}`)
     return handleResponse(response)
   },
