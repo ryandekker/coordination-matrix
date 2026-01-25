@@ -49,6 +49,8 @@ export interface ApiKey {
   createdById: ObjectId | null;
   // User ID that this API key acts as - when set, the key inherits the user's permissions
   userId?: ObjectId | null;
+  // Group ID that this API key is scoped to - when set, can only access resources in this group
+  groupId?: ObjectId | null;
   createdAt: Date;
   expiresAt?: Date | null;
   lastUsedAt?: Date | null;
@@ -73,11 +75,12 @@ function hashApiKey(key: string): string {
 // Query params (admin only):
 //   - createdById: Filter by who created the key
 //   - actsAsUserId: Filter by which user the key acts as (inherits permissions from)
+//   - groupId: Filter by which group the key is scoped to
 //   - includeInactive: Include revoked/inactive keys
 apiKeysRouter.get('/', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
-    const { createdById, actsAsUserId, includeInactive } = req.query;
+    const { createdById, actsAsUserId, groupId, includeInactive } = req.query;
 
     const filter: Record<string, unknown> = {};
 
@@ -93,6 +96,9 @@ apiKeysRouter.get('/', async (req: Request, res: Response, next: NextFunction): 
 
     if (actsAsUserId) {
       filter.userId = new ObjectId(actsAsUserId as string);
+    }
+    if (groupId) {
+      filter.groupId = new ObjectId(groupId as string);
     }
     if (!includeInactive) {
       filter.isActive = true;
@@ -137,10 +143,11 @@ apiKeysRouter.get('/:id', async (req: Request, res: Response, next: NextFunction
 // POST /api/auth/api-keys - Generate a new API key
 // Only admins and operators can create API keys.
 // Non-admins cannot set userId (impersonation) - only admins can create keys that act as other users.
+// groupId can be set to restrict the key to a specific group.
 apiKeysRouter.post('/', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
-    const { name, description, scopes, expiresAt, userId } = req.body;
+    const { name, description, scopes, expiresAt, userId, groupId } = req.body;
 
     if (!name) {
       throw createError('name is required', 400);
@@ -162,6 +169,18 @@ apiKeysRouter.post('/', async (req: Request, res: Response, next: NextFunction):
       validatedUserId = new ObjectId(userId);
     }
 
+    // Validate groupId if provided - the group must exist
+    let validatedGroupId: ObjectId | null = null;
+    if (groupId) {
+      const group = await db.collection('groups').findOne({
+        _id: new ObjectId(groupId),
+      });
+      if (!group) {
+        throw createError('groupId must reference an existing group', 400);
+      }
+      validatedGroupId = new ObjectId(groupId);
+    }
+
     // Generate the raw API key
     const rawKey = generateApiKey();
     const keyHash = hashApiKey(rawKey);
@@ -176,6 +195,7 @@ apiKeysRouter.post('/', async (req: Request, res: Response, next: NextFunction):
       scopes: scopes || ['tasks:read', 'saved-searches:read'],
       createdById: new ObjectId(req.user!.userId), // Always set to current user
       userId: validatedUserId,
+      groupId: validatedGroupId,
       createdAt: now,
       expiresAt: expiresAt ? new Date(expiresAt) : null,
       lastUsedAt: null,
@@ -195,6 +215,7 @@ apiKeysRouter.post('/', async (req: Request, res: Response, next: NextFunction):
         scopes: newApiKey.scopes,
         createdById: newApiKey.createdById,
         userId: newApiKey.userId,
+        groupId: newApiKey.groupId,
         createdAt: newApiKey.createdAt,
         expiresAt: newApiKey.expiresAt,
         isActive: newApiKey.isActive,
@@ -251,6 +272,22 @@ apiKeysRouter.patch('/:id', async (req: Request, res: Response, next: NextFuncti
           throw createError('userId must reference an active user', 400);
         }
         allowedUpdates.userId = new ObjectId(updates.userId);
+      }
+    }
+
+    // Allow updating groupId (the group this key is scoped to)
+    if (updates.groupId !== undefined) {
+      if (updates.groupId === null) {
+        allowedUpdates.groupId = null;
+      } else {
+        // Validate that the group exists
+        const group = await db.collection('groups').findOne({
+          _id: new ObjectId(updates.groupId),
+        });
+        if (!group) {
+          throw createError('groupId must reference an existing group', 400);
+        }
+        allowedUpdates.groupId = new ObjectId(updates.groupId);
       }
     }
 

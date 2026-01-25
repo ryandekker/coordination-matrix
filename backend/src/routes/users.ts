@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { ObjectId } from 'mongodb';
 import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
-import { User, Team } from '../types/index.js';
+import { User } from '../types/index.js';
 import { requireRole, isAdmin } from '../middleware/authorize.js';
 
 export const usersRouter = Router();
@@ -113,7 +113,6 @@ usersRouter.post('/agents/ensure/:agentId', async (req: Request, res: Response, 
         isActive: true,
         isAgent: true,
         agentPrompt: '', // Empty - uses base daemon prompt only
-        teamIds: [],
         preferences: {},
         createdAt: now,
         updatedAt: now,
@@ -176,7 +175,6 @@ usersRouter.post('/', requireRole('admin'), async (req: Request, res: Response, 
       displayName,
       role: role || 'viewer',
       isActive: true,
-      teamIds: [],
       preferences: {},
       createdAt: now,
       updatedAt: now,
@@ -308,157 +306,5 @@ usersRouter.delete('/:id', requireRole('admin'), async (req: Request, res: Respo
   }
 });
 
-// ============================================================================
-// Teams Routes
-// ============================================================================
-
-// GET /api/users/teams - Get all teams
-usersRouter.get('/teams/list', async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const db = getDb();
-    const teams = await db.collection<Team>('teams').find().sort({ name: 1 }).toArray();
-    res.json({ data: teams });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// GET /api/users/teams/:id - Get a specific team
-usersRouter.get('/teams/:id', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const db = getDb();
-    const teamId = new ObjectId(req.params.id);
-
-    const team = await db.collection<Team>('teams').findOne({ _id: teamId });
-
-    if (!team) {
-      throw createError('Team not found', 404);
-    }
-
-    // Get team members
-    const members = await db
-      .collection<User>('users')
-      .find({ _id: { $in: team.memberIds } })
-      .toArray();
-
-    res.json({ data: { ...team, members } });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// POST /api/users/teams - Create a new team
-// Only admins can create teams.
-usersRouter.post('/teams', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const db = getDb();
-    const { name, description, memberIds } = req.body;
-
-    if (!name) {
-      throw createError('name is required', 400);
-    }
-
-    // Check for duplicate name
-    const existing = await db.collection('teams').findOne({ name });
-    if (existing) {
-      throw createError('Team with this name already exists', 409);
-    }
-
-    const now = new Date();
-    const newTeam: Omit<Team, '_id'> = {
-      name,
-      description: description || '',
-      memberIds: (memberIds || []).map((id: string) => new ObjectId(id)),
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    const result = await db.collection<Team>('teams').insertOne(newTeam as Team);
-    const inserted = await db.collection<Team>('teams').findOne({ _id: result.insertedId });
-
-    res.status(201).json({ data: inserted });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// PATCH /api/users/teams/:id - Update a team
-// Only admins can update teams.
-usersRouter.patch('/teams/:id', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const db = getDb();
-    const teamId = new ObjectId(req.params.id);
-    const updates = req.body;
-
-    delete updates._id;
-    delete updates.createdAt;
-    updates.updatedAt = new Date();
-
-    if (updates.memberIds) {
-      updates.memberIds = updates.memberIds.map((id: string) => new ObjectId(id));
-    }
-
-    const result = await db.collection<Team>('teams').findOneAndUpdate(
-      { _id: teamId },
-      { $set: updates },
-      { returnDocument: 'after' }
-    );
-
-    if (!result) {
-      throw createError('Team not found', 404);
-    }
-
-    res.json({ data: result });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// DELETE /api/users/teams/:id - Delete a team
-// Only admins can delete teams.
-usersRouter.delete('/teams/:id', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const db = getDb();
-    const teamId = new ObjectId(req.params.id);
-
-    const result = await db.collection('teams').deleteOne({ _id: teamId });
-
-    if (result.deletedCount === 0) {
-      throw createError('Team not found', 404);
-    }
-
-    res.json({ success: true, message: 'Team deleted' });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// PUT /api/users/teams/:id/members - Update team members
-// Only admins can update team members.
-usersRouter.put('/teams/:id/members', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const db = getDb();
-    const teamId = new ObjectId(req.params.id);
-    const { memberIds } = req.body;
-
-    if (!Array.isArray(memberIds)) {
-      throw createError('memberIds array is required', 400);
-    }
-
-    const objectIds = memberIds.map((id: string) => new ObjectId(id));
-
-    const result = await db.collection<Team>('teams').findOneAndUpdate(
-      { _id: teamId },
-      { $set: { memberIds: objectIds, updatedAt: new Date() } },
-      { returnDocument: 'after' }
-    );
-
-    if (!result) {
-      throw createError('Team not found', 404);
-    }
-
-    res.json({ data: result });
-  } catch (error) {
-    next(error);
-  }
-});
+// Note: Teams functionality has been replaced by Groups.
+// See /api/groups for group-based access control.

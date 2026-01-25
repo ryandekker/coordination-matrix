@@ -1127,6 +1127,266 @@ async function cmdWebhooks(args) {
 }
 
 // ============================================================================
+// Group Commands
+// ============================================================================
+
+async function cmdGroups(args) {
+  const params = new URLSearchParams();
+  if (args.all) params.set('all', 'true');
+
+  const result = await api.get(`/api/groups?${params}`);
+
+  if (!result.ok) {
+    error(`Failed to fetch groups: ${result.data?.error || result.error}`);
+    process.exit(1);
+  }
+
+  if (args.ids) {
+    result.data.data.forEach(g => console.log(g._id));
+  } else if (args.brief) {
+    result.data.data.forEach(g => {
+      const memberCount = g.members?.length || 0;
+      console.log(`${g._id} | ${g.name.padEnd(20)} | ${memberCount} members | ${g.visibility}`);
+    });
+    console.log(`\n(${result.data.data.length} total)`);
+  } else {
+    output(result.data);
+  }
+}
+
+async function cmdGroup(args) {
+  const id = args._[0];
+
+  if (!id) {
+    error('Group ID is required: matrix-cli group <id>');
+    process.exit(1);
+  }
+
+  const result = await api.get(`/api/groups/${id}`);
+
+  if (!result.ok) {
+    error(`Failed to fetch group: ${result.data?.error || result.error}`);
+    process.exit(1);
+  }
+
+  output(result.data);
+}
+
+async function cmdGroupCreate(args) {
+  const group = {};
+
+  // Required
+  group.name = args.name || await prompt('Name (slug): ');
+  group.displayName = args.display || args['display-name'] || await prompt('Display Name: ');
+
+  // Optional
+  if (args.description) group.description = args.description;
+  if (args.visibility) group.visibility = args.visibility;
+
+  const result = await api.post('/api/groups', group);
+
+  if (!result.ok) {
+    error(`Failed to create group: ${result.data?.error || result.error}`);
+    process.exit(1);
+  }
+
+  if (args.quiet) {
+    console.log(result.data.data._id);
+  } else {
+    success(`Created group: ${result.data.data._id}`);
+    output(result.data);
+  }
+}
+
+async function cmdGroupMembers(args) {
+  const id = args._[0];
+
+  if (!id) {
+    error('Group ID is required: matrix-cli group:members <id>');
+    process.exit(1);
+  }
+
+  const result = await api.get(`/api/groups/${id}/members`);
+
+  if (!result.ok) {
+    error(`Failed to fetch members: ${result.data?.error || result.error}`);
+    process.exit(1);
+  }
+
+  if (args.brief) {
+    result.data.data.forEach(m => {
+      const userName = m.user?.displayName || m.userId;
+      console.log(`${m.userId} | ${m.role.padEnd(8)} | ${userName}`);
+    });
+  } else {
+    output(result.data);
+  }
+}
+
+async function cmdGroupAddMember(args) {
+  const groupId = args._[0];
+  const userId = args.user || args._[1];
+
+  if (!groupId || !userId) {
+    error('Usage: matrix-cli group:add-member <groupId> --user <userId> [--role member]');
+    process.exit(1);
+  }
+
+  const result = await api.post(`/api/groups/${groupId}/members`, {
+    userId,
+    role: args.role || 'member',
+  });
+
+  if (!result.ok) {
+    error(`Failed to add member: ${result.data?.error || result.error}`);
+    process.exit(1);
+  }
+
+  success(`Added member ${userId} to group ${groupId}`);
+}
+
+async function cmdGroupRemoveMember(args) {
+  const groupId = args._[0];
+  const userId = args.user || args._[1];
+
+  if (!groupId || !userId) {
+    error('Usage: matrix-cli group:remove-member <groupId> --user <userId>');
+    process.exit(1);
+  }
+
+  const result = await api.delete(`/api/groups/${groupId}/members/${userId}`);
+
+  if (!result.ok) {
+    error(`Failed to remove member: ${result.data?.error || result.error}`);
+    process.exit(1);
+  }
+
+  success(`Removed member ${userId} from group ${groupId}`);
+}
+
+// ============================================================================
+// Project Commands
+// ============================================================================
+
+async function cmdProjects(args) {
+  const params = new URLSearchParams();
+  if (args.group) params.set('groupId', args.group);
+  if (args.status) params.set('status', args.status);
+
+  const result = await api.get(`/api/projects?${params}`);
+
+  if (!result.ok) {
+    error(`Failed to fetch projects: ${result.data?.error || result.error}`);
+    process.exit(1);
+  }
+
+  if (args.ids) {
+    result.data.data.forEach(p => console.log(p._id));
+  } else if (args.brief) {
+    result.data.data.forEach(p => {
+      console.log(`${p._id} | ${p.status.padEnd(10)} | ${p.displayName}`);
+    });
+    console.log(`\n(${result.data.data.length} total)`);
+  } else {
+    output(result.data);
+  }
+}
+
+async function cmdProject(args) {
+  const id = args._[0];
+
+  if (!id) {
+    error('Project ID is required: matrix-cli project <id>');
+    process.exit(1);
+  }
+
+  const result = await api.get(`/api/projects/${id}`);
+
+  if (!result.ok) {
+    error(`Failed to fetch project: ${result.data?.error || result.error}`);
+    process.exit(1);
+  }
+
+  output(result.data);
+}
+
+async function cmdProjectCreate(args) {
+  const project = {};
+
+  // Required
+  project.name = args.name || await prompt('Name (slug): ');
+  project.displayName = args.display || args['display-name'] || await prompt('Display Name: ');
+  project.groupId = args.group || await prompt('Group ID: ');
+
+  // Optional
+  if (args.description) project.description = args.description;
+  if (args.color) project.color = args.color;
+
+  const result = await api.post('/api/projects', project);
+
+  if (!result.ok) {
+    error(`Failed to create project: ${result.data?.error || result.error}`);
+    process.exit(1);
+  }
+
+  if (args.quiet) {
+    console.log(result.data.data._id);
+  } else {
+    success(`Created project: ${result.data.data._id}`);
+    output(result.data);
+  }
+}
+
+async function cmdProjectUpdate(args) {
+  const id = args._[0];
+
+  if (!id) {
+    error('Project ID is required: matrix-cli project:update <id> [options]');
+    process.exit(1);
+  }
+
+  const updates = {};
+
+  if (args.display || args['display-name']) updates.displayName = args.display || args['display-name'];
+  if (args.description) updates.description = args.description;
+  if (args.status) updates.status = args.status;
+  if (args.color) updates.color = args.color;
+
+  if (Object.keys(updates).length === 0) {
+    error('No updates specified');
+    process.exit(1);
+  }
+
+  const result = await api.patch(`/api/projects/${id}`, updates);
+
+  if (!result.ok) {
+    error(`Failed to update project: ${result.data?.error || result.error}`);
+    process.exit(1);
+  }
+
+  success(`Updated project: ${id}`);
+  output(result.data);
+}
+
+async function cmdProjectDelete(args) {
+  const id = args._[0];
+
+  if (!id) {
+    error('Project ID is required: matrix-cli project:delete <id>');
+    process.exit(1);
+  }
+
+  const result = await api.delete(`/api/projects/${id}`);
+
+  if (!result.ok) {
+    error(`Failed to delete project: ${result.data?.error || result.error}`);
+    process.exit(1);
+  }
+
+  success(`Deleted project: ${id}`);
+}
+
+// ============================================================================
 // Event Stream Commands (SSE)
 // ============================================================================
 
@@ -1389,6 +1649,21 @@ User Commands:
   users                     List users (--role, --search)
   agents                    List AI agents
 
+Group Commands:
+  groups                    List groups (--all for admins to see all)
+  group <id>                Get group details
+  group:create              Create group (--name, --display-name, --visibility)
+  group:members <id>        List group members
+  group:add-member <id>     Add member (--user, --role)
+  group:remove-member <id>  Remove member (--user)
+
+Project Commands:
+  projects                  List projects (--group, --status)
+  project <id>              Get project details
+  project:create            Create project (--name, --display-name, --group)
+  project:update <id>       Update project (--display-name, --status, --color)
+  project:delete <id>       Delete project
+
 API Key Commands:
   api-keys                  List API keys
   api-key:create            Create API key (--name, --scopes, --expires)
@@ -1527,6 +1802,15 @@ async function main() {
       // Auth options
       email: { type: 'string', short: 'e' },
       password: { type: 'string' },
+
+      // Group/Project options
+      group: { type: 'string', short: 'g' },
+      visibility: { type: 'string' },
+      display: { type: 'string' },
+      'display-name': { type: 'string' },
+      user: { type: 'string' },
+      all: { type: 'boolean' },
+      color: { type: 'string' },
     },
     allowPositionals: true,
     strict: false,
@@ -1595,6 +1879,21 @@ async function main() {
 
     // Webhooks
     'webhooks': cmdWebhooks,
+
+    // Groups
+    'groups': cmdGroups,
+    'group': cmdGroup,
+    'group:create': cmdGroupCreate,
+    'group:members': cmdGroupMembers,
+    'group:add-member': cmdGroupAddMember,
+    'group:remove-member': cmdGroupRemoveMember,
+
+    // Projects
+    'projects': cmdProjects,
+    'project': cmdProject,
+    'project:create': cmdProjectCreate,
+    'project:update': cmdProjectUpdate,
+    'project:delete': cmdProjectDelete,
 
     // Events (SSE)
     'events': cmdEvents,

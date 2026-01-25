@@ -19,6 +19,8 @@ export interface ApiKey {
   createdById: unknown;
   // User ID that this API key acts as - when set, the key inherits the user's permissions
   userId?: unknown;
+  // Group ID that this API key is scoped to - when set, can only access resources in this group
+  groupId?: unknown;
   createdAt: Date;
   expiresAt?: Date | null;
   lastUsedAt?: Date | null;
