@@ -249,6 +249,8 @@ export default function GroupsSettingsPage() {
     },
   })
 
+  const users = usersData?.data || []
+
   const groups = (groupsData?.data || []).filter((g) => {
     if (!searchQuery) return true
     const query = searchQuery.toLowerCase()
@@ -258,8 +260,6 @@ export default function GroupsSettingsPage() {
       (ownerEmail && ownerEmail.toLowerCase().includes(query))
     )
   })
-
-  const users = usersData?.data || []
 
   const openCreateModal = () => {
     setEditingGroup(null)
