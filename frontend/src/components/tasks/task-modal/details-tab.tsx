@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { Controller, Control, UseFormRegister, UseFormSetValue, UseFormWatch } from 'react-hook-form'
 import { format } from 'date-fns'
 import { Copy, Check } from 'lucide-react'
@@ -122,10 +122,14 @@ export function DetailsTab({
   // Filter projects by selected group
   const groupProjects = projects.filter(p => p.groupId === selectedGroupId)
 
+  // Track which tasks we've already auto-fixed to prevent infinite loops
+  const autoFixedRef = useRef<{ groupId?: string; projectId?: string }>({})
+
   // Auto-fix: If task has no groupId but user has exactly one group, auto-assign it
   // This handles the case where subtasks are created without inheriting groupId
   useEffect(() => {
-    if (!task.groupId && groups.length === 1) {
+    if (!task.groupId && groups.length === 1 && autoFixedRef.current.groupId !== task._id) {
+      autoFixedRef.current.groupId = task._id
       const defaultGroupId = groups[0]._id
       setValue('groupId', defaultGroupId)
       updateTask.mutate({ id: task._id, data: { groupId: defaultGroupId } })
@@ -135,9 +139,10 @@ export function DetailsTab({
   // Auto-fix: If task has no projectId but the group has exactly one project, auto-assign it
   useEffect(() => {
     const currentGroupId = task.groupId || (groups.length === 1 ? groups[0]._id : null)
-    if (currentGroupId && !task.projectId) {
+    if (currentGroupId && !task.projectId && autoFixedRef.current.projectId !== task._id) {
       const projectsInGroup = projects.filter(p => p.groupId === currentGroupId)
       if (projectsInGroup.length === 1) {
+        autoFixedRef.current.projectId = task._id
         const defaultProjectId = projectsInGroup[0]._id
         setValue('projectId', defaultProjectId)
         updateTask.mutate({ id: task._id, data: { projectId: defaultProjectId } })
