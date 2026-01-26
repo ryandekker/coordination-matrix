@@ -1929,6 +1929,9 @@ export interface ApiKey {
   key?: string // Only present on creation/regeneration
   keyPrefix: string
   scopes: string[]
+  userId?: string | null // User this key acts as (inherits their permissions)
+  groupId?: string | null // Group this key is scoped to
+  createdById?: string | null // User who created this key
   createdAt: string
   expiresAt?: string | null
   lastUsedAt?: string | null
@@ -1949,7 +1952,7 @@ export const apiKeysApi = {
     return handleResponse(response)
   },
 
-  create: async (data: { name: string; description?: string; scopes: string[] }): Promise<ApiResponse<ApiKey>> => {
+  create: async (data: { name: string; description?: string; scopes: string[]; userId?: string | null }): Promise<ApiResponse<ApiKey>> => {
     const response = await authFetch(`${API_BASE}/auth/api-keys`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1974,7 +1977,7 @@ export const apiKeysApi = {
 
   update: async (
     id: string,
-    data: { name?: string; description?: string; scopes?: string[]; expiresAt?: string | null; isActive?: boolean }
+    data: { name?: string; description?: string; scopes?: string[]; expiresAt?: string | null; isActive?: boolean; userId?: string | null }
   ): Promise<ApiResponse<ApiKey>> => {
     const response = await authFetch(`${API_BASE}/auth/api-keys/${id}`, {
       method: 'PATCH',
