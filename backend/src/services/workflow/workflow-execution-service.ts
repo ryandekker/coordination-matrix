@@ -3060,6 +3060,8 @@ class WorkflowExecutionService {
    *   {{steps.stepId.output.field}} - Reference another step's output
    *   {{input.field}} - Reference the task's input payload
    *   {{output.field}} - Reference the task's input payload output
+   *   {{trigger.payload.field}} - Reference the workflow's original trigger payload
+   *   {{trigger.field}} - Reference the workflow's original trigger data
    *   Other patterns - Delegate to resolveTemplateWithPackages
    */
   private async resolveInputMappingValue(
@@ -3128,6 +3130,30 @@ class WorkflowExecutionService {
         const output = inputPayload.output as Record<string, unknown> | undefined;
         const value = output ? getValueByPath(output, outputPath) : null;
         return value !== undefined ? value : null;
+      }
+
+      // Handle trigger.* references - fetch from workflow run's original inputPayload
+      if (varPath.startsWith('trigger.')) {
+        const triggerPath = varPath.substring(8); // Remove 'trigger.' prefix
+        const workflowRun = await this.workflowRuns.findOne({ _id: workflowRunId });
+        if (workflowRun?.inputPayload) {
+          // If path starts with 'payload.', the trigger data is in inputPayload directly
+          // e.g., {{trigger.payload.data.field}} -> workflowRun.inputPayload.data.field
+          if (triggerPath.startsWith('payload.')) {
+            const payloadPath = triggerPath.substring(8); // Remove 'payload.' prefix
+            const value = payloadPath
+              ? getValueByPath(workflowRun.inputPayload as Record<string, unknown>, payloadPath)
+              : workflowRun.inputPayload;
+            console.log(`[WorkflowExecutionService] Resolved trigger.payload.${payloadPath} = ${JSON.stringify(value).substring(0, 200)}`);
+            return value !== undefined ? value : null;
+          }
+          // For {{trigger.field}}, look directly in inputPayload
+          const value = getValueByPath(workflowRun.inputPayload as Record<string, unknown>, triggerPath);
+          console.log(`[WorkflowExecutionService] Resolved trigger.${triggerPath} = ${JSON.stringify(value).substring(0, 200)}`);
+          return value !== undefined ? value : null;
+        }
+        console.warn(`[WorkflowExecutionService] Could not resolve trigger.${triggerPath} - no workflow run inputPayload found`);
+        return null;
       }
 
       // Handle direct variable lookup from inputPayload
