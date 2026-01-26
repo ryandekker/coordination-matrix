@@ -470,17 +470,22 @@ documentsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
     updates.lastModifiedById = req.user?.userId ? new ObjectId(req.user.userId) : existing.lastModifiedById;
 
     // If content changed, increment version and create version record
+    let unsetFields: Record<string, 1> = {};
     if (contentChanged) {
       updates.version = existing.version + 1;
 
-      // Clear embedding (will need to be regenerated)
-      updates.embedding = undefined;
-      updates.embeddingUpdatedAt = null;
+      // Clear embedding (will need to be regenerated) - use $unset instead of undefined
+      unsetFields = { embedding: 1, embeddingUpdatedAt: 1 };
+    }
+
+    const updateOperation: { $set: Partial<Document>; $unset?: Record<string, 1> } = { $set: updates };
+    if (Object.keys(unsetFields).length > 0) {
+      updateOperation.$unset = unsetFields;
     }
 
     const result = await db.collection<Document>('documents').findOneAndUpdate(
       { _id: documentId },
-      { $set: updates },
+      updateOperation,
       { returnDocument: 'after' }
     );
 
