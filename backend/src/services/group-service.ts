@@ -53,11 +53,10 @@ class GroupService {
 
     const creatorObjId = creatorId ? new ObjectId(creatorId) : null;
 
-    const group: Group = {
+    const group: Partial<Group> = {
       _id: new ObjectId(),
       name,
       displayName: input.displayName,
-      description: input.description,
       visibility: input.visibility || 'private',
       members: creatorObjId
         ? [
@@ -73,8 +72,12 @@ class GroupService {
       createdAt: now,
       updatedAt: now,
     };
+    // Only include description if provided (MongoDB validator rejects null for string field)
+    if (input.description) {
+      group.description = input.description;
+    }
 
-    await this.collection.insertOne(group);
+    await this.collection.insertOne(group as Group);
 
     // Create a default project for the group
     const db = getDb();
@@ -93,7 +96,7 @@ class GroupService {
     };
     await projectsCollection.insertOne(defaultProject);
 
-    return group as WithId<Group>;
+    return group as unknown as WithId<Group>;
   }
 
   /**
