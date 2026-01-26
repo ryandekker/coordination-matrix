@@ -1283,8 +1283,9 @@ export interface Workflow {
   // Dynamic title template for the root task - supports {{input.field}} variables
   rootTaskTitleTemplate?: string;
 
-  // Group access control - workflows must belong to a group
-  groupId?: ObjectId | null;   // Group this workflow belongs to (admin-only if null)
+  // Group and Project access control - workflows belong to a group and optionally a project
+  groupId?: ObjectId | null;     // Group this workflow belongs to (admin-only if null)
+  projectId?: ObjectId | null;   // Project within the group (optional)
 
   // Organization and display
   folderId?: ObjectId | null;  // Reference to workflow folder
@@ -1300,8 +1301,9 @@ export interface WorkflowRun {
   workflowId: ObjectId;
   workflowVersion?: number;
 
-  // Group access control - inherited from workflow
+  // Group and Project access control - inherited from workflow
   groupId?: ObjectId | null;
+  projectId?: ObjectId | null;
 
   // Execution status
   status: WorkflowRunStatus;
