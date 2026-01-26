@@ -41,7 +41,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
-import { authFetch, Group, GroupMember, GroupRole, GroupVisibility, User } from '@/lib/api'
+import { authFetch, Group, GroupMember, GroupRole, GroupVisibility, User, isSystemUser } from '@/lib/api'
 import { Textarea } from '@/components/ui/textarea'
 import { useAuth } from '@/lib/auth'
 
@@ -339,9 +339,9 @@ export default function GroupsSettingsPage() {
     updateRoleMutation.mutate({ groupId: selectedGroup._id, userId, role })
   }
 
-  // Get members not already in the group
+  // Get members not already in the group (exclude system user)
   const availableUsers = users.filter(
-    (user) => !selectedGroup?.members.some((m) => m.userId === user._id)
+    (user) => !isSystemUser(user) && !selectedGroup?.members.some((m) => m.userId === user._id)
   )
 
   // Refresh selected group from query data when it changes

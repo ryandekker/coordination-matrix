@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { getAuthHeader } from '@/lib/auth'
+import { SYSTEM_USER_ID } from '@/lib/api'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 import { Button } from '@/components/ui/button'
@@ -3033,7 +3034,7 @@ export function StepConfigPanel({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="_none">No default assignee</SelectItem>
-                  {users.map((user) => (
+                  {users.filter((user) => user._id !== SYSTEM_USER_ID).map((user) => (
                     <SelectItem key={user._id} value={user._id}>
                       {user.displayName}
                     </SelectItem>
@@ -3129,7 +3130,7 @@ The agent will receive task context automatically.`}
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="_none">No default assignee</SelectItem>
-                  {users.map((user) => (
+                  {users.filter((user) => user._id !== SYSTEM_USER_ID).map((user) => (
                     <SelectItem key={user._id} value={user._id}>
                       {user.displayName}
                     </SelectItem>

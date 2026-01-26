@@ -85,7 +85,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
-import { authFetch, Group } from '@/lib/api'
+import { authFetch, Group, SYSTEM_USER_ID } from '@/lib/api'
 import { Checkbox } from '@/components/ui/checkbox'
 import { useGroupContext } from '@/lib/group-context'
 import { useAuth } from '@/lib/auth'
@@ -1699,7 +1699,7 @@ export default function WorkflowsPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">No default assignee</SelectItem>
-                      {users.map((user) => (
+                      {users.filter((user) => user._id !== SYSTEM_USER_ID).map((user) => (
                         <SelectItem key={user._id} value={user._id}>
                           {user.displayName} {user.isAgent && '(Agent)'}
                         </SelectItem>

@@ -48,7 +48,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { formatDateTime } from '@/lib/utils'
-import { apiKeysApi, usersApi, type ApiKey, type ScopeDefinition } from '@/lib/api'
+import { apiKeysApi, usersApi, type ApiKey, type ScopeDefinition, isSystemUser } from '@/lib/api'
 
 interface User {
   _id: string
@@ -378,7 +378,7 @@ export default function ApiKeysPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No user (API key only)</SelectItem>
-                    {users.map((user) => (
+                    {users.filter((user) => !isSystemUser(user)).map((user) => (
                       <SelectItem key={user._id} value={user._id}>
                         {user.displayName}{user.email ? ` (${user.email})` : ''}
                       </SelectItem>
