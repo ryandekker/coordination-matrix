@@ -413,10 +413,16 @@ export function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string):
     const metadata: Record<string, unknown> = {};
     if (step.description) metadata.description = step.description;
     if (step.defaultAssigneeId) metadata.defaultAssigneeId = step.defaultAssigneeId;
-    if (step.inputPath) metadata.inputPath = step.inputPath;
+    // For decision steps, use decisionField instead of inputPath
+    // For other steps, inputPath is used for input extraction
+    if (step.stepType === 'decision') {
+      // Decision steps should only use decisionField (not inputPath)
+      if (step.decisionField) metadata.decisionField = step.decisionField;
+    } else {
+      if (step.inputPath) metadata.inputPath = step.inputPath;
+    }
     if (step.additionalInstructions) metadata.additionalInstructions = step.additionalInstructions;
     if (step.externalConfig) metadata.externalConfig = step.externalConfig;
-    if (step.decisionField) metadata.decisionField = step.decisionField;
     // NOTE: defaultConnection is NOT stored in metadata - it's represented visually by the "default" labeled arrow
     // Storing it in metadata would cause it to persist even when the arrow is removed from the diagram
     if (step.itemsPath) metadata.itemsPath = step.itemsPath;
@@ -617,10 +623,14 @@ export function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId
     const metadata: Record<string, unknown> = {};
     if (step.description) metadata.description = step.description;
     if (step.defaultAssigneeId) metadata.defaultAssigneeId = step.defaultAssigneeId;
-    if (step.inputPath) metadata.inputPath = step.inputPath;
+    // For decision steps, use decisionField instead of inputPath
+    if (step.stepType === 'decision') {
+      if (step.decisionField) metadata.decisionField = step.decisionField;
+    } else {
+      if (step.inputPath) metadata.inputPath = step.inputPath;
+    }
     if (step.additionalInstructions) metadata.additionalInstructions = step.additionalInstructions;
     if (step.externalConfig) metadata.externalConfig = step.externalConfig;
-    if (step.decisionField) metadata.decisionField = step.decisionField;
     // NOTE: defaultConnection is NOT stored in metadata - it's represented visually by the "default" labeled arrow
     // Storing it in metadata would cause it to persist even when the arrow is removed from the diagram
     if (step.itemsPath) metadata.itemsPath = step.itemsPath;

@@ -203,7 +203,8 @@ function formatRelativeTime(dateString: string): string {
 
 // Build token path from JSON path segments
 function buildTokenPath(basePath: string, segments: string[]): string {
-  let path = basePath
+  // Normalize basePath - remove trailing dot to prevent double dots
+  let path = basePath.replace(/\.+$/, '')
   for (const segment of segments) {
     if (/^\d+$/.test(segment)) {
       path += `[${segment}]`
@@ -213,7 +214,8 @@ function buildTokenPath(basePath: string, segments: string[]): string {
       path += `["${segment}"]`
     }
   }
-  return path
+  // Final cleanup - collapse any remaining double dots
+  return path.replace(/\.{2,}/g, '.')
 }
 
 // ============================================================================
@@ -1314,7 +1316,7 @@ export function TokenBrowserDialog({
                         </div>
                         <ClickableJsonViewer
                           data={selectedStepData.metadata}
-                          basePath={previousSteps[previousSteps.length - 1]?.id === selectedCategory ? '' : `steps.${selectedCategory}.`}
+                          basePath={previousSteps[previousSteps.length - 1]?.id === selectedCategory ? '' : `steps.${selectedCategory}`}
                           onSelectPath={handleSelectToken}
                           searchQuery={searchQuery}
                         />
