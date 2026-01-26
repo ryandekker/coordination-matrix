@@ -1820,21 +1820,45 @@ class WorkflowExecutionService {
 
     console.log(`[WorkflowExecutionService] executeDecision: selected path=${selectedConnection.targetStepId}, condition=${selectedConnection.condition}, matchedValue=${matchedValue}`);
 
+    // Check if targetStepId is null/empty - this means the branch ends the workflow
+    // or was misconfigured. Handle both cases gracefully.
+    const targetStepId = selectedConnection.targetStepId;
+    const isEndBranch = !targetStepId || targetStepId === '' || targetStepId === 'END';
+
+    // Validate target step exists (unless it's an end branch)
+    const nextStep = !isEndBranch ? workflow.steps.find(s => s.id === targetStepId) : null;
+    if (!isEndBranch && !nextStep) {
+      console.error(`[WorkflowExecutionService] Decision step ${step.id} has invalid targetStepId: "${targetStepId}" - step not found in workflow`);
+      await this.tasks.updateOne(
+        { _id: decisionTask._id },
+        {
+          $set: {
+            status: 'failed' as TaskStatus,
+            'metadata.error': `Invalid target step: "${targetStepId}" not found in workflow`,
+          }
+        }
+      );
+      return;
+    }
+
     // Build stepOutput for decision task so next steps can access decision data via stepOutput.data
     // Pass through the input payload as output, plus the decision metadata
     const decisionOutput = {
       ...inputPayload,
       _decision: {
-        selectedPath: selectedConnection.targetStepId,
+        selectedPath: isEndBranch ? 'END' : targetStepId,
         condition: selectedConnection.condition,
         matchedValue,
         decisionField: effectiveDecisionField,
+        isEndBranch,
       },
     };
     const decisionStepOutput = this.buildStepOutput(decisionOutput, {
-      summary: `Decision: ${matchedValue || selectedConnection.targetStepId}`,
+      summary: isEndBranch
+        ? `Decision: ${matchedValue || 'END'} (workflow ends)`
+        : `Decision: ${matchedValue || targetStepId}`,
       selectedBranch: {
-        targetStepId: selectedConnection.targetStepId,
+        targetStepId: isEndBranch ? 'END' : targetStepId,
         condition: selectedConnection.condition || undefined,
       },
     });
@@ -1845,26 +1869,34 @@ class WorkflowExecutionService {
         $set: {
           status: 'completed' as TaskStatus,
           stepOutput: decisionStepOutput,
-          decisionResult: matchedValue || selectedConnection.targetStepId,
-          'metadata.selectedPath': selectedConnection.targetStepId,
+          decisionResult: matchedValue || (isEndBranch ? 'END' : targetStepId),
+          'metadata.selectedPath': isEndBranch ? 'END' : targetStepId,
           'metadata.condition': selectedConnection.condition,
           'metadata.matchedValue': matchedValue,
           'metadata.decisionField': effectiveDecisionField,
+          'metadata.isEndBranch': isEndBranch,
         },
       }
     );
 
-    const nextStep = workflow.steps.find(s => s.id === selectedConnection!.targetStepId);
-    if (nextStep) {
-      const parentTask = await this.tasks.findOne({ _id: decisionTask.parentId! });
-      if (parentTask) {
-        await this.executeStep(run, workflow, nextStep, parentTask, inputPayload);
-      }
+    // If this is an end branch, don't create next task - workflow branch terminates here
+    if (isEndBranch) {
+      console.log(`[WorkflowExecutionService] Decision step ${step.id} selected END branch - workflow branch terminates`);
+      return;
+    }
+
+    // Execute next step (nextStep is already validated above)
+    const parentTask = await this.tasks.findOne({ _id: decisionTask.parentId! });
+    if (parentTask) {
+      await this.executeStep(run, workflow, nextStep!, parentTask, inputPayload);
     }
   }
 
   private evaluateCondition(condition: string, payload?: Record<string, unknown>, decisionField?: string): boolean {
-    if (!condition || !payload) return false;
+    if (!condition || !payload) {
+      console.log(`[WorkflowExecutionService] evaluateCondition: early return - condition=${!!condition}, payload=${!!payload}`);
+      return false;
+    }
 
     let field: string;
     let values: string;
@@ -1876,18 +1908,28 @@ class WorkflowExecutionService {
       values = condition;
     } else {
       const parts = condition.split(':');
-      if (parts.length < 2) return false;
+      if (parts.length < 2) {
+        console.log(`[WorkflowExecutionService] evaluateCondition: invalid format - condition="${condition}" has no colon`);
+        return false;
+      }
       field = parts[0];
       values = parts.slice(1).join(':'); // Handle values that might contain colons
     }
 
-    if (!field || !values) return false;
+    if (!field || !values) {
+      console.log(`[WorkflowExecutionService] evaluateCondition: missing field or values - field="${field}", values="${values}"`);
+      return false;
+    }
 
     const actualValue = getValueByPath(payload, field);
     const expectedValues = values.split(',').map(v => v.trim().toLowerCase());
+    const actualValueStr = String(actualValue).toLowerCase();
+    const result = expectedValues.includes(actualValueStr);
+
+    console.log(`[WorkflowExecutionService] evaluateCondition: field="${field}", actual="${actualValue}" (${typeof actualValue}), expected=[${expectedValues.join(',')}], result=${result}`);
 
     // Case-insensitive comparison
-    return expectedValues.includes(String(actualValue).toLowerCase());
+    return result;
   }
 
   // ============================================================================
