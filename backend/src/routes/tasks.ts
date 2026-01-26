@@ -2170,6 +2170,106 @@ tasksRouter.post('/:id/rollback', async (req: Request, res: Response, next: Next
   }
 });
 
+// ============================================================================
+// Agent Questions Endpoints
+// ============================================================================
+
+// POST /api/tasks/:id/answer-questions - Submit answers to agent questions
+tasksRouter.post('/:id/answer-questions', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const taskId = toObjectId(req.params.id);
+    const { answers } = req.body;
+
+    if (!answers || !Array.isArray(answers)) {
+      throw createError('answers array is required', 400);
+    }
+
+    // Get the task
+    const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
+    if (!task) {
+      throw createError('Task not found', 404);
+    }
+
+    // Verify task has questions pending
+    const metadata = task.metadata as Record<string, unknown> | undefined;
+    const output = metadata?.output as Record<string, unknown> | undefined;
+    const questionsData = output?.questions as { questions?: unknown[]; context?: string } | undefined;
+
+    if (!questionsData?.questions || !Array.isArray(questionsData.questions) || questionsData.questions.length === 0) {
+      throw createError('Task does not have pending questions', 400);
+    }
+
+    // Verify task is on_hold with ASK action
+    if (task.status !== 'on_hold' || output?.action !== 'ASK') {
+      throw createError('Task is not waiting for question answers', 400);
+    }
+
+    const now = new Date();
+    const actorId = req.user?.userId ? toObjectId(req.user.userId) : null;
+
+    // Update the questions data with answers
+    const updatedQuestionsData = {
+      ...questionsData,
+      answers,
+      answeredAt: now.toISOString(),
+      answeredById: actorId?.toString() || null,
+    };
+
+    // Update the task metadata
+    const updatedOutput = {
+      ...output,
+      questions: updatedQuestionsData,
+    };
+
+    const updatedMetadata = {
+      ...metadata,
+      output: updatedOutput,
+    };
+
+    // Update task - set status back to pending so daemon can re-process
+    await db.collection('tasks').updateOne(
+      { _id: taskId },
+      {
+        $set: {
+          status: 'pending',
+          metadata: updatedMetadata,
+          updatedAt: now,
+        },
+      }
+    );
+
+    // Get the updated task
+    const updatedTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
+
+    // Add comment to activity feed
+    const questionCount = questionsData.questions.length;
+    const comment = `Answered ${questionCount} question${questionCount !== 1 ? 's' : ''} from agent. Task will resume processing.`;
+    await activityLogService.addComment(taskId, comment, actorId, 'user');
+
+    // Publish event
+    if (updatedTask) {
+      await publishTaskEvent('task.updated', updatedTask, {
+        actorId,
+        actorType: req.user ? 'user' : 'system',
+        metadata: {
+          action: 'answered_questions',
+          previousStatus: 'on_hold',
+          newStatus: 'pending',
+        },
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Answers submitted successfully. Task will resume processing.',
+      data: updatedTask,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Helper function to build tree structure
 function buildTaskTree(tasks: Task[], _maxDepth: number, _currentDepth = 0): TaskWithChildren[] {
   const taskMap = new Map<string, TaskWithChildren>();

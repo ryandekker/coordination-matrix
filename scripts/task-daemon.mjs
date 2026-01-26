@@ -161,8 +161,9 @@ Response schema:
   "status": "SUCCESS" | "PARTIAL" | "BLOCKED" | "FAILED",
   "summary": "1-2 sentence summary of what was done",
   "output": { /* Structured result object - schema defined by task/workflow */ },
-  "nextAction": "COMPLETE" | "CONTINUE" | "ESCALATE" | "HOLD",
-  "nextActionReason": "Optional: reason for CONTINUE/ESCALATE/HOLD",
+  "nextAction": "COMPLETE" | "CONTINUE" | "ESCALATE" | "HOLD" | "ASK",
+  "nextActionReason": "Optional: reason for CONTINUE/ESCALATE/HOLD/ASK",
+  "questions": [ /* Only for nextAction: ASK - questions for human to answer */ ],
   "metadata": {
     "confidence": 0.0-1.0,
     "suggestedTags": [],
@@ -170,10 +171,67 @@ Response schema:
   }
 }
 
+## Asking Questions (nextAction: ASK)
+
+When you need human input to proceed, use nextAction: "ASK" and include a "questions" array.
+The task will be placed on hold and the human can answer questions through the UI.
+
+Questions schema:
+{
+  "questions": [
+    {
+      "id": "unique-question-id",
+      "type": "text" | "choice" | "multiselect" | "confirm" | "number",
+      "question": "The question to ask",
+      "description": "Optional longer explanation",
+      "required": true | false,
+      "options": [ /* For choice/multiselect types */
+        { "value": "opt1", "label": "Option 1", "description": "Optional description" }
+      ],
+      "placeholder": "Optional placeholder text",
+      "defaultValue": "Optional default",
+      "validation": { /* Optional */
+        "min": 0, "max": 100,           /* For number type */
+        "minLength": 1, "maxLength": 500 /* For text type */
+      }
+    }
+  ],
+  "context": "Optional explanation of why you need this information"
+}
+
+Example - asking for clarification:
+{
+  "status": "BLOCKED",
+  "summary": "Need clarification on deployment target",
+  "output": { "partialWork": "Prepared deployment configs" },
+  "nextAction": "ASK",
+  "nextActionReason": "Cannot proceed without knowing the deployment environment",
+  "questions": [
+    {
+      "id": "deploy-env",
+      "type": "choice",
+      "question": "Which environment should this be deployed to?",
+      "required": true,
+      "options": [
+        { "value": "staging", "label": "Staging", "description": "Test environment" },
+        { "value": "production", "label": "Production", "description": "Live environment" }
+      ]
+    },
+    {
+      "id": "notify-team",
+      "type": "confirm",
+      "question": "Should I notify the team after deployment?",
+      "defaultValue": true
+    }
+  ],
+  "context": "The task mentions deployment but doesn't specify the target environment."
+}
+
 Rules:
 - status: SUCCESS if task fully completed, PARTIAL if partially done, BLOCKED if cannot proceed, FAILED if error
-- nextAction: COMPLETE to finish, CONTINUE to spawn follow-up, ESCALATE for human help, HOLD to pause
+- nextAction: COMPLETE to finish, CONTINUE to spawn follow-up, ESCALATE for human help, HOLD to pause, ASK to request human input
 - output: A structured JSON object containing your work result. Follow the schema specified in the workflow/task instructions.
+- questions: Only include when nextAction is ASK. Task will resume after human answers.
 - Respond with ONLY the JSON object, nothing else`;
 
 // ============================================================================
@@ -1090,6 +1148,20 @@ function assemblePrompt(task, agent, workflowStep) {
     }
   }
 
+  // 7.5. Include answered questions from previous ASK action
+  // When a task was put on hold with ASK and questions were answered, include those answers
+  const previousOutput = task.metadata?.output;
+  if (previousOutput?.action === 'ASK' && previousOutput?.questions?.answers) {
+    const questionsData = previousOutput.questions;
+    const answeredSection = {
+      context: questionsData.context || 'You previously asked questions and received these answers:',
+      questions: questionsData.questions,
+      answers: questionsData.answers,
+      answeredAt: questionsData.answeredAt,
+    };
+    sections.push(`## Previous Questions Answered\nYou previously asked questions and the human has provided answers. Use these answers to continue the task.\n\`\`\`json\n${JSON.stringify(answeredSection, null, 2)}\n\`\`\`\n\n**IMPORTANT:** Do NOT ask the same questions again. Use the provided answers to complete the task.`);
+  }
+
   // 8. Response format reminder (placed last to override any conflicting instructions in extraPrompt)
   sections.push(`## IMPORTANT: Response Format
 Your response MUST be a JSON object with this exact structure:
@@ -1143,6 +1215,8 @@ function parseResponse(responseText) {
         nextActionReason: parsed.nextActionReason || '',
         metadata: parsed.metadata || {},
         documentOperations: parsed.documentOperations || [],
+        questions: parsed.questions || null,
+        questionsContext: parsed.context || null,
       },
     };
   } catch (e) {
@@ -1547,6 +1621,7 @@ async function processTask(config, task) {
       break;
     case 'ESCALATE':
     case 'HOLD':
+    case 'ASK':
       newStatus = 'on_hold';
       break;
     default:
@@ -1591,6 +1666,13 @@ async function processTask(config, task) {
     confidence: parsedResponse.data.metadata?.confidence || null,
     suggestedTags,
     suggestedNextStage: parsedResponse.data.metadata?.suggestedNextStage || null,
+    // Agent questions (for ASK action)
+    ...(parsedResponse.data.questions && {
+      questions: {
+        questions: parsedResponse.data.questions,
+        context: parsedResponse.data.questionsContext || null,
+      },
+    }),
   };
 
   // Merge suggested tags if provided

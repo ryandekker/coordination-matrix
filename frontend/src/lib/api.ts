@@ -243,6 +243,16 @@ export const tasksApi = {
     return handleResponse(response)
   },
 
+  // Submit answers to agent questions
+  answerQuestions: async (id: string, answers: AgentQuestionAnswer[]): Promise<ApiResponse<{ success: boolean; message: string; data: Task }>> => {
+    const response = await authFetch(`${API_BASE}/tasks/${id}/answer-questions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answers }),
+    })
+    return handleResponse(response)
+  },
+
   // Get all webhook task attempts across all tasks
   getWebhookAttempts: async (params?: {
     status?: 'pending' | 'success' | 'failed'
@@ -1036,6 +1046,45 @@ export interface TaskStepConfig {
   // Legacy input aggregation config
   inputPath?: string
   inputSource?: string
+}
+
+// Agent question types for tasks that need human input
+export type AgentQuestionType = 'text' | 'choice' | 'multiselect' | 'confirm' | 'number'
+
+export interface AgentQuestionOption {
+  value: string
+  label: string
+  description?: string
+}
+
+export interface AgentQuestion {
+  id: string
+  type: AgentQuestionType
+  question: string
+  description?: string
+  required?: boolean
+  options?: AgentQuestionOption[]  // For choice/multiselect types
+  placeholder?: string            // For text/number types
+  defaultValue?: string | number | boolean | string[]
+  validation?: {
+    min?: number                  // For number type
+    max?: number                  // For number type
+    minLength?: number            // For text type
+    maxLength?: number            // For text type
+    pattern?: string              // Regex pattern for text
+  }
+}
+
+export interface AgentQuestionAnswer {
+  questionId: string
+  value: string | number | boolean | string[]
+}
+
+export interface AgentQuestionsOutput {
+  questions: AgentQuestion[]
+  context?: string               // Optional context explaining why questions are needed
+  answeredAt?: string            // ISO timestamp when answered
+  answers?: AgentQuestionAnswer[] // Populated when questions are answered
 }
 
 // Task result status
