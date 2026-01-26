@@ -1929,6 +1929,9 @@ export interface ApiKey {
   key?: string // Only present on creation/regeneration
   keyPrefix: string
   scopes: string[]
+  createdById?: string | null
+  userId?: string | null // User this API key acts as (inherits permissions from)
+  groupId?: string | null // Group this API key is scoped to
   createdAt: string
   expiresAt?: string | null
   lastUsedAt?: string | null

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, MoreHorizontal, Copy, RefreshCw, Trash2, Eye, Key, Pencil } from 'lucide-react'
+import { Plus, MoreHorizontal, Copy, RefreshCw, Trash2, Eye, Key, Pencil, User, Users } from 'lucide-react'
 import {
   Table,
   TableBody,
@@ -48,7 +48,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { formatDateTime } from '@/lib/utils'
-import { apiKeysApi, usersApi, type ApiKey, type ScopeDefinition } from '@/lib/api'
+import { apiKeysApi, usersApi, groupsApi, type ApiKey, type ScopeDefinition, type Group } from '@/lib/api'
 
 interface User {
   _id: string
@@ -82,6 +82,11 @@ export default function ApiKeysPage() {
   const { data: usersData } = useQuery({
     queryKey: ['users'],
     queryFn: () => usersApi.list(),
+  })
+
+  const { data: groupsData } = useQuery({
+    queryKey: ['groups'],
+    queryFn: () => groupsApi.list(),
   })
 
   const { data: scopesData } = useQuery({
@@ -130,7 +135,12 @@ export default function ApiKeysPage() {
 
   const apiKeys = apiKeysData?.data || []
   const users = usersData?.data || []
+  const groups = groupsData?.data || []
   const availableScopes = scopesData?.data || []
+
+  // Create lookup maps for quick access
+  const usersMap = new Map(users.map((u) => [u._id, u]))
+  const groupsMap = new Map(groups.map((g) => [g._id, g]))
 
   // Group scopes by category for better UI organization
   const scopesByCategory = availableScopes.reduce((acc, scope) => {
@@ -237,6 +247,7 @@ export default function ApiKeysPage() {
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Key</TableHead>
+              <TableHead>Acts As</TableHead>
               <TableHead>Scopes</TableHead>
               <TableHead>Last Used</TableHead>
               <TableHead>Created</TableHead>
@@ -247,13 +258,13 @@ export default function ApiKeysPage() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={7} className="h-24 text-center">
+                <TableCell colSpan={8} className="h-24 text-center">
                   Loading...
                 </TableCell>
               </TableRow>
             ) : apiKeys.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+                <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
                   <div className="flex flex-col items-center gap-2">
                     <Key className="h-8 w-8" />
                     <p>No API keys yet</p>
@@ -276,6 +287,31 @@ export default function ApiKeysPage() {
                     <code className="text-sm bg-muted px-2 py-1 rounded">
                       {apiKey.keyPrefix}
                     </code>
+                  </TableCell>
+                  <TableCell>
+                    {(() => {
+                      const user = apiKey.userId ? usersMap.get(apiKey.userId) : null
+                      const group = apiKey.groupId ? groupsMap.get(apiKey.groupId) : null
+                      if (!user && !group) {
+                        return <span className="text-muted-foreground text-sm">—</span>
+                      }
+                      return (
+                        <div className="space-y-1">
+                          {user && (
+                            <div className="flex items-center gap-1 text-sm">
+                              <User className="h-3 w-3 text-muted-foreground" />
+                              <span>{user.displayName}</span>
+                            </div>
+                          )}
+                          {group && (
+                            <div className="flex items-center gap-1 text-sm">
+                              <Users className="h-3 w-3 text-muted-foreground" />
+                              <span className="text-muted-foreground">{group.displayName}</span>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })()}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
@@ -366,7 +402,40 @@ export default function ApiKeysPage() {
                 placeholder="What will this key be used for?"
               />
             </div>
-            {!editingKey && (
+            {editingKey ? (
+              // Show current user/group association (read-only for debugging)
+              (editingKey.userId || editingKey.groupId) && (
+                <div className="space-y-2 p-3 bg-muted/50 rounded-md">
+                  <label className="text-sm font-medium">Acts As</label>
+                  <div className="space-y-2">
+                    {editingKey.userId && (
+                      <div className="flex items-center gap-2">
+                        <User className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm">
+                          {usersMap.get(editingKey.userId)?.displayName || 'Unknown user'}
+                          {usersMap.get(editingKey.userId)?.email && (
+                            <span className="text-muted-foreground ml-1">
+                              ({usersMap.get(editingKey.userId)?.email})
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    )}
+                    {editingKey.groupId && (
+                      <div className="flex items-center gap-2">
+                        <Users className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm">
+                          Scoped to group: {groupsMap.get(editingKey.groupId)?.displayName || 'Unknown group'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    User and group associations cannot be changed after creation.
+                  </p>
+                </div>
+              )
+            ) : (
               <div className="space-y-2">
                 <label className="text-sm font-medium">Acts As User</label>
                 <Select

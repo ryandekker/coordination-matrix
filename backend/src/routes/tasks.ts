@@ -853,10 +853,13 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     }
 
     // Check group access
+    console.log(`[PATCH /tasks/:id] Checking access for task=${taskId}, groupId=${originalTask.groupId}, user=${req.user?.userId}, role=${req.user?.role}, apiKey=${req.apiKey?.keyPrefix || 'none'}, apiKeyUserId=${req.apiKey?.userId || 'none'}`);
     const hasAccess = await hasResourceAccess(req, originalTask.groupId);
     if (!hasAccess) {
+      console.log(`[PATCH /tasks/:id] Access DENIED for task=${taskId}`);
       throw createError('You do not have access to this task', 403);
     }
+    console.log(`[PATCH /tasks/:id] Access GRANTED for task=${taskId}`);
 
     // Remove fields that shouldn't be updated directly
     delete updates._id;
