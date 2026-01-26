@@ -13,6 +13,18 @@
 #   description     job only        -                            Job description
 #   viewId          job only        -                            View/saved search ID
 #
+# Tool Configuration:
+#   Use --allowedTools to give Claude access to tools for real work:
+#   - Bash: Execute shell commands (curl, npm, git, etc.)
+#   - WebFetch: Fetch URLs (for API calls)
+#   - Read/Edit/Write: File operations
+#
+#   Example: --allowedTools "Bash,WebFetch" enables HTTP requests via curl
+#
+#   IMPORTANT: With tools enabled, Claude can actually execute work instead
+#   of just describing what it would do. Conversation logs (including all tool
+#   calls and results) are captured and viewable in the UI under "Conversations".
+#
 # Usage:
 #   node scripts/task-daemon.mjs --config scripts/daemon-jobs.yaml --list
 #   node scripts/task-daemon.mjs --config scripts/daemon-jobs.yaml --job <name>
@@ -52,12 +64,35 @@ jobs:
     exec: "claude --model claude-haiku"
     interval: 3000
 
-  # Example: Code analysis with custom command
+  # Example: Code analysis with file access
   code-analysis:
-    description: Analyze code-related tasks
+    description: Analyze code-related tasks with file access
     viewId: YOUR_CODE_VIEW_ID
     exec: "claude --model claude-sonnet-4-20250514 --allowedTools Edit,Read,Bash"
     interval: 15000
+
+  # Example: API integration agent with HTTP access
+  # This agent can ACTUALLY make HTTP requests to external APIs
+  api-integration:
+    description: Agent that can make real API calls
+    viewId: YOUR_API_VIEW_ID
+    exec: "claude --model claude-sonnet-4-20250514 --allowedTools Bash"
+    # With Bash enabled, Claude can execute curl commands to call APIs
+    # Example: curl -X POST https://api.example.com/endpoint -d '{"data": "..."}'
+    interval: 10000
+
+  # Example: Templated.io render agent
+  # Agent prompt should include Templated API key and docs
+  templated-render:
+    description: Create image renders via Templated.io API
+    viewId: YOUR_TEMPLATED_VIEW_ID
+    exec: "claude --model claude-sonnet-4-20250514 --allowedTools Bash"
+    # Bash allows curl calls to Templated.io API:
+    # curl -X POST https://api.templated.io/v1/render \
+    #   -H "Authorization: Bearer $TEMPLATED_API_KEY" \
+    #   -H "Content-Type: application/json" \
+    #   -d '{"template": "...", "layers": {...}}'
+    interval: 10000
 
   # Example: Job with large payload support
   data-processing:
@@ -81,3 +116,10 @@ jobs:
 #   - claude-sonnet: Balanced (most tasks)
 #   - claude-opus: Complex reasoning tasks
 # - Custom exec commands can be any CLI that accepts prompts via stdin
+#
+# Tool Tips:
+# - --allowedTools "Bash" is the key to enabling real API calls via curl
+# - Without tools, Claude can only describe what it WOULD do (hallucination risk)
+# - With Bash enabled, Claude can execute real HTTP requests
+# - Conversation logs capture ALL tool calls for debugging/auditing
+# - View conversation history at /conversations in the UI

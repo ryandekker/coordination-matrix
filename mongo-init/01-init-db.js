@@ -1429,4 +1429,179 @@ db.variable_packages.createIndex({ name: 1 }, { unique: true });
 db.variable_packages.createIndex({ isActive: 1 });
 db.variable_packages.createIndex({ createdById: 1 });
 
+// ============================================================================
+// CONVERSATION RECORDS - Agent conversation logs with tool execution traces
+// ============================================================================
+db.createCollection('conversation_records', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['taskId', 'sessionId', 'status', 'startedAt'],
+      properties: {
+        // Link to the task
+        taskId: {
+          bsonType: 'objectId',
+          description: 'Task this conversation was executed for - required'
+        },
+
+        // Session tracking
+        sessionId: {
+          bsonType: 'string',
+          description: 'Claude CLI session ID - required'
+        },
+
+        // Execution context
+        jobName: {
+          bsonType: 'string',
+          description: 'Daemon job name that executed this'
+        },
+        model: {
+          bsonType: 'string',
+          description: 'Claude model used (e.g., claude-sonnet-4-20250514)'
+        },
+        execCommand: {
+          bsonType: 'string',
+          description: 'Full exec command used'
+        },
+
+        // Execution status
+        status: {
+          bsonType: 'string',
+          enum: ['running', 'completed', 'failed', 'timeout'],
+          description: 'Conversation execution status - required'
+        },
+        exitCode: {
+          bsonType: 'int',
+          description: 'Process exit code'
+        },
+
+        // Conversation thread - array of messages
+        messages: {
+          bsonType: 'array',
+          items: {
+            bsonType: 'object',
+            properties: {
+              type: {
+                bsonType: 'string',
+                enum: ['system', 'user', 'assistant', 'tool_use', 'tool_result'],
+                description: 'Message type'
+              },
+              timestamp: {
+                bsonType: 'date',
+                description: 'When this message was emitted'
+              },
+              content: {
+                description: 'Message content (text or structured)'
+              },
+              // For tool_use messages
+              toolName: {
+                bsonType: 'string',
+                description: 'Name of the tool called'
+              },
+              toolInput: {
+                bsonType: 'object',
+                description: 'Input parameters for the tool'
+              },
+              toolUseId: {
+                bsonType: 'string',
+                description: 'Unique ID for this tool invocation'
+              },
+              // For tool_result messages
+              toolResult: {
+                description: 'Output from the tool execution'
+              },
+              isError: {
+                bsonType: 'bool',
+                description: 'Whether the tool execution failed'
+              }
+            }
+          },
+          description: 'Ordered list of conversation messages and tool calls'
+        },
+
+        // Final result
+        result: {
+          bsonType: 'string',
+          description: 'Final text result from Claude'
+        },
+        parsedResult: {
+          bsonType: 'object',
+          description: 'Parsed JSON result if applicable'
+        },
+
+        // Cost and usage tracking
+        usage: {
+          bsonType: 'object',
+          properties: {
+            inputTokens: { bsonType: 'int' },
+            outputTokens: { bsonType: 'int' },
+            cacheCreationInputTokens: { bsonType: 'int' },
+            cacheReadInputTokens: { bsonType: 'int' },
+            totalCostUsd: { bsonType: 'double' }
+          },
+          description: 'Token usage and cost'
+        },
+
+        // Permission denials (when tools were blocked)
+        permissionDenials: {
+          bsonType: 'array',
+          items: {
+            bsonType: 'object',
+            properties: {
+              toolName: { bsonType: 'string' },
+              toolUseId: { bsonType: 'string' },
+              toolInput: { bsonType: 'object' }
+            }
+          },
+          description: 'Tool calls that were denied'
+        },
+
+        // Error information
+        error: {
+          bsonType: 'string',
+          description: 'Error message if failed'
+        },
+        stderr: {
+          bsonType: 'string',
+          description: 'Stderr output from execution'
+        },
+
+        // Timestamps
+        startedAt: {
+          bsonType: 'date',
+          description: 'When conversation started - required'
+        },
+        completedAt: {
+          bsonType: ['date', 'null'],
+          description: 'When conversation completed'
+        },
+        durationMs: {
+          bsonType: 'int',
+          description: 'Total execution time in milliseconds'
+        },
+        durationApiMs: {
+          bsonType: 'int',
+          description: 'Total API call time in milliseconds'
+        },
+
+        // Number of turns (request-response cycles)
+        numTurns: {
+          bsonType: 'int',
+          description: 'Number of conversation turns'
+        }
+      }
+    }
+  }
+});
+
+// Conversation record indexes
+db.conversation_records.createIndex({ taskId: 1, startedAt: -1 });
+db.conversation_records.createIndex({ sessionId: 1 }, { unique: true });
+db.conversation_records.createIndex({ jobName: 1, startedAt: -1 });
+db.conversation_records.createIndex({ status: 1 });
+db.conversation_records.createIndex({ startedAt: -1 });
+db.conversation_records.createIndex({ model: 1 });
+// For finding conversations with specific tools used
+db.conversation_records.createIndex({ 'messages.toolName': 1 });
+
 print('Database initialization complete!');
