@@ -1,5 +1,7 @@
 'use client'
 
+export const runtime = 'edge'
+
 import { Suspense } from 'react'
 import { ConversationsPage } from '@/components/conversations/conversations-page'
 
