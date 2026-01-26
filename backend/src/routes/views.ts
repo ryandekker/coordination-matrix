@@ -11,11 +11,20 @@ export const viewsRouter = Router();
 viewsRouter.get('/', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
-    const { collectionName, userId } = req.query;
+    const { collectionName, userId, groupId } = req.query;
 
     const filter: Record<string, unknown> = {};
     if (collectionName) {
       filter.collectionName = collectionName;
+    }
+
+    // Filter by group - show views that match the group OR have no group (global views)
+    if (groupId) {
+      filter.$or = [
+        { groupId: new ObjectId(groupId as string) },
+        { groupId: null },
+        { groupId: { $exists: false } },
+      ];
     }
 
     const views = await db
@@ -215,6 +224,8 @@ viewsRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       visibleColumns: viewData.visibleColumns || [],
       columnWidths: viewData.columnWidths,
       folderId: viewData.folderId ? new ObjectId(viewData.folderId) : null,
+      groupId: viewData.groupId ? new ObjectId(viewData.groupId) : null,
+      projectId: viewData.projectId ? new ObjectId(viewData.projectId) : null,
       createdById: viewData.createdById ? new ObjectId(viewData.createdById) : null,
       createdAt: now,
       updatedAt: now,
@@ -258,6 +269,14 @@ viewsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     // Handle folderId - convert to ObjectId or null
     if ('folderId' in updates) {
       updates.folderId = updates.folderId ? new ObjectId(updates.folderId) : null;
+    }
+
+    // Handle groupId and projectId - convert to ObjectId or null
+    if ('groupId' in updates) {
+      updates.groupId = updates.groupId ? new ObjectId(updates.groupId) : null;
+    }
+    if ('projectId' in updates) {
+      updates.projectId = updates.projectId ? new ObjectId(updates.projectId) : null;
     }
 
     // Handle default flag

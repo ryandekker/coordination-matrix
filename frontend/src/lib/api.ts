@@ -385,9 +385,12 @@ export const fieldConfigsApi = {
 
 // Views API
 export const viewsApi = {
-  list: async (collectionName?: string): Promise<ApiResponse<View[]>> => {
-    const params = collectionName ? `?collectionName=${collectionName}` : ''
-    const response = await authFetch(`${API_BASE}/views${params}`)
+  list: async (collectionName?: string, groupId?: string): Promise<ApiResponse<View[]>> => {
+    const params = new URLSearchParams()
+    if (collectionName) params.set('collectionName', collectionName)
+    if (groupId) params.set('groupId', groupId)
+    const queryString = params.toString()
+    const response = await authFetch(`${API_BASE}/views${queryString ? `?${queryString}` : ''}`)
     return handleResponse(response)
   },
 
@@ -1230,6 +1233,8 @@ export interface View {
   visibleColumns: string[]
   columnWidths?: Record<string, number>
   folderId?: string | null
+  groupId?: string | null
+  projectId?: string | null
   createdById?: string | null
   createdAt: string
   userPreference?: {
