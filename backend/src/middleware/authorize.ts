@@ -168,6 +168,10 @@ export type ScopeDefinition = (typeof SCOPE_DEFINITIONS)[number];
  * If authenticated via JWT (user token), this check is bypassed (users have implicit full access
  * based on their role).
  *
+ * Special case: API keys with a linked userId can always access their own user data
+ * (GET /api/users/:id where :id matches the API key's userId). This allows daemon agents
+ * to fetch their own agentPrompt without requiring users:read scope.
+ *
  * @param requiredScopes - Scopes required to access the route
  * @returns Express middleware
  *
@@ -192,6 +196,23 @@ export function requireScope(...requiredScopes: string[]) {
     if (keyScopes.includes(SCOPES.ADMIN) || keyScopes.includes('*')) {
       next();
       return;
+    }
+
+    // Special case: API keys with a linked userId can always read their own user data.
+    // This enables daemon agents to fetch their agentPrompt without users:read scope.
+    // Check if this is a GET request to /api/users/:id where :id matches the API key's userId.
+    if (
+      requiredScopes.includes(SCOPES.USERS_READ) &&
+      req.apiKey.userId &&
+      req.method === 'GET' &&
+      req.path.match(/^\/[a-f0-9]{24}$/) // Matches /:id where id is a MongoDB ObjectId
+    ) {
+      const requestedUserId = req.path.slice(1); // Remove leading slash
+      if (requestedUserId === req.apiKey.userId.toString()) {
+        // API key is accessing its own linked user - allow without users:read scope
+        next();
+        return;
+      }
     }
 
     // Check for wildcard scopes (e.g., 'tasks:*' grants all task operations)

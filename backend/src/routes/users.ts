@@ -129,6 +129,9 @@ usersRouter.post('/agents/ensure/:agentId', async (req: Request, res: Response, 
 });
 
 // GET /api/users/:id - Get a specific user
+// Note: API keys with a linked userId can always access their own user data,
+// even without users:read scope. This enables daemon agents to fetch their own
+// agentPrompt without requiring elevated permissions.
 usersRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
