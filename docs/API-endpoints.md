@@ -95,10 +95,13 @@ See `./scripts/matrix-cli.mjs --help` for all commands.
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
 | POST | `/login` | Login with email/password | No |
-| POST | `/register` | Register new user | No |
+| POST | `/register` | Register new user (first user only) | No |
 | GET | `/me` | Get current user | Yes |
 | POST | `/change-password` | Change password | Yes |
 | GET | `/status` | Check if setup required | No |
+| POST | `/provision` | SSO user provisioning (creates user + group) | No |
+| POST | `/sso-login` | SSO login for existing users | No |
+| POST | `/dev-login` | Dev-only passwordless login | No |
 
 **Login Request:**
 ```json
@@ -121,6 +124,61 @@ See `./scripts/matrix-cli.mjs --help` for all commands.
       "role": "admin"
     }
   }
+}
+```
+
+#### SSO User Provisioning (`/api/auth/provision`)
+
+Used by external SSO systems to provision new users. Automatically creates a personal group and project for new users, or accepts group invites.
+
+**Provision Request (New User):**
+```json
+{
+  "email": "newuser@example.com",
+  "displayName": "New User",
+  "externalId": "sso-12345"
+}
+```
+
+**Provision Request (Accepting Invite):**
+```json
+{
+  "email": "invited@example.com",
+  "displayName": "Invited User",
+  "inviteGroupId": "group-object-id",
+  "inviteRole": "member"
+}
+```
+
+**Provision Response (New User):**
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "user": {
+    "id": "user-object-id",
+    "email": "newuser@example.com",
+    "displayName": "New User",
+    "role": "operator"
+  },
+  "isNewUser": true,
+  "groupId": "auto-created-group-id"
+}
+```
+
+**Behavior:**
+- **New user (no invite):** Creates user, creates personal group ("User's Workspace"), creates default project
+- **New user (with invite):** Creates user, adds to invited group with specified role
+- **Existing user (no invite):** Returns login token
+- **Existing user (with invite):** Returns login token, adds to invited group if not already a member
+
+#### SSO Login (`/api/auth/sso-login`)
+
+Simple login for users already provisioned via SSO. The SSO system validates the user's identity before calling this endpoint.
+
+**SSO Login Request:**
+```json
+{
+  "email": "user@example.com"
 }
 ```
 
@@ -491,6 +549,127 @@ GET /api/views/:id/tasks?limit=10&resolveReferences=true
 | PATCH | `/teams/:id` | Update team |
 | DELETE | `/teams/:id` | Delete team |
 | PUT | `/teams/:id/members` | Update members |
+
+---
+
+### Groups (`/api/groups`)
+
+Groups are the primary organizational unit for access control. Users belong to groups, and tasks/workflows can be scoped to groups.
+
+| Method | Endpoint | Description | Required Role |
+|--------|----------|-------------|---------------|
+| GET | `/` | List groups user has access to | Any |
+| GET | `/?all=true` | List all groups (admin only) | admin |
+| POST | `/` | Create group | operator+ |
+| GET | `/:groupId` | Get group details | Group member |
+| PATCH | `/:groupId` | Update group | Group admin |
+| DELETE | `/:groupId` | Delete group | Group owner |
+| GET | `/:groupId/members` | List group members | Group viewer |
+| POST | `/:groupId/members` | Add member | Group admin |
+| PATCH | `/:groupId/members/:userId` | Update member role | Group admin |
+| DELETE | `/:groupId/members/:userId` | Remove member | Group admin |
+
+**Group Roles (hierarchy):**
+- `owner` - Full control, can delete group and manage all members
+- `admin` - Can manage members and group settings
+- `member` - Can create/edit content within the group
+- `viewer` - Read-only access to group content
+
+**Group Visibility:**
+- `private` - Only members can see the group
+- `internal` - All authenticated users can see the group (but must be a member to access content)
+
+**Create Group Request:**
+```json
+{
+  "displayName": "Engineering Team",
+  "description": "Software engineering team",
+  "visibility": "private"
+}
+```
+
+**Create Group Response:**
+```json
+{
+  "data": {
+    "_id": "group-id",
+    "name": "engineering-team",
+    "displayName": "Engineering Team",
+    "description": "Software engineering team",
+    "visibility": "private",
+    "members": [
+      {
+        "userId": "creator-user-id",
+        "role": "owner",
+        "addedAt": "2025-01-25T00:00:00Z",
+        "addedById": null
+      }
+    ],
+    "createdById": "creator-user-id",
+    "createdAt": "2025-01-25T00:00:00Z",
+    "updatedAt": "2025-01-25T00:00:00Z"
+  }
+}
+```
+
+**Add Member Request:**
+```json
+{
+  "userId": "user-object-id",
+  "role": "member"
+}
+```
+
+**Notes:**
+- The `name` field (machine name) is auto-generated from `displayName` if not provided
+- Group creators automatically become the owner
+- Only admins can create groups via the UI; regular users get groups created during SSO provisioning
+- Only owners can add other owners
+
+---
+
+### Projects (`/api/projects`)
+
+Projects are sub-divisions within groups for organizing work.
+
+| Method | Endpoint | Description | Required Role |
+|--------|----------|-------------|---------------|
+| GET | `/` | List projects | Any |
+| GET | `/?groupId=xxx` | List projects in a group | Group member |
+| POST | `/` | Create project | Group member |
+| GET | `/:projectId` | Get project details | Group member |
+| PATCH | `/:projectId` | Update project | Group member |
+| DELETE | `/:projectId` | Delete project | Group admin |
+
+**Project Status:** `active`, `archived`, `completed`
+
+**Create Project Request:**
+```json
+{
+  "displayName": "Q1 Sprint",
+  "description": "First quarter sprint",
+  "groupId": "group-object-id",
+  "color": "#3B82F6"
+}
+```
+
+**Create Project Response:**
+```json
+{
+  "data": {
+    "_id": "project-id",
+    "name": "q1-sprint",
+    "displayName": "Q1 Sprint",
+    "description": "First quarter sprint",
+    "groupId": "group-object-id",
+    "status": "active",
+    "color": "#3B82F6",
+    "createdById": "creator-user-id",
+    "createdAt": "2025-01-25T00:00:00Z",
+    "updatedAt": "2025-01-25T00:00:00Z"
+  }
+}
+```
 
 ---
 

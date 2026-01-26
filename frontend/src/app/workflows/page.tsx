@@ -20,6 +20,7 @@ import {
   ChevronRight,
   ChevronDown,
   User,
+  Users,
   Bot,
   Plus,
   Pencil,
@@ -86,6 +87,7 @@ import {
 import { cn } from '@/lib/utils'
 import { authFetch } from '@/lib/api'
 import { Checkbox } from '@/components/ui/checkbox'
+import { useGroupContext } from '@/lib/group-context'
 
 // Lazy-load WorkflowEditor to reduce initial bundle size (includes heavy mermaid dependency)
 const WorkflowEditor = dynamic(
@@ -183,6 +185,7 @@ interface WorkflowData {
   stages?: string[]  // Legacy format - simple stage names
   mermaidDiagram?: string
   folderId?: string | null
+  groupId?: string | null
   color?: string
   createdAt: string
   updatedAt?: string
@@ -197,6 +200,7 @@ interface BriefWorkflowData {
   stepCounts: StepCounts
   mermaidDiagram?: string
   folderId?: string | null
+  groupId?: string | null
   color?: string
   createdAt: string
   updatedAt?: string
@@ -229,9 +233,13 @@ interface WorkflowListItem extends BriefWorkflowData {
   steps?: WorkflowStep[]
 }
 
-async function fetchWorkflows(): Promise<{ data: BriefWorkflowData[] }> {
+async function fetchWorkflows(groupId?: string): Promise<{ data: BriefWorkflowData[] }> {
   // Use brief=true to get step counts instead of full steps array
-  const response = await authFetch(`${API_BASE}/workflows?includeInactive=true&brief=true`)
+  const params = new URLSearchParams({ includeInactive: 'true', brief: 'true' })
+  if (groupId) {
+    params.set('groupId', groupId)
+  }
+  const response = await authFetch(`${API_BASE}/workflows?${params.toString()}`)
   if (!response.ok) {
     throw new Error('Failed to fetch workflows')
   }
@@ -393,6 +401,7 @@ function formatRelativeTime(date: string | null): string {
 export default function WorkflowsPage() {
   const router = useRouter()
   const queryClient = useQueryClient()
+  const { currentGroupId, groups } = useGroupContext()
   const [isEditorOpen, setIsEditorOpen] = useState(false)
   const [editingWorkflow, setEditingWorkflow] = useState<WorkflowData | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<WorkflowData | null>(null)
@@ -433,8 +442,8 @@ export default function WorkflowsPage() {
   const [deleteFolderConfirm, setDeleteFolderConfirm] = useState<WorkflowFolder | null>(null)
 
   const { data: workflowsData, isLoading, error } = useQuery({
-    queryKey: ['workflows'],
-    queryFn: fetchWorkflows,
+    queryKey: ['workflows', currentGroupId],
+    queryFn: () => fetchWorkflows(currentGroupId || undefined),
   })
 
   const { data: foldersData } = useQuery({
@@ -581,6 +590,17 @@ export default function WorkflowsPage() {
   const bulkMoveToFolderMutation = useMutation({
     mutationFn: async ({ ids, folderId }: { ids: string[]; folderId: string | null }) => {
       await Promise.all(ids.map(id => updateWorkflow(id, { folderId })))
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflows'] })
+      setRowSelection({})
+    },
+  })
+
+  // Bulk move to group
+  const bulkMoveToGroupMutation = useMutation({
+    mutationFn: async ({ ids, groupId }: { ids: string[]; groupId: string | null }) => {
+      await Promise.all(ids.map(id => updateWorkflow(id, { groupId })))
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workflows'] })
@@ -1287,6 +1307,35 @@ export default function WorkflowsPage() {
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
+            {/* Move to group dropdown - only show if user has multiple groups */}
+            {groups.length > 1 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Users className="h-4 w-4 mr-1" />
+                    Move to Group
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem
+                    onClick={() => bulkMoveToGroupMutation.mutate({ ids: selectedWorkflowIds, groupId: null })}
+                  >
+                    <Users className="h-4 w-4 mr-2 text-muted-foreground" />
+                    No Group
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {groups.map(group => (
+                    <DropdownMenuItem
+                      key={group._id}
+                      onClick={() => bulkMoveToGroupMutation.mutate({ ids: selectedWorkflowIds, groupId: group._id })}
+                    >
+                      <Users className="h-4 w-4 mr-2 text-muted-foreground" />
+                      {group.displayName}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
             <Button
               variant="outline"
               size="sm"

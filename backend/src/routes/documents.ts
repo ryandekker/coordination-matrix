@@ -2,6 +2,9 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { ObjectId } from 'mongodb';
 import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
+import { loadUserGroups } from '../middleware/group-access.js';
+import { isAdmin } from '../middleware/authorize.js';
+import { groupService } from '../services/group-service.js';
 import {
   Document,
   DocumentVersion,
@@ -95,7 +98,17 @@ async function resolveDocumentReferences(doc: Document): Promise<DocumentWithRes
 // Build filter from query params
 function buildFilter(query: Record<string, unknown>): Record<string, unknown> {
   const filter: Record<string, unknown> = {};
-  const { search, type, status, tags, includeArchived, createdById, workflowRunId, parentDocumentId, filters } = query;
+  const { search, type, status, tags, includeArchived, createdById, workflowRunId, parentDocumentId, groupId, projectId, filters } = query;
+
+  // Group filter
+  if (groupId && typeof groupId === 'string' && ObjectId.isValid(groupId)) {
+    filter.groupId = new ObjectId(groupId);
+  }
+
+  // Project filter
+  if (projectId && typeof projectId === 'string' && ObjectId.isValid(projectId)) {
+    filter.projectId = new ObjectId(projectId);
+  }
 
   // Text search
   if (search && typeof search === 'string') {
@@ -167,7 +180,7 @@ function buildFilter(query: Record<string, unknown>): Record<string, unknown> {
 }
 
 // GET /api/documents - List documents with filtering and pagination
-documentsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
+documentsRouter.get('/', loadUserGroups(), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
     const {
@@ -176,12 +189,29 @@ documentsRouter.get('/', async (req: Request, res: Response, next: NextFunction)
       sortBy = 'updatedAt',
       sortOrder = 'desc',
       resolveReferences,
+      groupId,
     } = req.query;
 
     const pageNum = Math.max(1, parseInt(page as string, 10));
     const limitNum = Math.min(200, Math.max(1, parseInt(limit as string, 10)));
     const skip = (pageNum - 1) * limitNum;
     const sort: Record<string, 1 | -1> = { [sortBy as string]: sortOrder === 'asc' ? 1 : -1 };
+
+    // Validate group access if groupId is provided
+    if (groupId && typeof groupId === 'string') {
+      if (!ObjectId.isValid(groupId)) {
+        res.status(400).json({ error: 'Invalid groupId' });
+        return;
+      }
+
+      if (!isAdmin(req)) {
+        const membership = await groupService.getMembership(groupId, req.user!.userId);
+        if (!membership) {
+          res.status(403).json({ error: 'Not a member of this group' });
+          return;
+        }
+      }
+    }
 
     const filter = buildFilter(req.query);
 
@@ -248,7 +278,7 @@ documentsRouter.get('/:id', async (req: Request, res: Response, next: NextFuncti
 });
 
 // POST /api/documents - Create a new document
-documentsRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
+documentsRouter.post('/', loadUserGroups(), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
     const {
@@ -261,6 +291,8 @@ documentsRouter.post('/', async (req: Request, res: Response, next: NextFunction
       parentDocumentId,
       workflowRunId,
       metadata,
+      groupId,
+      projectId,
     } = req.body;
 
     // Validate required fields
@@ -282,13 +314,25 @@ documentsRouter.post('/', async (req: Request, res: Response, next: NextFunction
     const now = new Date();
     const userId = req.user?.userId ? new ObjectId(req.user.userId) : null;
 
+    // Determine groupId - use provided, or fall back to user's primary group
+    let resolvedGroupId: ObjectId | null = null;
+    if (groupId && ObjectId.isValid(groupId)) {
+      resolvedGroupId = new ObjectId(groupId);
+    } else if (req.userGroupIds && req.userGroupIds.length > 0) {
+      // Use user's first (primary) group
+      resolvedGroupId = req.userGroupIds[0];
+    }
+
+    // Build the document object, only including fields that have values
+    // This prevents undefined values from being sent to MongoDB which would fail validation
     const newDocument: Omit<Document, '_id'> = {
       title: title.trim(),
       content,
-      summary: summary?.trim() || undefined,
       type,
       status,
       tags: Array.isArray(tags) ? tags.filter((t: unknown) => typeof t === 'string') : [],
+      groupId: resolvedGroupId,
+      projectId: projectId && ObjectId.isValid(projectId) ? new ObjectId(projectId) : null,
       createdById: userId,
       lastModifiedById: userId,
       parentDocumentId: parentDocumentId && ObjectId.isValid(parentDocumentId)
@@ -303,21 +347,30 @@ documentsRouter.post('/', async (req: Request, res: Response, next: NextFunction
       updatedAt: now,
     };
 
+    // Only add optional string fields if they have values
+    if (summary?.trim()) {
+      newDocument.summary = summary.trim();
+    }
+
     const result = await db.collection<Document>('documents').insertOne(newDocument as Document);
     const inserted = await db.collection<Document>('documents').findOne({ _id: result.insertedId });
 
     // Create initial version record
     if (inserted && userId) {
-      await db.collection<DocumentVersion>('document_versions').insertOne({
+      const versionRecord: Partial<DocumentVersion> = {
         documentId: result.insertedId,
         version: 1,
         title: inserted.title,
         content: inserted.content,
-        summary: inserted.summary,
         changeDescription: 'Initial version',
         modifiedById: userId,
         modifiedAt: now,
-      } as DocumentVersion);
+      };
+      // Only include summary if it exists (schema requires string, not undefined)
+      if (inserted.summary) {
+        versionRecord.summary = inserted.summary;
+      }
+      await db.collection<DocumentVersion>('document_versions').insertOne(versionRecord as DocumentVersion);
     }
 
     // Generate embedding asynchronously (don't block response)
@@ -365,6 +418,8 @@ documentsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
       parentDocumentId,
       metadata,
       changeDescription,
+      groupId,
+      projectId,
     } = req.body;
 
     // Track if content changed (for versioning)
@@ -379,7 +434,12 @@ documentsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
       if (updates.content !== existing.content) contentChanged = true;
     }
     if (summary !== undefined) {
-      updates.summary = summary?.trim() || undefined;
+      // Only set summary if it has a value; use $unset for empty values
+      const trimmedSummary = summary?.trim();
+      if (trimmedSummary) {
+        updates.summary = trimmedSummary;
+      }
+      // Note: to clear summary, we'd need $unset but that's a separate operation
     }
     if (type !== undefined) {
       if (!VALID_TYPES.includes(type)) {
@@ -406,23 +466,56 @@ documentsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
       updates.metadata = { ...existing.metadata, ...metadata };
     }
 
+    // Handle group change (requires admin or membership in both groups)
+    if (groupId !== undefined && groupId !== existing.groupId?.toString()) {
+      if (!ObjectId.isValid(groupId)) {
+        throw createError('Invalid groupId', 400);
+      }
+      // Verify user has access to the target group (admin or member)
+      if (!isAdmin(req)) {
+        const targetMembership = await groupService.getMembership(groupId, req.user!.userId);
+        if (!targetMembership) {
+          throw createError('You do not have access to the target group', 403);
+        }
+      }
+      updates.groupId = new ObjectId(groupId);
+      // Clear projectId if moving to different group (projects are group-specific)
+      if (projectId === undefined) {
+        updates.projectId = null;
+      }
+    }
+
+    // Handle project change
+    if (projectId !== undefined) {
+      if (projectId === null || projectId === '') {
+        updates.projectId = null;
+      } else if (ObjectId.isValid(projectId)) {
+        updates.projectId = new ObjectId(projectId);
+      }
+    }
+
     // Add update metadata
     const now = new Date();
     updates.updatedAt = now;
     updates.lastModifiedById = req.user?.userId ? new ObjectId(req.user.userId) : existing.lastModifiedById;
 
     // If content changed, increment version and create version record
+    let unsetFields: Record<string, 1> = {};
     if (contentChanged) {
       updates.version = existing.version + 1;
 
-      // Clear embedding (will need to be regenerated)
-      updates.embedding = undefined;
-      updates.embeddingUpdatedAt = null;
+      // Clear embedding (will need to be regenerated) - use $unset instead of undefined
+      unsetFields = { embedding: 1, embeddingUpdatedAt: 1 };
+    }
+
+    const updateOperation: { $set: Partial<Document>; $unset?: Record<string, 1> } = { $set: updates };
+    if (Object.keys(unsetFields).length > 0) {
+      updateOperation.$unset = unsetFields;
     }
 
     const result = await db.collection<Document>('documents').findOneAndUpdate(
       { _id: documentId },
-      { $set: updates },
+      updateOperation,
       { returnDocument: 'after' }
     );
 
@@ -432,16 +525,20 @@ documentsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
 
     // Create version record if content changed
     if (contentChanged && updates.lastModifiedById) {
-      await db.collection<DocumentVersion>('document_versions').insertOne({
+      const versionRecord: Partial<DocumentVersion> = {
         documentId,
         version: result.version,
         title: result.title,
         content: result.content,
-        summary: result.summary,
         changeDescription: changeDescription || `Updated to version ${result.version}`,
         modifiedById: updates.lastModifiedById,
         modifiedAt: now,
-      } as DocumentVersion);
+      };
+      // Only include summary if it exists (schema requires string, not undefined)
+      if (result.summary) {
+        versionRecord.summary = result.summary;
+      }
+      await db.collection<DocumentVersion>('document_versions').insertOne(versionRecord as DocumentVersion);
 
       // Regenerate embedding asynchronously
       updateDocumentEmbedding(documentId).catch((err) => {
@@ -477,6 +574,140 @@ documentsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
     );
 
     res.json({ data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/documents/bulk-move - Move multiple documents to a different group
+documentsRouter.post('/bulk-move', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { documentIds, targetGroupId, targetProjectId } = req.body;
+
+    // Validate inputs
+    if (!Array.isArray(documentIds) || documentIds.length === 0) {
+      throw createError('documentIds must be a non-empty array', 400);
+    }
+
+    if (!targetGroupId || !ObjectId.isValid(targetGroupId)) {
+      throw createError('Valid targetGroupId is required', 400);
+    }
+
+    // Verify all document IDs are valid
+    const validDocIds = documentIds.filter((id: string) => ObjectId.isValid(id));
+    if (validDocIds.length !== documentIds.length) {
+      throw createError('Some document IDs are invalid', 400);
+    }
+
+    // Verify user has access to the target group (admin or member)
+    if (!isAdmin(req)) {
+      const targetMembership = await groupService.getMembership(targetGroupId, req.user!.userId);
+      if (!targetMembership) {
+        throw createError('You do not have access to the target group', 403);
+      }
+    }
+
+    // Validate target project if provided
+    let resolvedProjectId: ObjectId | null = null;
+    if (targetProjectId) {
+      if (!ObjectId.isValid(targetProjectId)) {
+        throw createError('Invalid targetProjectId', 400);
+      }
+      // Verify project belongs to target group
+      const project = await db.collection('projects').findOne({
+        _id: new ObjectId(targetProjectId),
+        groupId: new ObjectId(targetGroupId)
+      });
+      if (!project) {
+        throw createError('Target project not found in the specified group', 404);
+      }
+      resolvedProjectId = new ObjectId(targetProjectId);
+    }
+
+    const objectIds = validDocIds.map((id: string) => new ObjectId(id));
+    const now = new Date();
+    const actorId = req.user?.userId ? new ObjectId(req.user.userId) : null;
+
+    // Update all documents
+    const result = await db.collection<Document>('documents').updateMany(
+      { _id: { $in: objectIds } },
+      {
+        $set: {
+          groupId: new ObjectId(targetGroupId),
+          projectId: resolvedProjectId,
+          updatedAt: now,
+          lastModifiedById: actorId,
+        }
+      }
+    );
+
+    // Log activity for each document
+    for (const docId of objectIds) {
+      logDocumentActivity(docId, 'document.updated', actorId, 'user', [
+        { field: 'groupId', oldValue: null, newValue: targetGroupId }
+      ], { bulkMove: true });
+    }
+
+    res.json({
+      data: {
+        matched: result.matchedCount,
+        modified: result.modifiedCount,
+        targetGroupId,
+        targetProjectId: resolvedProjectId?.toString() || null,
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/documents/bulk-archive - Archive multiple documents
+documentsRouter.post('/bulk-archive', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { documentIds } = req.body;
+
+    // Validate inputs
+    if (!Array.isArray(documentIds) || documentIds.length === 0) {
+      throw createError('documentIds must be a non-empty array', 400);
+    }
+
+    // Verify all document IDs are valid
+    const validDocIds = documentIds.filter((id: string) => ObjectId.isValid(id));
+    if (validDocIds.length !== documentIds.length) {
+      throw createError('Some document IDs are invalid', 400);
+    }
+
+    const objectIds = validDocIds.map((id: string) => new ObjectId(id));
+    const now = new Date();
+    const actorId = req.user?.userId ? new ObjectId(req.user.userId) : null;
+
+    // Update all documents to archived status
+    const result = await db.collection<Document>('documents').updateMany(
+      { _id: { $in: objectIds }, status: { $ne: 'archived' } },
+      {
+        $set: {
+          status: 'archived' as DocumentStatus,
+          updatedAt: now,
+          lastModifiedById: actorId,
+        }
+      }
+    );
+
+    // Log activity for each document
+    for (const docId of objectIds) {
+      logDocumentActivity(docId, 'document.updated', actorId, 'user', [
+        { field: 'status', oldValue: null, newValue: 'archived' }
+      ], { bulkArchive: true });
+    }
+
+    res.json({
+      data: {
+        matched: result.matchedCount,
+        modified: result.modifiedCount,
+      }
+    });
   } catch (error) {
     next(error);
   }

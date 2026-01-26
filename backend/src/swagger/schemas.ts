@@ -252,8 +252,112 @@ export const schemas = {
       isActive: { type: 'boolean' },
       isAgent: { type: 'boolean' },
       agentPrompt: { type: 'string' },
-      teamIds: { type: 'array', items: { $ref: '#/components/schemas/ObjectId' } },
       createdAt: { type: 'string', format: 'date-time' },
+    },
+  },
+
+  // Group schemas
+  GroupRole: {
+    type: 'string',
+    enum: ['owner', 'admin', 'member', 'viewer'],
+    description: 'Role within a group: owner > admin > member > viewer',
+  },
+  GroupVisibility: {
+    type: 'string',
+    enum: ['private', 'internal'],
+    description: 'Group visibility: private = members only, internal = visible to all logged-in users',
+  },
+  GroupMember: {
+    type: 'object',
+    properties: {
+      userId: { $ref: '#/components/schemas/ObjectId' },
+      role: { $ref: '#/components/schemas/GroupRole' },
+      addedAt: { type: 'string', format: 'date-time' },
+      addedById: { $ref: '#/components/schemas/ObjectId', nullable: true },
+    },
+  },
+  GroupMemberWithUser: {
+    type: 'object',
+    properties: {
+      userId: { $ref: '#/components/schemas/ObjectId' },
+      role: { $ref: '#/components/schemas/GroupRole' },
+      addedAt: { type: 'string', format: 'date-time' },
+      addedById: { $ref: '#/components/schemas/ObjectId', nullable: true },
+      user: { $ref: '#/components/schemas/User' },
+    },
+  },
+  Group: {
+    type: 'object',
+    properties: {
+      _id: { $ref: '#/components/schemas/ObjectId' },
+      name: { type: 'string', example: 'engineering', description: 'Unique slug identifier' },
+      displayName: { type: 'string', example: 'Engineering Team' },
+      description: { type: 'string', nullable: true },
+      members: { type: 'array', items: { $ref: '#/components/schemas/GroupMember' } },
+      visibility: { $ref: '#/components/schemas/GroupVisibility' },
+      defaultProjectRole: { $ref: '#/components/schemas/GroupRole', nullable: true },
+      createdById: { $ref: '#/components/schemas/ObjectId', nullable: true },
+      createdAt: { type: 'string', format: 'date-time' },
+      updatedAt: { type: 'string', format: 'date-time' },
+    },
+  },
+  GroupCreate: {
+    type: 'object',
+    required: ['name', 'displayName'],
+    properties: {
+      name: { type: 'string', example: 'engineering', description: 'Unique slug identifier' },
+      displayName: { type: 'string', example: 'Engineering Team' },
+      description: { type: 'string' },
+      visibility: { $ref: '#/components/schemas/GroupVisibility' },
+    },
+  },
+  GroupUpdate: {
+    type: 'object',
+    properties: {
+      displayName: { type: 'string' },
+      description: { type: 'string' },
+      visibility: { $ref: '#/components/schemas/GroupVisibility' },
+    },
+  },
+
+  // Project schemas
+  ProjectStatus: {
+    type: 'string',
+    enum: ['active', 'archived'],
+  },
+  Project: {
+    type: 'object',
+    properties: {
+      _id: { $ref: '#/components/schemas/ObjectId' },
+      name: { type: 'string', example: 'q4-launch', description: 'Unique slug within group' },
+      displayName: { type: 'string', example: 'Q4 Product Launch' },
+      description: { type: 'string', nullable: true },
+      groupId: { $ref: '#/components/schemas/ObjectId' },
+      status: { $ref: '#/components/schemas/ProjectStatus' },
+      color: { type: 'string', example: '#3B82F6', nullable: true },
+      createdById: { $ref: '#/components/schemas/ObjectId', nullable: true },
+      createdAt: { type: 'string', format: 'date-time' },
+      updatedAt: { type: 'string', format: 'date-time' },
+    },
+  },
+  ProjectCreate: {
+    type: 'object',
+    required: ['name', 'displayName', 'groupId'],
+    properties: {
+      name: { type: 'string', example: 'q4-launch' },
+      displayName: { type: 'string', example: 'Q4 Product Launch' },
+      description: { type: 'string' },
+      groupId: { type: 'string', description: 'ID of the parent group' },
+      color: { type: 'string' },
+    },
+  },
+  ProjectUpdate: {
+    type: 'object',
+    properties: {
+      displayName: { type: 'string' },
+      description: { type: 'string' },
+      status: { $ref: '#/components/schemas/ProjectStatus' },
+      color: { type: 'string' },
     },
   },
 
@@ -525,7 +629,8 @@ export const tags = [
   { name: 'Workflow Runs', description: 'Workflow execution instances' },
   { name: 'Batch Jobs', description: 'Fan-out/fan-in job coordination' },
   { name: 'Users', description: 'User management' },
-  { name: 'Teams', description: 'Team management' },
+  { name: 'Groups', description: 'Group-based access control and organization' },
+  { name: 'Projects', description: 'Project organization within groups' },
   { name: 'Views', description: 'Saved searches and views' },
   { name: 'Webhooks', description: 'Webhook configuration and delivery' },
   { name: 'Activity Logs', description: 'Audit trail and comments' },

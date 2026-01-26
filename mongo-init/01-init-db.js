@@ -34,6 +34,15 @@ db.createCollection('tasks', {
           enum: ['low', 'normal', 'high', 'urgent'],
           description: 'Task urgency level'
         },
+        // Group and Project access control
+        groupId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Group this task belongs to (admin-only if null)'
+        },
+        projectId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Project within the group (optional)'
+        },
         // Simplified hierarchy - just parent reference
         parentId: {
           bsonType: ['objectId', 'null'],
@@ -171,6 +180,10 @@ db.tasks.createIndex({ tags: 1 });
 db.tasks.createIndex({ externalId: 1 });
 db.tasks.createIndex({ spawnedWorkflowRunId: 1 });  // For finding tasks that spawned workflows
 db.tasks.createIndex({ title: 'text', summary: 'text' });
+// Group and project indexes for access control
+db.tasks.createIndex({ groupId: 1, status: 1, createdAt: -1 });
+db.tasks.createIndex({ projectId: 1, status: 1, createdAt: -1 });
+db.tasks.createIndex({ groupId: 1, projectId: 1 });
 
 // Compound indexes for workflow task queries (prevents blocking in-memory sorts)
 // Critical for GET /api/workflow-runs/:id?includeTasks=true with large task sets
@@ -237,11 +250,134 @@ db.users.createIndex({ isActive: 1 });
 db.users.createIndex({ isSystem: 1 }, { sparse: true });  // For finding the system user
 
 // ============================================================================
-// TEAMS - Team management
+// GROUPS - Access control groups
 // ============================================================================
-db.createCollection('teams');
+db.createCollection('groups', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['name', 'displayName', 'members', 'visibility', 'createdAt', 'updatedAt'],
+      properties: {
+        name: {
+          bsonType: 'string',
+          description: 'Unique slug (lowercase, no spaces) - required'
+        },
+        displayName: {
+          bsonType: 'string',
+          description: 'Human-readable name - required'
+        },
+        description: {
+          bsonType: 'string',
+          description: 'Group description'
+        },
+        members: {
+          bsonType: 'array',
+          items: {
+            bsonType: 'object',
+            required: ['userId', 'role', 'addedAt'],
+            properties: {
+              userId: {
+                bsonType: 'objectId',
+                description: 'User ID'
+              },
+              role: {
+                bsonType: 'string',
+                enum: ['owner', 'admin', 'member', 'viewer'],
+                description: 'Role within the group'
+              },
+              addedAt: {
+                bsonType: 'date',
+                description: 'When the user was added'
+              },
+              addedById: {
+                bsonType: ['objectId', 'null'],
+                description: 'Who added this user'
+              }
+            }
+          },
+          description: 'Group members with roles - required'
+        },
+        visibility: {
+          bsonType: 'string',
+          enum: ['private', 'internal'],
+          description: 'Group visibility - required'
+        },
+        createdById: {
+          bsonType: ['objectId', 'null'],
+          description: 'User who created this group'
+        },
+        createdAt: {
+          bsonType: 'date',
+          description: 'Creation timestamp - required'
+        },
+        updatedAt: {
+          bsonType: 'date',
+          description: 'Last update timestamp - required'
+        }
+      }
+    }
+  }
+});
 
-db.teams.createIndex({ name: 1 }, { unique: true });
+db.groups.createIndex({ name: 1 }, { unique: true });
+db.groups.createIndex({ 'members.userId': 1 });
+db.groups.createIndex({ visibility: 1 });
+db.groups.createIndex({ createdById: 1 });
+
+// ============================================================================
+// PROJECTS - Organizational units within groups
+// ============================================================================
+db.createCollection('projects', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['name', 'displayName', 'groupId', 'status', 'createdAt', 'updatedAt'],
+      properties: {
+        name: {
+          bsonType: 'string',
+          description: 'Unique name per group (lowercase) - required'
+        },
+        displayName: {
+          bsonType: 'string',
+          description: 'Human-readable name - required'
+        },
+        description: {
+          bsonType: 'string',
+          description: 'Project description'
+        },
+        groupId: {
+          bsonType: 'objectId',
+          description: 'Group this project belongs to - required'
+        },
+        status: {
+          bsonType: 'string',
+          enum: ['active', 'archived'],
+          description: 'Project status - required'
+        },
+        color: {
+          bsonType: 'string',
+          description: 'Hex color for UI display'
+        },
+        createdById: {
+          bsonType: ['objectId', 'null'],
+          description: 'User who created this project'
+        },
+        createdAt: {
+          bsonType: 'date',
+          description: 'Creation timestamp - required'
+        },
+        updatedAt: {
+          bsonType: 'date',
+          description: 'Last update timestamp - required'
+        }
+      }
+    }
+  }
+});
+
+db.projects.createIndex({ groupId: 1, name: 1 }, { unique: true });
+db.projects.createIndex({ groupId: 1, status: 1 });
+db.projects.createIndex({ createdById: 1 });
 
 // ============================================================================
 // WORKFLOW FOLDERS - Organize workflows into folders
@@ -276,6 +412,12 @@ db.createCollection('workflow_runs', {
         workflowVersion: {
           bsonType: 'int',
           description: 'Snapshot version of workflow at run time'
+        },
+
+        // Group access control - inherited from workflow
+        groupId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Group this run belongs to (inherited from workflow)'
         },
 
         // Execution status
@@ -388,6 +530,7 @@ db.workflow_runs.createIndex({ rootTaskId: 1 });
 db.workflow_runs.createIndex({ triggerTaskId: 1 });  // For finding workflows spawned by a task
 db.workflow_runs.createIndex({ createdAt: -1 });
 db.workflow_runs.createIndex({ createdById: 1 });
+db.workflow_runs.createIndex({ groupId: 1, status: 1, createdAt: -1 });  // Group filtering
 
 // ============================================================================
 // EXTERNAL JOBS - Queue for external work
@@ -932,6 +1075,10 @@ db.createCollection('api_keys', {
           bsonType: ['objectId', 'null'],
           description: 'User this API key acts as - when set, inherits user permissions'
         },
+        groupId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Group this API key is scoped to - when set, can only access resources in this group'
+        },
         createdAt: {
           bsonType: 'date',
           description: 'When the key was created'
@@ -961,6 +1108,8 @@ db.api_keys.createIndex({ userId: 1 });
 db.api_keys.createIndex({ createdById: 1 });
 // Index on isActive for filtering
 db.api_keys.createIndex({ isActive: 1 });
+// Index on groupId for group-scoped keys
+db.api_keys.createIndex({ groupId: 1 });
 
 // ============================================================================
 // TAGS COLLECTION - Structured tag definitions with colors
@@ -1033,6 +1182,16 @@ db.createCollection('documents', {
         summary: {
           bsonType: 'string',
           description: 'Brief summary of the document (AI-generated or manual)'
+        },
+
+        // Group and Project access control
+        groupId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Group this document belongs to (admin-only if null)'
+        },
+        projectId: {
+          bsonType: ['objectId', 'null'],
+          description: 'Project within the group (optional)'
         },
 
         // Classification
@@ -1134,6 +1293,9 @@ db.documents.createIndex({ title: 'text', content: 'text', summary: 'text' });
 // Compound indexes for common queries
 db.documents.createIndex({ type: 1, status: 1 });
 db.documents.createIndex({ status: 1, createdAt: -1 });
+// Group and project indexes for access control
+db.documents.createIndex({ groupId: 1, status: 1 });
+db.documents.createIndex({ projectId: 1, status: 1 });
 
 // ============================================================================
 // DOCUMENT VERSIONS COLLECTION - Version history for documents

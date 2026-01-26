@@ -15,6 +15,7 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  devLogin: (email: string) => Promise<void>;
   register: (email: string, password: string, displayName: string) => Promise<void>;
   logout: () => void;
 }
@@ -88,6 +89,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     router.push('/');
   }, [router]);
 
+  const devLogin = useCallback(async (email: string) => {
+    const res = await fetch(`${API_URL}/auth/dev-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+
+    if (!res.ok) {
+      const error = await res.json();
+      throw new Error(error.error || 'Dev login failed');
+    }
+
+    const data = await res.json();
+    localStorage.setItem('auth_token', data.token);
+    setToken(data.token);
+    setUser(data.user);
+    router.push('/');
+  }, [router]);
+
   const register = useCallback(async (email: string, password: string, displayName: string) => {
     const res = await fetch(`${API_URL}/auth/register`, {
       method: 'POST',
@@ -120,9 +140,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     token,
     isLoading,
     login,
+    devLogin,
     register,
     logout,
-  }), [user, token, isLoading, login, register, logout]);
+  }), [user, token, isLoading, login, devLogin, register, logout]);
 
   return (
     <AuthContext.Provider value={contextValue}>

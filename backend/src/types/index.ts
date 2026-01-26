@@ -584,6 +584,10 @@ export interface Task {
   status: TaskStatus;
   urgency?: Urgency;
 
+  // Group and Project access control
+  groupId?: ObjectId | null;       // Group this task belongs to (admin-only if null)
+  projectId?: ObjectId | null;     // Project within the group (optional)
+
   // Hierarchy - simplified to just parent reference
   parentId: ObjectId | null;
 
@@ -801,6 +805,9 @@ export interface View {
   visibleColumns: string[];
   columnWidths?: Record<string, number>;
   folderId?: ObjectId | null;
+  // Group and Project scoping for views
+  groupId?: ObjectId | null;       // View is scoped to this group
+  projectId?: ObjectId | null;     // View is scoped to this project
   createdById?: ObjectId | null;
   createdAt: Date;
   updatedAt?: Date;
@@ -882,23 +889,62 @@ export interface User {
   agentPrompt?: string;           // Agent's base prompt/persona
   profilePicture?: string;        // URL to profile picture (for humans)
   botColor?: string;              // Custom color for bot users (hex code)
-  teamIds?: ObjectId[];
+  defaultGroupId?: ObjectId;      // User's preferred/default group
   preferences?: Record<string, unknown>;
   createdAt: Date;
   updatedAt?: Date;
 }
 
 // ============================================================================
-// Team Types
+// Group Types (Access Control)
 // ============================================================================
 
-export interface Team {
+export type GroupRole = 'owner' | 'admin' | 'member' | 'viewer';
+
+export interface GroupMember {
+  userId: ObjectId;
+  role: GroupRole;
+  addedAt: Date;
+  addedById: ObjectId | null;
+}
+
+export interface Group {
   _id: ObjectId;
-  name: string;
+  name: string;              // Unique slug (lowercase, no spaces)
+  displayName: string;       // Human-readable name
   description?: string;
-  memberIds: ObjectId[];
+  members: GroupMember[];
+  visibility: 'private' | 'internal';  // 'internal' = visible to all authenticated users
+  createdById: ObjectId | null;
   createdAt: Date;
-  updatedAt?: Date;
+  updatedAt: Date;
+}
+
+// Group role hierarchy for permission checks
+export const GROUP_ROLE_HIERARCHY: Record<GroupRole, number> = {
+  viewer: 0,
+  member: 1,
+  admin: 2,
+  owner: 3,
+};
+
+// ============================================================================
+// Project Types (Organizational)
+// ============================================================================
+
+export type ProjectStatus = 'active' | 'archived';
+
+export interface Project {
+  _id: ObjectId;
+  name: string;              // Unique per group (lowercase, no spaces)
+  displayName: string;       // Human-readable name
+  description?: string;
+  groupId: ObjectId;         // Required - projects belong to a group
+  status: ProjectStatus;
+  color?: string;            // Hex color for UI display
+  createdById: ObjectId | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 // ============================================================================
@@ -1237,6 +1283,9 @@ export interface Workflow {
   // Dynamic title template for the root task - supports {{input.field}} variables
   rootTaskTitleTemplate?: string;
 
+  // Group access control - workflows must belong to a group
+  groupId?: ObjectId | null;   // Group this workflow belongs to (admin-only if null)
+
   // Organization and display
   folderId?: ObjectId | null;  // Reference to workflow folder
   color?: string;              // Pastel hex color (e.g., "#BAE6FD")
@@ -1250,6 +1299,9 @@ export interface WorkflowRun {
   _id: ObjectId;
   workflowId: ObjectId;
   workflowVersion?: number;
+
+  // Group access control - inherited from workflow
+  groupId?: ObjectId | null;
 
   // Execution status
   status: WorkflowRunStatus;
@@ -1566,6 +1618,10 @@ export interface Document {
   title: string;
   content: string;           // Markdown content
   summary?: string;          // AI-generated or manual summary
+
+  // Group and Project access control
+  groupId?: ObjectId | null;       // Group this document belongs to (admin-only if null)
+  projectId?: ObjectId | null;     // Project within the group (optional)
 
   // Classification
   type: DocumentType;

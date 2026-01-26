@@ -7,8 +7,13 @@ import { parseMermaidToSteps, generateMermaidFromSteps } from './mermaid-parser.
 import { handleExportMulti, handleImportMulti } from './multi-workflow.js';
 import { aiPromptRoutes } from './ai-prompts.js';
 import { executeCode } from '../../services/workflow/code-executor.js';
+import { loadUserGroups, hasResourceAccess } from '../../middleware/group-access.js';
+import { isAdmin } from '../../middleware/authorize.js';
 
 export const workflowsRouter = Router();
+
+// Apply group loading middleware to all routes
+workflowsRouter.use(loadUserGroups());
 
 // Mount AI prompt routes (must come before /:id to avoid matching)
 workflowsRouter.use(aiPromptRoutes);
@@ -18,10 +23,11 @@ workflowsRouter.use(aiPromptRoutes);
 //   - includeInactive: 'true' to include inactive workflows
 //   - brief: 'true' to return step counts instead of full steps array (for faster list views)
 //   - folderId: filter by folder (use 'null' for unfiled workflows)
+//   - groupId: filter by specific group
 workflowsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { includeInactive, brief, folderId } = req.query;
+    const { includeInactive, brief, folderId, groupId } = req.query;
 
     const filter: Record<string, unknown> = {};
     if (includeInactive !== 'true') {
@@ -34,6 +40,22 @@ workflowsRouter.get('/', async (req: Request, res: Response, next: NextFunction)
     } else if (folderId) {
       filter.folderId = new ObjectId(folderId as string);
     }
+
+    // Group access filtering
+    if (groupId) {
+      // Explicit group filter
+      filter.groupId = new ObjectId(groupId as string);
+    } else if (!isAdmin(req)) {
+      // Non-admins only see workflows in their groups
+      const userGroupIds = req.userGroupIds || [];
+      if (userGroupIds.length === 0) {
+        // User has no group memberships - can't see any workflows
+        res.json({ data: [] });
+        return;
+      }
+      filter.groupId = { $in: userGroupIds };
+    }
+    // Admins see all workflows
 
     const workflows = await db
       .collection<Workflow>('workflows')
@@ -162,6 +184,12 @@ workflowsRouter.get('/:id', async (req: Request, res: Response, next: NextFuncti
       throw createError('Workflow not found', 404);
     }
 
+    // Check group access
+    const hasAccess = await hasResourceAccess(req, workflow.groupId);
+    if (!hasAccess) {
+      throw createError('You do not have access to this workflow', 403);
+    }
+
     res.json({ data: workflow });
   } catch (error) {
     next(error);
@@ -194,10 +222,23 @@ function ensureStepIds(steps: WorkflowStep[]): WorkflowStep[] {
 workflowsRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { name, description, steps, mermaidDiagram, isActive, folderId, color } = req.body;
+    const { name, description, steps, mermaidDiagram, isActive, folderId, color, groupId } = req.body;
 
     if (!name) {
       throw createError('name is required', 400);
+    }
+
+    // Workflows must belong to a group (unless admin creating admin-only workflow)
+    let workflowGroupId: ObjectId | null = null;
+    if (groupId) {
+      workflowGroupId = new ObjectId(groupId);
+      // Check that user has access to this group
+      const hasAccess = await hasResourceAccess(req, workflowGroupId);
+      if (!hasAccess) {
+        throw createError('You do not have access to this group', 403);
+      }
+    } else if (!isAdmin(req)) {
+      throw createError('groupId is required for creating workflows', 400);
     }
 
     const now = new Date();
@@ -209,6 +250,7 @@ workflowsRouter.post('/', async (req: Request, res: Response, next: NextFunction
       mermaidDiagram: mermaidDiagram || '',
       folderId: folderId ? new ObjectId(folderId) : null,
       color: color || undefined,
+      groupId: workflowGroupId,
       createdAt: now,
       updatedAt: now,
       createdById: req.body.createdById ? new ObjectId(req.body.createdById) : null,
@@ -230,6 +272,18 @@ workflowsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
     const workflowId = new ObjectId(req.params.id);
     const updates = req.body;
 
+    // Get original workflow to check access
+    const original = await db.collection<Workflow>('workflows').findOne({ _id: workflowId });
+    if (!original) {
+      throw createError('Workflow not found', 404);
+    }
+
+    // Check group access
+    const hasAccess = await hasResourceAccess(req, original.groupId);
+    if (!hasAccess) {
+      throw createError('You do not have access to this workflow', 403);
+    }
+
     delete updates._id;
     delete updates.createdAt;
     updates.updatedAt = new Date();
@@ -241,6 +295,23 @@ workflowsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
     // Handle folderId conversion
     if ('folderId' in updates) {
       updates.folderId = updates.folderId ? new ObjectId(updates.folderId) : null;
+    }
+
+    // Handle groupId updates
+    if ('groupId' in updates) {
+      if (updates.groupId) {
+        const newGroupId = new ObjectId(updates.groupId);
+        // Check access to new group
+        const hasNewAccess = await hasResourceAccess(req, newGroupId);
+        if (!hasNewAccess) {
+          throw createError('You do not have access to the target group', 403);
+        }
+        updates.groupId = newGroupId;
+      } else if (!isAdmin(req)) {
+        throw createError('Cannot remove groupId from workflow', 400);
+      } else {
+        updates.groupId = null;
+      }
     }
 
     const result = await db.collection<Workflow>('workflows').findOneAndUpdate(
@@ -264,6 +335,18 @@ workflowsRouter.delete('/:id', async (req: Request, res: Response, next: NextFun
   try {
     const db = getDb();
     const workflowId = new ObjectId(req.params.id);
+
+    // Get workflow to check access
+    const workflow = await db.collection<Workflow>('workflows').findOne({ _id: workflowId });
+    if (!workflow) {
+      throw createError('Workflow not found', 404);
+    }
+
+    // Check group access
+    const hasAccess = await hasResourceAccess(req, workflow.groupId);
+    if (!hasAccess) {
+      throw createError('You do not have access to this workflow', 403);
+    }
 
     const result = await db.collection('workflows').deleteOne({ _id: workflowId });
 
@@ -289,6 +372,21 @@ workflowsRouter.post('/:id/duplicate', async (req: Request, res: Response, next:
       throw createError('Workflow not found', 404);
     }
 
+    // Check group access to original workflow
+    const hasAccess = await hasResourceAccess(req, original.groupId);
+    if (!hasAccess) {
+      throw createError('You do not have access to this workflow', 403);
+    }
+
+    // Allow optionally specifying a different target groupId
+    const targetGroupId = req.body.groupId ? new ObjectId(req.body.groupId) : original.groupId;
+    if (req.body.groupId) {
+      const hasTargetAccess = await hasResourceAccess(req, targetGroupId);
+      if (!hasTargetAccess) {
+        throw createError('You do not have access to the target group', 403);
+      }
+    }
+
     const now = new Date();
     const duplicate: Omit<Workflow, '_id'> = {
       name: `${original.name} (Copy)`,
@@ -298,6 +396,7 @@ workflowsRouter.post('/:id/duplicate', async (req: Request, res: Response, next:
       mermaidDiagram: original.mermaidDiagram,
       folderId: original.folderId || null,
       color: original.color,
+      groupId: targetGroupId,
       createdAt: now,
       updatedAt: now,
       createdById: req.body.createdById ? new ObjectId(req.body.createdById) : null,

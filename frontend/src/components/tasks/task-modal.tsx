@@ -29,6 +29,7 @@ import {
 import { Task, FieldConfig, LookupValue, TaskType, WebhookConfig, isSystemUser } from '@/lib/api'
 import { toast } from 'sonner'
 import { useCreateTask, useUpdateTask, useRerunTask, useUsers, useWorkflows, useTasks, useTask, useTaskChildren, useTaskDocuments, useDetachDocument } from '@/hooks/use-tasks'
+import { useGroupContext } from '@/lib/group-context'
 import { cn } from '@/lib/utils'
 import { TaskActivity } from './task-activity'
 import { WebhookTaskConfig } from './webhook-task-config'
@@ -41,7 +42,7 @@ import {
   getSmartDefaultTab,
   type TaskModalTab,
 } from '@/lib/task-type-config'
-import { Activity, Workflow, ExternalLink, ListTree, FileText, FileOutput, Settings, Braces, Settings2 } from 'lucide-react'
+import { Activity, Workflow, ExternalLink, ListTree, FileText, FileOutput, Settings, Braces, Settings2, Users, FolderKanban } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { UserChip } from '@/components/ui/user-chip'
@@ -188,6 +189,9 @@ export function TaskModal({
       .sort((a, b) => a.displayOrder - b.displayOrder)
   }, [fieldConfigs])
 
+  // Get group context for default values in create mode
+  const { currentGroup, currentProject, groups, projects } = useGroupContext()
+
   // Core default values
   const coreDefaultValues: Record<string, unknown> = {
     title: '',
@@ -202,6 +206,8 @@ export function TaskModal({
     tags: [] as string[],
     taskType: 'agent',
     parentId: null,
+    groupId: currentGroup?._id || null,
+    projectId: currentProject?._id || null,
   }
 
   const defaultValues = useMemo(() => {
@@ -317,7 +323,7 @@ export function TaskModal({
         taskData[field as keyof Task] = (Array.isArray(value) ? value : []) as never
       } else if (field === 'dueAt') {
         taskData[field as keyof Task] = (value ? new Date(value as string).toISOString() : null) as never
-      } else if (field === 'workflowId' || field === 'assigneeId' || field === 'parentId') {
+      } else if (field === 'workflowId' || field === 'assigneeId' || field === 'parentId' || field === 'groupId' || field === 'projectId') {
         taskData[field as keyof Task] = (value || null) as never
       } else {
         taskData[field as keyof Task] = value as never
@@ -740,6 +746,93 @@ export function TaskModal({
                 />
               </div>
 
+              {/* Group - only show if user is in multiple groups */}
+              {groups.length > 1 && (
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Group</label>
+                  <Controller
+                    name="groupId"
+                    control={control}
+                    render={({ field }) => (
+                      <Select
+                        value={(field.value as string) || '_none'}
+                        onValueChange={(val) => {
+                          const newGroupId = val === '_none' ? null : val
+                          field.onChange(newGroupId)
+                          // Clear project when group changes
+                          setValue('projectId', null)
+                        }}
+                      >
+                        <SelectTrigger className="h-8 text-sm">
+                          <SelectValue placeholder="Select group" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="_none">
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              <Users className="h-3.5 w-3.5" />
+                              <span>No group (admin only)</span>
+                            </div>
+                          </SelectItem>
+                          {groups.map((group) => (
+                            <SelectItem key={group._id} value={group._id}>
+                              <div className="flex items-center gap-2">
+                                <Users className="h-3.5 w-3.5" />
+                                <span>{group.displayName}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                </div>
+              )}
+
+              {/* Project - only show if a group is selected */}
+              {(() => {
+                const selectedGroupId = watch('groupId') as string | null
+                if (!selectedGroupId) return null
+                const groupProjects = projects.filter(p => p.groupId === selectedGroupId)
+                return (
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">Project</label>
+                    <Controller
+                      name="projectId"
+                      control={control}
+                      render={({ field }) => (
+                        <Select
+                          value={(field.value as string) || '_none'}
+                          onValueChange={(val) => field.onChange(val === '_none' ? null : val)}
+                        >
+                          <SelectTrigger className="h-8 text-sm">
+                            <SelectValue placeholder="Select project (optional)" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="_none">
+                              <div className="flex items-center gap-2 text-muted-foreground">
+                                <FolderKanban className="h-3.5 w-3.5" />
+                                <span>No project</span>
+                              </div>
+                            </SelectItem>
+                            {groupProjects.map((project) => (
+                              <SelectItem key={project._id} value={project._id}>
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className="h-2.5 w-2.5 rounded-full flex-shrink-0"
+                                    style={{ backgroundColor: project.color || '#888' }}
+                                  />
+                                  <span>{project.displayName}</span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                  </div>
+                )
+              })()}
+
               {/* Parent Task info */}
               {parentTask && (
                 <div className="space-y-1">
@@ -1132,6 +1225,8 @@ export function TaskModal({
                 workflows={workflows}
                 users={users}
                 allTasks={allTasks}
+                groups={groups}
+                projects={projects}
                 webhookConfig={webhookConfig}
                 onWebhookConfigChange={handleWebhookConfigChange}
                 updateTask={updateTask}

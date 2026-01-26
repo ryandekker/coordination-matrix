@@ -49,10 +49,18 @@ Two methods supported:
 | List views | `GET /api/views` |
 | Get tasks from view | `GET /api/views/{id}/tasks` |
 
+### Groups & Projects
+| Action | Endpoint |
+|--------|----------|
+| List groups | `GET /api/groups` |
+| Get group | `GET /api/groups/{id}` |
+| List projects | `GET /api/projects?groupId={id}` |
+
 ### Reference Data
 | Data | Endpoint |
 |------|----------|
 | Users/Agents | `GET /api/users`, `GET /api/users/agents` |
+| Groups | `GET /api/groups` |
 | Tags | `GET /api/tags` |
 | Lookups (statuses, etc.) | `GET /api/lookups` |
 
@@ -93,11 +101,11 @@ backend/src/swagger/
     ├── index.ts       # Combines all paths
     ├── tasks.ts       # Task endpoints
     ├── workflows.ts   # Workflow & batch job endpoints
-    ├── health-auth.ts # Auth & API key endpoints
+    ├── health-auth.ts # Auth & API key endpoints (including SSO provision/login)
     ├── documents.ts   # Document management
     ├── field-configs.ts # Dynamic field configuration
     ├── events.ts      # SSE endpoints
-    └── other.ts       # Users, views, webhooks, lookups, tags, external jobs
+    └── other.ts       # Users, groups, projects, views, webhooks, lookups, tags, external jobs
 ```
 
 ## Tips for AI Agents

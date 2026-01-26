@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState } from 'react'
 import { AuthProvider } from '@/lib/auth'
+import { GroupProvider } from '@/lib/group-context'
 import { ThemeProvider } from '@/components/theme-provider'
 import { VibeKanbanWebCompanion } from 'vibe-kanban-web-companion'
 
@@ -31,7 +32,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
     >
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          {children}
+          <GroupProvider>
+            {children}
+          </GroupProvider>
         </AuthProvider>
       </QueryClientProvider>
       <VibeKanbanWebCompanion />

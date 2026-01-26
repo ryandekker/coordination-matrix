@@ -166,6 +166,8 @@ export interface Workflow {
   // Organization and display
   folderId?: ObjectId | null;  // Reference to workflow folder
   color?: string;              // Pastel hex color for visual identification
+  // Group access control - workflows must belong to a group (admin-only if null)
+  groupId?: ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
   createdById?: ObjectId | null;

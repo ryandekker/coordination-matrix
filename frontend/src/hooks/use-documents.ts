@@ -33,6 +33,8 @@ interface UseDocumentsOptions {
   workflowRunId?: string
   parentDocumentId?: string | null
   resolveReferences?: boolean
+  groupId?: string
+  projectId?: string
   enabled?: boolean
 }
 

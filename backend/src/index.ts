@@ -46,6 +46,8 @@ import { authRouter } from './routes/auth.js';
 import { tagsRouter } from './routes/tags.js';
 import { documentsRouter } from './routes/documents.js';
 import { variablePackagesRouter } from './routes/variable-packages.js';
+import groupsRouter from './routes/groups.js';
+import projectsRouter from './routes/projects.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { requireAuth } from './middleware/auth.js';
 import { requireScope, SCOPES } from './middleware/authorize.js';
@@ -270,6 +272,10 @@ app.use('/api/documents', requireAuth, requireScope(SCOPES.DOCUMENTS_READ), docu
 
 // Variable packages - configuration data, requires admin for write
 app.use('/api/variable-packages', requireAuth, requireScope(SCOPES.ADMIN), variablePackagesRouter);
+
+// Groups and Projects - access control
+app.use('/api/groups', groupsRouter);  // Auth handled within router
+app.use('/api/projects', projectsRouter);  // Auth handled within router
 
 // Error handling
 app.use(errorHandler);

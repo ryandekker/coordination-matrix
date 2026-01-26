@@ -7,11 +7,15 @@ import { Task, TaskWithChildren, PaginatedResponse, Document as AppDocument, Chi
 import { publishTaskEvent, computeChanges, getSpecificEventTypes } from '../services/event-bus.js';
 import { activityLogService } from '../services/activity-log.js';
 import { workflowExecutionService } from '../services/workflow-execution-service.js';
+import { loadUserGroups, hasResourceAccess } from '../middleware/group-access.js';
 
 // Import helpers from tasks module
 import { toObjectId, buildFilter } from './tasks/index.js';
 
 export const tasksRouter = Router();
+
+// Apply group loading middleware to all routes
+tasksRouter.use(loadUserGroups());
 
 // GET /api/tasks - List tasks with pagination, filtering, and sorting
 tasksRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
@@ -29,7 +33,8 @@ tasksRouter.get('/', async (req: Request, res: Response, next: NextFunction) => 
     const limitNum = Math.min(200, Math.max(1, parseInt(limit as string, 10) || 50));
     const skip = (pageNum - 1) * limitNum;
 
-    const filter = buildFilter(req.query as Record<string, unknown>, req.user?.userId);
+    // Pass request context to buildFilter for group access filtering
+    const filter = buildFilter(req.query as Record<string, unknown>, req.user?.userId, req);
     const sort: Sort = { [sortBy as string]: sortOrder === 'asc' ? 1 : -1 };
 
     const [tasks, total] = await Promise.all([
@@ -434,6 +439,12 @@ tasksRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) 
       throw createError('Task not found', 404);
     }
 
+    // Check group access
+    const hasAccess = await hasResourceAccess(req, task.groupId);
+    if (!hasAccess) {
+      throw createError('You do not have access to this task', 403);
+    }
+
     let result: Task | TaskWithChildren = task;
 
     // Get child count and status summary
@@ -671,6 +682,8 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
 
     const now = new Date();
     let parentId: ObjectId | null = null;
+    let groupId: ObjectId | null = null;
+    let projectId: ObjectId | null = null;
 
     // Handle parent task relationship
     if (taskData.parentId) {
@@ -680,6 +693,27 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       if (!parent) {
         throw createError('Parent task not found', 404);
       }
+
+      // Inherit groupId and projectId from parent if not explicitly set
+      if (!taskData.groupId && parent.groupId) {
+        groupId = parent.groupId;
+      }
+      if (!taskData.projectId && parent.projectId) {
+        projectId = parent.projectId;
+      }
+    }
+
+    // Handle explicit groupId and projectId
+    if (taskData.groupId) {
+      groupId = toObjectId(taskData.groupId);
+      // Validate user has access to this group
+      const hasAccess = await hasResourceAccess(req, groupId);
+      if (!hasAccess) {
+        throw createError('You do not have access to this group', 403);
+      }
+    }
+    if (taskData.projectId) {
+      projectId = toObjectId(taskData.projectId);
     }
 
     // Capture triggerWorkflowId for flow tasks
@@ -691,6 +725,8 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       extraPrompt: taskData.extraPrompt || '',
       status: taskData.status || 'pending',
       urgency: taskData.urgency || 'normal',
+      groupId,
+      projectId,
       parentId,
       workflowId: taskData.workflowId ? toObjectId(taskData.workflowId) : null,
       workflowStage: taskData.workflowStage || '',
@@ -816,6 +852,12 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
       throw createError('Task not found', 404);
     }
 
+    // Check group access
+    const hasAccess = await hasResourceAccess(req, originalTask.groupId);
+    if (!hasAccess) {
+      throw createError('You do not have access to this task', 403);
+    }
+
     // Remove fields that shouldn't be updated directly
     delete updates._id;
     delete updates.createdAt;
@@ -838,10 +880,18 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     }
 
     // Convert ID fields
-    const idFields = ['parentId', 'assigneeId', 'createdById', 'workflowId', 'workflowRunId', 'triggerWorkflowId'];
+    const idFields = ['parentId', 'assigneeId', 'createdById', 'workflowId', 'workflowRunId', 'triggerWorkflowId', 'groupId', 'projectId'];
     for (const field of idFields) {
       if (updates[field] !== undefined) {
         updates[field] = updates[field] ? toObjectId(updates[field]) : null;
+      }
+    }
+
+    // If groupId is being changed, validate access to the new group
+    if (updates.groupId && updates.groupId.toString() !== originalTask.groupId?.toString()) {
+      const hasAccess = await hasResourceAccess(req, updates.groupId);
+      if (!hasAccess) {
+        throw createError('You do not have access to the target group', 403);
       }
     }
 
@@ -1515,6 +1565,12 @@ tasksRouter.delete('/:id', async (req: Request, res: Response, next: NextFunctio
     const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
     if (!task) {
       throw createError('Task not found', 404);
+    }
+
+    // Check group access
+    const hasAccess = await hasResourceAccess(req, task.groupId);
+    if (!hasAccess) {
+      throw createError('You do not have access to this task', 403);
     }
 
     const now = new Date();

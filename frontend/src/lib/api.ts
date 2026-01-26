@@ -534,6 +534,150 @@ export const usersApi = {
   },
 }
 
+// Groups API
+export const groupsApi = {
+  list: async (params?: { all?: boolean }): Promise<ApiResponse<Group[]>> => {
+    const searchParams = new URLSearchParams()
+    if (params?.all) searchParams.set('all', 'true')
+    const queryString = searchParams.toString()
+    const response = await authFetch(`${API_BASE}/groups${queryString ? `?${queryString}` : ''}`)
+    return handleResponse(response)
+  },
+
+  get: async (id: string): Promise<ApiResponse<Group>> => {
+    const response = await authFetch(`${API_BASE}/groups/${id}`)
+    return handleResponse(response)
+  },
+
+  create: async (data: {
+    name: string
+    displayName: string
+    description?: string
+    visibility?: GroupVisibility
+  }): Promise<ApiResponse<Group>> => {
+    const response = await authFetch(`${API_BASE}/groups`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  update: async (id: string, data: {
+    displayName?: string
+    description?: string
+    visibility?: GroupVisibility
+  }): Promise<ApiResponse<Group>> => {
+    const response = await authFetch(`${API_BASE}/groups/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  delete: async (id: string): Promise<ApiResponse<void>> => {
+    const response = await authFetch(`${API_BASE}/groups/${id}`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
+
+  // Member management
+  getMembers: async (id: string): Promise<ApiResponse<GroupMember[]>> => {
+    const response = await authFetch(`${API_BASE}/groups/${id}/members`)
+    return handleResponse(response)
+  },
+
+  addMember: async (id: string, data: { userId: string; role?: GroupRole }): Promise<ApiResponse<Group>> => {
+    const response = await authFetch(`${API_BASE}/groups/${id}/members`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  updateMemberRole: async (id: string, userId: string, role: GroupRole): Promise<ApiResponse<Group>> => {
+    const response = await authFetch(`${API_BASE}/groups/${id}/members/${userId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role }),
+    })
+    return handleResponse(response)
+  },
+
+  removeMember: async (id: string, userId: string): Promise<ApiResponse<void>> => {
+    const response = await authFetch(`${API_BASE}/groups/${id}/members/${userId}`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
+}
+
+// Projects API
+export const projectsApi = {
+  list: async (params?: { groupId?: string; status?: ProjectStatus }): Promise<ApiResponse<Project[]>> => {
+    const searchParams = new URLSearchParams()
+    if (params?.groupId) searchParams.set('groupId', params.groupId)
+    if (params?.status) searchParams.set('status', params.status)
+    const queryString = searchParams.toString()
+    const response = await authFetch(`${API_BASE}/projects${queryString ? `?${queryString}` : ''}`)
+    return handleResponse(response)
+  },
+
+  get: async (id: string): Promise<ApiResponse<Project>> => {
+    const response = await authFetch(`${API_BASE}/projects/${id}`)
+    return handleResponse(response)
+  },
+
+  create: async (data: {
+    name: string
+    displayName: string
+    description?: string
+    groupId: string
+    color?: string
+  }): Promise<ApiResponse<Project>> => {
+    const response = await authFetch(`${API_BASE}/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  update: async (id: string, data: {
+    displayName?: string
+    description?: string
+    status?: ProjectStatus
+    color?: string
+  }): Promise<ApiResponse<Project>> => {
+    const response = await authFetch(`${API_BASE}/projects/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
+
+  delete: async (id: string): Promise<ApiResponse<void>> => {
+    const response = await authFetch(`${API_BASE}/projects/${id}`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
+
+  getStats: async (groupId: string): Promise<ApiResponse<Record<string, {
+    totalTasks: number
+    pendingTasks: number
+    inProgressTasks: number
+    completedTasks: number
+  }>>> => {
+    const response = await authFetch(`${API_BASE}/projects/stats?groupId=${groupId}`)
+    return handleResponse(response)
+  },
+}
+
 // Workflows API
 export const workflowsApi = {
   list: async (options?: { includeInactive?: boolean }): Promise<ApiResponse<Workflow[]>> => {
@@ -976,6 +1120,8 @@ export interface Task {
   extraPrompt?: string
   status: string
   urgency?: string
+  groupId?: string | null
+  projectId?: string | null
   parentId: string | null
   workflowId?: string | null
   workflowRunId?: string | null
@@ -1121,6 +1267,48 @@ export interface User {
 
 // Well-known system user ID (matches backend)
 export const SYSTEM_USER_ID = '000000000000000000000001'
+
+// Group types
+export type GroupRole = 'owner' | 'admin' | 'member' | 'viewer'
+export type GroupVisibility = 'private' | 'internal'
+
+export interface GroupMember {
+  userId: string
+  role: GroupRole
+  addedAt: string
+  addedById?: string | null
+  user?: User  // Resolved user info
+}
+
+export interface Group {
+  _id: string
+  name: string              // Unique slug identifier
+  displayName: string
+  description?: string
+  members: GroupMember[]
+  visibility: GroupVisibility
+  defaultProjectRole?: GroupRole
+  createdById?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+// Project types
+export type ProjectStatus = 'active' | 'archived'
+
+export interface Project {
+  _id: string
+  name: string              // Unique slug within group
+  displayName: string
+  description?: string
+  groupId: string
+  status: ProjectStatus
+  color?: string            // Hex color for visual identification
+  createdById?: string | null
+  createdAt: string
+  updatedAt: string
+  group?: Group             // Resolved group info
+}
 
 /**
  * Check if a user is the system user
@@ -1277,6 +1465,7 @@ export interface StartWorkflowInput {
 export const workflowRunsApi = {
   list: async (params?: {
     workflowId?: string
+    groupId?: string
     status?: WorkflowRunStatus | WorkflowRunStatus[]
     dateFrom?: string
     dateTo?: string
@@ -1285,6 +1474,7 @@ export const workflowRunsApi = {
   }): Promise<PaginatedResponse<WorkflowRun>> => {
     const searchParams = new URLSearchParams()
     if (params?.workflowId) searchParams.append('workflowId', params.workflowId)
+    if (params?.groupId) searchParams.append('groupId', params.groupId)
     if (params?.status) {
       const statuses = Array.isArray(params.status) ? params.status : [params.status]
       searchParams.append('status', statuses.join(','))
@@ -1523,12 +1713,13 @@ export const activityLogsApi = {
   },
 
   getRecentActivity: async (
-    params?: { limit?: number; offset?: number; eventTypes?: string[]; actorId?: string }
+    params?: { limit?: number; offset?: number; eventTypes?: string[]; actorId?: string; groupId?: string }
   ): Promise<{ data: ActivityLogEntry[]; pagination: { limit: number; offset: number; total: number } }> => {
     const searchParams = new URLSearchParams()
     if (params?.limit) searchParams.append('limit', String(params.limit))
     if (params?.offset) searchParams.append('offset', String(params.offset))
     if (params?.actorId) searchParams.append('actorId', params.actorId)
+    if (params?.groupId) searchParams.append('groupId', params.groupId)
     if (params?.eventTypes) {
       params.eventTypes.forEach(t => searchParams.append('eventTypes', t))
     }
@@ -1957,6 +2148,8 @@ export const documentsApi = {
     workflowRunId?: string
     parentDocumentId?: string | null
     resolveReferences?: boolean
+    groupId?: string
+    projectId?: string
   }): Promise<PaginatedResponse<Document>> => {
     const searchParams = new URLSearchParams()
     if (params?.page) searchParams.append('page', String(params.page))
@@ -1982,6 +2175,8 @@ export const documentsApi = {
       searchParams.append('parentDocumentId', params.parentDocumentId || '__root__')
     }
     if (params?.resolveReferences) searchParams.append('resolveReferences', 'true')
+    if (params?.groupId) searchParams.append('groupId', params.groupId)
+    if (params?.projectId) searchParams.append('projectId', params.projectId)
     const response = await authFetch(`${API_BASE}/documents?${searchParams}`)
     return handleResponse(response)
   },
@@ -2002,6 +2197,8 @@ export const documentsApi = {
     parentDocumentId?: string | null
     workflowRunId?: string | null
     metadata?: Record<string, unknown>
+    groupId?: string
+    projectId?: string
   }): Promise<ApiResponse<Document>> => {
     const response = await authFetch(`${API_BASE}/documents`, {
       method: 'POST',

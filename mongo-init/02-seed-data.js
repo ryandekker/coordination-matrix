@@ -457,6 +457,134 @@ const userResult = db.users.insertMany(users);
 const userIds = Object.values(userResult.insertedIds);
 
 // ============================================================================
+// GROUPS - Access control groups
+// ============================================================================
+
+const defaultGroupId = ObjectId();
+const engineeringGroupId = ObjectId();
+const marketingGroupId = ObjectId();
+
+const groups = [
+  {
+    _id: defaultGroupId,
+    name: 'default',
+    displayName: 'Default',
+    description: 'Default organization group with access to all resources',
+    visibility: 'internal',
+    members: [
+      { userId: userIds[0], role: 'owner', addedAt: new Date(), addedById: null },  // Admin
+      { userId: userIds[1], role: 'admin', addedAt: new Date(), addedById: userIds[0] },  // Alex Operator
+      { userId: userIds[2], role: 'member', addedAt: new Date(), addedById: userIds[0] },  // Sarah Chen
+      { userId: userIds[3], role: 'member', addedAt: new Date(), addedById: userIds[0] },  // Marcus Johnson
+      { userId: userIds[4], role: 'viewer', addedAt: new Date(), addedById: userIds[0] },  // Emma Wilson
+      { userId: userIds[5], role: 'member', addedAt: new Date(), addedById: userIds[0] },  // Code Reviewer bot
+      { userId: userIds[6], role: 'member', addedAt: new Date(), addedById: userIds[0] },  // Content Writer bot
+      { userId: userIds[7], role: 'member', addedAt: new Date(), addedById: userIds[0] },  // Research Assistant bot
+    ],
+    createdById: userIds[0],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    _id: engineeringGroupId,
+    name: 'engineering',
+    displayName: 'Engineering',
+    description: 'Engineering team for software development',
+    visibility: 'private',
+    members: [
+      { userId: userIds[0], role: 'owner', addedAt: new Date(), addedById: null },
+      { userId: userIds[1], role: 'admin', addedAt: new Date(), addedById: userIds[0] },
+      { userId: userIds[2], role: 'member', addedAt: new Date(), addedById: userIds[0] },
+      { userId: userIds[5], role: 'member', addedAt: new Date(), addedById: userIds[0] },  // Code Reviewer
+    ],
+    createdById: userIds[0],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    _id: marketingGroupId,
+    name: 'marketing',
+    displayName: 'Marketing',
+    description: 'Marketing team for campaigns and content',
+    visibility: 'private',
+    members: [
+      { userId: userIds[0], role: 'owner', addedAt: new Date(), addedById: null },
+      { userId: userIds[1], role: 'member', addedAt: new Date(), addedById: userIds[0] },
+      { userId: userIds[2], role: 'admin', addedAt: new Date(), addedById: userIds[0] },
+      { userId: userIds[3], role: 'member', addedAt: new Date(), addedById: userIds[0] },
+      { userId: userIds[6], role: 'member', addedAt: new Date(), addedById: userIds[0] },  // Content Writer
+    ],
+    createdById: userIds[0],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+];
+
+db.groups.insertMany(groups);
+
+// ============================================================================
+// PROJECTS - Organizational units within groups
+// ============================================================================
+
+const webAppProjectId = ObjectId();
+const apiProjectId = ObjectId();
+const q4CampaignProjectId = ObjectId();
+const websiteRedesignProjectId = ObjectId();
+
+const projects = [
+  {
+    _id: webAppProjectId,
+    name: 'web-app',
+    displayName: 'Web Application',
+    description: 'Main web application development',
+    groupId: engineeringGroupId,
+    status: 'active',
+    color: '#3B82F6',  // Blue
+    createdById: userIds[0],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    _id: apiProjectId,
+    name: 'api',
+    displayName: 'API Development',
+    description: 'REST and GraphQL API development',
+    groupId: engineeringGroupId,
+    status: 'active',
+    color: '#10B981',  // Green
+    createdById: userIds[0],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    _id: q4CampaignProjectId,
+    name: 'q4-campaign',
+    displayName: 'Q4 Campaign',
+    description: 'Q4 2024 marketing campaign',
+    groupId: marketingGroupId,
+    status: 'active',
+    color: '#F59E0B',  // Amber
+    createdById: userIds[0],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    _id: websiteRedesignProjectId,
+    name: 'website-redesign',
+    displayName: 'Website Redesign',
+    description: 'Company website redesign project',
+    groupId: marketingGroupId,
+    status: 'active',
+    color: '#8B5CF6',  // Purple
+    createdById: userIds[0],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+];
+
+db.projects.insertMany(projects);
+
+// ============================================================================
 // WORKFLOW FOLDERS
 // ============================================================================
 
@@ -514,6 +642,7 @@ const workflows = [
     stages: ['Draft', 'Review', 'Approved', 'Published'],
     folderId: workflowFolderContentId,
     color: WORKFLOW_COLORS.sky,
+    groupId: marketingGroupId,  // Marketing group owns this workflow
     createdAt: new Date(),
     updatedAt: new Date(),
   },
@@ -524,6 +653,7 @@ const workflows = [
     stages: ['Reported', 'Investigating', 'Fix in Progress', 'Testing', 'Deployed'],
     folderId: workflowFolderEngineeringId,
     color: WORKFLOW_COLORS.coral,
+    groupId: engineeringGroupId,  // Engineering group owns this workflow
     createdAt: new Date(),
     updatedAt: new Date(),
   },
@@ -534,6 +664,7 @@ const workflows = [
     stages: ['Planning', 'Design', 'Development', 'Code Review', 'QA', 'Released'],
     folderId: workflowFolderEngineeringId,
     color: WORKFLOW_COLORS.mint,
+    groupId: engineeringGroupId,  // Engineering group owns this workflow
     createdAt: new Date(),
     updatedAt: new Date(),
   },
@@ -560,6 +691,8 @@ const rootTask1 = {
   extraPrompt: 'Focus on product launches and holiday promotions',
   status: 'in_progress',
   urgency: 'high',
+  groupId: marketingGroupId,
+  projectId: q4CampaignProjectId,
   parentId: null,
   workflowId: workflowIds[0],
   workflowStage: 'Review',
@@ -582,6 +715,8 @@ const childTask1_1 = {
   extraPrompt: '',
   status: 'in_progress',
   urgency: 'high',
+  groupId: marketingGroupId,
+  projectId: q4CampaignProjectId,
   parentId: rootTask1Id,
   workflowId: null,
   workflowStage: '',
@@ -603,6 +738,8 @@ const grandchildTask1_1_1 = {
   extraPrompt: '',
   status: 'completed',
   urgency: 'normal',
+  groupId: marketingGroupId,
+  projectId: q4CampaignProjectId,
   parentId: childTask1_1Id,
   workflowId: null,
   workflowStage: '',
@@ -624,6 +761,8 @@ const grandchildTask1_1_2 = {
   extraPrompt: 'Use conversational tone, highlight value propositions',
   status: 'in_progress',
   urgency: 'high',
+  groupId: marketingGroupId,
+  projectId: q4CampaignProjectId,
   parentId: childTask1_1Id,
   workflowId: null,
   workflowStage: '',
@@ -646,6 +785,8 @@ const childTask1_2 = {
   extraPrompt: '',
   status: 'pending',
   urgency: 'normal',
+  groupId: marketingGroupId,
+  projectId: q4CampaignProjectId,
   parentId: rootTask1Id,
   workflowId: null,
   workflowStage: '',
@@ -668,6 +809,8 @@ const rootTask2 = {
   extraPrompt: '',
   status: 'on_hold',
   urgency: 'normal',
+  groupId: marketingGroupId,
+  projectId: websiteRedesignProjectId,
   parentId: null,
   workflowId: workflowIds[2],
   workflowStage: 'Design',
@@ -689,6 +832,8 @@ const rootTask3 = {
   extraPrompt: 'Check session handling and token expiration',
   status: 'in_progress',
   urgency: 'urgent',
+  groupId: engineeringGroupId,
+  projectId: webAppProjectId,
   parentId: null,
   workflowId: workflowIds[1],
   workflowStage: 'Fix in Progress',
@@ -710,6 +855,8 @@ const rootTask4 = {
   extraPrompt: '',
   status: 'pending',
   urgency: 'low',
+  groupId: engineeringGroupId,
+  projectId: apiProjectId,
   parentId: null,
   workflowId: null,
   workflowStage: '',
@@ -723,7 +870,7 @@ const rootTask4 = {
   dueAt: nextWeek,
 };
 
-// Root task 5: Completed task
+// Root task 5: Completed task (default group, no project)
 const rootTask5 = {
   _id: ObjectId(),
   title: 'Quarterly Performance Review',
@@ -731,6 +878,8 @@ const rootTask5 = {
   extraPrompt: '',
   status: 'completed',
   urgency: 'normal',
+  groupId: defaultGroupId,
+  projectId: null,
   parentId: null,
   workflowId: null,
   workflowStage: '',
@@ -744,7 +893,7 @@ const rootTask5 = {
   dueAt: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
 };
 
-// Root task 6: Cancelled task
+// Root task 6: Cancelled task (default group, no project)
 const rootTask6 = {
   _id: ObjectId(),
   title: 'Legacy System Migration',
@@ -752,6 +901,8 @@ const rootTask6 = {
   extraPrompt: '',
   status: 'cancelled',
   urgency: 'low',
+  groupId: defaultGroupId,
+  projectId: null,
   parentId: null,
   workflowId: null,
   workflowStage: '',
@@ -774,6 +925,8 @@ const additionalTasks = [
     extraPrompt: 'Follow system preferences by default',
     status: 'pending',
     urgency: 'low',
+    groupId: engineeringGroupId,
+    projectId: webAppProjectId,
     parentId: null,
     workflowId: workflowIds[2],
     workflowStage: 'Planning',
@@ -793,6 +946,8 @@ const additionalTasks = [
     extraPrompt: '',
     status: 'in_progress',
     urgency: 'high',
+    groupId: engineeringGroupId,
+    projectId: webAppProjectId,
     parentId: null,
     workflowId: null,
     workflowStage: '',
@@ -812,6 +967,8 @@ const additionalTasks = [
     extraPrompt: 'Identify top 3 improvement areas',
     status: 'completed',
     urgency: 'normal',
+    groupId: marketingGroupId,
+    projectId: null,
     parentId: null,
     workflowId: null,
     workflowStage: '',
@@ -1079,6 +1236,8 @@ db.tags.insertMany(tags);
 const documents = [
   {
     title: 'Social Media Posting Guidelines',
+    groupId: marketingGroupId,
+    projectId: null,
     content: `# Social Media Posting Guidelines
 
 ## Overview
@@ -1145,6 +1304,8 @@ This document outlines the standards and best practices for all social media con
   },
   {
     title: 'Q4 2024 Content Strategy',
+    groupId: marketingGroupId,
+    projectId: q4CampaignProjectId,
     content: `# Q4 2024 Content Strategy
 
 ## Executive Summary
@@ -1211,6 +1372,8 @@ This document outlines our content strategy for Q4 2024, focusing on product lau
   },
   {
     title: 'Content Approval Workflow Template',
+    groupId: marketingGroupId,
+    projectId: null,
     content: `# Content Approval Workflow
 
 ## Template Variables
@@ -1272,6 +1435,8 @@ Timeline: 3 business days
   },
   {
     title: 'Brand Voice Reference Guide',
+    groupId: marketingGroupId,
+    projectId: null,
     content: `# Brand Voice Reference Guide
 
 ## Our Brand Personality
@@ -1335,6 +1500,8 @@ We are **knowledgeable**, **approachable**, and **innovative**.
   },
   {
     title: 'Email Campaign Checklist',
+    groupId: marketingGroupId,
+    projectId: q4CampaignProjectId,
     content: `# Email Campaign Checklist
 
 ## Pre-Send Checklist

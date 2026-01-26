@@ -28,6 +28,7 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  FolderKanban,
   MoreHorizontal,
   Pencil,
   Variable,
@@ -36,12 +37,18 @@ import { Logo } from '@/components/ui/logo'
 import { View, ViewFolder } from '@/lib/api'
 import { useViews, useDeleteView, useViewFolders, useCreateViewFolder, useUpdateViewFolder, useDeleteViewFolder, useUpdateView } from '@/hooks/use-tasks'
 import { useAuth } from '@/lib/auth'
+import { useGroupContext } from '@/lib/group-context'
+import { Building2, Check } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu'
 import { ChangePasswordDialog } from '@/components/auth/change-password-dialog'
 import { Button } from '@/components/ui/button'
@@ -72,6 +79,7 @@ interface NavItem {
 
 const staticNavigation: NavItem[] = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard, exact: true },
+  { name: 'Projects', href: '/projects', icon: FolderKanban, exact: true },
   { name: 'All Tasks', href: '/tasks', icon: ListTodo, exact: true },
   { name: 'Documents', href: '/documents', icon: FileText, exact: true },
   { name: 'Activity', href: '/activity', icon: Activity, exact: true },
@@ -85,6 +93,8 @@ const bottomNavigation: NavItem[] = [
 ]
 
 const settingsNavigation: NavItem[] = [
+  { name: 'Groups', href: '/settings/groups', icon: Users, exact: true },
+  { name: 'Projects', href: '/settings/projects', icon: FolderKanban, exact: true },
   { name: 'Field Configuration', href: '/settings/fields', icon: Database, exact: true },
   { name: 'Tags', href: '/settings/tags', icon: Tags, exact: true },
   { name: 'Variables', href: '/settings/variables', icon: Variable, exact: true },
@@ -235,6 +245,10 @@ export function Sidebar() {
   const [settingsExpanded, setSettingsExpanded] = useState(() => pathname.startsWith('/settings'))
   const [changePasswordOpen, setChangePasswordOpen] = useState(false)
   const { user, logout } = useAuth()
+  const { currentGroup, groups, setCurrentGroup, isLoadingGroups } = useGroupContext()
+
+  // Check if user can switch groups (has more than one group)
+  const canSwitchGroups = groups.length > 1
 
   // Dialog states
   const [createFolderOpen, setCreateFolderOpen] = useState(false)
@@ -522,14 +536,45 @@ export function Sidebar() {
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground">
                 <User className="h-4 w-4" />
               </div>
-              <div className="flex-1 text-left text-sm">
+              <div className="flex-1 text-left text-sm min-w-0">
                 <p className="font-medium truncate">{user?.displayName || 'User'}</p>
-                <p className="text-muted-foreground truncate text-xs">{user?.email || ''}</p>
+                <div className="flex items-center gap-1 text-muted-foreground text-xs">
+                  <Building2 className="h-3 w-3 flex-shrink-0" />
+                  <span className="truncate">{currentGroup?.displayName || 'No group'}</span>
+                </div>
               </div>
-              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
+            {canSwitchGroups && (
+              <>
+                <DropdownMenuLabel className="text-xs text-muted-foreground">
+                  Current Group
+                </DropdownMenuLabel>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <Building2 className="mr-2 h-4 w-4" />
+                    {currentGroup?.displayName || 'Select group'}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    {groups.map((group) => (
+                      <DropdownMenuItem
+                        key={group._id}
+                        onClick={() => setCurrentGroup(group)}
+                        className="flex items-center justify-between"
+                      >
+                        <span className="truncate">{group.displayName}</span>
+                        {currentGroup?._id === group._id && (
+                          <Check className="h-4 w-4 text-primary ml-2" />
+                        )}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                <DropdownMenuSeparator />
+              </>
+            )}
             <DropdownMenuItem onClick={() => setChangePasswordOpen(true)}>
               <Key className="mr-2 h-4 w-4" />
               Change Password
