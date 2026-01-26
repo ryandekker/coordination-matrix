@@ -752,7 +752,7 @@ workflowsRouter.post('/:workflowId/steps/:stepId/test-execute', async (req: Requ
   try {
     const db = getDb();
     const { workflowId, stepId } = req.params;
-    const { inputPayload, dryRun } = req.body;
+    const { inputPayload, dryRun, workflowRunId } = req.body;
 
     if (!ObjectId.isValid(workflowId)) {
       throw createError('Invalid workflow ID', 400);
@@ -771,6 +771,18 @@ workflowsRouter.post('/:workflowId/steps/:stepId/test-execute', async (req: Requ
     const step = workflow.steps?.find(s => s.id === stepId);
     if (!step) {
       throw createError('Step not found in workflow', 404);
+    }
+
+    // Get trigger payload from workflow run if provided (needed for trigger.payload.* paths)
+    let triggerPayload: Record<string, unknown> | undefined;
+    if (workflowRunId && ObjectId.isValid(workflowRunId as string)) {
+      const run = await db.collection('workflow_runs').findOne({
+        _id: new ObjectId(workflowRunId as string),
+        workflowId: new ObjectId(workflowId),
+      });
+      if (run?.inputPayload) {
+        triggerPayload = run.inputPayload as Record<string, unknown>;
+      }
     }
 
     const stepType = step.stepType || 'agent';
@@ -807,26 +819,80 @@ workflowsRouter.post('/:workflowId/steps/:stepId/test-execute', async (req: Requ
       }
 
       case 'decision': {
-        // Evaluate conditions against input
+        // Evaluate conditions against input using the same logic as workflow execution
         const connections = step.connections || [];
         let selectedBranch = null;
+
+        // Use decisionField or inputPath to determine which field to check
+        const effectiveDecisionField = step.decisionField || step.inputPath;
+
+        // Helper to resolve decision field value (supports trigger.payload.* paths)
+        // Uses triggerPayload from the workflow run if available
+        const resolveValue = (field: string, payload: Record<string, unknown>): unknown => {
+          // Handle trigger.payload.* paths - use triggerPayload from workflow run
+          if (field.startsWith('trigger.payload.')) {
+            const triggerPath = field.substring('trigger.payload.'.length);
+            // First try the triggerPayload from the workflow run (fetched above)
+            if (triggerPayload) {
+              return getNestedValue(triggerPayload, triggerPath);
+            }
+            // Fallback: look in payload.trigger or payload.inputPayload.trigger
+            const inlineTrigger = (payload as Record<string, unknown>).trigger as Record<string, unknown> | undefined;
+            if (inlineTrigger) {
+              return getNestedValue(inlineTrigger, triggerPath);
+            }
+            const nestedTrigger = getNestedValue(payload, 'inputPayload.trigger') as Record<string, unknown> | undefined;
+            if (nestedTrigger) {
+              return getNestedValue(nestedTrigger, triggerPath);
+            }
+            return undefined;
+          }
+          if (field === 'trigger.payload') {
+            // Return the entire trigger payload
+            return triggerPayload || (payload as Record<string, unknown>).trigger || getNestedValue(payload, 'inputPayload.trigger');
+          }
+          return getNestedValue(payload, field);
+        };
+
+        // Get the actual value to compare
+        const actualValue = effectiveDecisionField
+          ? resolveValue(effectiveDecisionField, inputPayload || {})
+          : undefined;
 
         for (const conn of connections) {
           if (!conn.condition) continue;
 
-          // Simple condition evaluation (for preview purposes)
-          try {
-            const conditionResult = evaluateSimpleCondition(conn.condition, inputPayload || {});
-            if (conditionResult) {
+          // When decisionField is set, condition is just the value(s) to match
+          // Otherwise, condition must be in "field:value" or "path == 'value'" format
+          if (effectiveDecisionField) {
+            // Simple case-insensitive value match (supports comma-separated values)
+            const expectedValues = conn.condition.split(',').map(v => v.trim().toLowerCase());
+            const actualValueStr = String(actualValue).toLowerCase();
+            if (expectedValues.includes(actualValueStr)) {
               selectedBranch = {
                 targetStepId: conn.targetStepId,
                 condition: conn.condition,
                 label: conn.label,
+                matchedValue: actualValue,
+                decisionField: effectiveDecisionField,
               };
               break;
             }
-          } catch {
-            // Condition evaluation failed, continue to next
+          } else {
+            // Legacy format: use evaluateSimpleCondition
+            try {
+              const conditionResult = evaluateSimpleCondition(conn.condition, inputPayload || {});
+              if (conditionResult) {
+                selectedBranch = {
+                  targetStepId: conn.targetStepId,
+                  condition: conn.condition,
+                  label: conn.label,
+                };
+                break;
+              }
+            } catch {
+              // Condition evaluation failed, continue to next
+            }
           }
         }
 
@@ -835,13 +901,23 @@ workflowsRouter.post('/:workflowId/steps/:stepId/test-execute', async (req: Requ
           selectedBranch = {
             targetStepId: step.defaultConnection,
             condition: 'default',
+            matchedValue: actualValue,
+            decisionField: effectiveDecisionField,
+            isDefault: true,
           };
         }
 
         res.json({
           data: {
             success: true,
-            output: { selectedBranch },
+            output: {
+              selectedBranch,
+              debug: {
+                decisionField: effectiveDecisionField,
+                actualValue,
+                availableBranches: connections.map(c => c.condition),
+              },
+            },
             executionTimeMs: Date.now() - startTime,
             stepType: 'decision',
           },

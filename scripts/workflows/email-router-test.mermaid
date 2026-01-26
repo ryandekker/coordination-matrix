@@ -1,0 +1,57 @@
+flowchart TD
+
+    69584ddea45a543a43369e52["Classify Email + Generate Routing Payload"]
+
+    69584ddea45a543a43369e53{"Route Type?"}
+
+    69584ddea45a543a43369e54[["Run: Draft Email Response"]]
+
+    69584ddea45a543a43369e55[["Run: Digest Email Item"]]
+
+    69584ddea45a543a43369e56[["Run: Label Email Noise"]]
+
+    69584ddea45a543a43369e58[["Run: Queue Email Action"]]
+
+    69584ddea45a543a43369e52 --> 69584ddea45a543a43369e53
+
+    69584ddea45a543a43369e53 -->|"Noise"| 69584ddea45a543a43369e56
+
+    69584ddea45a543a43369e53 -->|"Digest"| 69584ddea45a543a43369e55
+
+    69584ddea45a543a43369e53 -->|"Response Required"| 69584ddea45a543a43369e54
+
+    69584ddea45a543a43369e53 -->|"Actionable"| 69584ddea45a543a43369e58
+
+    classDef agent fill:#3B82F6,color:#fff,stroke:#2563EB
+
+    classDef external fill:#F97316,color:#fff,stroke:#EA580C
+
+    classDef manual fill:#8B5CF6,color:#fff,stroke:#7C3AED
+
+    classDef decision fill:#F59E0B,color:#fff,stroke:#D97706
+
+    classDef foreach fill:#10B981,color:#fff,stroke:#059669
+
+    classDef join fill:#6366F1,color:#fff,stroke:#4F46E5
+
+    classDef flow fill:#EC4899,color:#fff,stroke:#DB2777
+
+    class 69584ddea45a543a43369e52 agent
+
+    class 69584ddea45a543a43369e53 decision
+
+    class 69584ddea45a543a43369e54,69584ddea45a543a43369e55,69584ddea45a543a43369e56,69584ddea45a543a43369e58 flow
+
+    %% Step configuration (preserved on import)
+
+    %% @step(69584ddea45a543a43369e52): {"defaultAssigneeId":"694a2fd75a47610e83b966bf"}
+
+    %% @step(69584ddea45a543a43369e53): {"inputPath":"output.output.result.category"}
+
+    %% @step(69584ddea45a543a43369e54): {"flowId":"696f16104c83fe5dfd7aa501","inputMapping":{"email":"{{trigger.payload}}","classification":"{{steps.69584ddea45a543a43369e52.output.result}}"}}
+
+    %% @step(69584ddea45a543a43369e55): {"flowId":"696aadc8d411fe03908e1316","inputMapping":{"classification":"{{output}}","initialEmail":"{{inputPayload}}"}}
+
+    %% @step(69584ddea45a543a43369e56): {"flowId":"69683231c060c264565d6d0f","inputMapping":{"email":"{{trigger.payload}}","classification":"{{steps.69584ddea45a543a43369e52.output.result}}"}}
+
+    %% @step(69584ddea45a543a43369e58): {"flowId":"695842ada45a543a43369e06","inputMapping":{"email":"{{input.email}}","normalized":"{{steps.ingest.output.normalized}}","classification":"{{steps.classify.output}}","action":"{{steps.classify.output.action}}","tags":"{{steps.classify.output.tags}}"}}

@@ -2422,7 +2422,7 @@ function InputPreviewSection({
   stepId: string
   stepIndex: number
   inputConfig?: StepInputConfig
-  onResolvedInputChange?: (input: Record<string, unknown> | null) => void
+  onResolvedInputChange?: (input: Record<string, unknown> | null, workflowRunId?: string) => void
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [isLoadingRuns, setIsLoadingRuns] = useState(false)
@@ -2490,11 +2490,11 @@ function InputPreviewSection({
       const data = await response.json()
       const previewData = data.data || data
       setPreview(previewData)
-      // Notify parent of resolved input for test execution
-      onResolvedInputChange?.(previewData.resolvedInput || null)
+      // Notify parent of resolved input for test execution (include workflowRunId for trigger.payload.* resolution)
+      onResolvedInputChange?.(previewData.resolvedInput || null, previewData.workflowRunId || runId)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch preview')
-      onResolvedInputChange?.(null)
+      onResolvedInputChange?.(null, undefined)
     } finally {
       setIsLoadingPreview(false)
     }
@@ -2507,12 +2507,21 @@ function InputPreviewSection({
     }
   }, [isOpen, runsLoaded, fetchRuns])
 
-  // Fetch preview when run is selected or inputConfig changes
+  // Fetch preview ONLY when a different run is explicitly selected
+  // Using a ref to track the previous run ID to avoid re-fetching on config changes
+  const lastFetchedRunIdRef = useRef<string | null>(null)
+
   useEffect(() => {
-    if (isOpen && selectedRunId && runsLoaded) {
+    // Only fetch if:
+    // 1. Section is open
+    // 2. A run is selected
+    // 3. Runs have loaded
+    // 4. This is a NEW run selection (not the same run)
+    if (isOpen && selectedRunId && runsLoaded && selectedRunId !== lastFetchedRunIdRef.current) {
+      lastFetchedRunIdRef.current = selectedRunId
       fetchPreview(selectedRunId)
     }
-  }, [isOpen, selectedRunId, runsLoaded, fetchPreview, inputConfig])
+  }, [isOpen, selectedRunId, runsLoaded, fetchPreview])
 
   // Don't show for first step
   if (stepIndex === 0) return null
@@ -2601,9 +2610,10 @@ function InputPreviewSection({
                   className="h-6 text-xs"
                   onClick={() => fetchPreview(selectedRunId || undefined)}
                   disabled={isLoadingPreview}
+                  title="Recalculate preview with current input configuration"
                 >
                   <RefreshCw className={cn("h-3 w-3 mr-1", isLoadingPreview && "animate-spin")} />
-                  Recalculate
+                  Refresh
                 </Button>
               </div>
               <div className="max-h-48 overflow-auto bg-muted/30 rounded p-2">
@@ -2628,12 +2638,14 @@ function TestExecutionSection({
   stepType,
   stepName,
   sampleInput,
+  workflowRunId,
 }: {
   workflowId?: string
   stepId: string
   stepType?: WorkflowStepType
   stepName: string
   sampleInput?: Record<string, unknown> | null
+  workflowRunId?: string
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [isExecuting, setIsExecuting] = useState(false)
@@ -2668,7 +2680,7 @@ function TestExecutionSection({
           'Content-Type': 'application/json',
           ...getAuthHeader(),
         },
-        body: JSON.stringify({ inputPayload: sampleInput }),
+        body: JSON.stringify({ inputPayload: sampleInput, workflowRunId }),
       })
 
       const data = await response.json()
@@ -2858,6 +2870,7 @@ export function StepConfigPanel({
   const [flowSelectorOpen, setFlowSelectorOpen] = useState(false)
   // Shared state for resolved input from InputPreviewSection to TestExecutionSection
   const [sampleInput, setSampleInput] = useState<Record<string, unknown> | null>(null)
+  const [sampleInputRunId, setSampleInputRunId] = useState<string | undefined>(undefined)
   const typeInfo = getStepTypeInfo(step.stepType)
   const TypeIcon = typeInfo.icon
 
@@ -3425,7 +3438,10 @@ The agent will receive task context automatically.`}
               stepId={step.id}
               stepIndex={stepIndex}
               inputConfig={step.inputConfig}
-              onResolvedInputChange={setSampleInput}
+              onResolvedInputChange={(input, runId) => {
+                setSampleInput(input)
+                setSampleInputRunId(runId)
+              }}
             />
             <TestExecutionSection
               workflowId={workflowId}
@@ -3433,6 +3449,7 @@ The agent will receive task context automatically.`}
               stepType={step.stepType}
               stepName={step.name}
               sampleInput={sampleInput}
+              workflowRunId={sampleInputRunId}
             />
           </div>
         )}

@@ -453,12 +453,36 @@ class WorkflowExecutionService {
     });
 
     switch (step.stepType) {
-      case 'trigger':
+      case 'trigger': {
+        // Mark trigger task as completed and publish event to advance workflow
+        // Pass through the inputPayload as the trigger's output so subsequent steps can access it
+        const triggerOutput = this.buildStepOutput(inputPayload || {}, {
+          summary: 'Workflow triggered',
+        });
         await this.tasks.updateOne(
           { _id: task._id },
-          { $set: { status: 'completed' as TaskStatus } }
+          {
+            $set: {
+              status: 'completed' as TaskStatus,
+              updatedAt: new Date(),
+              stepOutput: triggerOutput,
+            }
+          }
         );
+        const updatedTriggerTask = await this.tasks.findOne({ _id: task._id });
+        if (updatedTriggerTask) {
+          await eventBus.publish({
+            type: 'task.status.changed',
+            taskId: updatedTriggerTask._id,
+            task: updatedTriggerTask,
+            changes: [{ field: 'status', oldValue: 'pending', newValue: 'completed' }],
+            actorId: null,
+            actorType: 'system',
+          });
+          console.log(`[WorkflowExecutionService] Published task.status.changed for trigger task ${task._id}`);
+        }
         break;
+      }
 
       case 'agent':
       case 'manual':
@@ -1780,10 +1804,18 @@ class WorkflowExecutionService {
 
     console.log(`[WorkflowExecutionService] executeDecision: step=${step.id}, decisionField=${step.decisionField}, inputPath=${step.inputPath}, effective=${effectiveDecisionField}`);
     console.log(`[WorkflowExecutionService] executeDecision: inputPayload keys: ${Object.keys(inputPayload || {}).join(', ')}`);
+    console.log(`[WorkflowExecutionService] executeDecision: inputPayload.output keys: ${Object.keys((inputPayload?.output as Record<string, unknown>) || {}).join(', ')}`);
+
+    // Debug: show the actual value at the decision field path
+    if (effectiveDecisionField && inputPayload) {
+      const actualValue = this.resolveDecisionFieldValue(effectiveDecisionField, inputPayload, run);
+      console.log(`[WorkflowExecutionService] executeDecision: value at path "${effectiveDecisionField}" = "${actualValue}" (${typeof actualValue})`);
+    }
+    console.log(`[WorkflowExecutionService] executeDecision: full inputPayload: ${JSON.stringify(inputPayload, null, 2).substring(0, 1000)}`);
 
     let selectedConnection = step.connections?.find(conn => {
       if (!conn.condition) return false;
-      const result = this.evaluateCondition(conn.condition, inputPayload, effectiveDecisionField);
+      const result = this.evaluateCondition(conn.condition, inputPayload, effectiveDecisionField, run);
       console.log(`[WorkflowExecutionService] executeDecision: condition "${conn.condition}" -> ${result}`);
       return result;
     });
@@ -1892,7 +1924,46 @@ class WorkflowExecutionService {
     }
   }
 
-  private evaluateCondition(condition: string, payload?: Record<string, unknown>, decisionField?: string): boolean {
+  /**
+   * Resolves a decision field path to its value.
+   * Supports special paths like:
+   * - trigger.payload.* - references the original workflow trigger payload
+   * - output.* - references the step's input payload (standard path)
+   * - Any other path is looked up directly in the inputPayload
+   */
+  private resolveDecisionFieldValue(
+    field: string,
+    inputPayload: Record<string, unknown>,
+    run: WorkflowRun
+  ): unknown {
+    // Handle trigger.payload.* paths - look up from workflow run's inputPayload
+    if (field.startsWith('trigger.payload.')) {
+      const triggerPath = field.substring('trigger.payload.'.length);
+      const triggerPayload = run.inputPayload as Record<string, unknown> | undefined;
+      if (triggerPayload) {
+        const value = getValueByPath(triggerPayload, triggerPath);
+        console.log(`[WorkflowExecutionService] resolveDecisionFieldValue: resolved trigger.payload.${triggerPath} = "${value}"`);
+        return value;
+      }
+      console.log(`[WorkflowExecutionService] resolveDecisionFieldValue: no trigger payload available for path "${field}"`);
+      return undefined;
+    }
+
+    // Handle trigger.payload (entire object)
+    if (field === 'trigger.payload') {
+      return run.inputPayload;
+    }
+
+    // Standard path lookup in inputPayload
+    return getValueByPath(inputPayload, field);
+  }
+
+  private evaluateCondition(
+    condition: string,
+    payload?: Record<string, unknown>,
+    decisionField?: string,
+    run?: WorkflowRun
+  ): boolean {
     if (!condition || !payload) {
       console.log(`[WorkflowExecutionService] evaluateCondition: early return - condition=${!!condition}, payload=${!!payload}`);
       return false;
@@ -1921,7 +1992,12 @@ class WorkflowExecutionService {
       return false;
     }
 
-    const actualValue = getValueByPath(payload, field);
+    // Use resolveDecisionFieldValue if we have a run context (supports trigger.payload.* paths)
+    // Otherwise fall back to direct path lookup
+    const actualValue = run
+      ? this.resolveDecisionFieldValue(field, payload, run)
+      : getValueByPath(payload, field);
+
     const expectedValues = values.split(',').map(v => v.trim().toLowerCase());
     const actualValueStr = String(actualValue).toLowerCase();
     const result = expectedValues.includes(actualValueStr);
@@ -2226,6 +2302,7 @@ class WorkflowExecutionService {
           {
             $set: {
               status: 'completed' as TaskStatus,
+              updatedAt: new Date(),
               stepOutput,
               'metadata.output': result.output,
               'metadata.executionTimeMs': result.executionTimeMs,
@@ -2246,6 +2323,20 @@ class WorkflowExecutionService {
           }
         );
         console.log(`[WorkflowExecutionService] Code step ${step.id} completed successfully in ${result.executionTimeMs}ms`);
+
+        // Publish event to trigger workflow advancement
+        const updatedCodeTask = await this.tasks.findOne({ _id: codeTask._id });
+        if (updatedCodeTask) {
+          await eventBus.publish({
+            type: 'task.status.changed',
+            taskId: updatedCodeTask._id,
+            task: updatedCodeTask,
+            changes: [{ field: 'status', oldValue: 'in_progress', newValue: 'completed' }],
+            actorId: null,
+            actorType: 'system',
+          });
+          console.log(`[WorkflowExecutionService] Published task.status.changed for code task ${codeTask._id}`);
+        }
       } else {
         // Code execution failed
         if (config.continueOnError) {
