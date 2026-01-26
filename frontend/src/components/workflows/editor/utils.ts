@@ -73,13 +73,16 @@ export function getStepOutputs(step: WorkflowStep): { path: string; description:
 
 // Get the full input path with step reference
 export function buildInputPath(sourceStepId: string | undefined, path: string): string {
+  // Normalize path - remove leading/trailing dots and collapse multiple dots
+  const normalizedPath = path?.replace(/^\.+|\.+$/g, '').replace(/\.{2,}/g, '.') || ''
+
   if (!sourceStepId || sourceStepId === 'previous') {
-    return path
+    return normalizedPath
   }
   if (sourceStepId === 'trigger') {
-    return `trigger.${path}`
+    return normalizedPath ? `trigger.${normalizedPath}` : 'trigger'
   }
-  return `steps.${sourceStepId}.${path}`
+  return normalizedPath ? `steps.${sourceStepId}.${normalizedPath}` : `steps.${sourceStepId}`
 }
 
 // Parse input path to extract source and path

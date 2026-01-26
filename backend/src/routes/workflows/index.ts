@@ -197,24 +197,82 @@ workflowsRouter.get('/:id', async (req: Request, res: Response, next: NextFuncti
 });
 
 // Helper to ensure all steps have IDs
+/**
+ * Sanitize and normalize workflow steps.
+ * - Ensures all steps have IDs
+ * - Cleans up legacy/conflicting fields
+ * - For decision steps: removes inputPath if decisionField exists, removes legacy branches
+ * - For flow steps: prefers inputConfig over inputMapping
+ * - Fixes double-dot paths in templates
+ */
 function ensureStepIds(steps: WorkflowStep[]): WorkflowStep[] {
   if (!steps || !Array.isArray(steps)) return [];
 
   return steps.map((step) => {
-    const normalized = { ...step };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const normalized = { ...step } as any;
 
+    // Ensure step has an ID
     if (!normalized.id) {
       normalized.id = new ObjectId().toString();
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const stepAny = step as any;
-    if (!normalized.stepType && stepAny.type && VALID_STEP_TYPES.includes(stepAny.type)) {
-      normalized.stepType = stepAny.type;
-      delete stepAny.type;
+    // Normalize legacy 'type' field to 'stepType'
+    if (!normalized.stepType && normalized.type && VALID_STEP_TYPES.includes(normalized.type)) {
+      normalized.stepType = normalized.type;
+      delete normalized.type;
     }
 
-    return normalized;
+    // Decision step cleanup
+    if (normalized.stepType === 'decision') {
+      // If decisionField is set, remove inputPath to avoid confusion
+      if (normalized.decisionField && normalized.inputPath) {
+        delete normalized.inputPath;
+      }
+      // Remove legacy branches array - connections is the source of truth
+      if (normalized.branches && normalized.connections) {
+        delete normalized.branches;
+      }
+    }
+
+    // Flow step cleanup - prefer inputConfig over inputMapping
+    if (normalized.stepType === 'flow') {
+      // If inputConfig.mapping exists, it supersedes inputMapping
+      if (normalized.inputConfig?.mapping && Object.keys(normalized.inputConfig.mapping).length > 0) {
+        delete normalized.inputMapping;
+      }
+    }
+
+    // Fix double-dot paths in templates (e.g., "steps.abc..output" -> "steps.abc.output")
+    const fixDoubleDots = (obj: unknown): unknown => {
+      if (typeof obj === 'string') {
+        return obj.replace(/\.{2,}/g, '.');
+      }
+      if (Array.isArray(obj)) {
+        return obj.map(fixDoubleDots);
+      }
+      if (obj && typeof obj === 'object') {
+        const result: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(obj)) {
+          result[key] = fixDoubleDots(value);
+        }
+        return result;
+      }
+      return obj;
+    };
+
+    // Apply double-dot fix to template fields
+    if (normalized.titleTemplate) {
+      normalized.titleTemplate = fixDoubleDots(normalized.titleTemplate);
+    }
+    if (normalized.inputMapping) {
+      normalized.inputMapping = fixDoubleDots(normalized.inputMapping);
+    }
+    if (normalized.inputConfig?.mapping) {
+      normalized.inputConfig.mapping = fixDoubleDots(normalized.inputConfig.mapping);
+    }
+
+    return normalized as WorkflowStep;
   });
 }
 
