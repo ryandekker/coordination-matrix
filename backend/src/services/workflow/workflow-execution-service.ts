@@ -63,6 +63,16 @@ class WorkflowExecutionService {
       }
     });
 
+    // Handle findDocument step reruns when task is set to pending
+    eventBus.subscribe('task.status.changed', async (event: TaskEvent) => {
+      const task = event.task;
+      // Only process findDocument tasks that are part of a workflow and set to pending
+      if (task.taskType === 'findDocument' && task.workflowRunId && task.workflowStepId && task.status === 'pending') {
+        console.log(`[WorkflowExecutionService] FindDocument task ${task._id} set to pending - triggering rerun`);
+        await this.rerunFindDocumentTask(task._id);
+      }
+    });
+
     // Handle flow step auto-execution when task is set to pending (for reruns)
     eventBus.subscribe('task.status.changed', async (event: TaskEvent) => {
       const task = event.task;
@@ -2508,6 +2518,56 @@ class WorkflowExecutionService {
 
     // Execute the code step
     await this.executeCodeStep(run, workflow, step, task, inputPayload);
+  }
+
+  /**
+   * Rerun a findDocument task that was set back to pending.
+   * Looks up the workflow run and step config to re-execute the document search.
+   */
+  async rerunFindDocumentTask(taskId: ObjectId | string): Promise<void> {
+    const id = typeof taskId === 'string' ? new ObjectId(taskId) : taskId;
+    const task = await this.tasks.findOne({ _id: id });
+
+    if (!task) {
+      console.error(`[WorkflowExecutionService] rerunFindDocumentTask: Task ${id} not found`);
+      return;
+    }
+
+    if (task.taskType !== 'findDocument') {
+      console.error(`[WorkflowExecutionService] rerunFindDocumentTask: Task ${id} is not a findDocument task`);
+      return;
+    }
+
+    if (!task.workflowRunId || !task.workflowStepId) {
+      console.error(`[WorkflowExecutionService] rerunFindDocumentTask: Task ${id} is not part of a workflow`);
+      return;
+    }
+
+    const run = await this.workflowRuns.findOne({ _id: task.workflowRunId });
+    if (!run) {
+      console.error(`[WorkflowExecutionService] rerunFindDocumentTask: Workflow run ${task.workflowRunId} not found`);
+      return;
+    }
+
+    const workflow = await this.workflows.findOne({ _id: run.workflowId });
+    if (!workflow) {
+      console.error(`[WorkflowExecutionService] rerunFindDocumentTask: Workflow ${run.workflowId} not found`);
+      return;
+    }
+
+    const step = workflow.steps.find(s => s.id === task.workflowStepId);
+    if (!step) {
+      console.error(`[WorkflowExecutionService] rerunFindDocumentTask: Step ${task.workflowStepId} not found in workflow`);
+      return;
+    }
+
+    // Get the input payload from the task's metadata (set when task was originally created)
+    const inputPayload = task.metadata?.inputPayload as Record<string, unknown> | undefined;
+
+    console.log(`[WorkflowExecutionService] Rerunning findDocument task ${id} for step ${step.name}`);
+
+    // Execute the findDocument step
+    await this.executeFindDocument(run, workflow, step, task, inputPayload);
   }
 
   // ============================================================================
