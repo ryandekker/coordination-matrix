@@ -50,6 +50,10 @@ const __dirname = dirname(__filename);
 const DEFAULT_CONFIG_PATH = join(__dirname, 'daemon-jobs.yaml');
 const PID_DIR = join(homedir(), '.matrix-daemon');
 
+// Track active child process for graceful shutdown
+let activeChildProcess = null;
+let shuttingDown = false;
+
 // ============================================================================
 // Logger - Structured logging with levels and colors
 // ============================================================================
@@ -1232,7 +1236,7 @@ function parseResponse(responseText) {
 // Command Execution
 // ============================================================================
 
-function executeCommand(cmd, prompt) {
+async function executeCommand(cmd, prompt) {
   console.log(`[DEBUG] Executing command: ${cmd}`);
   console.log(`[DEBUG] Prompt preview: ${prompt.substring(0, 300)}${prompt.length > 300 ? '...' : ''}`);
 
@@ -1256,28 +1260,123 @@ function executeCommand(cmd, prompt) {
 
   console.log(`[DEBUG] Running (this may take a while)...`);
 
-  try {
-    const stdout = execSync(fullCmd, {
-      encoding: 'utf8',
-      maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+  return new Promise((resolve) => {
+    const child = spawn('sh', ['-c', fullCmd], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    try { unlinkSync(tmpFile); } catch {}
+    // Track the child process for graceful shutdown
+    activeChildProcess = child;
 
-    return {
-      exitCode: 0,
-      stdout,
-      stderr: '',
-    };
-  } catch (error) {
-    try { unlinkSync(tmpFile); } catch {}
+    let stdout = '';
+    let stderr = '';
 
-    return {
-      exitCode: error.status || 1,
-      stdout: error.stdout || '',
-      stderr: error.stderr || error.message,
-    };
+    child.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    child.on('close', (exitCode, signal) => {
+      activeChildProcess = null;
+      try { unlinkSync(tmpFile); } catch {}
+
+      if (signal === 'SIGTERM' || signal === 'SIGKILL') {
+        resolve({
+          exitCode: 143, // Standard exit code for SIGTERM
+          stdout,
+          stderr: stderr || `Process terminated by ${signal}`,
+          terminated: true,
+        });
+      } else {
+        resolve({
+          exitCode: exitCode || 0,
+          stdout,
+          stderr,
+        });
+      }
+    });
+
+    child.on('error', (error) => {
+      activeChildProcess = null;
+      try { unlinkSync(tmpFile); } catch {}
+      resolve({
+        exitCode: 1,
+        stdout: '',
+        stderr: error.message,
+      });
+    });
+  });
+}
+
+/**
+ * Parse NDJSON stream output into conversation object
+ */
+function parseConversationOutput(stdout, conversation) {
+  const lines = stdout.split('\n').filter(line => line.trim());
+
+  for (const line of lines) {
+    try {
+      const event = JSON.parse(line);
+
+      if (event.type === 'system' && event.subtype === 'init') {
+        conversation.sessionId = event.session_id;
+        conversation.model = event.model;
+      } else if (event.type === 'assistant') {
+        // Claude's response - may contain tool_use blocks
+        const msg = event.message;
+        if (msg?.content) {
+          for (const block of msg.content) {
+            if (block.type === 'tool_use') {
+              conversation.messages.push({
+                type: 'tool_use',
+                timestamp: new Date(),
+                toolName: block.name,
+                toolInput: block.input,
+                toolUseId: block.id,
+              });
+            } else if (block.type === 'text') {
+              conversation.messages.push({
+                type: 'assistant',
+                timestamp: new Date(),
+                content: block.text,
+              });
+            }
+          }
+        }
+      } else if (event.type === 'user' && event.tool_use_result) {
+        // Tool result
+        conversation.messages.push({
+          type: 'tool_result',
+          timestamp: new Date(),
+          toolUseId: event.message?.content?.[0]?.tool_use_id,
+          toolResult: event.tool_use_result,
+          isError: false,
+        });
+      } else if (event.type === 'result') {
+        // Final result with metadata
+        conversation.result = event.result;
+        conversation.numTurns = event.num_turns || 0;
+        conversation.durationMs = event.duration_ms || 0;
+        conversation.durationApiMs = event.duration_api_ms || 0;
+        conversation.permissionDenials = event.permission_denials || [];
+
+        if (event.usage) {
+          conversation.usage = {
+            inputTokens: event.usage.input_tokens || 0,
+            outputTokens: event.usage.output_tokens || 0,
+            cacheCreationInputTokens: event.usage.cache_creation_input_tokens || 0,
+            cacheReadInputTokens: event.usage.cache_read_input_tokens || 0,
+            totalCostUsd: event.total_cost_usd || 0,
+          };
+        }
+      }
+    } catch (parseErr) {
+      // Skip lines that aren't valid JSON
+      console.log(`[DEBUG] Skipping non-JSON line: ${line.substring(0, 100)}`);
+    }
   }
 }
 
@@ -1285,7 +1384,7 @@ function executeCommand(cmd, prompt) {
  * Execute command with stream-json output to capture full conversation thread
  * Returns conversation data including tool calls and results
  */
-function executeCommandWithConversation(cmd, prompt) {
+async function executeCommandWithConversation(cmd, prompt) {
   console.log(`[DEBUG] Executing command with conversation capture: ${cmd}`);
   console.log(`[DEBUG] Prompt preview: ${prompt.substring(0, 300)}${prompt.length > 300 ? '...' : ''}`);
 
@@ -1320,110 +1419,65 @@ function executeCommandWithConversation(cmd, prompt) {
     durationApiMs: 0,
   };
 
-  try {
-    const stdout = execSync(fullCmd, {
-      encoding: 'utf8',
-      maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+  return new Promise((resolve) => {
+    const child = spawn('sh', ['-c', fullCmd], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    try { unlinkSync(tmpFile); } catch {}
+    // Track the child process for graceful shutdown
+    activeChildProcess = child;
 
-    // Parse NDJSON stream output
-    const lines = stdout.split('\n').filter(line => line.trim());
+    let stdout = '';
+    let stderr = '';
 
-    for (const line of lines) {
-      try {
-        const event = JSON.parse(line);
+    child.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
 
-        if (event.type === 'system' && event.subtype === 'init') {
-          conversation.sessionId = event.session_id;
-          conversation.model = event.model;
-        } else if (event.type === 'assistant') {
-          // Claude's response - may contain tool_use blocks
-          const msg = event.message;
-          if (msg?.content) {
-            for (const block of msg.content) {
-              if (block.type === 'tool_use') {
-                conversation.messages.push({
-                  type: 'tool_use',
-                  timestamp: new Date(),
-                  toolName: block.name,
-                  toolInput: block.input,
-                  toolUseId: block.id,
-                });
-              } else if (block.type === 'text') {
-                conversation.messages.push({
-                  type: 'assistant',
-                  timestamp: new Date(),
-                  content: block.text,
-                });
-              }
-            }
-          }
-        } else if (event.type === 'user' && event.tool_use_result) {
-          // Tool result
-          conversation.messages.push({
-            type: 'tool_result',
-            timestamp: new Date(),
-            toolUseId: event.message?.content?.[0]?.tool_use_id,
-            toolResult: event.tool_use_result,
-            isError: false,
-          });
-        } else if (event.type === 'result') {
-          // Final result with metadata
-          conversation.result = event.result;
-          conversation.numTurns = event.num_turns || 0;
-          conversation.durationMs = event.duration_ms || 0;
-          conversation.durationApiMs = event.duration_api_ms || 0;
-          conversation.permissionDenials = event.permission_denials || [];
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
 
-          if (event.usage) {
-            conversation.usage = {
-              inputTokens: event.usage.input_tokens || 0,
-              outputTokens: event.usage.output_tokens || 0,
-              cacheCreationInputTokens: event.usage.cache_creation_input_tokens || 0,
-              cacheReadInputTokens: event.usage.cache_read_input_tokens || 0,
-              totalCostUsd: event.total_cost_usd || 0,
-            };
-          }
-        }
-      } catch (parseErr) {
-        // Skip lines that aren't valid JSON
-        console.log(`[DEBUG] Skipping non-JSON line: ${line.substring(0, 100)}`);
+    child.on('close', (exitCode, signal) => {
+      activeChildProcess = null;
+      try { unlinkSync(tmpFile); } catch {}
+
+      // Parse conversation data from stdout
+      parseConversationOutput(stdout, conversation);
+
+      if (signal === 'SIGTERM' || signal === 'SIGKILL') {
+        resolve({
+          exitCode: 143,
+          stdout: conversation.result || stdout,
+          stderr: stderr || `Process terminated by ${signal}`,
+          conversation,
+          terminated: true,
+        });
+      } else {
+        resolve({
+          exitCode: exitCode || 0,
+          stdout: conversation.result || stdout,
+          stderr,
+          conversation,
+        });
       }
-    }
+    });
 
-    return {
-      exitCode: 0,
-      stdout: conversation.result || stdout,
-      stderr: '',
-      conversation,
-    };
-  } catch (error) {
-    try { unlinkSync(tmpFile); } catch {}
+    child.on('error', (error) => {
+      activeChildProcess = null;
+      try { unlinkSync(tmpFile); } catch {}
 
-    // Try to parse any conversation data from stdout even on failure
-    if (error.stdout) {
-      const lines = error.stdout.split('\n').filter(line => line.trim());
-      for (const line of lines) {
-        try {
-          const event = JSON.parse(line);
-          if (event.type === 'system' && event.subtype === 'init') {
-            conversation.sessionId = event.session_id;
-            conversation.model = event.model;
-          }
-        } catch {}
-      }
-    }
+      // Try to parse any conversation data from stdout even on failure
+      parseConversationOutput(stdout, conversation);
 
-    return {
-      exitCode: error.status || 1,
-      stdout: error.stdout || '',
-      stderr: error.stderr || error.message,
-      conversation,
-    };
-  }
+      resolve({
+        exitCode: 1,
+        stdout: stdout || '',
+        stderr: error.message,
+        conversation,
+      });
+    });
+  });
 }
 
 /**
@@ -1733,10 +1787,17 @@ async function processTask(config, task) {
 
   // Use conversation capture for claude commands to get full tool call traces
   const result = isClaudeCommand
-    ? executeCommandWithConversation(config.exec, prompt)
-    : executeCommand(config.exec, prompt);
+    ? await executeCommandWithConversation(config.exec, prompt)
+    : await executeCommand(config.exec, prompt);
 
   const duration = ((Date.now() - startTime.getTime()) / 1000).toFixed(1);
+
+  // Check if command was terminated due to shutdown
+  if (result.terminated) {
+    console.log(`\nCommand terminated due to shutdown after ${duration}s`);
+    // Don't update task status when terminated - let the next daemon run pick it up
+    return;
+  }
 
   console.log('-'.repeat(40));
   console.log(`\nCommand completed in ${duration}s with exit code: ${result.exitCode}`);
@@ -1976,10 +2037,26 @@ async function runDaemon(config) {
   });
 
   // Handle graceful shutdown
-  let shuttingDown = false;
   const handleShutdown = () => {
-    log.warn('Shutting down after current task...');
+    if (shuttingDown) {
+      // Second signal - force kill child process
+      log.warn('Force shutdown requested...');
+      if (activeChildProcess) {
+        try {
+          activeChildProcess.kill('SIGKILL');
+        } catch {}
+      }
+      process.exit(1);
+    }
+    log.warn('Shutting down after current task... (press Ctrl+C again to force)');
     shuttingDown = true;
+    // Kill active child process to stop the current task immediately
+    if (activeChildProcess) {
+      log.warn('Terminating active command...');
+      try {
+        activeChildProcess.kill('SIGTERM');
+      } catch {}
+    }
     if (config.jobName) {
       stats.currentTask = null;
       saveStatus(config.jobName);

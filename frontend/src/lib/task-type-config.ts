@@ -11,6 +11,7 @@ import {
   User,
   Network,
   Code,
+  FileSearch,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -52,6 +53,7 @@ export const TASK_TYPE_TO_STEP_TYPE: Record<string, string> = {
   join: 'join',
   manual: 'manual',
   code: 'code',
+  findDocument: 'findDocument',
 }
 
 // Central configuration for all task types
@@ -137,6 +139,14 @@ export const TASK_TYPE_CONFIG: Record<string, TaskTypeConfig> = {
     hexColor: '#10B981',
     description: 'Execute JavaScript code',
   },
+  findDocument: {
+    icon: FileSearch,
+    label: 'Find Document',
+    color: 'text-cyan-500',
+    bgColor: 'bg-cyan-50 dark:bg-cyan-950/30',
+    hexColor: '#06B6D4',
+    description: 'Search for documents',
+  },
 }
 
 // Workflow step type configuration (for workflow editor)
@@ -205,6 +215,14 @@ export const WORKFLOW_STEP_TYPE_CONFIG: Record<string, TaskTypeConfig> = {
     bgColor: 'bg-emerald-50 dark:bg-emerald-950/30',
     hexColor: '#10B981',
     description: 'Execute JavaScript code',
+  },
+  findDocument: {
+    icon: FileSearch,
+    label: 'Find Document',
+    color: 'text-cyan-500',
+    bgColor: 'bg-cyan-50 dark:bg-cyan-950/30',
+    hexColor: '#06B6D4',
+    description: 'Search for documents',
   },
 }
 

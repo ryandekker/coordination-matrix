@@ -140,6 +140,8 @@ function generateMermaidFromSteps(steps: WorkflowStep[], includeStartNode: boole
   lines.push('  classDef foreach fill:#10B981,color:#fff,stroke:#059669,stroke-width:2px')
   lines.push('  classDef join fill:#6366F1,color:#fff,stroke:#4F46E5,stroke-width:2px')
   lines.push('  classDef flow fill:#EC4899,color:#fff,stroke:#DB2777,stroke-width:2px')
+  lines.push('  classDef findDocument fill:#06B6D4,color:#fff,stroke:#0891B2,stroke-width:2px')
+  lines.push('  classDef code fill:#10B981,color:#fff,stroke:#059669,stroke-width:2px')
   lines.push('  classDef startNode fill:#9CA3AF,color:#fff,stroke:#6B7280,stroke-width:1px')
   lines.push('')
 
@@ -187,6 +189,14 @@ function generateMermaidFromSteps(steps: WorkflowStep[], includeStartNode: boole
       case 'flow':
         shape = `${id}[["Run: ${name}"]]`
         styleClass = 'flow'
+        break
+      case 'findDocument':
+        shape = `${id}[("${name}")]`
+        styleClass = 'findDocument'
+        break
+      case 'code':
+        shape = `${id}[/"${name}"/]`
+        styleClass = 'code'
         break
       default:
         shape = `${id}["${name}"]`

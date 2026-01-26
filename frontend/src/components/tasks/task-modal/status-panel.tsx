@@ -213,6 +213,8 @@ export function StatusPanel({
                   {taskType === 'manual' && 'Requires manual completion'}
                   {taskType === 'foreach' && 'Waiting for batch processing to start'}
                   {taskType === 'join' && 'Waiting for upstream tasks to complete'}
+                  {taskType === 'findDocument' && 'Searching for documents'}
+                  {taskType === 'code' && 'Ready to execute code'}
                 </p>
               </div>
             </div>
