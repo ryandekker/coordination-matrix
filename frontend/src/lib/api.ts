@@ -843,8 +843,10 @@ export type TaskType =
   | 'decision'
   | 'foreach'
   | 'join'
-  | 'flow'
   | 'external'
+  | 'webhook'
+  | 'code'
+  | 'findDocument'
 
 // Review decision for manual workflow steps
 export type ManualReviewDecision = 'approved' | 'request_changes' | 'approved_with_notes'

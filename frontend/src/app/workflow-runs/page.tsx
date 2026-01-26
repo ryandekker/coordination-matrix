@@ -34,6 +34,7 @@ import {
   Copy,
   Check,
   Code,
+  FileSearch,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -94,7 +95,7 @@ const TASK_STATUS_CONFIG: Record<string, { color: string; bgColor: string }> = {
   cancelled: { color: 'text-gray-400', bgColor: 'bg-gray-50 dark:bg-gray-800/50' },
 }
 
-type TaskType = 'flow' | 'agent' | 'decision' | 'foreach' | 'join' | 'external' | 'trigger' | 'manual' | 'code'
+type TaskType = 'flow' | 'agent' | 'decision' | 'foreach' | 'join' | 'external' | 'trigger' | 'manual' | 'code' | 'findDocument'
 
 const TASK_TYPE_CONFIG: Record<TaskType, { icon: React.ElementType; color: string; label: string }> = {
   flow: { icon: WorkflowIcon, color: 'text-pink-500', label: 'Flow' },
@@ -106,6 +107,7 @@ const TASK_TYPE_CONFIG: Record<TaskType, { icon: React.ElementType; color: strin
   trigger: { icon: Bot, color: 'text-yellow-500', label: 'Trigger' },
   manual: { icon: User, color: 'text-purple-500', label: 'Manual' },
   code: { icon: Code, color: 'text-emerald-500', label: 'Code' },
+  findDocument: { icon: FileSearch, color: 'text-cyan-500', label: 'Find Document' },
 }
 
 function formatDate(dateString: string | null | undefined): string {

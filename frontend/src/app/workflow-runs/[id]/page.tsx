@@ -27,6 +27,7 @@ import {
   Merge,
   Copy,
   Code,
+  FileSearch,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -66,7 +67,7 @@ const TASK_STATUS_CONFIG: Record<string, { color: string; bgColor: string }> = {
   cancelled: { color: 'text-gray-400', bgColor: 'bg-gray-50 dark:bg-gray-800/50' },
 }
 
-type TaskType = 'standard' | 'trigger' | 'decision' | 'foreach' | 'join' | 'subflow' | 'external' | 'code' | 'agent' | 'manual' | 'flow'
+type TaskType = 'standard' | 'trigger' | 'decision' | 'foreach' | 'join' | 'subflow' | 'external' | 'code' | 'agent' | 'manual' | 'flow' | 'findDocument'
 
 const TASK_TYPE_CONFIG: Record<TaskType, { icon: React.ElementType; color: string; label: string }> = {
   standard: { icon: Bot, color: 'text-blue-500', label: 'Agent' },
@@ -80,6 +81,7 @@ const TASK_TYPE_CONFIG: Record<TaskType, { icon: React.ElementType; color: strin
   external: { icon: Globe, color: 'text-orange-500', label: 'External' },
   manual: { icon: User, color: 'text-purple-500', label: 'Manual' },
   code: { icon: Code, color: 'text-emerald-500', label: 'Code' },
+  findDocument: { icon: FileSearch, color: 'text-cyan-500', label: 'Find Document' },
 }
 
 function formatDate(dateString: string | null | undefined): string {
