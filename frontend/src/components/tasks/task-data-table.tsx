@@ -18,6 +18,7 @@ import {
   CheckCircle,
   Archive,
   ArrowRight,
+  Users,
 } from 'lucide-react'
 import {
   Table,
@@ -52,7 +53,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { EditableCell } from './editable-cell'
-import { Task, FieldConfig, LookupValue, User, Workflow, tasksApi, isSystemUser } from '@/lib/api'
+import { Task, FieldConfig, LookupValue, User, Workflow, Group, tasksApi, isSystemUser } from '@/lib/api'
 import { useTaskChildren, useUpdateTask, useDeleteTask, useBulkUpdateTasks, useBulkDeleteTasks, useLookups, useCreateTask } from '@/hooks/use-tasks'
 import { formatDateTime, cn } from '@/lib/utils'
 import { TASK_TYPE_CONFIG, getTaskTypeConfig } from '@/lib/task-type-config'
@@ -93,9 +94,11 @@ const BulkActionsBar = memo(function BulkActionsBar({
   selectedCount,
   lookups,
   users,
+  groups,
   onStatusChange,
   onPriorityChange,
   onAssigneeChange,
+  onGroupChange,
   onArchive,
   onDelete,
   onClearSelection,
@@ -104,9 +107,11 @@ const BulkActionsBar = memo(function BulkActionsBar({
   selectedCount: number
   lookups: Record<string, LookupValue[]>
   users: User[]
+  groups: Group[]
   onStatusChange: (status: string) => void
   onPriorityChange: (priority: string) => void
   onAssigneeChange: (assigneeId: string | null) => void
+  onGroupChange: (groupId: string | null) => void
   onArchive: () => void
   onDelete: () => void
   onClearSelection: () => void
@@ -162,6 +167,29 @@ const BulkActionsBar = memo(function BulkActionsBar({
             ))}
           </SelectContent>
         </Select>
+        {groups.length > 1 && (
+          <Select onValueChange={(val) => onGroupChange(val === '__none__' ? null : val)} disabled={isUpdating}>
+            <SelectTrigger className="h-8 w-[160px]">
+              <SelectValue placeholder="Move to group" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Users className="h-3.5 w-3.5" />
+                  <span>No group</span>
+                </div>
+              </SelectItem>
+              {groups.map((group) => (
+                <SelectItem key={group._id} value={group._id}>
+                  <div className="flex items-center gap-2">
+                    <Users className="h-3.5 w-3.5" />
+                    <span>{group.displayName}</span>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
       <div className="h-4 w-px bg-border" />
       <Button
@@ -204,6 +232,7 @@ interface TaskDataTableProps {
   lookups: Record<string, LookupValue[]>
   users: User[]
   workflows: Workflow[]
+  groups?: Group[]
   visibleColumns: string[]
   sortBy: string
   sortOrder: 'asc' | 'desc'
@@ -901,6 +930,7 @@ export function TaskDataTable({
   lookups,
   users,
   workflows,
+  groups = [],
   visibleColumns,
   sortBy,
   sortOrder,
@@ -1186,6 +1216,16 @@ export function TaskDataTable({
       clearSelection()
     } catch (error) {
       console.error('Bulk assignee update failed:', error)
+    }
+  }, [selectedRows, bulkUpdateTasks, clearSelection])
+
+  const handleBulkGroupChange = useCallback(async (groupId: string | null) => {
+    const taskIds = Array.from(selectedRows)
+    try {
+      await bulkUpdateTasks.mutateAsync({ taskIds, updates: { groupId } })
+      clearSelection()
+    } catch (error) {
+      console.error('Bulk group update failed:', error)
     }
   }, [selectedRows, bulkUpdateTasks, clearSelection])
 
@@ -1566,9 +1606,11 @@ export function TaskDataTable({
           selectedCount={selectedRows.size}
           lookups={lookups}
           users={users}
+          groups={groups}
           onStatusChange={handleBulkStatusChange}
           onPriorityChange={handleBulkPriorityChange}
           onAssigneeChange={handleBulkAssigneeChange}
+          onGroupChange={handleBulkGroupChange}
           onArchive={handleBulkArchive}
           onDelete={handleBulkDelete}
           onClearSelection={clearSelection}

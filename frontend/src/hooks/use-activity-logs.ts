@@ -31,6 +31,7 @@ export function useRecentActivity(params?: {
   offset?: number
   eventTypes?: string[]
   actorId?: string
+  groupId?: string
 }) {
   return useQuery({
     queryKey: ['activity-logs', 'recent', params],

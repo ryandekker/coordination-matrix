@@ -9,6 +9,8 @@ import {
   registrationRateLimiter,
   passwordChangeRateLimiter,
 } from '../middleware/rate-limit.js';
+import { groupService } from '../services/group-service.js';
+import { projectService } from '../services/project-service.js';
 
 const router = Router();
 
@@ -306,6 +308,228 @@ router.post('/dev-login', loginRateLimiter, async (req: Request, res: Response):
   } catch (error) {
     console.error('Dev login error:', error);
     res.status(500).json({ error: 'Dev login failed' });
+  }
+});
+
+// POST /api/auth/provision - Provision a new user from SSO
+// This endpoint is called by an external SSO system to create a user
+// It auto-creates a personal group and project for the user
+// If inviteGroupId is provided, adds the user to that group instead of creating a new one
+const provisionSchema = z.object({
+  email: z.string().email(),
+  displayName: z.string().min(1),
+  externalId: z.string().optional(), // External SSO ID
+  // For invite acceptance - adds user to existing group instead of creating new one
+  inviteGroupId: z.string().optional(),
+  inviteRole: z.enum(['owner', 'admin', 'member', 'viewer']).optional().default('member'),
+});
+
+router.post('/provision', registrationRateLimiter, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const validation = provisionSchema.safeParse(req.body);
+    if (!validation.success) {
+      res.status(400).json({ error: validation.error.errors[0].message });
+      return;
+    }
+
+    const { email, displayName, externalId, inviteGroupId, inviteRole } = validation.data;
+    const db = getDb();
+    const usersCollection = db.collection('users');
+    const normalizedEmail = email.toLowerCase();
+
+    // If accepting an invite, verify the group exists
+    if (inviteGroupId) {
+      const inviteGroup = await groupService.getGroupById(inviteGroupId);
+      if (!inviteGroup) {
+        res.status(404).json({ error: 'Invited group not found' });
+        return;
+      }
+    }
+
+    // Check if user already exists
+    let user = await usersCollection.findOne({ email: normalizedEmail });
+
+    if (user) {
+      // User exists - just return a login token
+      if (!user.isActive) {
+        res.status(401).json({ error: 'Account is disabled' });
+        return;
+      }
+
+      // Update last login and external ID if provided
+      const updateFields: Record<string, unknown> = { lastLoginAt: new Date() };
+      if (externalId && !user.externalId) {
+        updateFields.externalId = externalId;
+      }
+      await usersCollection.updateOne({ _id: user._id }, { $set: updateFields });
+
+      // If accepting an invite, add user to the group
+      if (inviteGroupId) {
+        try {
+          await groupService.addMember(
+            inviteGroupId,
+            { userId: user._id.toString(), role: inviteRole || 'member' },
+            null // System-added
+          );
+        } catch (err) {
+          // Ignore "already a member" errors
+          if (!(err instanceof Error && err.message.includes('already a member'))) {
+            throw err;
+          }
+        }
+      }
+
+      const token = generateToken({
+        userId: user._id.toString(),
+        email: user.email,
+        role: user.role || 'viewer',
+      });
+
+      res.json({
+        token,
+        user: {
+          id: user._id.toString(),
+          email: user.email,
+          displayName: user.displayName,
+          role: user.role || 'viewer',
+        },
+        isNewUser: false,
+        groupId: inviteGroupId || undefined,
+      });
+      return;
+    }
+
+    // Create new user
+    const userId = new ObjectId();
+    const now = new Date();
+
+    const newUser = {
+      _id: userId,
+      email: normalizedEmail,
+      displayName,
+      externalId: externalId || undefined,
+      role: 'operator', // Default role for SSO users
+      isActive: true,
+      isAgent: false,
+      createdAt: now,
+      updatedAt: now,
+      lastLoginAt: now,
+    };
+
+    await usersCollection.insertOne(newUser);
+
+    let assignedGroupId: string;
+
+    if (inviteGroupId) {
+      // User is accepting an invite - add them to the invited group
+      await groupService.addMember(
+        inviteGroupId,
+        { userId: userId.toString(), role: inviteRole || 'member' },
+        null // System-added
+      );
+      assignedGroupId = inviteGroupId;
+    } else {
+      // Create a personal group for the user
+      const groupName = `${displayName}'s Workspace`;
+      const group = await groupService.createGroup(
+        {
+          displayName: groupName,
+          description: `Personal workspace for ${displayName}`,
+          visibility: 'private',
+        },
+        userId.toString()
+      );
+
+      // Create a default project in the group
+      await projectService.createProject(
+        {
+          displayName: 'Default Project',
+          description: 'Your first project',
+          groupId: group._id.toString(),
+        },
+        userId.toString()
+      );
+      assignedGroupId = group._id.toString();
+    }
+
+    const token = generateToken({
+      userId: userId.toString(),
+      email: normalizedEmail,
+      role: 'operator',
+    });
+
+    res.status(201).json({
+      token,
+      user: {
+        id: userId.toString(),
+        email: normalizedEmail,
+        displayName,
+        role: 'operator',
+      },
+      isNewUser: true,
+      groupId: assignedGroupId,
+    });
+  } catch (error) {
+    console.error('Provision error:', error);
+    res.status(500).json({ error: 'User provisioning failed' });
+  }
+});
+
+// POST /api/auth/sso-login - Login for existing SSO users
+// This is a simpler endpoint that just logs in an existing user by email
+// Used when the SSO system has already verified the user's identity
+const ssoLoginSchema = z.object({
+  email: z.string().email(),
+});
+
+router.post('/sso-login', loginRateLimiter, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const validation = ssoLoginSchema.safeParse(req.body);
+    if (!validation.success) {
+      res.status(400).json({ error: 'Invalid email format' });
+      return;
+    }
+
+    const { email } = validation.data;
+    const db = getDb();
+    const usersCollection = db.collection('users');
+
+    const user = await usersCollection.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found. Please complete provisioning first.' });
+      return;
+    }
+
+    if (!user.isActive) {
+      res.status(401).json({ error: 'Account is disabled' });
+      return;
+    }
+
+    // Update last login
+    await usersCollection.updateOne(
+      { _id: user._id },
+      { $set: { lastLoginAt: new Date() } }
+    );
+
+    const token = generateToken({
+      userId: user._id.toString(),
+      email: user.email,
+      role: user.role || 'viewer',
+    });
+
+    res.json({
+      token,
+      user: {
+        id: user._id.toString(),
+        email: user.email,
+        displayName: user.displayName,
+        role: user.role || 'viewer',
+      },
+    });
+  } catch (error) {
+    console.error('SSO login error:', error);
+    res.status(500).json({ error: 'SSO login failed' });
   }
 });
 

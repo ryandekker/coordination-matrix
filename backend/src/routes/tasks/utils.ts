@@ -1,6 +1,8 @@
 import { ObjectId, Filter } from 'mongodb';
+import { Request } from 'express';
 import { createError } from '../../middleware/error-handler.js';
 import { Task } from '../../types/index.js';
+import { isAdmin } from '../../middleware/authorize.js';
 
 // Helper to parse ObjectId safely
 export function toObjectId(id: string): ObjectId {
@@ -19,9 +21,10 @@ export function resolveUserPlaceholder(value: string, currentUserId?: string): s
 }
 
 // Helper to build filter from query params
-export function buildFilter(query: Record<string, unknown>, currentUserId?: string): Filter<Task> {
+// The req parameter is optional for backward compatibility, but required for group filtering
+export function buildFilter(query: Record<string, unknown>, currentUserId?: string, req?: Request): Filter<Task> {
   const filter: Filter<Task> = {};
-  const { search, filters, parentId, rootOnly, status, urgency, assigneeId, tags, includeArchived, workflowId, workflowRunId, workflowStage, hasWorkflow } = query;
+  const { search, filters, parentId, rootOnly, status, urgency, assigneeId, tags, includeArchived, workflowId, workflowRunId, workflowStage, hasWorkflow, groupId, projectId } = query;
 
   // By default, exclude archived tasks unless explicitly requested
   const shouldIncludeArchived = includeArchived === 'true' || includeArchived === true;
@@ -157,6 +160,41 @@ export function buildFilter(query: Record<string, unknown>, currentUserId?: stri
         }
       }
     });
+  }
+
+  // Group ID filter - explicit filter for a specific group
+  if (groupId) {
+    if (Array.isArray(groupId)) {
+      filter.groupId = { $in: groupId.map((id) => toObjectId(id as string)) };
+    } else {
+      filter.groupId = toObjectId(groupId as string);
+    }
+  }
+
+  // Project ID filter
+  if (projectId) {
+    if (Array.isArray(projectId)) {
+      filter.projectId = { $in: projectId.map((id) => toObjectId(id as string)) };
+    } else {
+      filter.projectId = toObjectId(projectId as string);
+    }
+  }
+
+  // Group access filtering - restrict results to user's groups unless admin
+  // This only applies if we have request context and no explicit groupId filter
+  if (req && !groupId) {
+    if (!isAdmin(req)) {
+      const userGroupIds = req.userGroupIds || [];
+      if (userGroupIds.length === 0) {
+        // User has no group memberships - they can only see tasks without a group (none, since admin-only)
+        // Return an impossible filter to match nothing
+        (filter as Record<string, unknown>)._id = { $exists: false };
+      } else {
+        // User can only see tasks in their groups
+        filter.groupId = { $in: userGroupIds };
+      }
+    }
+    // Admins see all tasks - no additional filtering needed
   }
 
   // Final archived exclusion check: if we ended up with a status filter that explicitly

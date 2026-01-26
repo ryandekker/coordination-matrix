@@ -7,9 +7,10 @@ import { Input } from '@/components/ui/input';
 import { Logo } from '@/components/ui/logo';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
+const IS_DEV = process.env.NODE_ENV === 'development';
 
 export default function LoginPage() {
-  const { login, register, user, isLoading } = useAuth();
+  const { login, devLogin, register, user, isLoading } = useAuth();
   const [isRegister, setIsRegister] = useState(false);
   const [setupRequired, setSetupRequired] = useState(false);
   const [email, setEmail] = useState('');
@@ -168,6 +169,56 @@ export default function LoginPage() {
                   </button>
                 </>
               )}
+            </div>
+          )}
+
+          {IS_DEV && !isRegister && (
+            <div className="mt-6 pt-4 border-t">
+              <p className="text-xs text-muted-foreground text-center mb-3">
+                Development Mode - Quick Login
+              </p>
+              <div className="flex flex-col gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full text-xs"
+                  disabled={submitting}
+                  onClick={async () => {
+                    setError('');
+                    setSubmitting(true);
+                    try {
+                      await devLogin('admin@example.com');
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : 'Dev login failed');
+                    } finally {
+                      setSubmitting(false);
+                    }
+                  }}
+                >
+                  Login as Admin
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full text-xs"
+                  disabled={submitting}
+                  onClick={async () => {
+                    setError('');
+                    setSubmitting(true);
+                    try {
+                      await devLogin('developer@example.com');
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : 'Dev login failed');
+                    } finally {
+                      setSubmitting(false);
+                    }
+                  }}
+                >
+                  Login as Developer
+                </Button>
+              </div>
             </div>
           )}
         </div>

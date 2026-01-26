@@ -206,6 +206,24 @@
   flex-shrink: 0 !important;
   border-bottom: 1px solid hsl(var(--border));
   background: hsl(var(--background));
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* Ensure toolbar left section with formatting buttons is visible */
+.bytemd-container .bytemd-toolbar-left {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  gap: 0;
+}
+
+/* Individual toolbar icons */
+.bytemd-container .bytemd-toolbar-left .bytemd-toolbar-icon {
+  display: inline-flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
 }
 
 .bytemd-container .bytemd-body {
@@ -387,9 +405,23 @@
 }
 
 /* Preview pane styling */
+.bytemd-container .bytemd-preview {
+  background: hsl(var(--background)) !important;
+  color: hsl(var(--foreground)) !important;
+}
+
 .bytemd-container .bytemd-preview .markdown-body {
-  background: hsl(var(--background));
-  color: hsl(var(--foreground));
+  background: hsl(var(--background)) !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+/* Ensure all text in preview is readable */
+.bytemd-container .bytemd-preview .markdown-body p,
+.bytemd-container .bytemd-preview .markdown-body li,
+.bytemd-container .bytemd-preview .markdown-body td,
+.bytemd-container .bytemd-preview .markdown-body th,
+.bytemd-container .bytemd-preview .markdown-body span {
+  color: hsl(var(--foreground)) !important;
 }
 
 .bytemd-container .bytemd-preview .markdown-body h1,

@@ -373,6 +373,19 @@ export function parseMermaidToStepsWithWarnings(mermaid: string): ParseMermaidRe
       }
     }
     if (step.stepType === 'decision' && step.connections) {
+      // Check for "default" labeled connection and extract it as defaultConnection
+      const defaultConn = step.connections.find(c => c.condition?.toLowerCase() === 'default' || c.label?.toLowerCase() === 'default');
+      if (defaultConn) {
+        step.defaultConnection = defaultConn.targetStepId;
+        // Remove the default connection from the regular connections list
+        step.connections = step.connections.filter(c => c !== defaultConn);
+      } else {
+        // IMPORTANT: Clear defaultConnection if no "default" labeled arrow exists
+        // This ensures defaultConnection only persists if visually represented in the diagram
+        // Otherwise, removing the arrow in the editor wouldn't actually remove the default behavior
+        delete step.defaultConnection;
+      }
+
       step.branches = step.connections.map(c => ({
         condition: c.condition || null,
         targetStepId: c.targetStepId,
@@ -403,7 +416,9 @@ export function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string):
     if (step.inputPath) metadata.inputPath = step.inputPath;
     if (step.additionalInstructions) metadata.additionalInstructions = step.additionalInstructions;
     if (step.externalConfig) metadata.externalConfig = step.externalConfig;
-    if (step.defaultConnection) metadata.defaultConnection = step.defaultConnection;
+    if (step.decisionField) metadata.decisionField = step.decisionField;
+    // NOTE: defaultConnection is NOT stored in metadata - it's represented visually by the "default" labeled arrow
+    // Storing it in metadata would cause it to persist even when the arrow is removed from the diagram
     if (step.itemsPath) metadata.itemsPath = step.itemsPath;
     if (step.itemVariable) metadata.itemVariable = step.itemVariable;
     if (step.maxItems) metadata.maxItems = step.maxItems;
@@ -475,6 +490,13 @@ export function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string):
           lines.push(`    ${nodeId} --> ${conn.targetStepId}`);
         }
       }
+      // Add defaultConnection if it's not already in connections
+      if (step.defaultConnection) {
+        const alreadyConnected = step.connections.some(c => c.targetStepId === step.defaultConnection);
+        if (!alreadyConnected) {
+          lines.push(`    ${nodeId} -->|"default"| ${step.defaultConnection}`);
+        }
+      }
       connectedFrom.add(nodeId);
     } else if (step.stepType === 'decision' && step.branches && step.branches.length > 0) {
       for (const branch of step.branches) {
@@ -484,6 +506,17 @@ export function generateMermaidFromSteps(steps: WorkflowStep[], _name?: string):
           lines.push(`    ${nodeId} --> ${branch.targetStepId}`);
         }
       }
+      // Add defaultConnection if it's not already in branches
+      if (step.defaultConnection) {
+        const alreadyConnected = step.branches.some(b => b.targetStepId === step.defaultConnection);
+        if (!alreadyConnected) {
+          lines.push(`    ${nodeId} -->|"default"| ${step.defaultConnection}`);
+        }
+      }
+      connectedFrom.add(nodeId);
+    } else if (step.defaultConnection) {
+      // Step only has defaultConnection, no other connections
+      lines.push(`    ${nodeId} -->|"default"| ${step.defaultConnection}`);
       connectedFrom.add(nodeId);
     }
   }
@@ -587,7 +620,9 @@ export function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId
     if (step.inputPath) metadata.inputPath = step.inputPath;
     if (step.additionalInstructions) metadata.additionalInstructions = step.additionalInstructions;
     if (step.externalConfig) metadata.externalConfig = step.externalConfig;
-    if (step.defaultConnection) metadata.defaultConnection = step.defaultConnection;
+    if (step.decisionField) metadata.decisionField = step.decisionField;
+    // NOTE: defaultConnection is NOT stored in metadata - it's represented visually by the "default" labeled arrow
+    // Storing it in metadata would cause it to persist even when the arrow is removed from the diagram
     if (step.itemsPath) metadata.itemsPath = step.itemsPath;
     if (step.itemVariable) metadata.itemVariable = step.itemVariable;
     if (step.maxItems) metadata.maxItems = step.maxItems;
@@ -668,6 +703,19 @@ export function generateMermaidSubgraphContent(steps: WorkflowStep[], workflowId
           lines.push(`        ${nodeId} --> ${targetNodeId}`);
         }
       }
+      // Add defaultConnection if it's not already in connections
+      if (step.defaultConnection) {
+        const alreadyConnected = step.connections.some(c => c.targetStepId === step.defaultConnection);
+        if (!alreadyConnected) {
+          const defaultTargetNodeId = stepIdToNodeId.get(step.defaultConnection) || `${workflowId}_${step.defaultConnection}`;
+          lines.push(`        ${nodeId} -->|"default"| ${defaultTargetNodeId}`);
+        }
+      }
+      connectedFrom.add(nodeId);
+    } else if (step.defaultConnection) {
+      // Step only has defaultConnection, no other connections
+      const defaultTargetNodeId = stepIdToNodeId.get(step.defaultConnection) || `${workflowId}_${step.defaultConnection}`;
+      lines.push(`        ${nodeId} -->|"default"| ${defaultTargetNodeId}`);
       connectedFrom.add(nodeId);
     }
   }

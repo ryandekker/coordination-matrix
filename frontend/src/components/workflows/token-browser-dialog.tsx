@@ -477,6 +477,7 @@ export function TokenBrowserDialog({
   const [variablesLoading, setVariablesLoading] = useState(false)
   const [variablesError, setVariablesError] = useState<string | null>(null)
   const [expandedVariables, setExpandedVariables] = useState<Set<string>>(new Set())
+  const variablesFetchedRef = useRef(false)
 
   // Fetch available runs when dialog opens (skip in taskOnly mode)
   useEffect(() => {
@@ -492,12 +493,13 @@ export function TokenBrowserDialog({
     }
   }, [selectedRunId])
 
-  // Fetch variable tokens when dialog opens
+  // Fetch variable tokens when dialog opens (only once per mount)
   useEffect(() => {
-    if (open && variableTokens.length === 0 && !variablesLoading && !variablesError) {
+    if (open && !variablesFetchedRef.current && !variablesLoading) {
+      variablesFetchedRef.current = true
       fetchVariableTokens()
     }
-  }, [open, variableTokens.length, variablesLoading, variablesError])
+  }, [open, variablesLoading])
 
   const fetchVariableTokens = async () => {
     setVariablesLoading(true)
@@ -508,6 +510,8 @@ export function TokenBrowserDialog({
     } catch (err) {
       console.error('Failed to fetch variable tokens:', err)
       setVariablesError(err instanceof Error ? err.message : 'Failed to load variables')
+      // Reset the ref so user can retry
+      variablesFetchedRef.current = false
     } finally {
       setVariablesLoading(false)
     }
@@ -1069,6 +1073,7 @@ export function TokenBrowserDialog({
                                 className="ml-2 underline hover:no-underline"
                                 onClick={() => {
                                   setVariablesError(null)
+                                  variablesFetchedRef.current = false
                                   fetchVariableTokens()
                                 }}
                               >

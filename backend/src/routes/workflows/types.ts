@@ -112,6 +112,7 @@ export interface WorkflowStep {
   // Uses connections[] with conditions for routing
   // Each connection.condition is evaluated against previous step output
   defaultConnection?: string;       // targetStepId for when no conditions match
+  decisionField?: string;           // Field path to evaluate (e.g., 'trigger.payload.category')
 
   // ForEach configuration - spawns subtasks
   itemsPath?: string;               // JSONPath to array in previous output
@@ -166,6 +167,8 @@ export interface Workflow {
   // Organization and display
   folderId?: ObjectId | null;  // Reference to workflow folder
   color?: string;              // Pastel hex color for visual identification
+  // Group access control - workflows must belong to a group (admin-only if null)
+  groupId?: ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
   createdById?: ObjectId | null;

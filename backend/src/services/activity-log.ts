@@ -220,9 +220,10 @@ class ActivityLogService {
       offset?: number;
       eventTypes?: string[];
       actorId?: ObjectId;
+      groupId?: ObjectId;
     } = {}
   ): Promise<{ data: ActivityLogEntry[]; total: number }> {
-    const { limit = 50, offset = 0, eventTypes, actorId } = options;
+    const { limit = 50, offset = 0, eventTypes, actorId, groupId } = options;
     const db = getDb();
 
     const filter: Record<string, unknown> = {};
@@ -233,6 +234,16 @@ class ActivityLogService {
 
     if (actorId) {
       filter.actorId = actorId;
+    }
+
+    // Filter by group - activity logs are linked to tasks, so filter by tasks in the group
+    if (groupId) {
+      const taskIds = await db
+        .collection('tasks')
+        .find({ groupId })
+        .project({ _id: 1 })
+        .toArray();
+      filter.taskId = { $in: taskIds.map((t) => t._id) };
     }
 
     const [entries, total] = await Promise.all([

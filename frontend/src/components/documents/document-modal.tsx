@@ -8,6 +8,7 @@ import {
   useUpdateDocument,
   useDocumentVersions,
 } from '@/hooks/use-documents'
+import { useGroupContext } from '@/lib/group-context'
 import {
   Dialog,
   DialogContent,
@@ -99,6 +100,7 @@ export function DocumentModal({
   const createDocument = useCreateDocument()
   const updateDocument = useUpdateDocument()
   const { data: versionsData } = useDocumentVersions(document?._id || null)
+  const { currentGroupId } = useGroupContext()
 
   // Initialize form when document changes or modal opens
   useEffect(() => {
@@ -167,6 +169,7 @@ export function DocumentModal({
           type,
           status,
           tags: tagArray.length > 0 ? tagArray : undefined,
+          groupId: currentGroupId || undefined,
         })
         toast.success('Document created')
         onOpenChange(false)
@@ -326,6 +329,7 @@ export function DocumentModal({
                   value={content}
                   plugins={plugins}
                   onChange={(v) => setContent(v)}
+                  mode="split"
                 />
               </div>
             )}

@@ -6,6 +6,7 @@ export { userPaths, viewPaths, webhookPaths, activityLogPaths, lookupPaths, tagP
 export { documentPaths } from './documents.js';
 export { fieldConfigPaths } from './field-configs.js';
 export { eventPaths } from './events.js';
+export { groupPaths, projectPaths } from './groups.js';
 
 // Combine all paths into a single object
 import { healthPaths, authPaths, apiKeyPaths } from './health-auth.js';
@@ -15,6 +16,7 @@ import { userPaths, viewPaths, webhookPaths, activityLogPaths, lookupPaths, tagP
 import { documentPaths } from './documents.js';
 import { fieldConfigPaths } from './field-configs.js';
 import { eventPaths } from './events.js';
+import { groupPaths, projectPaths } from './groups.js';
 
 export const allPaths = {
   ...healthPaths,
@@ -25,6 +27,8 @@ export const allPaths = {
   ...workflowRunPaths,
   ...batchJobPaths,
   ...userPaths,
+  ...groupPaths,
+  ...projectPaths,
   ...viewPaths,
   ...webhookPaths,
   ...activityLogPaths,

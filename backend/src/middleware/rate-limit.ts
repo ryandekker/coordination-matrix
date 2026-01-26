@@ -38,8 +38,11 @@ export const authRateLimiter = rateLimit({
   },
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-  // Skip rate limiting if user is already authenticated (for /me endpoint)
+  // Skip rate limiting if user is already authenticated (for /me endpoint) or in development with DISABLE_RATE_LIMIT
   skip: (req) => {
+    if (process.env.DISABLE_RATE_LIMIT === 'true' && process.env.NODE_ENV !== 'production') {
+      return true;
+    }
     return req.path === '/me' && req.headers.authorization !== undefined;
   },
 });
@@ -60,6 +63,10 @@ export const loginRateLimiter = rateLimit({
   legacyHeaders: false,
   // Disable the IPv6 key generator validation since we handle it ourselves
   validate: { xForwardedForHeader: false },
+  // Skip rate limiting in development if explicitly disabled
+  skip: () => {
+    return process.env.DISABLE_RATE_LIMIT === 'true' && process.env.NODE_ENV !== 'production';
+  },
   // Use a custom key generator that includes the email (if available) to prevent
   // distributed brute force attacks from multiple IPs targeting the same account
   keyGenerator: (req) => {
@@ -89,6 +96,10 @@ export const registrationRateLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  // Skip rate limiting in development if explicitly disabled
+  skip: () => {
+    return process.env.DISABLE_RATE_LIMIT === 'true' && process.env.NODE_ENV !== 'production';
+  },
 });
 
 /**

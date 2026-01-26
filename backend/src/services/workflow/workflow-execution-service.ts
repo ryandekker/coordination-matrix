@@ -453,12 +453,36 @@ class WorkflowExecutionService {
     });
 
     switch (step.stepType) {
-      case 'trigger':
+      case 'trigger': {
+        // Mark trigger task as completed and publish event to advance workflow
+        // Pass through the inputPayload as the trigger's output so subsequent steps can access it
+        const triggerOutput = this.buildStepOutput(inputPayload || {}, {
+          summary: 'Workflow triggered',
+        });
         await this.tasks.updateOne(
           { _id: task._id },
-          { $set: { status: 'completed' as TaskStatus } }
+          {
+            $set: {
+              status: 'completed' as TaskStatus,
+              updatedAt: new Date(),
+              stepOutput: triggerOutput,
+            }
+          }
         );
+        const updatedTriggerTask = await this.tasks.findOne({ _id: task._id });
+        if (updatedTriggerTask) {
+          await eventBus.publish({
+            type: 'task.status.changed',
+            taskId: updatedTriggerTask._id,
+            task: updatedTriggerTask,
+            changes: [{ field: 'status', oldValue: 'pending', newValue: 'completed' }],
+            actorId: null,
+            actorType: 'system',
+          });
+          console.log(`[WorkflowExecutionService] Published task.status.changed for trigger task ${task._id}`);
+        }
         break;
+      }
 
       case 'agent':
       case 'manual':
@@ -1780,10 +1804,18 @@ class WorkflowExecutionService {
 
     console.log(`[WorkflowExecutionService] executeDecision: step=${step.id}, decisionField=${step.decisionField}, inputPath=${step.inputPath}, effective=${effectiveDecisionField}`);
     console.log(`[WorkflowExecutionService] executeDecision: inputPayload keys: ${Object.keys(inputPayload || {}).join(', ')}`);
+    console.log(`[WorkflowExecutionService] executeDecision: inputPayload.output keys: ${Object.keys((inputPayload?.output as Record<string, unknown>) || {}).join(', ')}`);
+
+    // Debug: show the actual value at the decision field path
+    if (effectiveDecisionField && inputPayload) {
+      const actualValue = this.resolveDecisionFieldValue(effectiveDecisionField, inputPayload, run);
+      console.log(`[WorkflowExecutionService] executeDecision: value at path "${effectiveDecisionField}" = "${actualValue}" (${typeof actualValue})`);
+    }
+    console.log(`[WorkflowExecutionService] executeDecision: full inputPayload: ${JSON.stringify(inputPayload, null, 2).substring(0, 1000)}`);
 
     let selectedConnection = step.connections?.find(conn => {
       if (!conn.condition) return false;
-      const result = this.evaluateCondition(conn.condition, inputPayload, effectiveDecisionField);
+      const result = this.evaluateCondition(conn.condition, inputPayload, effectiveDecisionField, run);
       console.log(`[WorkflowExecutionService] executeDecision: condition "${conn.condition}" -> ${result}`);
       return result;
     });
@@ -1820,21 +1852,45 @@ class WorkflowExecutionService {
 
     console.log(`[WorkflowExecutionService] executeDecision: selected path=${selectedConnection.targetStepId}, condition=${selectedConnection.condition}, matchedValue=${matchedValue}`);
 
+    // Check if targetStepId is null/empty - this means the branch ends the workflow
+    // or was misconfigured. Handle both cases gracefully.
+    const targetStepId = selectedConnection.targetStepId;
+    const isEndBranch = !targetStepId || targetStepId === '' || targetStepId === 'END';
+
+    // Validate target step exists (unless it's an end branch)
+    const nextStep = !isEndBranch ? workflow.steps.find(s => s.id === targetStepId) : null;
+    if (!isEndBranch && !nextStep) {
+      console.error(`[WorkflowExecutionService] Decision step ${step.id} has invalid targetStepId: "${targetStepId}" - step not found in workflow`);
+      await this.tasks.updateOne(
+        { _id: decisionTask._id },
+        {
+          $set: {
+            status: 'failed' as TaskStatus,
+            'metadata.error': `Invalid target step: "${targetStepId}" not found in workflow`,
+          }
+        }
+      );
+      return;
+    }
+
     // Build stepOutput for decision task so next steps can access decision data via stepOutput.data
     // Pass through the input payload as output, plus the decision metadata
     const decisionOutput = {
       ...inputPayload,
       _decision: {
-        selectedPath: selectedConnection.targetStepId,
+        selectedPath: isEndBranch ? 'END' : targetStepId,
         condition: selectedConnection.condition,
         matchedValue,
         decisionField: effectiveDecisionField,
+        isEndBranch,
       },
     };
     const decisionStepOutput = this.buildStepOutput(decisionOutput, {
-      summary: `Decision: ${matchedValue || selectedConnection.targetStepId}`,
+      summary: isEndBranch
+        ? `Decision: ${matchedValue || 'END'} (workflow ends)`
+        : `Decision: ${matchedValue || targetStepId}`,
       selectedBranch: {
-        targetStepId: selectedConnection.targetStepId,
+        targetStepId: isEndBranch ? 'END' : targetStepId,
         condition: selectedConnection.condition || undefined,
       },
     });
@@ -1845,26 +1901,73 @@ class WorkflowExecutionService {
         $set: {
           status: 'completed' as TaskStatus,
           stepOutput: decisionStepOutput,
-          decisionResult: matchedValue || selectedConnection.targetStepId,
-          'metadata.selectedPath': selectedConnection.targetStepId,
+          decisionResult: matchedValue || (isEndBranch ? 'END' : targetStepId),
+          'metadata.selectedPath': isEndBranch ? 'END' : targetStepId,
           'metadata.condition': selectedConnection.condition,
           'metadata.matchedValue': matchedValue,
           'metadata.decisionField': effectiveDecisionField,
+          'metadata.isEndBranch': isEndBranch,
         },
       }
     );
 
-    const nextStep = workflow.steps.find(s => s.id === selectedConnection!.targetStepId);
-    if (nextStep) {
-      const parentTask = await this.tasks.findOne({ _id: decisionTask.parentId! });
-      if (parentTask) {
-        await this.executeStep(run, workflow, nextStep, parentTask, inputPayload);
-      }
+    // If this is an end branch, don't create next task - workflow branch terminates here
+    if (isEndBranch) {
+      console.log(`[WorkflowExecutionService] Decision step ${step.id} selected END branch - workflow branch terminates`);
+      return;
+    }
+
+    // Execute next step (nextStep is already validated above)
+    const parentTask = await this.tasks.findOne({ _id: decisionTask.parentId! });
+    if (parentTask) {
+      await this.executeStep(run, workflow, nextStep!, parentTask, inputPayload);
     }
   }
 
-  private evaluateCondition(condition: string, payload?: Record<string, unknown>, decisionField?: string): boolean {
-    if (!condition || !payload) return false;
+  /**
+   * Resolves a decision field path to its value.
+   * Supports special paths like:
+   * - trigger.payload.* - references the original workflow trigger payload
+   * - output.* - references the step's input payload (standard path)
+   * - Any other path is looked up directly in the inputPayload
+   */
+  private resolveDecisionFieldValue(
+    field: string,
+    inputPayload: Record<string, unknown>,
+    run: WorkflowRun
+  ): unknown {
+    // Handle trigger.payload.* paths - look up from workflow run's inputPayload
+    if (field.startsWith('trigger.payload.')) {
+      const triggerPath = field.substring('trigger.payload.'.length);
+      const triggerPayload = run.inputPayload as Record<string, unknown> | undefined;
+      if (triggerPayload) {
+        const value = getValueByPath(triggerPayload, triggerPath);
+        console.log(`[WorkflowExecutionService] resolveDecisionFieldValue: resolved trigger.payload.${triggerPath} = "${value}"`);
+        return value;
+      }
+      console.log(`[WorkflowExecutionService] resolveDecisionFieldValue: no trigger payload available for path "${field}"`);
+      return undefined;
+    }
+
+    // Handle trigger.payload (entire object)
+    if (field === 'trigger.payload') {
+      return run.inputPayload;
+    }
+
+    // Standard path lookup in inputPayload
+    return getValueByPath(inputPayload, field);
+  }
+
+  private evaluateCondition(
+    condition: string,
+    payload?: Record<string, unknown>,
+    decisionField?: string,
+    run?: WorkflowRun
+  ): boolean {
+    if (!condition || !payload) {
+      console.log(`[WorkflowExecutionService] evaluateCondition: early return - condition=${!!condition}, payload=${!!payload}`);
+      return false;
+    }
 
     let field: string;
     let values: string;
@@ -1876,18 +1979,33 @@ class WorkflowExecutionService {
       values = condition;
     } else {
       const parts = condition.split(':');
-      if (parts.length < 2) return false;
+      if (parts.length < 2) {
+        console.log(`[WorkflowExecutionService] evaluateCondition: invalid format - condition="${condition}" has no colon`);
+        return false;
+      }
       field = parts[0];
       values = parts.slice(1).join(':'); // Handle values that might contain colons
     }
 
-    if (!field || !values) return false;
+    if (!field || !values) {
+      console.log(`[WorkflowExecutionService] evaluateCondition: missing field or values - field="${field}", values="${values}"`);
+      return false;
+    }
 
-    const actualValue = getValueByPath(payload, field);
+    // Use resolveDecisionFieldValue if we have a run context (supports trigger.payload.* paths)
+    // Otherwise fall back to direct path lookup
+    const actualValue = run
+      ? this.resolveDecisionFieldValue(field, payload, run)
+      : getValueByPath(payload, field);
+
     const expectedValues = values.split(',').map(v => v.trim().toLowerCase());
+    const actualValueStr = String(actualValue).toLowerCase();
+    const result = expectedValues.includes(actualValueStr);
+
+    console.log(`[WorkflowExecutionService] evaluateCondition: field="${field}", actual="${actualValue}" (${typeof actualValue}), expected=[${expectedValues.join(',')}], result=${result}`);
 
     // Case-insensitive comparison
-    return expectedValues.includes(String(actualValue).toLowerCase());
+    return result;
   }
 
   // ============================================================================
@@ -2184,6 +2302,7 @@ class WorkflowExecutionService {
           {
             $set: {
               status: 'completed' as TaskStatus,
+              updatedAt: new Date(),
               stepOutput,
               'metadata.output': result.output,
               'metadata.executionTimeMs': result.executionTimeMs,
@@ -2204,6 +2323,20 @@ class WorkflowExecutionService {
           }
         );
         console.log(`[WorkflowExecutionService] Code step ${step.id} completed successfully in ${result.executionTimeMs}ms`);
+
+        // Publish event to trigger workflow advancement
+        const updatedCodeTask = await this.tasks.findOne({ _id: codeTask._id });
+        if (updatedCodeTask) {
+          await eventBus.publish({
+            type: 'task.status.changed',
+            taskId: updatedCodeTask._id,
+            task: updatedCodeTask,
+            changes: [{ field: 'status', oldValue: 'in_progress', newValue: 'completed' }],
+            actorId: null,
+            actorType: 'system',
+          });
+          console.log(`[WorkflowExecutionService] Published task.status.changed for code task ${codeTask._id}`);
+        }
       } else {
         // Code execution failed
         if (config.continueOnError) {
@@ -4142,6 +4275,7 @@ class WorkflowExecutionService {
 
   async listWorkflowRuns(options: {
     workflowId?: string;
+    groupId?: ObjectId;
     status?: WorkflowRunStatus | WorkflowRunStatus[];
     dateFrom?: Date;
     dateTo?: Date;
@@ -4154,6 +4288,16 @@ class WorkflowExecutionService {
     if (options.workflowId) {
       filter.workflowId = new ObjectId(options.workflowId);
     }
+
+    // Filter by group - workflow runs are linked to workflows which have groupId
+    if (options.groupId) {
+      const workflowIds = await this.workflows
+        .find({ groupId: options.groupId })
+        .project({ _id: 1 })
+        .toArray();
+      filter.workflowId = { $in: workflowIds.map((w) => w._id) };
+    }
+
     if (options.status) {
       filter.status = Array.isArray(options.status)
         ? { $in: options.status }

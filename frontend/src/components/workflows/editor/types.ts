@@ -151,6 +151,7 @@ export interface Workflow {
   // Organization and display
   folderId?: string | null  // Reference to workflow folder
   color?: string            // Pastel hex color for visual identification
+  groupId?: string | null   // Reference to group
 }
 
 export interface WorkflowEditorProps {

@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useTasks, useTask, useLookups, useFieldConfigs, useViews, useViewFolders, useUsers, useWorkflows, useTags, useCreateView, useUpdateView } from '@/hooks/use-tasks'
 import { useEventStream } from '@/hooks/use-event-stream'
+import { useGroupContext } from '@/lib/group-context'
 import { Task, View, FieldConfig } from '@/lib/api'
 
 // Fallback field configs when API returns empty or fails - ensures basic functionality
@@ -93,6 +94,10 @@ export function TasksPage() {
   const viewIdFromUrl = searchParams.get('viewId')
   const taskIdFromUrl = searchParams.get('taskId')
   const parentIdFromUrl = searchParams.get('parentId')  // For viewing a flow's children
+  const projectIdFromUrl = searchParams.get('projectId')  // For filtering by project
+
+  // Get projects from group context
+  const { projects, groups, currentGroupId } = useGroupContext()
 
   const [selectedView, setSelectedView] = useState<string | null>(null)
   const [filters, setFilters] = useState<Record<string, unknown>>({})
@@ -122,6 +127,7 @@ export function TasksPage() {
     sortOrder,
     search,
     ...(parentIdFromUrl ? { parentId: parentIdFromUrl } : { rootOnly: true }),
+    ...(currentGroupId ? { groupId: currentGroupId } : {}),
     resolveReferences: true,
     ...filters,
   })
@@ -186,6 +192,13 @@ export function TasksPage() {
     setExpandAllEnabled(enabled)
     localStorage.setItem('taskList.expandAllPreference', String(enabled))
   }, [])
+
+  // Apply projectId filter from URL
+  useEffect(() => {
+    if (projectIdFromUrl) {
+      setFilters(prev => ({ ...prev, projectId: projectIdFromUrl }))
+    }
+  }, [projectIdFromUrl])
 
   // Sync view from URL - only apply view settings once the view is loaded
   useEffect(() => {
@@ -458,6 +471,7 @@ export function TasksPage() {
         tasks={tasks}
         availableTags={tags}
         workflows={workflows}
+        projects={projects}
         filters={filters}
         search={search}
         sorting={currentSorting}
@@ -477,6 +491,7 @@ export function TasksPage() {
         lookups={lookups}
         users={users}
         workflows={workflows}
+        groups={groups}
         visibleColumns={effectiveVisibleColumns}
         sortBy={sortBy}
         sortOrder={sortOrder}
