@@ -402,6 +402,12 @@ class WorkflowExecutionService {
   private applyTaskDefaults(run: WorkflowRun, now: Date): Partial<Task> {
     const defaults: Partial<Task> = {};
 
+    // Inherit groupId from the workflow run for access control
+    // This ensures subtasks are visible to users with access to the parent workflow
+    if (run.groupId) {
+      defaults.groupId = run.groupId;
+    }
+
     if (run.taskDefaults) {
       if (run.taskDefaults.assigneeId) {
         defaults.assigneeId = run.taskDefaults.assigneeId;
