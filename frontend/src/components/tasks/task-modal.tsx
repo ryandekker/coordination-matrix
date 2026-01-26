@@ -26,7 +26,8 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs'
-import { Task, FieldConfig, LookupValue, TaskType, WebhookConfig, isSystemUser } from '@/lib/api'
+import { Task, FieldConfig, LookupValue, TaskType, WebhookConfig, isSystemUser, Group, authFetch } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
 import { toast } from 'sonner'
 import { useCreateTask, useUpdateTask, useRerunTask, useUsers, useWorkflows, useTasks, useTask, useTaskChildren, useTaskDocuments, useDetachDocument } from '@/hooks/use-tasks'
 import { useGroupContext } from '@/lib/group-context'
@@ -191,6 +192,24 @@ export function TaskModal({
 
   // Get group context for default values in create mode
   const { currentGroup, currentProject, groups, projects } = useGroupContext()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
+
+  // Fetch all groups for admins
+  const [allGroups, setAllGroups] = useState<Group[]>([])
+  useEffect(() => {
+    if (isOpen && isAdmin) {
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
+      authFetch(`${API_BASE}/groups?all=true`)
+        .then(res => res.json())
+        .then(data => setAllGroups(data.data || []))
+        .catch(console.error)
+    }
+  }, [isOpen, isAdmin])
+
+  // Use all groups for admins, otherwise use groups from context
+  const availableGroups = isAdmin ? allGroups : groups
+  const showGroupSelector = isAdmin || groups.length > 1
 
   // Core default values
   const coreDefaultValues: Record<string, unknown> = {
@@ -746,8 +765,8 @@ export function TaskModal({
                 />
               </div>
 
-              {/* Group - only show if user is in multiple groups */}
-              {groups.length > 1 && (
+              {/* Group - only show if user is admin or in multiple groups */}
+              {showGroupSelector && (
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground">Group</label>
                   <Controller
@@ -773,7 +792,7 @@ export function TaskModal({
                               <span>No group (admin only)</span>
                             </div>
                           </SelectItem>
-                          {groups.map((group) => (
+                          {availableGroups.map((group) => (
                             <SelectItem key={group._id} value={group._id}>
                               <div className="flex items-center gap-2">
                                 <Users className="h-3.5 w-3.5" />
@@ -1225,8 +1244,9 @@ export function TaskModal({
                 workflows={workflows}
                 users={users}
                 allTasks={allTasks}
-                groups={groups}
+                groups={availableGroups}
                 projects={projects}
+                showGroupSelector={showGroupSelector}
                 webhookConfig={webhookConfig}
                 onWebhookConfigChange={handleWebhookConfigChange}
                 updateTask={updateTask}

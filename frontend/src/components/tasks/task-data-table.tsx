@@ -53,7 +53,8 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { EditableCell } from './editable-cell'
-import { Task, FieldConfig, LookupValue, User, Workflow, Group, tasksApi, isSystemUser } from '@/lib/api'
+import { Task, FieldConfig, LookupValue, User, Workflow, Group, tasksApi, isSystemUser, authFetch } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
 import { useTaskChildren, useUpdateTask, useDeleteTask, useBulkUpdateTasks, useBulkDeleteTasks, useLookups, useCreateTask } from '@/hooks/use-tasks'
 import { formatDateTime, cn } from '@/lib/utils'
 import { TASK_TYPE_CONFIG, getTaskTypeConfig } from '@/lib/task-type-config'
@@ -95,6 +96,7 @@ const BulkActionsBar = memo(function BulkActionsBar({
   lookups,
   users,
   groups,
+  showGroupSelector,
   onStatusChange,
   onPriorityChange,
   onAssigneeChange,
@@ -108,6 +110,7 @@ const BulkActionsBar = memo(function BulkActionsBar({
   lookups: Record<string, LookupValue[]>
   users: User[]
   groups: Group[]
+  showGroupSelector: boolean
   onStatusChange: (status: string) => void
   onPriorityChange: (priority: string) => void
   onAssigneeChange: (assigneeId: string | null) => void
@@ -167,7 +170,7 @@ const BulkActionsBar = memo(function BulkActionsBar({
             ))}
           </SelectContent>
         </Select>
-        {groups.length > 1 && (
+        {showGroupSelector && (
           <Select onValueChange={(val) => onGroupChange(val === '__none__' ? null : val)} disabled={isUpdating}>
             <SelectTrigger className="h-8 w-[160px]">
               <SelectValue placeholder="Move to group" />
@@ -946,6 +949,8 @@ export function TaskDataTable({
   hasActiveFilters = false,
 }: TaskDataTableProps) {
   const router = useRouter()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [expandedRows, setExpandedRows] = useState<Set<string>>(() => new Set(autoExpandIds || []))
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
   const [pulsingRows, setPulsingRows] = useState<Set<string>>(new Set())
@@ -954,6 +959,23 @@ export function TaskDataTable({
   const [inlineCreationParentId, setInlineCreationParentId] = useState<string | null>(null)
   // Pending pulse target - when set, we'll watch for this task to appear in the DOM and pulse it
   const [pendingPulseTarget, setPendingPulseTarget] = useState<string | null>(null)
+  // All groups for admins
+  const [allGroups, setAllGroups] = useState<Group[]>([])
+
+  // Fetch all groups for admins
+  useEffect(() => {
+    if (isAdmin) {
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
+      authFetch(`${API_BASE}/groups?all=true`)
+        .then(res => res.json())
+        .then(data => setAllGroups(data.data || []))
+        .catch(console.error)
+    }
+  }, [isAdmin])
+
+  // Use all groups for admins, otherwise use groups from props
+  const availableGroups = isAdmin ? allGroups : groups
+  const showGroupSelector = isAdmin || groups.length > 1
 
   const createTask = useCreateTask()
 
@@ -1606,7 +1628,8 @@ export function TaskDataTable({
           selectedCount={selectedRows.size}
           lookups={lookups}
           users={users}
-          groups={groups}
+          groups={availableGroups}
+          showGroupSelector={showGroupSelector}
           onStatusChange={handleBulkStatusChange}
           onPriorityChange={handleBulkPriorityChange}
           onAssigneeChange={handleBulkAssigneeChange}
