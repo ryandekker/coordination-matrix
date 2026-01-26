@@ -48,6 +48,7 @@ import { documentsRouter } from './routes/documents.js';
 import { variablePackagesRouter } from './routes/variable-packages.js';
 import groupsRouter from './routes/groups.js';
 import projectsRouter from './routes/projects.js';
+import { conversationRecordsRouter } from './routes/conversation-records.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { requireAuth } from './middleware/auth.js';
 import { requireScope, SCOPES } from './middleware/authorize.js';
@@ -276,6 +277,9 @@ app.use('/api/variable-packages', requireAuth, requireScope(SCOPES.ADMIN), varia
 // Groups and Projects - access control
 app.use('/api/groups', groupsRouter);  // Auth handled within router
 app.use('/api/projects', projectsRouter);  // Auth handled within router
+
+// Conversation records - daemon execution logs
+app.use('/api/conversation-records', requireAuth, requireScope(SCOPES.TASKS_READ), conversationRecordsRouter);
 
 // Error handling
 app.use(errorHandler);

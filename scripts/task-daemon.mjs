@@ -1281,6 +1281,199 @@ function executeCommand(cmd, prompt) {
   }
 }
 
+/**
+ * Execute command with stream-json output to capture full conversation thread
+ * Returns conversation data including tool calls and results
+ */
+function executeCommandWithConversation(cmd, prompt) {
+  console.log(`[DEBUG] Executing command with conversation capture: ${cmd}`);
+  console.log(`[DEBUG] Prompt preview: ${prompt.substring(0, 300)}${prompt.length > 300 ? '...' : ''}`);
+
+  // Write prompt to a temp file to avoid shell escaping issues
+  const tmpFile = join(tmpdir(), `task-daemon-${Date.now()}.txt`);
+  writeFileSync(tmpFile, prompt);
+
+  // For claude, insert --print --output-format stream-json --verbose
+  const claudeMatch = cmd.match(/^(.*\/)?claude(\s|$)/);
+  let fullCmd;
+  if (claudeMatch) {
+    const claudeEndIdx = claudeMatch[0].length;
+    const beforeArgs = cmd.substring(0, claudeEndIdx).trimEnd();
+    const afterArgs = cmd.substring(claudeEndIdx);
+    fullCmd = `${beforeArgs} --print --output-format stream-json --verbose ${afterArgs}`.trim() + ` "$(cat '${tmpFile}')"`;
+  } else {
+    // Non-claude command, fall back to simple execution
+    fullCmd = `${cmd} "$(cat '${tmpFile}')"`;
+  }
+
+  console.log(`[DEBUG] Running with conversation capture (this may take a while)...`);
+
+  const conversation = {
+    sessionId: null,
+    model: null,
+    messages: [],
+    result: null,
+    usage: null,
+    permissionDenials: [],
+    numTurns: 0,
+    durationMs: 0,
+    durationApiMs: 0,
+  };
+
+  try {
+    const stdout = execSync(fullCmd, {
+      encoding: 'utf8',
+      maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    try { unlinkSync(tmpFile); } catch {}
+
+    // Parse NDJSON stream output
+    const lines = stdout.split('\n').filter(line => line.trim());
+
+    for (const line of lines) {
+      try {
+        const event = JSON.parse(line);
+
+        if (event.type === 'system' && event.subtype === 'init') {
+          conversation.sessionId = event.session_id;
+          conversation.model = event.model;
+        } else if (event.type === 'assistant') {
+          // Claude's response - may contain tool_use blocks
+          const msg = event.message;
+          if (msg?.content) {
+            for (const block of msg.content) {
+              if (block.type === 'tool_use') {
+                conversation.messages.push({
+                  type: 'tool_use',
+                  timestamp: new Date(),
+                  toolName: block.name,
+                  toolInput: block.input,
+                  toolUseId: block.id,
+                });
+              } else if (block.type === 'text') {
+                conversation.messages.push({
+                  type: 'assistant',
+                  timestamp: new Date(),
+                  content: block.text,
+                });
+              }
+            }
+          }
+        } else if (event.type === 'user' && event.tool_use_result) {
+          // Tool result
+          conversation.messages.push({
+            type: 'tool_result',
+            timestamp: new Date(),
+            toolUseId: event.message?.content?.[0]?.tool_use_id,
+            toolResult: event.tool_use_result,
+            isError: false,
+          });
+        } else if (event.type === 'result') {
+          // Final result with metadata
+          conversation.result = event.result;
+          conversation.numTurns = event.num_turns || 0;
+          conversation.durationMs = event.duration_ms || 0;
+          conversation.durationApiMs = event.duration_api_ms || 0;
+          conversation.permissionDenials = event.permission_denials || [];
+
+          if (event.usage) {
+            conversation.usage = {
+              inputTokens: event.usage.input_tokens || 0,
+              outputTokens: event.usage.output_tokens || 0,
+              cacheCreationInputTokens: event.usage.cache_creation_input_tokens || 0,
+              cacheReadInputTokens: event.usage.cache_read_input_tokens || 0,
+              totalCostUsd: event.total_cost_usd || 0,
+            };
+          }
+        }
+      } catch (parseErr) {
+        // Skip lines that aren't valid JSON
+        console.log(`[DEBUG] Skipping non-JSON line: ${line.substring(0, 100)}`);
+      }
+    }
+
+    return {
+      exitCode: 0,
+      stdout: conversation.result || stdout,
+      stderr: '',
+      conversation,
+    };
+  } catch (error) {
+    try { unlinkSync(tmpFile); } catch {}
+
+    // Try to parse any conversation data from stdout even on failure
+    if (error.stdout) {
+      const lines = error.stdout.split('\n').filter(line => line.trim());
+      for (const line of lines) {
+        try {
+          const event = JSON.parse(line);
+          if (event.type === 'system' && event.subtype === 'init') {
+            conversation.sessionId = event.session_id;
+            conversation.model = event.model;
+          }
+        } catch {}
+      }
+    }
+
+    return {
+      exitCode: error.status || 1,
+      stdout: error.stdout || '',
+      stderr: error.stderr || error.message,
+      conversation,
+    };
+  }
+}
+
+/**
+ * Create a conversation record in the database
+ */
+async function createConversationRecord(config, taskId, jobName, execCommand, conversationData, startedAt) {
+  const url = `${config.apiUrl}/conversation-records`;
+
+  const record = {
+    taskId,
+    sessionId: conversationData.sessionId || `daemon-${Date.now()}`,
+    jobName,
+    model: conversationData.model,
+    execCommand,
+    status: conversationData.exitCode === 0 ? 'completed' : 'failed',
+    messages: conversationData.messages || [],
+    result: conversationData.result,
+    usage: conversationData.usage,
+    permissionDenials: conversationData.permissionDenials || [],
+    exitCode: conversationData.exitCode,
+    stderr: conversationData.stderr,
+    numTurns: conversationData.numTurns,
+    durationMs: conversationData.durationMs,
+    durationApiMs: conversationData.durationApiMs,
+    startedAt: startedAt.toISOString(),
+    completedAt: new Date().toISOString(),
+  };
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: getHeaders(config),
+      body: JSON.stringify(record),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.log(`[WARN] Failed to create conversation record: ${response.status} - ${text}`);
+      return null;
+    }
+
+    const data = await response.json();
+    console.log(`[DEBUG] Created conversation record: ${data.data?._id}`);
+    return data.data;
+  } catch (err) {
+    console.log(`[WARN] Error creating conversation record: ${err.message}`);
+    return null;
+  }
+}
+
 // ============================================================================
 // Stage Transition Logic
 // ============================================================================
@@ -1531,16 +1724,51 @@ async function processTask(config, task) {
     return;
   }
 
-  // Execute the command
+  // Execute the command - use conversation capture for claude commands
   console.log(`\nExecuting: ${config.exec}\n`);
   console.log('-'.repeat(40));
 
-  const startTime = Date.now();
-  const result = executeCommand(config.exec, prompt);
-  const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+  const startTime = new Date();
+  const isClaudeCommand = /^(.*\/)?claude(\s|$)/.test(config.exec);
+
+  // Use conversation capture for claude commands to get full tool call traces
+  const result = isClaudeCommand
+    ? executeCommandWithConversation(config.exec, prompt)
+    : executeCommand(config.exec, prompt);
+
+  const duration = ((Date.now() - startTime.getTime()) / 1000).toFixed(1);
 
   console.log('-'.repeat(40));
   console.log(`\nCommand completed in ${duration}s with exit code: ${result.exitCode}`);
+
+  // Log conversation stats if available
+  if (result.conversation) {
+    const conv = result.conversation;
+    const toolCalls = conv.messages?.filter(m => m.type === 'tool_use').length || 0;
+    console.log(`[DEBUG] Conversation: ${conv.numTurns} turns, ${toolCalls} tool calls`);
+    if (conv.usage?.totalCostUsd) {
+      console.log(`[DEBUG] Cost: $${conv.usage.totalCostUsd.toFixed(4)}`);
+    }
+    if (conv.permissionDenials?.length > 0) {
+      console.log(`[WARN] ${conv.permissionDenials.length} permission denial(s)`);
+    }
+
+    // Log conversation to database
+    const conversationRecord = await createConversationRecord(
+      config,
+      task._id,
+      config.jobName,
+      config.exec,
+      { ...conv, exitCode: result.exitCode, stderr: result.stderr },
+      startTime
+    );
+
+    // Store conversation record ID in task metadata for reference
+    if (conversationRecord?._id) {
+      task.metadata = task.metadata || {};
+      task.metadata.lastConversationRecordId = conversationRecord._id;
+    }
+  }
 
   // Log stderr if present (useful for debugging failures)
   if (result.stderr) {
@@ -1562,6 +1790,7 @@ async function processTask(config, task) {
         exitCode: result.exitCode,
         message: errorInfo.substring(0, 2000),
       },
+      conversationRecordId: task.metadata?.lastConversationRecordId,
     };
 
     await updateTask(config, task._id, {
@@ -1666,6 +1895,7 @@ async function processTask(config, task) {
     confidence: parsedResponse.data.metadata?.confidence || null,
     suggestedTags,
     suggestedNextStage: parsedResponse.data.metadata?.suggestedNextStage || null,
+    conversationRecordId: task.metadata?.lastConversationRecordId || null,
     // Agent questions (for ASK action)
     ...(parsedResponse.data.questions && {
       questions: {

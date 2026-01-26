@@ -2473,3 +2473,134 @@ export const variablePackagesApi = {
     return handleResponse(response)
   },
 }
+
+// Conversation Records API
+export interface ConversationMessage {
+  type: 'system' | 'user' | 'assistant' | 'tool_use' | 'tool_result'
+  timestamp: string
+  content?: string | unknown
+  toolName?: string
+  toolInput?: Record<string, unknown>
+  toolUseId?: string
+  toolResult?: unknown
+  isError?: boolean
+}
+
+export interface ConversationUsage {
+  inputTokens: number
+  outputTokens: number
+  cacheCreationInputTokens: number
+  cacheReadInputTokens: number
+  totalCostUsd: number
+}
+
+export interface PermissionDenial {
+  toolName: string
+  toolUseId: string
+  toolInput: Record<string, unknown>
+}
+
+export interface ConversationRecord {
+  _id: string
+  taskId: string
+  sessionId: string
+  jobName?: string
+  model?: string
+  execCommand?: string
+  status: 'running' | 'completed' | 'failed' | 'timeout'
+  exitCode?: number
+  messages?: ConversationMessage[]
+  result?: string
+  parsedResult?: Record<string, unknown>
+  usage?: ConversationUsage
+  permissionDenials?: PermissionDenial[]
+  error?: string
+  stderr?: string
+  startedAt: string
+  completedAt?: string
+  durationMs?: number
+  durationApiMs?: number
+  numTurns?: number
+}
+
+export interface ConversationStats {
+  summary: {
+    totalConversations: number
+    completedCount: number
+    failedCount: number
+    totalCostUsd: number
+    totalInputTokens: number
+    totalOutputTokens: number
+    avgDurationMs: number
+    avgTurns: number
+    totalToolCalls: number
+  }
+  byJob: Array<{
+    _id: string
+    count: number
+    totalCostUsd: number
+    avgDurationMs: number
+  }>
+  byStatus: Array<{
+    _id: string
+    count: number
+  }>
+}
+
+export const conversationRecordsApi = {
+  list: async (params?: {
+    taskId?: string
+    sessionId?: string
+    jobName?: string
+    status?: string
+    model?: string
+    limit?: number
+    offset?: number
+    sortBy?: string
+    sortOrder?: 'asc' | 'desc'
+  }): Promise<{
+    data: ConversationRecord[]
+    pagination: { limit: number; offset: number; total: number }
+  }> => {
+    const searchParams = new URLSearchParams()
+    if (params?.taskId) searchParams.append('taskId', params.taskId)
+    if (params?.sessionId) searchParams.append('sessionId', params.sessionId)
+    if (params?.jobName) searchParams.append('jobName', params.jobName)
+    if (params?.status) searchParams.append('status', params.status)
+    if (params?.model) searchParams.append('model', params.model)
+    if (params?.limit) searchParams.append('limit', String(params.limit))
+    if (params?.offset) searchParams.append('offset', String(params.offset))
+    if (params?.sortBy) searchParams.append('sortBy', params.sortBy)
+    if (params?.sortOrder) searchParams.append('sortOrder', params.sortOrder)
+    const response = await authFetch(`${API_BASE}/conversation-records?${searchParams}`)
+    return handleResponse(response)
+  },
+
+  get: async (id: string): Promise<ApiResponse<ConversationRecord>> => {
+    const response = await authFetch(`${API_BASE}/conversation-records/${id}`)
+    return handleResponse(response)
+  },
+
+  getByTask: async (taskId: string): Promise<ApiResponse<ConversationRecord[]>> => {
+    const response = await authFetch(`${API_BASE}/conversation-records/task/${taskId}`)
+    return handleResponse(response)
+  },
+
+  getStats: async (params?: {
+    jobName?: string
+    since?: string
+  }): Promise<ApiResponse<ConversationStats>> => {
+    const searchParams = new URLSearchParams()
+    if (params?.jobName) searchParams.append('jobName', params.jobName)
+    if (params?.since) searchParams.append('since', params.since)
+    const response = await authFetch(`${API_BASE}/conversation-records/stats/summary?${searchParams}`)
+    return handleResponse(response)
+  },
+
+  delete: async (id: string): Promise<ApiResponse<void>> => {
+    const response = await authFetch(`${API_BASE}/conversation-records/${id}`, {
+      method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
+}
