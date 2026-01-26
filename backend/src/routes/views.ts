@@ -101,6 +101,13 @@ viewsRouter.get('/:id/tasks', loadUserGroups(), async (req: Request, res: Respon
       for (const [key, value] of Object.entries(view.filters)) {
         if (value === undefined || value === null || value === '') continue;
 
+        // Handle special __unassigned__ marker for null values
+        // This is used to filter for tasks with null values (e.g., unassigned tasks)
+        if (value === '__unassigned__' || (Array.isArray(value) && value.includes('__unassigned__'))) {
+          (filter as Record<string, unknown>)[key] = { $eq: null };
+          continue;
+        }
+
         // Handle array values (for $in queries)
         if (Array.isArray(value)) {
           if (key.endsWith('Id')) {
