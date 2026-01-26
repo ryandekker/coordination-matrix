@@ -38,7 +38,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
-import { MermaidLiveEditor } from '@/components/ui/mermaid-live-editor'
 import { IntegratedWorkflowView } from './integrated-workflow-view'
 import {
   Tabs,
@@ -52,7 +51,6 @@ import {
   Plus,
   Trash2,
   GripVertical,
-  FileCode,
   Upload,
   Download,
   LayoutPanelLeft,
@@ -65,14 +63,12 @@ import {
   Sparkles,
   Info,
   MessageSquare,
-  RefreshCw,
   ArrowRightFromLine,
   ArrowDown,
   Folder,
   FolderPlus,
   History,
   Palette,
-  FileText,
   Settings,
   ToggleLeft,
   Copy,
@@ -80,8 +76,8 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
-  Play,
   Pause,
+  FileJson,
 } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { TokenBrowser } from './token-browser'
@@ -91,7 +87,7 @@ import { TemplateTextarea } from '@/components/ui/template-textarea'
 // Import types, constants, and utilities from editor module
 import type { WorkflowStep, WorkflowStepType, Workflow, WorkflowEditorProps, LoopScope } from './editor/types'
 import { STEP_TYPES, getStepTypeInfo } from './editor/constants'
-import { detectLoopScopes, generateMermaidFromSteps } from './editor/utils'
+import { detectLoopScopes } from './editor/utils'
 import { StepConfigPanel } from './step-config-panel'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
@@ -184,7 +180,7 @@ const SETTINGS_SECTIONS = [
   { id: 'status', label: 'Status', icon: ToggleLeft },
   { id: 'organization', label: 'Organization', icon: Folder },
   { id: 'color', label: 'Color', icon: Palette },
-  { id: 'payload', label: 'Sample Payload', icon: FileCode },
+  { id: 'payload', label: 'Sample Payload', icon: FileJson },
   { id: 'ai-prompt', label: 'AI Generation', icon: Sparkles },
   { id: 'webhook', label: 'Webhook', icon: ArrowRightFromLine },
 ] as const
@@ -198,14 +194,11 @@ export function WorkflowEditor({
   const [steps, setSteps] = useState<WorkflowStep[]>([])
   const [rootTaskTitleTemplate, setRootTaskTitleTemplate] = useState('')
   const [samplePayload, setSamplePayload] = useState('')
-  const [mermaidCode, setMermaidCode] = useState('')
   const [selectedColor, setSelectedColor] = useState<string | undefined>(undefined)
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null)
-  const [mermaidError, setMermaidError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState('integrated')
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
-  const [isSyncing, setIsSyncing] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
 
   // Available workflows for Flow step type
@@ -301,7 +294,6 @@ export function WorkflowEditor({
             stepType: 'manual' as const,
           })) || [])
       setSteps(normalizedSteps)
-      setMermaidCode(workflow.mermaidDiagram || '')
       setRootTaskTitleTemplate(workflow.rootTaskTitleTemplate || '')
       setSamplePayload(workflow.samplePayload || '')
       setSelectedColor(workflow.color || undefined)
@@ -314,7 +306,6 @@ export function WorkflowEditor({
         isActive: true,
       })
       setSteps([])
-      setMermaidCode('')
       setRootTaskTitleTemplate('')
       setSamplePayload('')
       setSelectedColor(undefined)
@@ -344,19 +335,6 @@ export function WorkflowEditor({
         })
     }
   }, [isOpen, workflow?._id])
-
-  // Update mermaid when steps change
-  // Extract primitive value to avoid infinite re-renders (watch function changes reference every render)
-  const workflowName = watch('name')
-  useEffect(() => {
-    if (steps.length > 0) {
-      const diagram = generateMermaidFromSteps(steps, workflowName)
-      setMermaidCode(diagram)
-      setMermaidError(null)
-    } else {
-      setMermaidCode('')
-    }
-  }, [steps, workflowName])
 
   const toggleStepExpanded = (stepId: string) => {
     setExpandedSteps(prev => {
@@ -412,58 +390,11 @@ export function WorkflowEditor({
     setSteps(newSteps)
   }
 
-  // Sync Mermaid code to steps by calling backend parse API
-  const syncMermaidToSteps = async () => {
-    if (!mermaidCode.trim()) {
-      setSyncError('No Mermaid code to parse')
-      return
-    }
-
-    setIsSyncing(true)
-    setSyncError(null)
-
-    try {
-      const response = await fetch(`${API_BASE}/workflows/parse-mermaid`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-        body: JSON.stringify({ mermaidDiagram: mermaidCode }),
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to parse: ${response.statusText}`)
-      }
-
-      const result = await response.json()
-      const parsedSteps = result.data?.steps || []
-
-      if (parsedSteps.length === 0) {
-        setSyncError('No steps found in diagram. Check your Mermaid syntax.')
-        return
-      }
-
-      // Normalize the parsed steps - new types don't need execution field
-      const normalizedSteps = parsedSteps.map((step: WorkflowStep) => ({
-        ...step,
-        stepType: step.stepType || 'agent',
-      }))
-
-      setSteps(normalizedSteps)
-      // Expand all newly created steps
-      setExpandedSteps(new Set(normalizedSteps.map((s: WorkflowStep) => s.id)))
-      setActiveTab('visual')
-    } catch (error) {
-      setSyncError(error instanceof Error ? error.message : 'Failed to parse Mermaid')
-    } finally {
-      setIsSyncing(false)
-    }
-  }
-
   const onSubmit = (data: WorkflowFormData) => {
     const workflowData: Workflow = {
       ...data,
       _id: workflow?._id,
       steps,
-      mermaidDiagram: mermaidCode,
       description: data.description || '',
       rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
       samplePayload: samplePayload || undefined,
@@ -483,7 +414,6 @@ export function WorkflowEditor({
       rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
       samplePayload: samplePayload || undefined,
       steps,
-      mermaidDiagram: mermaidCode,
       exportedAt: new Date().toISOString(),
       version: '1.0',
     }
@@ -498,7 +428,7 @@ export function WorkflowEditor({
     URL.revokeObjectURL(url)
   }
 
-  // Import workflow from file (supports both JSON and Mermaid)
+  // Import workflow from JSON file
   const importWorkflowFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
@@ -506,47 +436,34 @@ export function WorkflowEditor({
     const reader = new FileReader()
     reader.onload = async (e) => {
       const content = e.target?.result as string
-      const isJson = file.name.endsWith('.json')
 
-      if (isJson) {
-        try {
-          const data = JSON.parse(content)
+      try {
+        const data = JSON.parse(content)
 
-          // Apply workflow-level fields
-          if (data.name) setValue('name', data.name)
-          if (data.description !== undefined) setValue('description', data.description)
-          if (data.isActive !== undefined) setValue('isActive', data.isActive)
-          if (data.rootTaskTitleTemplate) setRootTaskTitleTemplate(data.rootTaskTitleTemplate)
-          if (data.samplePayload) setSamplePayload(data.samplePayload)
+        // Apply workflow-level fields
+        if (data.name) setValue('name', data.name)
+        if (data.description !== undefined) setValue('description', data.description)
+        if (data.isActive !== undefined) setValue('isActive', data.isActive)
+        if (data.rootTaskTitleTemplate) setRootTaskTitleTemplate(data.rootTaskTitleTemplate)
+        if (data.samplePayload) setSamplePayload(data.samplePayload)
 
-          // Apply steps if present
-          if (data.steps && Array.isArray(data.steps)) {
-            // Normalize steps
-            const normalizedSteps = data.steps.map((step: WorkflowStep) => ({
-              ...step,
-              stepType: step.stepType || 'agent',
-              // Preserve the id for round-trip, but generate new ones if missing
-              id: step.id || `step-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            }))
-            setSteps(normalizedSteps)
-            setExpandedSteps(new Set(normalizedSteps.map((s: WorkflowStep) => s.id)))
-          }
-
-          // Apply mermaid diagram if present
-          if (data.mermaidDiagram) {
-            setMermaidCode(data.mermaidDiagram)
-          }
-
-          setActiveTab('visual')
-          setSyncError(null)
-        } catch (err) {
-          setSyncError('Invalid JSON file: ' + (err instanceof Error ? err.message : 'Unknown error'))
+        // Apply steps if present
+        if (data.steps && Array.isArray(data.steps)) {
+          // Normalize steps
+          const normalizedSteps = data.steps.map((step: WorkflowStep) => ({
+            ...step,
+            stepType: step.stepType || 'agent',
+            // Preserve the id for round-trip, but generate new ones if missing
+            id: step.id || `step-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          }))
+          setSteps(normalizedSteps)
+          setExpandedSteps(new Set(normalizedSteps.map((s: WorkflowStep) => s.id)))
         }
-      } else {
-        // Mermaid file - just update the code and switch to diagram tab
-        setMermaidCode(content)
-        setActiveTab('code')
+
+        setActiveTab('visual')
         setSyncError(null)
+      } catch (err) {
+        setSyncError('Invalid JSON file: ' + (err instanceof Error ? err.message : 'Unknown error'))
       }
     }
     reader.readAsText(file)
@@ -613,10 +530,6 @@ export function WorkflowEditor({
                     <GripVertical className="h-4 w-4" />
                     Steps
                   </TabsTrigger>
-                  <TabsTrigger value="code" className="gap-1.5 h-7">
-                    <FileCode className="h-4 w-4" />
-                    Code
-                  </TabsTrigger>
                   <TabsTrigger value="settings" className="gap-1.5 h-7">
                     <Info className="h-4 w-4" />
                     Settings
@@ -629,7 +542,7 @@ export function WorkflowEditor({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".json,.mmd"
+                  accept=".json"
                   onChange={importWorkflowFile}
                   className="hidden"
                 />
@@ -937,7 +850,7 @@ export function WorkflowEditor({
                   {/* Sample Payload Section */}
                   <div id="settings-payload" className="space-y-3 p-4 bg-muted/30 rounded-lg">
                     <h3 className="text-sm font-medium flex items-center gap-2">
-                      <FileCode className="h-4 w-4 text-muted-foreground" />
+                      <FileJson className="h-4 w-4 text-muted-foreground" />
                       Sample Payload
                       <span className="text-xs text-muted-foreground font-normal">(optional)</span>
                     </h3>
@@ -1057,27 +970,6 @@ export function WorkflowEditor({
                         className="gap-1.5"
                         onClick={async () => {
                           try {
-                            const response = await fetch(`${API_BASE}/workflows/ai-prompt?format=mermaid&includeContext=true`, {
-                              headers: getAuthHeader(),
-                            })
-                            const data = await response.json()
-                            await navigator.clipboard.writeText(data.data.prompt)
-                            // Could add a toast notification here
-                          } catch (err) {
-                            console.error('Failed to copy AI prompt:', err)
-                          }
-                        }}
-                      >
-                        <Sparkles className="h-3 w-3" />
-                        Copy AI Prompt (Mermaid)
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="gap-1.5"
-                        onClick={async () => {
-                          try {
                             const response = await fetch(`${API_BASE}/workflows/ai-prompt?format=json&includeContext=true`, {
                               headers: getAuthHeader(),
                             })
@@ -1089,7 +981,7 @@ export function WorkflowEditor({
                         }}
                       >
                         <Sparkles className="h-3 w-3" />
-                        Copy AI Prompt (JSON)
+                        Copy AI Prompt
                       </Button>
                     </div>
                     <p className="text-xs text-muted-foreground mt-2">
@@ -1118,11 +1010,7 @@ export function WorkflowEditor({
                 steps={steps}
                 workflowId={workflow?._id}
                 users={users}
-                onStepsChange={(newSteps) => {
-                  setSteps(newSteps)
-                  // Auto-generate Mermaid when steps change
-                  setMermaidCode(generateMermaidFromSteps(newSteps, watch('name')))
-                }}
+                onStepsChange={setSteps}
                 className="flex-1 min-h-0"
               />
             </TabsContent>
@@ -1363,51 +1251,6 @@ export function WorkflowEditor({
               </div>
             </TabsContent>
 
-            {/* Mermaid Editor with Live Preview */}
-            <TabsContent value="code" className="flex-1 flex flex-col overflow-hidden mt-0">
-              {/* Convert to Steps toolbar */}
-              <div className="flex items-center justify-between mb-2 px-1">
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="default"
-                    size="sm"
-                    onClick={syncMermaidToSteps}
-                    disabled={isSyncing || !mermaidCode.trim()}
-                    className="gap-1.5"
-                  >
-                    {isSyncing ? (
-                      <>
-                        <RefreshCw className="h-4 w-4 animate-spin" />
-                        Converting...
-                      </>
-                    ) : (
-                      <>
-                        <ArrowRightFromLine className="h-4 w-4" />
-                        Convert to Steps
-                      </>
-                    )}
-                  </Button>
-                  <span className="text-xs text-muted-foreground">
-                    Parse Mermaid diagram and create workflow steps
-                  </span>
-                </div>
-                {syncError && (
-                  <span className="text-xs text-destructive flex items-center gap-1">
-                    <AlertCircle className="h-3 w-3" />
-                    {syncError}
-                  </span>
-                )}
-              </div>
-              <MermaidLiveEditor
-                value={mermaidCode}
-                onChange={setMermaidCode}
-                onError={setMermaidError}
-                className="flex-1"
-                minHeight="500px"
-                initialLayout="split"
-              />
-            </TabsContent>
           </Tabs>
 
           <DialogFooter className="mt-4">

@@ -2,4 +2,3 @@
 // This file is kept for backward compatibility with existing imports
 export { workflowsRouter } from './workflows/index.js';
 export * from './workflows/types.js';
-export { parseMermaidToSteps, generateMermaidFromSteps } from './workflows/mermaid-parser.js';

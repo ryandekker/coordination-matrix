@@ -702,33 +702,27 @@ async function checkJoinCondition(
 
 ## Export/Import Format
 
-For workflow export with prompts (mermaid config embedded, also parsed out for convenience):
+JSON is the canonical format for workflow export/import:
 
 ```json
 {
-  "workflow": {
-    "name": "PR Review Pipeline",
-    "description": "Automated PR review with human escalation",
-    "mermaidSource": "graph TD\n    A[Fetch PR] --> B...\n\n%% === WORKFLOW_CONFIG ===\n...",
-    "steps": [
-      {
-        "id": "A",
-        "name": "Fetch PR Details",
-        "stepType": "task",
-        "execution": "automated",
-        "prompt": "Fetch PR #{{input.prNumber}}..."
-      }
-    ]
-  },
-  "agents": [
+  "version": "1.0",
+  "exportedAt": "2025-01-15T10:00:00Z",
+  "workflows": [
     {
-      "id": "code-reviewer",
-      "displayName": "Code Review Agent",
-      "agentPrompt": "You are an expert code reviewer..."
+      "name": "PR Review Pipeline",
+      "description": "Automated PR review with human escalation",
+      "isActive": true,
+      "steps": [
+        {
+          "id": "A",
+          "name": "Fetch PR Details",
+          "stepType": "agent",
+          "additionalInstructions": "Fetch PR #{{input.prNumber}}..."
+        }
+      ]
     }
-  ],
-  "exportVersion": "2.0",
-  "exportedAt": "2025-01-15T10:00:00Z"
+  ]
 }
 ```
 
@@ -801,11 +795,10 @@ function getValueByPath(obj: unknown, path: string): unknown {
 - [ ] Add join fields: `awaitTag`
 - [ ] Add flow fields: `flowId`, `inputMapping`
 
-### Phase 2: Mermaid Parser Updates
-- [ ] Update `parseMermaidToSteps()` to extract config block
-- [ ] Parse step configs from `%% @ID: {...}` format
-- [ ] Extract decision branches from edge labels
-- [ ] Preserve config block in export
+### Phase 2: JSON Import/Export (Completed)
+- [x] JSON is the canonical format for workflow definitions
+- [x] Import/export via `/api/workflows/import-multi` and `/api/workflows/export-multi`
+- [x] Mermaid is used only for visualization (rendering), not import
 
 ### Phase 3: Daemon Updates
 - [ ] Implement layered prompt assembly
