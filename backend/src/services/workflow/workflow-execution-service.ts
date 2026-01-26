@@ -2026,13 +2026,33 @@ class WorkflowExecutionService {
 
   private async executeFindDocument(
     run: WorkflowRun,
-    _workflow: Workflow,
+    workflow: Workflow,
     step: WorkflowStep,
     findDocTask: Task,
     inputPayload?: Record<string, unknown>
   ): Promise<void> {
     const config = step.findDocumentConfig;
     console.log(`[WorkflowExecutionService] Executing findDocument step: ${step.id}`);
+
+    // Helper to advance to the next step after successful completion
+    const advanceToNextStep = async (outputData: Record<string, unknown>) => {
+      // Find and execute the next step based on connections
+      const connection = step.connections?.[0];
+      if (connection?.targetStepId) {
+        const nextStep = workflow.steps.find(s => s.id === connection.targetStepId);
+        if (nextStep) {
+          const parentTask = await this.tasks.findOne({ _id: findDocTask.parentId! });
+          if (parentTask) {
+            // Merge the found documents into the input payload for the next step
+            const nextInputPayload = {
+              ...inputPayload,
+              output: { data: outputData },
+            };
+            await this.executeStep(run, workflow, nextStep, parentTask, nextInputPayload);
+          }
+        }
+      }
+    };
 
     if (!config) {
       console.warn(`[WorkflowExecutionService] FindDocument step ${step.id} has no findDocumentConfig`);
@@ -2077,7 +2097,8 @@ class WorkflowExecutionService {
             );
             return;
           }
-          // Not failing, just store null
+          // Not failing, just store null and advance
+          const emptyResult: Record<string, unknown> = { [storeAs]: [] };
           await this.tasks.updateOne(
             { _id: findDocTask._id },
             {
@@ -2090,18 +2111,20 @@ class WorkflowExecutionService {
               }
             }
           );
+          await advanceToNextStep(emptyResult);
           return;
         }
 
         // Remove embedding from response (too large)
         const { embedding, ...documentWithoutEmbedding } = document as Record<string, unknown>;
+        const docResult = { document: documentWithoutEmbedding };
 
         await this.tasks.updateOne(
           { _id: findDocTask._id },
           {
             $set: {
               status: 'completed' as TaskStatus,
-              [`metadata.${storeAs}`]: { document: documentWithoutEmbedding },
+              [`metadata.${storeAs}`]: docResult,
               'metadata.mode': 'static',
               'metadata.documentId': config.documentId,
               'metadata.resultCount': 1,
@@ -2109,6 +2132,7 @@ class WorkflowExecutionService {
           }
         );
         console.log(`[WorkflowExecutionService] FindDocument step ${step.id} (static) completed successfully`);
+        await advanceToNextStep({ [storeAs]: docResult });
         return;
       } catch (error) {
         console.error(`[WorkflowExecutionService] FindDocument step ${step.id} (static) failed:`, error);
@@ -2221,6 +2245,9 @@ class WorkflowExecutionService {
       );
 
       console.log(`[WorkflowExecutionService] FindDocument step ${step.id} (dynamic) completed successfully`);
+
+      // Advance to the next step
+      await advanceToNextStep({ [storeAs]: documentResult });
     } catch (error) {
       console.error(`[WorkflowExecutionService] FindDocument step ${step.id} (dynamic) failed:`, error);
       await this.tasks.updateOne(
