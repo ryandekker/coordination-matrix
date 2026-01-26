@@ -9,8 +9,10 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
+import * as VisuallyHidden from '@radix-ui/react-visually-hidden'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -618,7 +620,7 @@ export function TaskModal({
   if (!task) {
     return (
       <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
+        <DialogContent className="max-w-lg max-h-[85vh] flex flex-col overflow-hidden" aria-describedby={undefined}>
           <DialogHeader className="pb-2 flex-shrink-0">
             <DialogTitle className="text-base">
               {parentTask ? `New Subtask` : 'New Task'}
@@ -883,9 +885,11 @@ export function TaskModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl h-[90vh] p-0 gap-0 flex flex-col overflow-hidden">
-        {/* Accessibility: visually hidden title */}
-        <span className="sr-only">Edit Task</span>
+      <DialogContent className="max-w-4xl h-[90vh] p-0 gap-0 flex flex-col overflow-hidden" aria-describedby={undefined}>
+        {/* Accessibility: visually hidden title and description for screen readers */}
+        <VisuallyHidden.Root asChild>
+          <DialogTitle>Edit Task: {task?.title || 'Task'}</DialogTitle>
+        </VisuallyHidden.Root>
 
         {/* Header */}
         <div className="px-5 pt-5 pb-4 flex-shrink-0 border-b border-border">
