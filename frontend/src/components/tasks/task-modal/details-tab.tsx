@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Controller, Control, UseFormRegister, UseFormSetValue, UseFormWatch } from 'react-hook-form'
 import { format } from 'date-fns'
 import { Copy, Check } from 'lucide-react'
@@ -117,9 +117,33 @@ export function DetailsTab({
   const selectedWorkflowId = watch('workflowId')
   const currentTaskType = watch('taskType') || 'agent'
   const selectedGroupId = watch('groupId') as string | null
+  const selectedProjectId = watch('projectId') as string | null
 
   // Filter projects by selected group
   const groupProjects = projects.filter(p => p.groupId === selectedGroupId)
+
+  // Auto-fix: If task has no groupId but user has exactly one group, auto-assign it
+  // This handles the case where subtasks are created without inheriting groupId
+  useEffect(() => {
+    if (!task.groupId && groups.length === 1) {
+      const defaultGroupId = groups[0]._id
+      setValue('groupId', defaultGroupId)
+      updateTask.mutate({ id: task._id, data: { groupId: defaultGroupId } })
+    }
+  }, [task._id, task.groupId, groups, setValue, updateTask])
+
+  // Auto-fix: If task has no projectId but the group has exactly one project, auto-assign it
+  useEffect(() => {
+    const currentGroupId = task.groupId || (groups.length === 1 ? groups[0]._id : null)
+    if (currentGroupId && !task.projectId) {
+      const projectsInGroup = projects.filter(p => p.groupId === currentGroupId)
+      if (projectsInGroup.length === 1) {
+        const defaultProjectId = projectsInGroup[0]._id
+        setValue('projectId', defaultProjectId)
+        updateTask.mutate({ id: task._id, data: { projectId: defaultProjectId } })
+      }
+    }
+  }, [task._id, task.groupId, task.projectId, groups, projects, setValue, updateTask])
 
   // Get workflow stages for the selected workflow
   const workflowStages = workflows

@@ -294,6 +294,9 @@ class WorkflowExecutionService {
       createdById: actorId ?? null,
       createdAt: now,
       startedAt: now,
+      // Inherit group and project from the workflow for access control
+      ...(workflow.groupId && { groupId: workflow.groupId }),
+      ...(workflow.projectId && { projectId: workflow.projectId }),
       ...(input.inputPayload && { inputPayload: input.inputPayload }),
       ...(taskDefaults && { taskDefaults }),
       ...(input.executionOptions && { executionOptions: input.executionOptions }),
@@ -402,10 +405,13 @@ class WorkflowExecutionService {
   private applyTaskDefaults(run: WorkflowRun, now: Date): Partial<Task> {
     const defaults: Partial<Task> = {};
 
-    // Inherit groupId from the workflow run for access control
-    // This ensures subtasks are visible to users with access to the parent workflow
+    // Inherit groupId and projectId from the workflow run for access control
+    // This ensures tasks are visible to users with access to the parent workflow
     if (run.groupId) {
       defaults.groupId = run.groupId;
+    }
+    if (run.projectId) {
+      defaults.projectId = run.projectId;
     }
 
     if (run.taskDefaults) {
