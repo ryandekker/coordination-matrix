@@ -1126,13 +1126,28 @@ function resolveSimpleTemplate(
   sourceData: Record<string, unknown>,
   triggerData: Record<string, unknown>
 ): unknown {
+  // Helper to resolve a path from trigger data
+  // trigger.payload.* -> look up in triggerData (which IS the payload)
+  // trigger.* (without payload) -> also look up in triggerData
+  const resolveTriggerPath = (path: string): unknown => {
+    if (path.startsWith('trigger.payload.')) {
+      // Strip 'trigger.payload.' - triggerData IS the payload
+      const subPath = path.substring(16);
+      return subPath ? getNestedValue(triggerData, subPath) : triggerData;
+    } else if (path.startsWith('trigger.')) {
+      // Strip 'trigger.' - for backwards compatibility
+      return getNestedValue(triggerData, path.substring(8));
+    }
+    return undefined;
+  };
+
   // If it's a simple variable reference like "{{output.field}}"
   const simpleMatch = template.match(/^\{\{([^}]+)\}\}$/);
   if (simpleMatch) {
     const path = simpleMatch[1].trim();
 
     if (path.startsWith('trigger.')) {
-      return getNestedValue(triggerData, path.substring(8));
+      return resolveTriggerPath(path);
     }
     if (path.startsWith('input.')) {
       return getNestedValue(sourceData, path.substring(6));
@@ -1146,7 +1161,7 @@ function resolveSimpleTemplate(
     let value: unknown;
 
     if (trimmedPath.startsWith('trigger.')) {
-      value = getNestedValue(triggerData, trimmedPath.substring(8));
+      value = resolveTriggerPath(trimmedPath);
     } else if (trimmedPath.startsWith('input.')) {
       value = getNestedValue(sourceData, trimmedPath.substring(6));
     } else {
