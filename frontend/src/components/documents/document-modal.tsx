@@ -100,7 +100,7 @@ export function DocumentModal({
   const updateDocument = useUpdateDocument()
   const { data: versionsData } = useDocumentVersions(document?._id || null)
 
-  // Initialize form when document changes
+  // Initialize form when document changes or modal opens
   useEffect(() => {
     if (document) {
       setTitle(document.title)
@@ -127,7 +127,8 @@ export function DocumentModal({
       lastSavedRef.current = null
     }
     setHasChanges(false)
-  }, [document])
+    setShowHistory(false)
+  }, [document, open])
 
   // Track changes
   useEffect(() => {

@@ -36,8 +36,8 @@
     --card-foreground: 210 40% 98%;
     --popover: 210 45% 14%;
     --popover-foreground: 210 40% 98%;
-    /* Core blue for dark mode */
-    --primary: 202 79% 60%;
+    /* Core blue for dark mode - lightened for better contrast */
+    --primary: 202 85% 70%;
     --primary-foreground: 0 0% 100%;
     --secondary: 210 35% 20%;
     --secondary-foreground: 210 55% 88%;
