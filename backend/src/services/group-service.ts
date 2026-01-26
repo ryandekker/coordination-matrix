@@ -285,11 +285,15 @@ class GroupService {
     userId: string
   ): Promise<GroupMember | null> {
     const group = await this.getGroupById(groupId);
-    if (!group) return null;
+    if (!group) {
+      console.log(`[getMembership] Group not found: ${groupId}`);
+      return null;
+    }
 
-    return (
-      group.members.find((m) => m.userId.toString() === userId) || null
-    );
+    console.log(`[getMembership] Checking user=${userId} in group=${groupId}, members: ${group.members.map(m => m.userId.toString()).join(', ')}`);
+    const member = group.members.find((m) => m.userId.toString() === userId) || null;
+    console.log(`[getMembership] Result: ${member ? `found with role=${member.role}` : 'not found'}`);
+    return member;
   }
 
   /**

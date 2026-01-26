@@ -184,23 +184,36 @@ export async function hasResourceAccess(
   req: Request,
   resourceGroupId: ObjectId | string | null | undefined
 ): Promise<boolean> {
-  if (!req.user) return false;
+  if (!req.user) {
+    console.log('[hasResourceAccess] No user on request');
+    return false;
+  }
 
   // Admins can access everything
-  if (isAdmin(req)) return true;
+  if (isAdmin(req)) {
+    console.log('[hasResourceAccess] User is admin, granting access');
+    return true;
+  }
 
   // Resources without a group are admin-only
-  if (!resourceGroupId) return false;
+  if (!resourceGroupId) {
+    console.log('[hasResourceAccess] Resource has no group, denying non-admin');
+    return false;
+  }
 
   const groupIdStr = resourceGroupId.toString();
 
   // Check API key group scoping
   if (req.apiKey?.groupId) {
-    return req.apiKey.groupId.toString() === groupIdStr;
+    const matches = req.apiKey.groupId.toString() === groupIdStr;
+    console.log(`[hasResourceAccess] API key group scoping: apiKeyGroup=${req.apiKey.groupId}, resourceGroup=${groupIdStr}, matches=${matches}`);
+    return matches;
   }
 
   // Check user group membership
+  console.log(`[hasResourceAccess] Checking membership for user=${req.user.userId} in group=${groupIdStr}`);
   const membership = await groupService.getMembership(groupIdStr, req.user.userId);
+  console.log(`[hasResourceAccess] Membership result: ${membership ? `role=${membership.role}` : 'null'}`);
   return membership !== null;
 }
 
