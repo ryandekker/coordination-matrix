@@ -49,6 +49,10 @@ import {
 } from '@/components/ui/select'
 import { formatDateTime } from '@/lib/utils'
 import { apiKeysApi, usersApi, type ApiKey, type ScopeDefinition, isSystemUser } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
+
+// Special value for "Full System Access" option (no user association, admin-level access)
+const SYSTEM_ACCESS_VALUE = '__system__'
 
 interface User {
   _id: string
@@ -60,6 +64,8 @@ interface User {
 
 export default function ApiKeysPage() {
   const queryClient = useQueryClient()
+  const { user: currentUser } = useAuth()
+  const isCurrentUserAdmin = currentUser?.role === 'admin'
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingKey, setEditingKey] = useState<ApiKey | null>(null)
   const [isKeyRevealModalOpen, setIsKeyRevealModalOpen] = useState(false)
@@ -90,7 +96,7 @@ export default function ApiKeysPage() {
   })
 
   const createMutation = useMutation({
-    mutationFn: (data: { name: string; description?: string; scopes: string[] }) => apiKeysApi.create(data),
+    mutationFn: (data: { name: string; description?: string; scopes: string[]; userId?: string | null }) => apiKeysApi.create(data),
     onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['api-keys'] })
       closeModal()
@@ -101,7 +107,7 @@ export default function ApiKeysPage() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: { name?: string; description?: string; scopes?: string[] } }) =>
+    mutationFn: ({ id, data }: { id: string; data: { name?: string; description?: string; scopes?: string[]; userId?: string | null } }) =>
       apiKeysApi.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['api-keys'] })
@@ -143,7 +149,8 @@ export default function ApiKeysPage() {
     setFormData({
       name: '',
       description: '',
-      userId: '',
+      // Default to current user - they must select a user (or system access if admin)
+      userId: currentUser?.id || '',
       scopes: ['tasks:read', 'saved-searches:read'],
     })
   }
@@ -161,10 +168,14 @@ export default function ApiKeysPage() {
   }
 
   const openEditModal = (apiKey: ApiKey) => {
+    // Determine the userId value for the form:
+    // - If apiKey has no userId, it's a system access key (admin only)
+    // - Otherwise use the userId
+    const userIdValue = apiKey.userId ? apiKey.userId : SYSTEM_ACCESS_VALUE
     setFormData({
       name: apiKey.name,
       description: apiKey.description || '',
-      userId: '',
+      userId: userIdValue,
       scopes: [...apiKey.scopes],
     })
     setEditingKey(apiKey)
@@ -173,24 +184,37 @@ export default function ApiKeysPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+
+    // Convert userId: SYSTEM_ACCESS_VALUE means null (no user), otherwise use the userId
+    const userIdPayload = formData.userId === SYSTEM_ACCESS_VALUE ? null : formData.userId
+
     if (editingKey) {
-      // Update existing key
+      // Update existing key - include userId if admin is editing
+      const updateData: { name?: string; description?: string; scopes?: string[]; userId?: string | null } = {
+        name: formData.name,
+        description: formData.description || undefined,
+        scopes: formData.scopes,
+      }
+      // Only admins can change userId
+      if (isCurrentUserAdmin) {
+        updateData.userId = userIdPayload
+      }
       updateMutation.mutate({
         id: editingKey._id,
-        data: {
-          name: formData.name,
-          description: formData.description || undefined,
-          scopes: formData.scopes,
-        },
+        data: updateData,
       })
     } else {
       // Create new key
-      const payload = {
+      const payload: { name: string; description?: string; scopes: string[]; userId?: string | null } = {
         name: formData.name,
-        description: formData.description,
+        description: formData.description || undefined,
         scopes: formData.scopes,
-        ...(formData.userId && { userId: formData.userId }),
       }
+      // userId is required - either a user ID or null for system access
+      if (userIdPayload !== null) {
+        payload.userId = userIdPayload
+      }
+      // If null (system access), don't include userId - backend will handle it
       createMutation.mutate(payload)
     }
   }
@@ -237,6 +261,7 @@ export default function ApiKeysPage() {
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Key</TableHead>
+              <TableHead>Acts As</TableHead>
               <TableHead>Scopes</TableHead>
               <TableHead>Last Used</TableHead>
               <TableHead>Created</TableHead>
@@ -247,13 +272,13 @@ export default function ApiKeysPage() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={7} className="h-24 text-center">
+                <TableCell colSpan={8} className="h-24 text-center">
                   Loading...
                 </TableCell>
               </TableRow>
             ) : apiKeys.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+                <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
                   <div className="flex flex-col items-center gap-2">
                     <Key className="h-8 w-8" />
                     <p>No API keys yet</p>
@@ -276,6 +301,17 @@ export default function ApiKeysPage() {
                     <code className="text-sm bg-muted px-2 py-1 rounded">
                       {apiKey.keyPrefix}
                     </code>
+                  </TableCell>
+                  <TableCell>
+                    {apiKey.userId ? (
+                      <span className="text-sm">
+                        {users.find(u => u._id === apiKey.userId)?.displayName || apiKey.userId}
+                      </span>
+                    ) : (
+                      <Badge variant="outline" className="text-amber-600 border-amber-600">
+                        System
+                      </Badge>
+                    )}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
@@ -366,30 +402,37 @@ export default function ApiKeysPage() {
                 placeholder="What will this key be used for?"
               />
             </div>
-            {!editingKey && (
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Acts As User</label>
-                <Select
-                  value={formData.userId || 'none'}
-                  onValueChange={(value) => setFormData({ ...formData, userId: value === 'none' ? '' : value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a user (optional)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No user (API key only)</SelectItem>
-                    {users.filter((user) => !isSystemUser(user)).map((user) => (
-                      <SelectItem key={user._id} value={user._id}>
-                        {user.displayName}{user.email ? ` (${user.email})` : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  When set, this API key will inherit the selected user&apos;s permissions.
-                </p>
-              </div>
-            )}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Acts As User *</label>
+              <Select
+                value={formData.userId}
+                onValueChange={(value) => setFormData({ ...formData, userId: value })}
+                disabled={!!editingKey && !isCurrentUserAdmin}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a user" />
+                </SelectTrigger>
+                <SelectContent>
+                  {isCurrentUserAdmin && (
+                    <SelectItem value={SYSTEM_ACCESS_VALUE}>
+                      <span className="font-medium text-amber-600">Full System Access</span>
+                    </SelectItem>
+                  )}
+                  {users.filter((user) => !isSystemUser(user)).map((user) => (
+                    <SelectItem key={user._id} value={user._id}>
+                      {user.displayName}{user.email ? ` (${user.email})` : ''}
+                      {user._id === currentUser?.id && ' (you)'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {formData.userId === SYSTEM_ACCESS_VALUE
+                  ? 'This key will have full system access without user restrictions.'
+                  : 'This API key will inherit the selected user\'s permissions and group access.'}
+                {editingKey && !isCurrentUserAdmin && ' Only admins can change this setting.'}
+              </p>
+            </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Scopes</label>
               <div className="space-y-4 border rounded-md p-3 max-h-64 overflow-y-auto">
@@ -425,7 +468,7 @@ export default function ApiKeysPage() {
               </Button>
               <Button
                 type="submit"
-                disabled={createMutation.isPending || updateMutation.isPending || !formData.name}
+                disabled={createMutation.isPending || updateMutation.isPending || !formData.name || !formData.userId}
               >
                 {editingKey
                   ? updateMutation.isPending
