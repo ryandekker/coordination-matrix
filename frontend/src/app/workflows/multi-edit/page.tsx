@@ -1,9 +1,8 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { MermaidLiveEditor } from '@/components/ui/mermaid-live-editor'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -31,6 +30,7 @@ import {
   ChevronUp,
   Sparkles,
   Copy,
+  FileJson,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -42,6 +42,7 @@ interface ImportResult {
   action: 'create' | 'update' | 'skip'
   stepCount: number
   error?: string
+  warnings?: string[]
 }
 
 interface ImportSummary {
@@ -84,46 +85,102 @@ interface StepSummary {
   unchanged: number
 }
 
-const MULTI_WORKFLOW_TEMPLATE = `flowchart TD
+// Types for workflow JSON
+interface WorkflowStep {
+  id: string
+  name: string
+  stepType: string
+  description?: string
+  additionalInstructions?: string
+  defaultAssigneeId?: string
+  connections?: { targetStepId: string; condition?: string; label?: string }[]
+  [key: string]: unknown
+}
 
-    %% @workflow: "My New Workflow"
-    %% @description: Description of this workflow
-    subgraph workflow1["My New Workflow"]
-        direction TB
-        step1["First Step"]:::agent
-        step2("Manual Review"):::manual
-        step3{{"API Call"}}:::external
-        step1 --> step2 --> step3
-    end
+interface WorkflowExport {
+  _id?: string
+  name: string
+  description?: string
+  isActive: boolean
+  rootTaskTitleTemplate?: string
+  samplePayload?: string
+  steps: WorkflowStep[]
+}
 
-    %% @workflow: "Another Workflow"
-    %% @description: A second workflow that calls the first
-    subgraph workflow2["Another Workflow"]
-        direction TB
-        start["Begin Process"]:::agent
-        nested[["Run: My New Workflow"]]:::flow
-        finish["Complete"]:::agent
-        start --> nested --> finish
-    end
+interface MultiWorkflowExport {
+  version: string
+  exportedAt: string
+  workflows: WorkflowExport[]
+}
 
-    %% Styling
-    classDef agent fill:#3B82F6,color:#fff
-    classDef manual fill:#8B5CF6,color:#fff
-    classDef external fill:#F97316,color:#fff
-    classDef decision fill:#F59E0B,color:#fff
-    classDef foreach fill:#10B981,color:#fff
-    classDef join fill:#6366F1,color:#fff
-    classDef flow fill:#EC4899,color:#fff
-`
+const JSON_TEMPLATE: MultiWorkflowExport = {
+  version: '1.0',
+  exportedAt: new Date().toISOString(),
+  workflows: [
+    {
+      name: 'My New Workflow',
+      description: 'Description of this workflow',
+      isActive: true,
+      steps: [
+        {
+          id: 'step-1',
+          name: 'First Step',
+          stepType: 'agent',
+          description: 'Initial processing step',
+          connections: [{ targetStepId: 'step-2' }],
+        },
+        {
+          id: 'step-2',
+          name: 'Manual Review',
+          stepType: 'manual',
+          description: 'Human review step',
+          connections: [{ targetStepId: 'step-3' }],
+        },
+        {
+          id: 'step-3',
+          name: 'API Call',
+          stepType: 'external',
+          description: 'External API integration',
+        },
+      ],
+    },
+    {
+      name: 'Another Workflow',
+      description: 'A second workflow that calls the first',
+      isActive: true,
+      steps: [
+        {
+          id: 'step-a',
+          name: 'Begin Process',
+          stepType: 'agent',
+          connections: [{ targetStepId: 'step-b' }],
+        },
+        {
+          id: 'step-b',
+          name: 'Run My New Workflow',
+          stepType: 'flow',
+          flowId: 'my-new-workflow-id',
+          connections: [{ targetStepId: 'step-c' }],
+        },
+        {
+          id: 'step-c',
+          name: 'Complete',
+          stepType: 'agent',
+        },
+      ],
+    },
+  ],
+}
 
 export default function MultiWorkflowEditPage() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const idsParam = searchParams.get('ids')
   const workflowIds = idsParam ? idsParam.split(',').filter(Boolean) : []
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const [mermaidCode, setMermaidCode] = useState('')
-  const [mermaidError, setMermaidError] = useState<string | null>(null)
+  const [jsonCode, setJsonCode] = useState('')
+  const [jsonError, setJsonError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const [importResults, setImportResults] = useState<ImportResult[] | null>(null)
@@ -144,7 +201,21 @@ export default function MultiWorkflowEditPage() {
   const [stepSummary, setStepSummary] = useState<StepSummary | null>(null)
   const [isConfirming, setIsConfirming] = useState(false)
 
-  // Export workflows (by IDs if provided, or all)
+  // Validate JSON on change
+  useEffect(() => {
+    if (!jsonCode.trim()) {
+      setJsonError(null)
+      return
+    }
+    try {
+      JSON.parse(jsonCode)
+      setJsonError(null)
+    } catch (err) {
+      setJsonError(err instanceof Error ? err.message : 'Invalid JSON')
+    }
+  }, [jsonCode])
+
+  // Export workflows as JSON (by IDs if provided, or all)
   const handleExport = useCallback(async (ids?: string[]) => {
     setIsLoading(true)
     setError(null)
@@ -162,8 +233,9 @@ export default function MultiWorkflowEditPage() {
         throw new Error(errorData.message || `Export failed: ${response.statusText}`)
       }
       const result = await response.json()
-      setMermaidCode(result.data.mermaid || '')
-      setWorkflowCount(result.data.workflows?.length || 0)
+      const exportData = result.data as MultiWorkflowExport
+      setJsonCode(JSON.stringify(exportData, null, 2))
+      setWorkflowCount(exportData.workflows?.length || 0)
       setImportResults(null)
       setImportSummary(null)
     } catch (err) {
@@ -182,18 +254,44 @@ export default function MultiWorkflowEditPage() {
 
   // Load template for new workflows
   const handleNewFromTemplate = useCallback(() => {
-    setMermaidCode(MULTI_WORKFLOW_TEMPLATE)
+    setJsonCode(JSON.stringify(JSON_TEMPLATE, null, 2))
     setImportResults(null)
     setImportSummary(null)
     setError(null)
   }, [])
 
+  // Parse JSON and get workflows for import
+  const parseJsonWorkflows = useCallback((): WorkflowExport[] | null => {
+    if (!jsonCode.trim()) {
+      setError('No JSON to import')
+      return null
+    }
+
+    try {
+      const parsed = JSON.parse(jsonCode)
+
+      // Support both wrapped format ({workflows: [...]}) and direct array
+      if (Array.isArray(parsed)) {
+        return parsed
+      } else if (parsed.workflows && Array.isArray(parsed.workflows)) {
+        return parsed.workflows
+      } else if (parsed.name && parsed.steps) {
+        // Single workflow object
+        return [parsed]
+      } else {
+        setError('Invalid format: expected {workflows: [...]} or array of workflows')
+        return null
+      }
+    } catch (err) {
+      setError('Invalid JSON: ' + (err instanceof Error ? err.message : 'Unknown error'))
+      return null
+    }
+  }, [jsonCode])
+
   // Preview (quick dry-run without detailed diffs)
   const handlePreview = useCallback(async () => {
-    if (!mermaidCode.trim()) {
-      setError('No Mermaid code to import')
-      return
-    }
+    const workflows = parseJsonWorkflows()
+    if (!workflows) return
 
     setIsImporting(true)
     setError(null)
@@ -204,7 +302,7 @@ export default function MultiWorkflowEditPage() {
       const response = await fetch(`${API_BASE}/workflows/import-multi`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-        body: JSON.stringify({ mermaid: mermaidCode, dryRun: true }),
+        body: JSON.stringify({ workflows, dryRun: true }),
       })
 
       if (!response.ok) {
@@ -219,14 +317,12 @@ export default function MultiWorkflowEditPage() {
     } finally {
       setIsImporting(false)
     }
-  }, [mermaidCode])
+  }, [parseJsonWorkflows])
 
   // Import with detailed preview modal
   const handleImportWithPreview = useCallback(async () => {
-    if (!mermaidCode.trim()) {
-      setError('No Mermaid code to import')
-      return
-    }
+    const workflows = parseJsonWorkflows()
+    if (!workflows) return
 
     setIsImporting(true)
     setError(null)
@@ -236,7 +332,7 @@ export default function MultiWorkflowEditPage() {
       const response = await fetch(`${API_BASE}/workflows/import-multi`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-        body: JSON.stringify({ mermaid: mermaidCode, dryRun: true, includeStepDiffs: true }),
+        body: JSON.stringify({ workflows, dryRun: true, includeStepDiffs: true }),
       })
 
       if (!response.ok) {
@@ -253,11 +349,12 @@ export default function MultiWorkflowEditPage() {
     } finally {
       setIsImporting(false)
     }
-  }, [mermaidCode])
+  }, [parseJsonWorkflows])
 
   // Confirm import after preview
   const handleConfirmImport = useCallback(async () => {
-    if (!mermaidCode.trim()) return
+    const workflows = parseJsonWorkflows()
+    if (!workflows) return
 
     setIsConfirming(true)
     setError(null)
@@ -266,7 +363,7 @@ export default function MultiWorkflowEditPage() {
       const response = await fetch(`${API_BASE}/workflows/import-multi`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-        body: JSON.stringify({ mermaid: mermaidCode, dryRun: false }),
+        body: JSON.stringify({ workflows, dryRun: false }),
       })
 
       if (!response.ok) {
@@ -281,21 +378,21 @@ export default function MultiWorkflowEditPage() {
     } finally {
       setIsConfirming(false)
     }
-  }, [mermaidCode, router])
+  }, [parseJsonWorkflows, router])
 
-  // Download as file
+  // Download as JSON file
   const handleDownload = useCallback(() => {
-    if (!mermaidCode) return
-    const blob = new Blob([mermaidCode], { type: 'text/plain' })
+    if (!jsonCode) return
+    const blob = new Blob([jsonCode], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'workflows.mmd'
+    a.download = 'workflows.json'
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
-  }, [mermaidCode])
+  }, [jsonCode])
 
   // Upload from file
   const handleUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -304,7 +401,7 @@ export default function MultiWorkflowEditPage() {
     const reader = new FileReader()
     reader.onload = (e) => {
       const content = e.target?.result as string
-      setMermaidCode(content)
+      setJsonCode(content)
       setImportResults(null)
       setImportSummary(null)
     }
@@ -317,7 +414,7 @@ export default function MultiWorkflowEditPage() {
     setIsCopyingPrompt(true)
     setError(null)
     try {
-      const response = await fetch(`${API_BASE}/workflows/ai-prompt-multi?includeContext=true`, {
+      const response = await fetch(`${API_BASE}/workflows/ai-prompt?format=json&includeContext=true`, {
         headers: getAuthHeader(),
       })
       if (!response.ok) {
@@ -326,10 +423,10 @@ export default function MultiWorkflowEditPage() {
       const result = await response.json()
       const prompt = result.data?.prompt || ''
 
-      // Append current diagram if available
+      // Append current JSON if available
       let fullPrompt = prompt
-      if (mermaidCode.trim()) {
-        fullPrompt += `\n\n---\n\n## Current Diagram to Edit\n\nHere is the current multi-workflow diagram. Modify it based on the user's request:\n\n\`\`\`mermaid\n${mermaidCode}\n\`\`\``
+      if (jsonCode.trim() && !jsonError) {
+        fullPrompt += `\n\n---\n\n## Current Workflows to Edit\n\nHere is the current workflow JSON. Modify it based on the user's request:\n\n\`\`\`json\n${jsonCode}\n\`\`\``
       }
 
       // Try clipboard first, fall back to dialog
@@ -347,7 +444,7 @@ export default function MultiWorkflowEditPage() {
     } finally {
       setIsCopyingPrompt(false)
     }
-  }, [mermaidCode])
+  }, [jsonCode, jsonError])
 
   // Copy from dialog textarea
   const handleCopyFromDialog = useCallback(async () => {
@@ -363,9 +460,19 @@ export default function MultiWorkflowEditPage() {
     }
   }, [promptContent])
 
+  // Copy JSON to clipboard
+  const handleCopyJson = useCallback(async () => {
+    if (!jsonCode) return
+    try {
+      await navigator.clipboard.writeText(jsonCode)
+    } catch {
+      // Fallback - could show dialog
+    }
+  }, [jsonCode])
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      {/* Header - Clean and simple */}
+      {/* Header */}
       <div className="border-b bg-muted/30 flex-shrink-0">
         <div className="container mx-auto px-4 py-3">
           <div className="flex items-center gap-4">
@@ -385,7 +492,7 @@ export default function MultiWorkflowEditPage() {
                 )}
               </h1>
               <p className="text-xs text-muted-foreground">
-                Edit multiple workflows as Mermaid diagrams
+                Edit multiple workflows as JSON
               </p>
             </div>
           </div>
@@ -394,7 +501,7 @@ export default function MultiWorkflowEditPage() {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-h-0 container mx-auto px-4 py-3">
-        {/* Toolbar - All actions organized here */}
+        {/* Toolbar */}
         <div className="flex items-center justify-between mb-3 flex-shrink-0 flex-wrap gap-2">
           {/* Left: Load/Save actions */}
           <div className="flex items-center gap-2">
@@ -422,29 +529,41 @@ export default function MultiWorkflowEditPage() {
               Template
             </Button>
             <div className="h-4 w-px bg-border" />
-            <label>
-              <Button variant="outline" size="sm" className="gap-1.5 cursor-pointer" asChild>
-                <span>
-                  <FileUp className="h-3.5 w-3.5" />
-                  Upload
-                </span>
-              </Button>
-              <input
-                type="file"
-                accept=".mmd,.txt"
-                className="hidden"
-                onChange={handleUpload}
-              />
-            </label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={handleUpload}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <FileUp className="h-3.5 w-3.5" />
+              Upload
+            </Button>
             <Button
               variant="outline"
               size="sm"
               onClick={handleDownload}
-              disabled={!mermaidCode}
+              disabled={!jsonCode}
               className="gap-1.5"
             >
               <Download className="h-3.5 w-3.5" />
               Download
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCopyJson}
+              disabled={!jsonCode}
+              className="gap-1.5"
+            >
+              <Copy className="h-3.5 w-3.5" />
+              Copy
             </Button>
           </div>
 
@@ -471,7 +590,7 @@ export default function MultiWorkflowEditPage() {
               variant="outline"
               size="sm"
               onClick={handlePreview}
-              disabled={isImporting || !mermaidCode.trim()}
+              disabled={isImporting || !jsonCode.trim() || !!jsonError}
               className="gap-1.5"
             >
               {isImporting && isDryRun && !previewModalOpen ? (
@@ -485,7 +604,7 @@ export default function MultiWorkflowEditPage() {
               variant="default"
               size="sm"
               onClick={handleImportWithPreview}
-              disabled={isImporting || !mermaidCode.trim()}
+              disabled={isImporting || !jsonCode.trim() || !!jsonError}
               className="gap-1.5"
             >
               {isImporting && !isDryRun ? (
@@ -506,15 +625,28 @@ export default function MultiWorkflowEditPage() {
           </div>
         )}
 
-        {/* Mermaid editor - takes remaining space */}
-        <div className="flex-1 min-h-0">
-          <MermaidLiveEditor
-            value={mermaidCode}
-            onChange={setMermaidCode}
-            onError={setMermaidError}
-            className="h-full"
-            minHeight="100%"
-            initialLayout="split"
+        {/* JSON validation error */}
+        {jsonError && (
+          <div className="mb-3 px-4 py-2 bg-amber-500/10 text-amber-700 dark:text-amber-400 rounded-lg flex items-center gap-2 flex-shrink-0 text-sm">
+            <AlertCircle className="h-4 w-4" />
+            JSON Error: {jsonError}
+          </div>
+        )}
+
+        {/* JSON Editor */}
+        <div className="flex-1 min-h-0 flex flex-col border rounded-lg overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2 bg-muted/30 border-b">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <FileJson className="h-4 w-4" />
+              <span>workflows.json</span>
+            </div>
+          </div>
+          <Textarea
+            value={jsonCode}
+            onChange={(e) => setJsonCode(e.target.value)}
+            placeholder={JSON.stringify(JSON_TEMPLATE, null, 2)}
+            className="flex-1 font-mono text-sm resize-none border-0 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0"
+            style={{ minHeight: '400px' }}
           />
         </div>
 
@@ -592,8 +724,9 @@ export default function MultiWorkflowEditPage() {
         {/* Format reference - compact footer */}
         <div className="mt-2 text-xs text-muted-foreground flex-shrink-0">
           <span className="opacity-70">Format:</span>{' '}
-          <code className="bg-muted px-1 rounded">%% @workflow: &quot;Name&quot;</code>{' '}
-          <code className="bg-muted px-1 rounded">subgraph id[&quot;Name&quot;]...end</code>
+          <code className="bg-muted px-1 rounded">{`{workflows: [{name, steps: [...]}]}`}</code>{' '}
+          <span className="opacity-70">or</span>{' '}
+          <code className="bg-muted px-1 rounded">[{`{name, steps: [...]}`}]</code>
         </div>
       </div>
 

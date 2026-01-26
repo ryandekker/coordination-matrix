@@ -103,7 +103,7 @@ aiPromptRoutes.get('/ai-prompt-multi', async (req: Request, res: Response, next:
     res.json({
       data: {
         prompt,
-        format: 'multi-mermaid',
+        format: 'multi-json',
         includeContext: includeContext === 'true'
       }
     });
@@ -116,7 +116,7 @@ aiPromptRoutes.get('/ai-prompt-multi', async (req: Request, res: Response, next:
 aiPromptRoutes.get('/ai-prompt', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { format = 'mermaid', includeContext = 'true' } = req.query;
+    const { format = 'json', includeContext = 'true' } = req.query;
 
     const agents = await db
       .collection('users')
@@ -946,104 +946,163 @@ flowchart TD
 }
 
 function buildMultiWorkflowAIPrompt(includeContext: boolean, context: ContextData): string {
-  let prompt = `# Multi-Workflow Editor Guide for Coordination Matrix
+  let prompt = `# Multi-Workflow JSON Editor Guide for Coordination Matrix
 
-You are editing multiple workflows in a single Mermaid document. Each workflow is defined as a **subgraph** with metadata comments above it.
+You are editing multiple workflows in JSON format. This is the canonical format for workflow import/export.
 
-## Multi-Workflow Format
+## Multi-Workflow JSON Format
 
-The multi-workflow format uses subgraphs to contain each workflow:
+The multi-workflow format wraps workflows in an array:
 
-\`\`\`mermaid
-flowchart TD
-
-    %% @workflow: "First Workflow Name"
-    %% @id: existing_workflow_id_or_(new)
-    %% @description: What this workflow does
-    %% @isActive: true
-    %% @rootTaskTitleTemplate: {{input.title}}
-    subgraph workflow1["First Workflow Name"]
-        direction TB
-        start>"Start"]:::trigger
-        step1["AI Task"]:::agent
-        step2("Manual Review"):::manual
-        start --> step1 --> step2
-
-        %% @step(step1): {"additionalInstructions":"Instructions here"}
-    end
-
-    %% @workflow: "Second Workflow Name"
-    %% @id: (new)
-    %% @description: Description of second workflow
-    %% @isActive: true
-    subgraph workflow2["Second Workflow Name"]
-        direction TB
-        stepA["Process"]:::agent
-        stepB{"Decision?"}:::decision
-        stepC[/"Transform"/]:::code
-        stepA --> stepB
-        stepB -->|"Yes"| stepC
-
-        %% @step(stepC): {"codeConfig":{"code":"return { result: input.value * 2 };"}}
-    end
-
-    %% Styling (at end, applies to all workflows)
-    classDef trigger fill:#6B7280,color:#fff
-    classDef agent fill:#3B82F6,color:#fff
-    classDef manual fill:#8B5CF6,color:#fff
-    classDef external fill:#F97316,color:#fff
-    classDef decision fill:#F59E0B,color:#fff
-    classDef foreach fill:#10B981,color:#fff
-    classDef join fill:#6366F1,color:#fff
-    classDef flow fill:#EC4899,color:#fff
-    classDef code fill:#0EA5E9,color:#fff
-    classDef findDocument fill:#14B8A6,color:#fff
+\`\`\`json
+{
+  "version": "1.0",
+  "workflows": [
+    {
+      "_id": "existing_workflow_id",
+      "name": "First Workflow Name",
+      "description": "What this workflow does",
+      "isActive": true,
+      "rootTaskTitleTemplate": "{{input.title}}",
+      "steps": [
+        {
+          "id": "start",
+          "name": "Start",
+          "stepType": "trigger",
+          "connections": [{ "targetStepId": "step1" }]
+        },
+        {
+          "id": "step1",
+          "name": "AI Task",
+          "stepType": "agent",
+          "additionalInstructions": "Instructions here",
+          "connections": [{ "targetStepId": "step2" }]
+        },
+        {
+          "id": "step2",
+          "name": "Manual Review",
+          "stepType": "manual"
+        }
+      ]
+    },
+    {
+      "name": "Second Workflow Name",
+      "description": "Description of second workflow",
+      "isActive": true,
+      "steps": [
+        {
+          "id": "stepA",
+          "name": "Process",
+          "stepType": "agent",
+          "connections": [{ "targetStepId": "stepB" }]
+        },
+        {
+          "id": "stepB",
+          "name": "Decision?",
+          "stepType": "decision",
+          "connections": [
+            { "targetStepId": "stepC", "condition": "result:success", "label": "Yes" }
+          ]
+        },
+        {
+          "id": "stepC",
+          "name": "Transform",
+          "stepType": "code",
+          "codeConfig": {
+            "code": "return { result: input.value * 2 };"
+          }
+        }
+      ]
+    }
+  ]
+}
 \`\`\`
 
-## Required Metadata Comments
+## Workflow Fields
 
-Each workflow subgraph MUST have these metadata comments directly above it:
+| Field | Required | Description |
+|-------|----------|-------------|
+| \`_id\` | No | Include to UPDATE an existing workflow, omit to CREATE new |
+| \`name\` | Yes | Workflow display name |
+| \`description\` | No | Workflow description |
+| \`isActive\` | No | Whether workflow is active (default: true) |
+| \`rootTaskTitleTemplate\` | No | Dynamic title using \`{{input.field}}\` |
+| \`steps\` | Yes | Array of step objects |
 
-| Comment | Required | Description |
-|---------|----------|-------------|
-| \`%% @workflow: "Name"\` | Yes | Workflow display name (quoted) |
-| \`%% @id: id_or_(new)\` | Yes | Existing workflow ID to update, or \`(new)\` to create |
-| \`%% @description: text\` | No | Workflow description |
-| \`%% @isActive: true/false\` | No | Whether workflow is active (default: true) |
-| \`%% @rootTaskTitleTemplate: template\` | No | Dynamic title using \`{{input.field}}\` |
+## Step Types (11 Types)
 
-## Step Types and Shapes (11 Types)
+| Step Type | Execution | Description |
+|-----------|-----------|-------------|
+| trigger | immediate | Entry point / workflow start |
+| agent | automated | AI-powered automated task |
+| manual | manual | Human-in-the-loop task |
+| external | callback | External API with callback |
+| webhook | automated | Outbound HTTP (no callback) |
+| decision | immediate | Conditional routing |
+| foreach | immediate | Fan-out iteration |
+| join | immediate | Fan-in synchronization |
+| flow | automated | Nested workflow |
+| code | automated | JavaScript code execution |
+| findDocument | automated | Semantic document search |
 
-| Step Type | Mermaid Shape | Example | Description |
-|-----------|---------------|---------|-------------|
-| trigger | \`>"label"]\` | \`start>"Start"]\` | Entry point / workflow start |
-| agent | \`["label"]\` | \`step1["AI Analysis"]\` | AI-powered automated task |
-| manual | \`("label")\` | \`step2("Human Review")\` | Human-in-the-loop task |
-| external | \`{{"label"}}\` | \`step3{{"API Call"}}\` | External API with callback |
-| webhook | \`{{"label"}}\` | \`step3{{"Notify"}}\` | Outbound HTTP (no callback) |
-| decision | \`{"label"}\` | \`step4{"Is Valid?"}\` | Conditional routing |
-| foreach | \`[["Each: label"]]\` | \`step5[["Each: Process"]]\` | Fan-out iteration |
-| join | \`[["Join: label"]]\` | \`step6[["Join: Aggregate"]]\` | Fan-in synchronization |
-| flow | \`[["Run: label"]]\` | \`step7[["Run: Subprocess"]]\` | Nested workflow |
-| code | \`[/"label"/]\` | \`step8[/"Transform"/]\` | JavaScript code execution |
-| findDocument | \`[(label)]\` | \`step9[("Find Docs")]\` | Semantic document search |
+## Step Configuration Examples
 
-## Step Configuration
+### Agent/Manual Step
+\`\`\`json
+{
+  "id": "analyze",
+  "name": "Analyze Data",
+  "stepType": "agent",
+  "additionalInstructions": "Extract key metrics from the data",
+  "defaultAssigneeId": "agent_id_here"
+}
+\`\`\`
 
-Use \`%% @step(nodeId): {json}\` comments inside the subgraph for step-specific config:
+### Code Step
+\`\`\`json
+{
+  "id": "transform",
+  "name": "Process Results",
+  "stepType": "code",
+  "codeConfig": {
+    "code": "return { summary: input.metrics.join(', ') };",
+    "packages": ["lodash"]
+  }
+}
+\`\`\`
 
-\`\`\`mermaid
-subgraph wf1["My Workflow"]
-    direction TB
-    analyze["Analyze Data"]:::agent
-    transform[/"Process Results"/]:::code
-    review("Manager Approval"):::manual
-    analyze --> transform --> review
+### Decision Step
+\`\`\`json
+{
+  "id": "route",
+  "name": "Is Valid?",
+  "stepType": "decision",
+  "connections": [
+    { "targetStepId": "pass", "condition": "status:valid", "label": "Yes" },
+    { "targetStepId": "fail", "condition": "status:invalid", "label": "No" }
+  ],
+  "defaultConnection": "fail"
+}
+\`\`\`
 
-    %% @step(analyze): {"additionalInstructions":"Extract key metrics from the data"}
-    %% @step(transform): {"codeConfig":{"code":"return { summary: input.metrics.join(', ') };","packages":["lodash"]}}
-    %% @step(review): {"defaultAssigneeId":"user_id_here"}
-end
+### ForEach + Join Pattern
+\`\`\`json
+{
+  "id": "processItems",
+  "name": "Process Each Item",
+  "stepType": "foreach",
+  "itemsPath": "data.records",
+  "itemVariable": "record",
+  "maxItems": 50,
+  "connections": [{ "targetStepId": "handleItem" }]
+},
+{
+  "id": "aggregate",
+  "name": "Aggregate Results",
+  "stepType": "join",
+  "awaitStepId": "processItems",
+  "joinBoundary": { "minPercent": 90 }
+}
 \`\`\`
 
 ## Template Variables
@@ -1061,7 +1120,6 @@ end
 **External/Webhook:**
 - \`{{callbackUrl}}\` - Callback URL for external services
 - \`{{callbackSecret}}\` - Secret for callback auth
-- \`{{systemWebhookUrl}}\` - Smart callback (routes to foreach)
 
 **Variable Packages:**
 - \`{{variables.name}}\` - Stored credentials/config
@@ -1071,22 +1129,24 @@ end
 - \`{{workflowRunId}}\`, \`{{stepId}}\`, \`{{taskId}}\` - Current IDs
 - \`{{_apiUrl}}\`, \`{{_apiKey}}\` - API access
 
-## Important Rules
-
-1. **Metadata placement**: \`@workflow\`, \`@id\`, \`@description\` go BEFORE the subgraph
-2. **Step config placement**: \`@step(id)\` comments go INSIDE the subgraph
-3. **Always quote labels**: Use \`["Label"]\` not \`[Label]\`
-4. **Use direction TB**: Each subgraph should have \`direction TB\` as first line
-5. **Styling at end**: Put all classDef statements after all subgraphs
-6. **Never use inline style**: Don't use \`style nodeId fill:#color\`
-7. **Quote branch labels**: Use \`-->|"Yes"|\` not \`-->|Yes|\`
-8. **Unique node IDs**: Node IDs must be unique across the entire document
-9. **Use :::class suffix**: Append \`:::className\` to node definitions for styling
-
 ## Creating vs Updating Workflows
 
-- To **update** an existing workflow: Use the actual workflow ID in \`@id:\`
-- To **create** a new workflow: Use \`@id: (new)\`
+- To **update** an existing workflow: Include \`_id\` field with the workflow ID
+- To **create** a new workflow: Omit the \`_id\` field
+
+## Import API
+
+\`\`\`http
+POST /api/workflows/import-multi
+Content-Type: application/json
+
+{
+  "workflows": [...],
+  "dryRun": true
+}
+\`\`\`
+
+Use \`dryRun: true\` to preview changes without applying them.
 
 ## Step Configuration Reference
 

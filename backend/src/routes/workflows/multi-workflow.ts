@@ -3,7 +3,6 @@ import { ObjectId } from 'mongodb';
 import { getDb } from '../../db/connection.js';
 import { createError } from '../../middleware/error-handler.js';
 import { Workflow, WorkflowStep, VALID_STEP_TYPES } from './types.js';
-import { parseMermaidToStepsWithWarnings, generateMermaidFromSteps, generateMermaidSubgraphContent } from './mermaid-parser.js';
 
 // ============================================================================
 // Diff Types for Change Preview
@@ -53,9 +52,40 @@ const STEP_DIFF_FIELDS: (keyof WorkflowStep)[] = [
   'inputMapping',
   'inputSource',
   'inputPath',
+  'inputConfig',
+  'decisionField',
+  'codeConfig',
+  'findDocumentConfig',
   'connections',
   'branches',
 ];
+
+// ============================================================================
+// JSON Export/Import Types
+// ============================================================================
+
+/**
+ * Workflow export format for JSON-based import/export
+ */
+export interface WorkflowExportJson {
+  _id?: string;
+  name: string;
+  description?: string;
+  isActive: boolean;
+  rootTaskTitleTemplate?: string;
+  samplePayload?: string;
+  color?: string;
+  steps: WorkflowStep[];
+}
+
+/**
+ * Multi-workflow export format
+ */
+export interface MultiWorkflowExportJson {
+  version: '1.0';
+  exportedAt: string;
+  workflows: WorkflowExportJson[];
+}
 
 // ============================================================================
 // Diff Computation Functions
@@ -308,8 +338,17 @@ function ensureStepIds(steps: WorkflowStep[]): WorkflowStep[] {
   });
 }
 
-// Handler for GET /api/workflows/export-multi - Export workflows as multi-workflow Mermaid
-export async function handleExportMulti(req: Request, res: Response, next: NextFunction) {
+// ============================================================================
+// JSON Export Handler
+// ============================================================================
+
+/**
+ * Handler for GET /api/workflows/export-multi - Export workflows as JSON
+ *
+ * Query params:
+ *   - ids: comma-separated workflow IDs (optional, exports all if omitted)
+ */
+export async function handleExportMultiJson(req: Request, res: Response, next: NextFunction) {
   try {
     const db = getDb();
     const { ids } = req.query;
@@ -341,186 +380,71 @@ export async function handleExportMulti(req: Request, res: Response, next: NextF
       .toArray();
 
     if (workflows.length === 0) {
-      res.json({ data: { mermaid: '', workflows: [] } });
+      res.json({ data: { workflows: [], version: '1.0', exportedAt: new Date().toISOString() } });
       return;
     }
 
-    const lines: string[] = ['flowchart TD'];
-    const workflowSummaries: Array<{ id: string; name: string; isNew: boolean }> = [];
+    // Transform workflows to export format
+    const exportWorkflows: WorkflowExportJson[] = workflows.map(w => ({
+      _id: w._id.toString(),
+      name: w.name,
+      description: w.description || undefined,
+      isActive: w.isActive,
+      rootTaskTitleTemplate: w.rootTaskTitleTemplate || undefined,
+      samplePayload: w.samplePayload || undefined,
+      color: w.color || undefined,
+      steps: w.steps || [],
+    }));
 
-    for (const workflow of workflows) {
-      const workflowId = workflow._id.toString();
-      const safeName = workflow.name.replace(/"/g, "'");
+    const exportData: MultiWorkflowExportJson = {
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      workflows: exportWorkflows,
+    };
 
-      lines.push('');
-      lines.push(`    %% @workflow: "${workflow.name}"`);
-      lines.push(`    %% @id: ${workflowId}`);
-      if (workflow.description) {
-        lines.push(`    %% @description: ${workflow.description}`);
-      }
-      if (workflow.isActive !== undefined) {
-        lines.push(`    %% @isActive: ${workflow.isActive}`);
-      }
-      if (workflow.rootTaskTitleTemplate) {
-        lines.push(`    %% @rootTaskTitleTemplate: ${workflow.rootTaskTitleTemplate}`);
-      }
-
-      lines.push(`    subgraph ${workflowId}["${safeName}"]`);
-      lines.push('        direction TB');
-
-      const subgraphContent = generateMermaidSubgraphContent(workflow.steps || [], workflowId);
-      if (subgraphContent) {
-        lines.push(subgraphContent);
-      }
-
-      lines.push('    end');
-
-      workflowSummaries.push({
-        id: workflowId,
-        name: workflow.name,
-        isNew: false,
-      });
-    }
-
-    lines.push('');
-    lines.push('    %% Styling');
-    lines.push('    classDef agent fill:#3B82F6,color:#fff');
-    lines.push('    classDef external fill:#F97316,color:#fff');
-    lines.push('    classDef manual fill:#8B5CF6,color:#fff');
-    lines.push('    classDef decision fill:#F59E0B,color:#fff');
-    lines.push('    classDef foreach fill:#10B981,color:#fff');
-    lines.push('    classDef join fill:#6366F1,color:#fff');
-    lines.push('    classDef flow fill:#EC4899,color:#fff');
-
-    const mermaid = lines.join('\n');
-
-    res.json({
-      data: {
-        mermaid,
-        workflows: workflowSummaries,
-      }
-    });
+    res.json({ data: exportData });
   } catch (error) {
     next(error);
   }
 }
 
-// Parse multi-workflow Mermaid document with subgraphs
-interface ParsedWorkflowSection {
-  name: string;
-  id: string | null;
-  description: string;
-  isActive: boolean;
-  rootTaskTitleTemplate: string;
-  mermaidContent: string;
-}
+// ============================================================================
+// JSON Import Handler
+// ============================================================================
 
-function parseMultiWorkflowMermaid(mermaid: string): ParsedWorkflowSection[] {
-  const lines = mermaid.split('\n');
-  const workflows: ParsedWorkflowSection[] = [];
-
-  let currentWorkflow: Partial<ParsedWorkflowSection> = {};
-  let currentContent: string[] = [];
-  let inSubgraph = false;
-  let subgraphDepth = 0;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmedLine = line.trim();
-
-    if (!inSubgraph) {
-      const nameMatch = trimmedLine.match(/^%% @workflow:\s*"?([^"]+)"?$/);
-      if (nameMatch) {
-        currentWorkflow.name = nameMatch[1].trim();
-        continue;
-      }
-
-      const idMatch = trimmedLine.match(/^%% @id:\s*(\S+)$/);
-      if (idMatch && idMatch[1] !== '(new)') {
-        currentWorkflow.id = idMatch[1].trim();
-        continue;
-      }
-
-      const descMatch = trimmedLine.match(/^%% @description:\s*(.+)$/);
-      if (descMatch) {
-        currentWorkflow.description = descMatch[1].trim();
-        continue;
-      }
-
-      const activeMatch = trimmedLine.match(/^%% @isActive:\s*(true|false)$/);
-      if (activeMatch) {
-        currentWorkflow.isActive = activeMatch[1] === 'true';
-        continue;
-      }
-
-      const templateMatch = trimmedLine.match(/^%% @rootTaskTitleTemplate:\s*(.+)$/);
-      if (templateMatch) {
-        currentWorkflow.rootTaskTitleTemplate = templateMatch[1].trim();
-        continue;
-      }
-    }
-
-    const subgraphMatch = trimmedLine.match(/^subgraph\s+(\S+)/);
-    if (subgraphMatch) {
-      if (subgraphDepth === 0) {
-        inSubgraph = true;
-        currentContent = [];
-      }
-      subgraphDepth++;
-      continue;
-    }
-
-    if (trimmedLine === 'end') {
-      subgraphDepth--;
-      if (subgraphDepth === 0 && inSubgraph) {
-        workflows.push({
-          name: currentWorkflow.name || '',
-          id: currentWorkflow.id || null,
-          description: currentWorkflow.description || '',
-          isActive: currentWorkflow.isActive !== undefined ? currentWorkflow.isActive : true,
-          rootTaskTitleTemplate: currentWorkflow.rootTaskTitleTemplate || '',
-          mermaidContent: currentContent.join('\n'),
-        });
-
-        currentWorkflow = {};
-        currentContent = [];
-        inSubgraph = false;
-      }
-      continue;
-    }
-
-    if (inSubgraph && subgraphDepth === 1) {
-      if (!trimmedLine.startsWith('direction ')) {
-        currentContent.push(line);
-      }
-    }
-  }
-
-  return workflows;
-}
-
-// Handler for POST /api/workflows/import-multi - Import workflows from multi-workflow Mermaid
-export async function handleImportMulti(req: Request, res: Response, next: NextFunction) {
+/**
+ * Handler for POST /api/workflows/import-multi - Import workflows from JSON
+ *
+ * Body:
+ *   - workflows: Array of workflow objects (required)
+ *   - dryRun: boolean (default: false) - preview changes without applying
+ *   - includeStepDiffs: boolean (default: false) - include detailed step-level diffs
+ */
+export async function handleImportMultiJson(req: Request, res: Response, next: NextFunction) {
   try {
     const db = getDb();
-    const { mermaid, dryRun = false, includeStepDiffs = false } = req.body;
+    const { workflows: inputWorkflows, dryRun = false, includeStepDiffs = false } = req.body;
 
-    if (!mermaid || typeof mermaid !== 'string') {
-      throw createError('mermaid is required', 400);
+    // Support both direct array and wrapped format
+    let workflowsToImport: WorkflowExportJson[];
+    if (Array.isArray(inputWorkflows)) {
+      workflowsToImport = inputWorkflows;
+    } else if (inputWorkflows?.workflows && Array.isArray(inputWorkflows.workflows)) {
+      workflowsToImport = inputWorkflows.workflows;
+    } else {
+      throw createError('workflows array is required. Provide either an array directly or {workflows: [...]}', 400);
     }
 
-    const workflowSections = parseMultiWorkflowMermaid(mermaid);
-
-    if (workflowSections.length === 0) {
-      throw createError('No workflow subgraphs found. Use subgraph blocks with @workflow metadata.', 400);
+    if (workflowsToImport.length === 0) {
+      throw createError('No workflows provided for import', 400);
     }
 
     // For detailed diffs, we need to fetch existing workflows
     const existingWorkflowsMap = new Map<string, Workflow>();
     if (dryRun && includeStepDiffs) {
-      const idsToFetch = workflowSections
-        .filter(s => s.id && ObjectId.isValid(s.id))
-        .map(s => new ObjectId(s.id!));
+      const idsToFetch = workflowsToImport
+        .filter(w => w._id && ObjectId.isValid(w._id))
+        .map(w => new ObjectId(w._id!));
 
       if (idsToFetch.length > 0) {
         const existingWorkflows = await db
@@ -534,7 +458,7 @@ export async function handleImportMulti(req: Request, res: Response, next: NextF
       }
     }
 
-    // Use WorkflowDiff for detailed results, or basic results
+    // Process each workflow
     const detailedResults: WorkflowDiff[] = [];
     const basicResults: Array<{
       name: string;
@@ -545,9 +469,9 @@ export async function handleImportMulti(req: Request, res: Response, next: NextF
       warnings?: string[];
     }> = [];
 
-    for (const section of workflowSections) {
+    for (const workflowData of workflowsToImport) {
       try {
-        const { name: workflowName, id: workflowId, description, isActive, rootTaskTitleTemplate, mermaidContent } = section;
+        const { _id: workflowId, name: workflowName, description, isActive, rootTaskTitleTemplate, steps } = workflowData;
 
         if (!workflowName) {
           if (includeStepDiffs) {
@@ -556,22 +480,32 @@ export async function handleImportMulti(req: Request, res: Response, next: NextF
               action: 'skip',
               stepCount: 0,
               stepDiffs: [],
-              error: 'Missing @workflow metadata',
+              error: 'Missing workflow name',
             });
           } else {
             basicResults.push({
               name: '(unknown)',
               action: 'skip',
               stepCount: 0,
-              error: 'Missing @workflow metadata',
+              error: 'Missing workflow name',
             });
           }
           continue;
         }
 
-        const mermaidDiagram = `flowchart TD\n${mermaidContent}`;
-        const { steps, warnings } = parseMermaidToStepsWithWarnings(mermaidDiagram);
-        const stepsWithIds = ensureStepIds(steps);
+        const stepsArray = steps || [];
+        const stepsWithIds = ensureStepIds(stepsArray);
+        const warnings: string[] = [];
+
+        // Validate steps
+        for (const step of stepsWithIds) {
+          if (!step.name) {
+            warnings.push(`Step ${step.id} has no name`);
+          }
+          if (!step.stepType || !VALID_STEP_TYPES.includes(step.stepType)) {
+            warnings.push(`Step "${step.name || step.id}" has invalid stepType: ${step.stepType}`);
+          }
+        }
 
         if (dryRun) {
           const action = workflowId ? 'update' : 'create';
@@ -612,7 +546,7 @@ export async function handleImportMulti(req: Request, res: Response, next: NextF
 
               // Compute metadata diff
               metadataChanges = computeWorkflowMetadataDiff(
-                { name: workflowName, description, isActive, rootTaskTitleTemplate },
+                { name: workflowName, description: description || '', isActive: isActive ?? true, rootTaskTitleTemplate: rootTaskTitleTemplate || '' },
                 existingWorkflow
               );
               if (metadataChanges.length === 0) metadataChanges = undefined;
@@ -640,23 +574,22 @@ export async function handleImportMulti(req: Request, res: Response, next: NextF
               name: workflowName,
               id: workflowId || undefined,
               action,
-              stepCount: steps.length,
+              stepCount: stepsWithIds.length,
               warnings: warnings.length > 0 ? warnings : undefined,
             });
           }
         } else {
           // Actual import (not dry run)
-          if (workflowId) {
+          if (workflowId && ObjectId.isValid(workflowId)) {
             const updateResult = await db.collection<Workflow>('workflows').findOneAndUpdate(
               { _id: new ObjectId(workflowId) },
               {
                 $set: {
                   name: workflowName,
-                  description,
-                  isActive,
+                  description: description || '',
+                  isActive: isActive ?? true,
                   rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
                   steps: stepsWithIds,
-                  mermaidDiagram: generateMermaidFromSteps(stepsWithIds, workflowName),
                   updatedAt: new Date(),
                 },
               },
@@ -672,14 +605,14 @@ export async function handleImportMulti(req: Request, res: Response, next: NextF
                 warnings: warnings.length > 0 ? warnings : undefined,
               });
             } else {
+              // Workflow with this ID doesn't exist, create new
               const now = new Date();
               const newWorkflow: Omit<Workflow, '_id'> = {
                 name: workflowName,
-                description,
-                isActive,
+                description: description || '',
+                isActive: isActive ?? true,
                 rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
                 steps: stepsWithIds,
-                mermaidDiagram: generateMermaidFromSteps(stepsWithIds, workflowName),
                 createdAt: now,
                 updatedAt: now,
                 createdById: null,
@@ -695,14 +628,14 @@ export async function handleImportMulti(req: Request, res: Response, next: NextF
               });
             }
           } else {
+            // No ID provided, create new
             const now = new Date();
             const newWorkflow: Omit<Workflow, '_id'> = {
               name: workflowName,
-              description,
-              isActive,
+              description: description || '',
+              isActive: isActive ?? true,
               rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
               steps: stepsWithIds,
-              mermaidDiagram: generateMermaidFromSteps(stepsWithIds, workflowName),
               createdAt: now,
               updatedAt: now,
               createdById: null,

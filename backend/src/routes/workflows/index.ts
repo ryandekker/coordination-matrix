@@ -3,8 +3,7 @@ import { ObjectId } from 'mongodb';
 import { getDb } from '../../db/connection.js';
 import { createError } from '../../middleware/error-handler.js';
 import { Workflow, WorkflowStep, VALID_STEP_TYPES } from './types.js';
-import { parseMermaidToSteps, generateMermaidFromSteps } from './mermaid-parser.js';
-import { handleExportMulti, handleImportMulti } from './multi-workflow.js';
+import { handleExportMultiJson, handleImportMultiJson } from './multi-workflow.js';
 import { aiPromptRoutes } from './ai-prompts.js';
 import { executeCode } from '../../services/workflow/code-executor.js';
 import { loadUserGroups, hasResourceAccess } from '../../middleware/group-access.js';
@@ -169,8 +168,9 @@ workflowsRouter.get('/stats', async (_req: Request, res: Response, next: NextFun
 });
 
 // Multi-workflow routes (must come before /:id)
-workflowsRouter.get('/export-multi', handleExportMulti);
-workflowsRouter.post('/import-multi', handleImportMulti);
+// JSON-based import/export for workflows (Mermaid parsing removed in favor of JSON as canonical format)
+workflowsRouter.get('/export-multi', handleExportMultiJson);
+workflowsRouter.post('/import-multi', handleImportMultiJson);
 
 // GET /api/workflows/:id - Get a specific workflow
 workflowsRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
@@ -464,40 +464,6 @@ workflowsRouter.post('/:id/duplicate', async (req: Request, res: Response, next:
     const inserted = await db.collection<Workflow>('workflows').findOne({ _id: result.insertedId });
 
     res.status(201).json({ data: inserted });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// POST /api/workflows/parse-mermaid - Parse Mermaid diagram to workflow steps
-workflowsRouter.post('/parse-mermaid', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { mermaidDiagram } = req.body;
-
-    if (!mermaidDiagram) {
-      throw createError('mermaidDiagram is required', 400);
-    }
-
-    const steps = parseMermaidToSteps(mermaidDiagram);
-
-    res.json({ data: { steps, mermaidDiagram } });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// POST /api/workflows/generate-mermaid - Generate Mermaid diagram from steps
-workflowsRouter.post('/generate-mermaid', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { steps, name } = req.body;
-
-    if (!steps || !Array.isArray(steps)) {
-      throw createError('steps array is required', 400);
-    }
-
-    const mermaidDiagram = generateMermaidFromSteps(steps, name);
-
-    res.json({ data: { mermaidDiagram } });
   } catch (error) {
     next(error);
   }
@@ -1196,5 +1162,4 @@ function evaluateSimpleCondition(condition: string, input: Record<string, unknow
 
 // Re-export types and utilities
 export * from './types.js';
-export { parseMermaidToSteps, generateMermaidFromSteps } from './mermaid-parser.js';
 export { ensureStepIds };

@@ -352,8 +352,8 @@ Note: Detaching a document removes the link but does not delete the document its
 | PATCH | `/:id` | Update workflow |
 | DELETE | `/:id` | Delete workflow |
 | POST | `/:id/duplicate` | Duplicate workflow |
-| POST | `/parse-mermaid` | Parse Mermaid to steps |
-| POST | `/generate-mermaid` | Generate Mermaid from steps |
+| GET | `/export-multi` | Export workflows as JSON |
+| POST | `/import-multi` | Import workflows from JSON |
 | GET | `/ai-prompt-context` | Get context for AI workflow generation |
 | GET | `/ai-prompt` | Get complete AI prompt for workflow generation |
 
@@ -366,15 +366,11 @@ Use these endpoints to generate workflows with AI tools:
 curl http://localhost:3001/api/workflows/ai-prompt-context
 ```
 
-Response includes: available agents, users, existing workflows, step types, template variables, and Mermaid syntax reference.
+Response includes: available agents, users, existing workflows, step types, and template variables.
 
 **Get AI Prompt** - Returns a complete markdown prompt ready to use:
 ```bash
-# Mermaid format (default)
-curl "http://localhost:3001/api/workflows/ai-prompt?format=mermaid&includeContext=true"
-
-# JSON format
-curl "http://localhost:3001/api/workflows/ai-prompt?format=json"
+curl "http://localhost:3001/api/workflows/ai-prompt?format=json&includeContext=true"
 ```
 
 See [AI Workflow Generation Guide](./ai-workflow-generation.md) for comprehensive documentation.
