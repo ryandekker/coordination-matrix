@@ -409,10 +409,10 @@ export function useFieldConfigs(collection: string) {
 }
 
 // Views
-export function useViews(collectionName?: string) {
+export function useViews(collectionName?: string, groupId?: string) {
   return useQuery({
-    queryKey: ['views', collectionName],
-    queryFn: () => viewsApi.list(collectionName),
+    queryKey: ['views', collectionName, groupId],
+    queryFn: () => viewsApi.list(collectionName, groupId),
     staleTime: 60 * 1000, // 1 minute
   })
 }

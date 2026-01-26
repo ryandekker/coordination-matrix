@@ -1846,6 +1846,17 @@ tasksRouter.post('/bulk', async (req: Request, res: Response, next: NextFunction
         delete updates.createdAt;
         updates.updatedAt = now;
 
+        // Convert ID fields to ObjectIds
+        if (updates.groupId !== undefined) {
+          updates.groupId = updates.groupId ? toObjectId(updates.groupId) : null;
+        }
+        if (updates.projectId !== undefined) {
+          updates.projectId = updates.projectId ? toObjectId(updates.projectId) : null;
+        }
+        if (updates.assigneeId !== undefined) {
+          updates.assigneeId = updates.assigneeId ? toObjectId(updates.assigneeId) : null;
+        }
+
         console.log(`[Bulk Update] Updating ${taskIds.length} tasks with:`, updates);
         result = await db.collection('tasks').updateMany(
           { _id: { $in: objectIds } },

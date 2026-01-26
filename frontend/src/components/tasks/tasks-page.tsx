@@ -134,7 +134,7 @@ export function TasksPage() {
 
   const { data: lookupsData } = useLookups()
   const { data: fieldConfigsData } = useFieldConfigs('tasks')
-  const { data: viewsData, refetch: refetchViews } = useViews('tasks')
+  const { data: viewsData, refetch: refetchViews } = useViews('tasks', currentGroupId || undefined)
   const { data: viewFoldersData } = useViewFolders('tasks')
   const { data: usersData } = useUsers()
   const { data: workflowsData } = useWorkflows()
@@ -327,6 +327,7 @@ export function TasksPage() {
       sorting: sorting || currentSorting,
       visibleColumns: effectiveVisibleColumns,
       folderId: folderId || undefined,
+      groupId: currentGroupId || undefined,
     })
 
     // Refetch views to update sidebar
@@ -336,7 +337,7 @@ export function TasksPage() {
     if (newView?.data?._id) {
       router.push(`/tasks?viewId=${newView.data._id}`)
     }
-  }, [createViewMutation, currentSorting, effectiveVisibleColumns, refetchViews, router])
+  }, [createViewMutation, currentSorting, effectiveVisibleColumns, refetchViews, router, currentGroupId])
 
   const handleUpdateSearch = useCallback(async (
     viewId: string,
