@@ -330,9 +330,21 @@ export function requireOwnership(
 
 /**
  * Check if user is admin (utility function for use in route handlers).
+ * Also returns true for system API keys (keys with no userId, which have full system access).
  */
 export function isAdmin(req: Request): boolean {
-  return req.user?.role === 'admin';
+  // Direct admin role
+  if (req.user?.role === 'admin') {
+    return true;
+  }
+
+  // System API key (no userId = full system access)
+  // These keys have role 'api' and are not tied to any user
+  if (req.apiKey && !req.apiKey.userId) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
