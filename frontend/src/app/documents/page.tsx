@@ -4,10 +4,12 @@ import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useDocuments, useCreateDocument, useDeleteDocument } from '@/hooks/use-documents'
 import { useGroupContext } from '@/lib/group-context'
-import { Document, DocumentType, DocumentStatus } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
+import { Document, DocumentType, DocumentStatus, authFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Select,
   SelectContent,
@@ -31,6 +33,14 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from '@/components/ui/dialog'
+import {
   Plus,
   Search,
   MoreHorizontal,
@@ -39,9 +49,14 @@ import {
   Trash2,
   Archive,
   History,
+  FolderInput,
+  X,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { DocumentModal } from '@/components/documents/document-modal'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
 const DOCUMENT_TYPES: { value: DocumentType; label: string }[] = [
   { value: 'sop', label: 'SOP' },
@@ -76,9 +91,25 @@ function getTypeBadge(type: DocumentType) {
   return <Badge variant="secondary">{typeConfig?.label || type}</Badge>
 }
 
+// Bulk move API function
+async function bulkMoveDocuments(documentIds: string[], targetGroupId: string, targetProjectId?: string | null) {
+  const response = await authFetch(`${API_BASE}/documents/bulk-move`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ documentIds, targetGroupId, targetProjectId }),
+  })
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.error || 'Failed to move documents')
+  }
+  return response.json()
+}
+
 export default function DocumentsPage() {
   const router = useRouter()
-  const { currentGroupId } = useGroupContext()
+  const { user } = useAuth()
+  const { currentGroupId, groups } = useGroupContext()
+  const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<DocumentType | 'all'>('all')
   const [statusFilter, setStatusFilter] = useState<DocumentStatus | 'all'>('all')
@@ -86,6 +117,15 @@ export default function DocumentsPage() {
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
+
+  // Bulk selection state
+  const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set())
+  const [moveDialogOpen, setMoveDialogOpen] = useState(false)
+  const [targetGroupId, setTargetGroupId] = useState<string>('')
+
+  // Check if user can bulk move (admin or has multiple groups)
+  const isAdmin = user?.role === 'admin'
+  const canBulkMove = isAdmin || groups.length > 1
 
   const { data, isLoading, error } = useDocuments({
     search: search || undefined,
@@ -101,7 +141,57 @@ export default function DocumentsPage() {
   const createDocument = useCreateDocument()
   const deleteDocument = useDeleteDocument()
 
+  // Bulk move mutation
+  const bulkMoveMutation = useMutation({
+    mutationFn: ({ docIds, groupId }: { docIds: string[]; groupId: string }) =>
+      bulkMoveDocuments(docIds, groupId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents'] })
+      setSelectedDocIds(new Set())
+      setMoveDialogOpen(false)
+      setTargetGroupId('')
+    },
+  })
+
   const documents = useMemo(() => data?.data || [], [data])
+
+  // Selection handlers
+  const toggleDocSelection = (docId: string) => {
+    setSelectedDocIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(docId)) {
+        next.delete(docId)
+      } else {
+        next.add(docId)
+      }
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedDocIds.size === documents.length) {
+      setSelectedDocIds(new Set())
+    } else {
+      setSelectedDocIds(new Set(documents.map((d) => d._id)))
+    }
+  }
+
+  const clearSelection = () => {
+    setSelectedDocIds(new Set())
+  }
+
+  const handleBulkMove = () => {
+    if (selectedDocIds.size === 0) return
+    setMoveDialogOpen(true)
+  }
+
+  const confirmBulkMove = () => {
+    if (!targetGroupId || selectedDocIds.size === 0) return
+    bulkMoveMutation.mutate({
+      docIds: Array.from(selectedDocIds),
+      groupId: targetGroupId,
+    })
+  }
 
   const handleCreateDocument = async () => {
     setSelectedDocument(null)
@@ -228,26 +318,62 @@ export default function DocumentsPage() {
             </Button>
           </div>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[40%]">Title</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Version</TableHead>
-                <TableHead>Last Modified</TableHead>
-                <TableHead className="w-[50px]"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {documents.map((doc) => (
-                <TableRow
-                  key={doc._id}
-                  className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => handleEditDocument(doc)}
-                >
-                  <TableCell>
-                    <div className="font-medium">{doc.title}</div>
+          <>
+            {/* Bulk Action Bar */}
+            {canBulkMove && selectedDocIds.size > 0 && (
+              <div className="mb-4 flex items-center gap-4 rounded-lg border bg-muted/50 p-3">
+                <span className="text-sm font-medium">
+                  {selectedDocIds.size} document{selectedDocIds.size !== 1 ? 's' : ''} selected
+                </span>
+                <Button size="sm" variant="outline" onClick={handleBulkMove}>
+                  <FolderInput className="mr-2 h-4 w-4" />
+                  Move to Group
+                </Button>
+                <Button size="sm" variant="ghost" onClick={clearSelection}>
+                  <X className="mr-2 h-4 w-4" />
+                  Clear Selection
+                </Button>
+              </div>
+            )}
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  {canBulkMove && (
+                    <TableHead className="w-[50px]">
+                      <Checkbox
+                        checked={documents.length > 0 && selectedDocIds.size === documents.length}
+                        onCheckedChange={toggleSelectAll}
+                        aria-label="Select all documents"
+                      />
+                    </TableHead>
+                  )}
+                  <TableHead className="w-[40%]">Title</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Version</TableHead>
+                  <TableHead>Last Modified</TableHead>
+                  <TableHead className="w-[50px]"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {documents.map((doc) => (
+                  <TableRow
+                    key={doc._id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => handleEditDocument(doc)}
+                  >
+                    {canBulkMove && (
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={selectedDocIds.has(doc._id)}
+                          onCheckedChange={() => toggleDocSelection(doc._id)}
+                          aria-label={`Select ${doc.title}`}
+                        />
+                      </TableCell>
+                    )}
+                    <TableCell>
+                      <div className="font-medium">{doc.title}</div>
                     {doc.summary && (
                       <div className="text-sm text-muted-foreground line-clamp-1">
                         {doc.summary}
@@ -345,8 +471,9 @@ export default function DocumentsPage() {
                   </TableCell>
                 </TableRow>
               ))}
-            </TableBody>
-          </Table>
+              </TableBody>
+            </Table>
+          </>
         )}
       </div>
 
@@ -364,6 +491,58 @@ export default function DocumentsPage() {
         document={selectedDocument}
         isCreating={isCreating}
       />
+
+      {/* Bulk Move Dialog */}
+      <Dialog open={moveDialogOpen} onOpenChange={setMoveDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Move Documents to Group</DialogTitle>
+            <DialogDescription>
+              Move {selectedDocIds.size} selected document{selectedDocIds.size !== 1 ? 's' : ''} to a different group.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Target Group</label>
+              <Select value={targetGroupId} onValueChange={setTargetGroupId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a group" />
+                </SelectTrigger>
+                <SelectContent>
+                  {groups
+                    .filter((g) => g._id !== currentGroupId)
+                    .map((group) => (
+                      <SelectItem key={group._id} value={group._id}>
+                        {group.displayName}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {bulkMoveMutation.isError && (
+              <div className="rounded-md bg-destructive/10 border border-destructive/30 p-3 text-sm text-destructive">
+                {bulkMoveMutation.error instanceof Error
+                  ? bulkMoveMutation.error.message
+                  : 'Failed to move documents'}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMoveDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmBulkMove}
+              disabled={!targetGroupId || bulkMoveMutation.isPending}
+            >
+              {bulkMoveMutation.isPending ? 'Moving...' : 'Move Documents'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

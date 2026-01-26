@@ -418,6 +418,8 @@ documentsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
       parentDocumentId,
       metadata,
       changeDescription,
+      groupId,
+      projectId,
     } = req.body;
 
     // Track if content changed (for versioning)
@@ -462,6 +464,34 @@ documentsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
     if (metadata !== undefined) {
       // Merge metadata rather than replace
       updates.metadata = { ...existing.metadata, ...metadata };
+    }
+
+    // Handle group change (requires admin or membership in both groups)
+    if (groupId !== undefined && groupId !== existing.groupId?.toString()) {
+      if (!ObjectId.isValid(groupId)) {
+        throw createError('Invalid groupId', 400);
+      }
+      // Verify user has access to the target group (admin or member)
+      if (!isAdmin(req)) {
+        const targetMembership = await groupService.getMembership(groupId, req.user!.userId);
+        if (!targetMembership) {
+          throw createError('You do not have access to the target group', 403);
+        }
+      }
+      updates.groupId = new ObjectId(groupId);
+      // Clear projectId if moving to different group (projects are group-specific)
+      if (projectId === undefined) {
+        updates.projectId = null;
+      }
+    }
+
+    // Handle project change
+    if (projectId !== undefined) {
+      if (projectId === null || projectId === '') {
+        updates.projectId = null;
+      } else if (ObjectId.isValid(projectId)) {
+        updates.projectId = new ObjectId(projectId);
+      }
     }
 
     // Add update metadata
@@ -544,6 +574,89 @@ documentsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
     );
 
     res.json({ data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/documents/bulk-move - Move multiple documents to a different group
+documentsRouter.post('/bulk-move', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { documentIds, targetGroupId, targetProjectId } = req.body;
+
+    // Validate inputs
+    if (!Array.isArray(documentIds) || documentIds.length === 0) {
+      throw createError('documentIds must be a non-empty array', 400);
+    }
+
+    if (!targetGroupId || !ObjectId.isValid(targetGroupId)) {
+      throw createError('Valid targetGroupId is required', 400);
+    }
+
+    // Verify all document IDs are valid
+    const validDocIds = documentIds.filter((id: string) => ObjectId.isValid(id));
+    if (validDocIds.length !== documentIds.length) {
+      throw createError('Some document IDs are invalid', 400);
+    }
+
+    // Verify user has access to the target group (admin or member)
+    if (!isAdmin(req)) {
+      const targetMembership = await groupService.getMembership(targetGroupId, req.user!.userId);
+      if (!targetMembership) {
+        throw createError('You do not have access to the target group', 403);
+      }
+    }
+
+    // Validate target project if provided
+    let resolvedProjectId: ObjectId | null = null;
+    if (targetProjectId) {
+      if (!ObjectId.isValid(targetProjectId)) {
+        throw createError('Invalid targetProjectId', 400);
+      }
+      // Verify project belongs to target group
+      const project = await db.collection('projects').findOne({
+        _id: new ObjectId(targetProjectId),
+        groupId: new ObjectId(targetGroupId)
+      });
+      if (!project) {
+        throw createError('Target project not found in the specified group', 404);
+      }
+      resolvedProjectId = new ObjectId(targetProjectId);
+    }
+
+    const objectIds = validDocIds.map((id: string) => new ObjectId(id));
+    const now = new Date();
+    const actorId = req.user?.userId ? new ObjectId(req.user.userId) : null;
+
+    // Update all documents
+    const result = await db.collection<Document>('documents').updateMany(
+      { _id: { $in: objectIds } },
+      {
+        $set: {
+          groupId: new ObjectId(targetGroupId),
+          projectId: resolvedProjectId,
+          updatedAt: now,
+          lastModifiedById: actorId,
+        }
+      }
+    );
+
+    // Log activity for each document
+    for (const docId of objectIds) {
+      logDocumentActivity(docId, 'document.updated', actorId, 'user', [
+        { field: 'groupId', oldValue: null, newValue: targetGroupId }
+      ], { bulkMove: true });
+    }
+
+    res.json({
+      data: {
+        matched: result.matchedCount,
+        modified: result.modifiedCount,
+        targetGroupId,
+        targetProjectId: resolvedProjectId?.toString() || null,
+      }
+    });
   } catch (error) {
     next(error);
   }
