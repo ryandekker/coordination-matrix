@@ -4,15 +4,17 @@ import { useMemo, useState, useCallback } from 'react'
 import { Copy, Check, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { JsonViewer } from '@/components/ui/json-viewer'
-import { Task, WebhookAttempt, ManualReviewDecision } from '@/lib/api'
+import { Task, WebhookAttempt, ManualReviewDecision, AgentQuestionAnswer, AgentQuestionsOutput, tasksApi } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { format, formatDistanceToNow } from 'date-fns'
 import Link from 'next/link'
 import { TaskResultDisplay } from '../task-result-display'
 import { DecisionOptionsPanel } from '../decision-options-panel'
 import { ManualReviewPanel } from './manual-review-panel'
+import { AgentQuestionsPanel } from './agent-questions-panel'
 import { useUpdateTask } from '@/hooks/use-tasks'
 import { toast } from 'sonner'
+import { useQueryClient } from '@tanstack/react-query'
 
 interface OutputTabProps {
   task: Task
@@ -23,6 +25,7 @@ export function OutputTab({ task, onRollback }: OutputTabProps) {
   const [copied, setCopied] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const updateTask = useUpdateTask()
+  const queryClient = useQueryClient()
   const taskType = task.taskType || 'agent'
   const metadata = task.metadata as Record<string, unknown> | undefined
   const webhookConfig = task.webhookConfig
@@ -33,6 +36,23 @@ export function OutputTab({ task, onRollback }: OutputTabProps) {
   const isManualTask = taskType === 'manual'
   const needsReview = isManualTask && ['pending', 'in_progress'].includes(task.status)
   const hasBeenReviewed = isManualTask && task.reviewDecision
+
+  // Check if task has agent questions pending
+  const agentQuestionsData = useMemo((): AgentQuestionsOutput | null => {
+    const output = metadata?.output as Record<string, unknown> | undefined
+    if (!output) return null
+
+    // Check if action is ASK and there are questions
+    if (output.action === 'ASK' && output.questions) {
+      const questionsData = output.questions as AgentQuestionsOutput
+      if (questionsData.questions && Array.isArray(questionsData.questions) && questionsData.questions.length > 0) {
+        return questionsData
+      }
+    }
+    return null
+  }, [metadata])
+
+  const hasAgentQuestions = agentQuestionsData !== null
 
   // Extract output based on task type - MUST be before any early returns (React hooks rule)
   const output = useMemo(() => {
@@ -95,6 +115,23 @@ export function OutputTab({ task, onRollback }: OutputTabProps) {
     }
     return null
   }, [output])
+
+  // Handle agent questions submission
+  const handleSubmitAnswers = useCallback(async (answers: AgentQuestionAnswer[]) => {
+    setIsSubmitting(true)
+    try {
+      await tasksApi.answerQuestions(task._id, answers)
+      toast.success('Answers submitted successfully. Task will resume processing.')
+      // Invalidate task queries to refresh the UI
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task', task._id] })
+    } catch (error) {
+      toast.error('Failed to submit answers')
+      throw error
+    } finally {
+      setIsSubmitting(false)
+    }
+  }, [task._id, queryClient])
 
   // Handle manual review submission
   const handleReview = useCallback(async (decision: ManualReviewDecision, comment: string) => {
@@ -163,6 +200,18 @@ export function OutputTab({ task, onRollback }: OutputTabProps) {
         previousStepOutput={metadata as Record<string, unknown> | null}
         onReview={handleReview}
         onRollback={onRollback}
+        isSubmitting={isSubmitting}
+      />
+    )
+  }
+
+  // For tasks with agent questions (ASK action), show the questions panel
+  if (hasAgentQuestions && agentQuestionsData) {
+    return (
+      <AgentQuestionsPanel
+        task={task}
+        questionsData={agentQuestionsData}
+        onSubmitAnswers={handleSubmitAnswers}
         isSubmitting={isSubmitting}
       />
     )
