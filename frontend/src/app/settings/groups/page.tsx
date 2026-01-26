@@ -43,6 +43,7 @@ import {
 import { cn } from '@/lib/utils'
 import { authFetch, Group, GroupMember, GroupRole, GroupVisibility, User } from '@/lib/api'
 import { Textarea } from '@/components/ui/textarea'
+import { useAuth } from '@/lib/auth'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
@@ -166,6 +167,8 @@ const roleColors: Record<GroupRole, string> = {
 }
 
 export default function GroupsSettingsPage() {
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const queryClient = useQueryClient()
   const [searchQuery, setSearchQuery] = useState('')
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -352,13 +355,17 @@ export default function GroupsSettingsPage() {
         <div>
           <h1 className="text-2xl font-bold">Group Management</h1>
           <p className="text-muted-foreground">
-            Create and manage groups to organize users and control access to tasks and workflows.
+            {isAdmin
+              ? 'Create and manage groups to organize users and control access to tasks and workflows.'
+              : 'View groups and manage your memberships.'}
           </p>
         </div>
-        <Button onClick={openCreateModal}>
-          <Plus className="mr-2 h-4 w-4" />
-          Create Group
-        </Button>
+        {isAdmin && (
+          <Button onClick={openCreateModal}>
+            <Plus className="mr-2 h-4 w-4" />
+            Create Group
+          </Button>
+        )}
       </div>
 
       {/* Search */}
@@ -383,11 +390,13 @@ export default function GroupsSettingsPage() {
             <p>No groups found matching &quot;{searchQuery}&quot;</p>
           ) : (
             <div className="space-y-2">
-              <p>No groups have been created yet.</p>
-              <Button onClick={openCreateModal} variant="outline">
-                <Plus className="mr-2 h-4 w-4" />
-                Create your first group
-              </Button>
+              <p>{isAdmin ? 'No groups have been created yet.' : 'You are not a member of any groups.'}</p>
+              {isAdmin && (
+                <Button onClick={openCreateModal} variant="outline">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Create your first group
+                </Button>
+              )}
             </div>
           )}
         </div>
@@ -431,32 +440,34 @@ export default function GroupsSettingsPage() {
                   <Users className="h-4 w-4" />
                   <span>{group.members.length} members</span>
                 </button>
-                <div className="flex gap-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0"
-                    onClick={() => openMembersModal(group)}
-                  >
-                    <UserPlus className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0"
-                    onClick={() => openEditModal(group)}
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0 text-destructive"
-                    onClick={() => handleDelete(group)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
+                {isAdmin && (
+                  <div className="flex gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => openMembersModal(group)}
+                    >
+                      <UserPlus className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => openEditModal(group)}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 text-destructive"
+                      onClick={() => handleDelete(group)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
           )})}
