@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useDocuments, useCreateDocument, useDeleteDocument } from '@/hooks/use-documents'
 import { useGroupContext } from '@/lib/group-context'
 import { useAuth } from '@/lib/auth'
-import { Document, DocumentType, DocumentStatus, authFetch } from '@/lib/api'
+import { Document, DocumentType, DocumentStatus, authFetch, Group } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -105,6 +105,30 @@ async function bulkMoveDocuments(documentIds: string[], targetGroupId: string, t
   return response.json()
 }
 
+// Bulk archive API function
+async function bulkArchiveDocuments(documentIds: string[]) {
+  const response = await authFetch(`${API_BASE}/documents/bulk-archive`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ documentIds }),
+  })
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.error || 'Failed to archive documents')
+  }
+  return response.json()
+}
+
+// Fetch all groups (for admins)
+async function fetchAllGroups(): Promise<Group[]> {
+  const response = await authFetch(`${API_BASE}/groups?all=true`)
+  if (!response.ok) {
+    throw new Error('Failed to fetch groups')
+  }
+  const data = await response.json()
+  return data.data || []
+}
+
 export default function DocumentsPage() {
   const router = useRouter()
   const { user } = useAuth()
@@ -121,11 +145,28 @@ export default function DocumentsPage() {
   // Bulk selection state
   const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set())
   const [moveDialogOpen, setMoveDialogOpen] = useState(false)
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false)
   const [targetGroupId, setTargetGroupId] = useState<string>('')
+  const [allGroups, setAllGroups] = useState<Group[]>([])
+  const [loadingAllGroups, setLoadingAllGroups] = useState(false)
 
   // Check if user can bulk move (admin or has multiple groups)
   const isAdmin = user?.role === 'admin'
   const canBulkMove = isAdmin || groups.length > 1
+
+  // Fetch all groups when dialog opens (for admins)
+  useEffect(() => {
+    if (moveDialogOpen && isAdmin) {
+      setLoadingAllGroups(true)
+      fetchAllGroups()
+        .then(setAllGroups)
+        .catch(console.error)
+        .finally(() => setLoadingAllGroups(false))
+    }
+  }, [moveDialogOpen, isAdmin])
+
+  // Use all groups for admins, otherwise use groups from context
+  const availableGroupsForMove = isAdmin ? allGroups : groups
 
   const { data, isLoading, error } = useDocuments({
     search: search || undefined,
@@ -150,6 +191,16 @@ export default function DocumentsPage() {
       setSelectedDocIds(new Set())
       setMoveDialogOpen(false)
       setTargetGroupId('')
+    },
+  })
+
+  // Bulk archive mutation
+  const bulkArchiveMutation = useMutation({
+    mutationFn: (docIds: string[]) => bulkArchiveDocuments(docIds),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents'] })
+      setSelectedDocIds(new Set())
+      setArchiveDialogOpen(false)
     },
   })
 
@@ -191,6 +242,16 @@ export default function DocumentsPage() {
       docIds: Array.from(selectedDocIds),
       groupId: targetGroupId,
     })
+  }
+
+  const handleBulkArchive = () => {
+    if (selectedDocIds.size === 0) return
+    setArchiveDialogOpen(true)
+  }
+
+  const confirmBulkArchive = () => {
+    if (selectedDocIds.size === 0) return
+    bulkArchiveMutation.mutate(Array.from(selectedDocIds))
   }
 
   const handleCreateDocument = async () => {
@@ -320,14 +381,20 @@ export default function DocumentsPage() {
         ) : (
           <>
             {/* Bulk Action Bar */}
-            {canBulkMove && selectedDocIds.size > 0 && (
+            {selectedDocIds.size > 0 && (
               <div className="mb-4 flex items-center gap-4 rounded-lg border bg-muted/50 p-3">
                 <span className="text-sm font-medium">
                   {selectedDocIds.size} document{selectedDocIds.size !== 1 ? 's' : ''} selected
                 </span>
-                <Button size="sm" variant="outline" onClick={handleBulkMove}>
-                  <FolderInput className="mr-2 h-4 w-4" />
-                  Move to Group
+                {canBulkMove && (
+                  <Button size="sm" variant="outline" onClick={handleBulkMove}>
+                    <FolderInput className="mr-2 h-4 w-4" />
+                    Move to Group
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" onClick={handleBulkArchive}>
+                  <Archive className="mr-2 h-4 w-4" />
+                  Archive
                 </Button>
                 <Button size="sm" variant="ghost" onClick={clearSelection}>
                   <X className="mr-2 h-4 w-4" />
@@ -339,15 +406,13 @@ export default function DocumentsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  {canBulkMove && (
-                    <TableHead className="w-[50px]">
-                      <Checkbox
-                        checked={documents.length > 0 && selectedDocIds.size === documents.length}
-                        onCheckedChange={toggleSelectAll}
-                        aria-label="Select all documents"
-                      />
-                    </TableHead>
-                  )}
+                  <TableHead className="w-[50px]">
+                    <Checkbox
+                      checked={documents.length > 0 && selectedDocIds.size === documents.length}
+                      onCheckedChange={toggleSelectAll}
+                      aria-label="Select all documents"
+                    />
+                  </TableHead>
                   <TableHead className="w-[40%]">Title</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Status</TableHead>
@@ -363,15 +428,13 @@ export default function DocumentsPage() {
                     className="cursor-pointer hover:bg-muted/50"
                     onClick={() => handleEditDocument(doc)}
                   >
-                    {canBulkMove && (
-                      <TableCell onClick={(e) => e.stopPropagation()}>
-                        <Checkbox
-                          checked={selectedDocIds.has(doc._id)}
-                          onCheckedChange={() => toggleDocSelection(doc._id)}
-                          aria-label={`Select ${doc.title}`}
-                        />
-                      </TableCell>
-                    )}
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={selectedDocIds.has(doc._id)}
+                        onCheckedChange={() => toggleDocSelection(doc._id)}
+                        aria-label={`Select ${doc.title}`}
+                      />
+                    </TableCell>
                     <TableCell>
                       <div className="font-medium">{doc.title}</div>
                     {doc.summary && (
@@ -505,18 +568,23 @@ export default function DocumentsPage() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Target Group</label>
-              <Select value={targetGroupId} onValueChange={setTargetGroupId}>
+              <Select value={targetGroupId} onValueChange={setTargetGroupId} disabled={loadingAllGroups}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select a group" />
+                  <SelectValue placeholder={loadingAllGroups ? "Loading groups..." : "Select a group"} />
                 </SelectTrigger>
                 <SelectContent>
-                  {groups
+                  {availableGroupsForMove
                     .filter((g) => g._id !== currentGroupId)
                     .map((group) => (
                       <SelectItem key={group._id} value={group._id}>
                         {group.displayName}
                       </SelectItem>
                     ))}
+                  {availableGroupsForMove.filter((g) => g._id !== currentGroupId).length === 0 && !loadingAllGroups && (
+                    <div className="py-2 px-2 text-sm text-muted-foreground">
+                      No other groups available
+                    </div>
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -536,9 +604,42 @@ export default function DocumentsPage() {
             </Button>
             <Button
               onClick={confirmBulkMove}
-              disabled={!targetGroupId || bulkMoveMutation.isPending}
+              disabled={!targetGroupId || bulkMoveMutation.isPending || loadingAllGroups}
             >
               {bulkMoveMutation.isPending ? 'Moving...' : 'Move Documents'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Archive Dialog */}
+      <Dialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Archive Documents</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to archive {selectedDocIds.size} document{selectedDocIds.size !== 1 ? 's' : ''}?
+              Archived documents can be viewed by enabling &quot;Include archived&quot; filter.
+            </DialogDescription>
+          </DialogHeader>
+
+          {bulkArchiveMutation.isError && (
+            <div className="rounded-md bg-destructive/10 border border-destructive/30 p-3 text-sm text-destructive">
+              {bulkArchiveMutation.error instanceof Error
+                ? bulkArchiveMutation.error.message
+                : 'Failed to archive documents'}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setArchiveDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmBulkArchive}
+              disabled={bulkArchiveMutation.isPending}
+            >
+              {bulkArchiveMutation.isPending ? 'Archiving...' : 'Archive Documents'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -662,6 +662,57 @@ documentsRouter.post('/bulk-move', async (req: Request, res: Response, next: Nex
   }
 });
 
+// POST /api/documents/bulk-archive - Archive multiple documents
+documentsRouter.post('/bulk-archive', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { documentIds } = req.body;
+
+    // Validate inputs
+    if (!Array.isArray(documentIds) || documentIds.length === 0) {
+      throw createError('documentIds must be a non-empty array', 400);
+    }
+
+    // Verify all document IDs are valid
+    const validDocIds = documentIds.filter((id: string) => ObjectId.isValid(id));
+    if (validDocIds.length !== documentIds.length) {
+      throw createError('Some document IDs are invalid', 400);
+    }
+
+    const objectIds = validDocIds.map((id: string) => new ObjectId(id));
+    const now = new Date();
+    const actorId = req.user?.userId ? new ObjectId(req.user.userId) : null;
+
+    // Update all documents to archived status
+    const result = await db.collection<Document>('documents').updateMany(
+      { _id: { $in: objectIds }, status: { $ne: 'archived' } },
+      {
+        $set: {
+          status: 'archived' as DocumentStatus,
+          updatedAt: now,
+          lastModifiedById: actorId,
+        }
+      }
+    );
+
+    // Log activity for each document
+    for (const docId of objectIds) {
+      logDocumentActivity(docId, 'document.updated', actorId, 'user', [
+        { field: 'status', oldValue: null, newValue: 'archived' }
+      ], { bulkArchive: true });
+    }
+
+    res.json({
+      data: {
+        matched: result.matchedCount,
+        modified: result.modifiedCount,
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // DELETE /api/documents/:id - Soft delete (archive) or hard delete a document
 documentsRouter.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {

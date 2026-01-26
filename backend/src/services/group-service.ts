@@ -52,9 +52,10 @@ class GroupService {
     }
 
     const creatorObjId = creatorId ? new ObjectId(creatorId) : null;
+    const groupId = new ObjectId();
 
     const group: Partial<Group> = {
-      _id: new ObjectId(),
+      _id: groupId,
       name,
       displayName: input.displayName,
       visibility: input.visibility || 'private',
@@ -87,7 +88,7 @@ class GroupService {
       name: 'default',
       displayName: 'Default',
       description: 'Default project for new items',
-      groupId: group._id,
+      groupId: groupId,
       status: 'active',
       color: '#6366F1', // Indigo
       createdById: creatorObjId,
