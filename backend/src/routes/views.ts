@@ -4,6 +4,7 @@ import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
 import { View, UserPreference, Task } from '../types/index.js';
 import { ReferenceResolver } from '../services/reference-resolver.js';
+import { loadUserGroups, buildGroupAccessFilter } from '../middleware/group-access.js';
 
 export const viewsRouter = Router();
 
@@ -68,7 +69,7 @@ viewsRouter.get('/', async (req: Request, res: Response, next: NextFunction): Pr
 });
 
 // GET /api/views/:id/tasks - Get tasks matching a saved search/view's filters
-viewsRouter.get('/:id/tasks', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+viewsRouter.get('/:id/tasks', loadUserGroups(), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const db = getDb();
     const viewId = new ObjectId(req.params.id);
@@ -94,7 +95,7 @@ viewsRouter.get('/:id/tasks', async (req: Request, res: Response, next: NextFunc
     const skip = (pageNum - 1) * limitNum;
 
     // Build filter from view's saved filters
-    const filter: Filter<Task> = {};
+    let filter: Filter<Task> = {};
 
     if (view.filters) {
       for (const [key, value] of Object.entries(view.filters)) {
@@ -118,6 +119,9 @@ viewsRouter.get('/:id/tasks', async (req: Request, res: Response, next: NextFunc
         }
       }
     }
+
+    // Apply group access filtering - only return tasks the user has access to
+    filter = buildGroupAccessFilter(req, filter) as Filter<Task>;
 
     // Build sort from view's sorting config
     const sortSpec: Record<string, 1 | -1> = {};
