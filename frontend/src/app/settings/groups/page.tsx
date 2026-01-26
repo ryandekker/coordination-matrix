@@ -257,7 +257,8 @@ export default function GroupsSettingsPage() {
     const ownerEmail = getOwnerEmail(g, users)
     return (
       g.displayName.toLowerCase().includes(query) ||
-      (ownerEmail && ownerEmail.toLowerCase().includes(query))
+      (ownerEmail && ownerEmail.toLowerCase().includes(query)) ||
+      (g.description && g.description.toLowerCase().includes(query))
     )
   })
 
