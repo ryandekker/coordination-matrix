@@ -328,6 +328,7 @@ export function DocumentModal({
                   value={content}
                   plugins={plugins}
                   onChange={(v) => setContent(v)}
+                  mode="split"
                 />
               </div>
             )}
