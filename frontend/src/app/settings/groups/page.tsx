@@ -132,17 +132,23 @@ async function fetchUsers(): Promise<{ data: User[] }> {
 }
 
 interface GroupFormData {
-  name: string
   displayName: string
   description: string
   visibility: GroupVisibility
 }
 
 const defaultGroupFormData: GroupFormData = {
-  name: '',
   displayName: '',
   description: '',
   visibility: 'private',
+}
+
+// Helper to get owner email from a group
+function getOwnerEmail(group: Group, users: User[]): string | null {
+  const ownerMember = group.members.find((m) => m.role === 'owner')
+  if (!ownerMember) return null
+  const owner = users.find((u) => u._id === ownerMember.userId)
+  return owner?.email || null
 }
 
 const roleIcons: Record<GroupRole, React.ComponentType<{ className?: string }>> = {
@@ -243,12 +249,15 @@ export default function GroupsSettingsPage() {
     },
   })
 
-  const groups = (groupsData?.data || []).filter((g) =>
-    searchQuery
-      ? g.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        g.name.toLowerCase().includes(searchQuery.toLowerCase())
-      : true
-  )
+  const groups = (groupsData?.data || []).filter((g) => {
+    if (!searchQuery) return true
+    const query = searchQuery.toLowerCase()
+    const ownerEmail = getOwnerEmail(g, users)
+    return (
+      g.displayName.toLowerCase().includes(query) ||
+      (ownerEmail && ownerEmail.toLowerCase().includes(query))
+    )
+  })
 
   const users = usersData?.data || []
 
@@ -262,7 +271,6 @@ export default function GroupsSettingsPage() {
   const openEditModal = (group: Group) => {
     setEditingGroup(group)
     setFormData({
-      name: group.name,
       displayName: group.displayName,
       description: group.description || '',
       visibility: group.visibility,
@@ -288,8 +296,7 @@ export default function GroupsSettingsPage() {
     setFormError(null)
 
     const data = {
-      name: formData.name,
-      displayName: formData.displayName || formData.name,
+      displayName: formData.displayName,
       description: formData.description || undefined,
       visibility: formData.visibility,
     }
@@ -326,15 +333,6 @@ export default function GroupsSettingsPage() {
   const handleRoleChange = (userId: string, role: GroupRole) => {
     if (!selectedGroup) return
     updateRoleMutation.mutate({ groupId: selectedGroup._id, userId, role })
-  }
-
-  // Auto-generate display name from name if empty
-  const handleNameChange = (name: string) => {
-    const newFormData = { ...formData, name }
-    if (!formData.displayName || formData.displayName === formData.name) {
-      newFormData.displayName = name
-    }
-    setFormData(newFormData)
   }
 
   // Get members not already in the group
@@ -394,7 +392,9 @@ export default function GroupsSettingsPage() {
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {groups.map((group) => (
+          {groups.map((group) => {
+            const ownerEmail = getOwnerEmail(group, users)
+            return (
             <div
               key={group._id}
               className="flex flex-col rounded-lg border p-4 transition-colors hover:bg-muted/50"
@@ -410,7 +410,12 @@ export default function GroupsSettingsPage() {
                       {group.visibility}
                     </Badge>
                   </div>
-                  <p className="text-xs text-muted-foreground font-mono mb-1">{group.name}</p>
+                  {ownerEmail && (
+                    <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                      <Crown className="h-3 w-3" />
+                      {ownerEmail}
+                    </p>
+                  )}
                   {group.description && (
                     <p className="text-sm text-muted-foreground line-clamp-2">{group.description}</p>
                   )}
@@ -453,7 +458,7 @@ export default function GroupsSettingsPage() {
                 </div>
               </div>
             </div>
-          ))}
+          )})}
         </div>
       )}
 
@@ -473,26 +478,11 @@ export default function GroupsSettingsPage() {
             <div className="space-y-2">
               <label className="text-sm font-medium">Name *</label>
               <Input
-                value={formData.name}
-                onChange={(e) => handleNameChange(e.target.value)}
-                placeholder="e.g., engineering"
-                required
-              />
-              <p className="text-xs text-muted-foreground">
-                Lowercase identifier used in the API. Spaces will be converted to hyphens.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Display Name</label>
-              <Input
                 value={formData.displayName}
                 onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
                 placeholder="e.g., Engineering Team"
+                required
               />
-              <p className="text-xs text-muted-foreground">
-                Human-readable name shown in the UI. Defaults to the name if not provided.
-              </p>
             </div>
 
             <div className="space-y-2">
