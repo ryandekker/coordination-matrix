@@ -88,6 +88,7 @@ interface DetailsTabProps {
   isRerunning?: boolean
   isExecuting?: boolean
   isRetrying?: boolean
+  showGroupSelector?: boolean
 }
 
 export function DetailsTab({
@@ -111,6 +112,7 @@ export function DetailsTab({
   isRerunning,
   isExecuting,
   isRetrying,
+  showGroupSelector,
 }: DetailsTabProps) {
   const selectedWorkflowId = watch('workflowId')
   const currentTaskType = watch('taskType') || 'agent'
@@ -165,8 +167,8 @@ export function DetailsTab({
         </div>
       </div>
 
-      {/* Group & Project - only show if user has multiple groups */}
-      {groups.length > 1 && (
+      {/* Group & Project - only show if user is admin or has multiple groups */}
+      {showGroupSelector && (
         <div className="space-y-1">
           <h4 className="text-sm font-medium">Organization</h4>
           <div className="grid grid-cols-2 gap-4">

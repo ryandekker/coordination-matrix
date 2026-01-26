@@ -85,9 +85,10 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
-import { authFetch } from '@/lib/api'
+import { authFetch, Group } from '@/lib/api'
 import { Checkbox } from '@/components/ui/checkbox'
 import { useGroupContext } from '@/lib/group-context'
+import { useAuth } from '@/lib/auth'
 
 // Lazy-load WorkflowEditor to reduce initial bundle size (includes heavy mermaid dependency)
 const WorkflowEditor = dynamic(
@@ -398,10 +399,37 @@ function formatRelativeTime(date: string | null): string {
   return then.toLocaleDateString()
 }
 
+// Fetch all groups (for admins)
+async function fetchAllGroups(): Promise<Group[]> {
+  const response = await authFetch(`${API_BASE}/groups?all=true`)
+  if (!response.ok) {
+    throw new Error('Failed to fetch groups')
+  }
+  const data = await response.json()
+  return data.data || []
+}
+
 export default function WorkflowsPage() {
   const router = useRouter()
   const queryClient = useQueryClient()
   const { currentGroupId, groups } = useGroupContext()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
+
+  // Fetch all groups for admins
+  const [allGroups, setAllGroups] = useState<Group[]>([])
+  React.useEffect(() => {
+    if (isAdmin) {
+      fetchAllGroups()
+        .then(setAllGroups)
+        .catch(console.error)
+    }
+  }, [isAdmin])
+
+  // Use all groups for admins, otherwise use groups from context
+  const availableGroups = isAdmin ? allGroups : groups
+  const showGroupSelector = isAdmin || groups.length > 1
+
   const [isEditorOpen, setIsEditorOpen] = useState(false)
   const [editingWorkflow, setEditingWorkflow] = useState<WorkflowData | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<WorkflowData | null>(null)
@@ -1307,8 +1335,8 @@ export default function WorkflowsPage() {
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
-            {/* Move to group dropdown - only show if user has multiple groups */}
-            {groups.length > 1 && (
+            {/* Move to group dropdown - only show if user is admin or has multiple groups */}
+            {showGroupSelector && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="sm">
@@ -1324,7 +1352,7 @@ export default function WorkflowsPage() {
                     No Group
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  {groups.map(group => (
+                  {availableGroups.map(group => (
                     <DropdownMenuItem
                       key={group._id}
                       onClick={() => bulkMoveToGroupMutation.mutate({ ids: selectedWorkflowIds, groupId: group._id })}
