@@ -432,7 +432,12 @@ documentsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
       if (updates.content !== existing.content) contentChanged = true;
     }
     if (summary !== undefined) {
-      updates.summary = summary?.trim() || undefined;
+      // Only set summary if it has a value; use $unset for empty values
+      const trimmedSummary = summary?.trim();
+      if (trimmedSummary) {
+        updates.summary = trimmedSummary;
+      }
+      // Note: to clear summary, we'd need $unset but that's a separate operation
     }
     if (type !== undefined) {
       if (!VALID_TYPES.includes(type)) {
@@ -485,16 +490,20 @@ documentsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
 
     // Create version record if content changed
     if (contentChanged && updates.lastModifiedById) {
-      await db.collection<DocumentVersion>('document_versions').insertOne({
+      const versionRecord: Partial<DocumentVersion> = {
         documentId,
         version: result.version,
         title: result.title,
         content: result.content,
-        summary: result.summary,
         changeDescription: changeDescription || `Updated to version ${result.version}`,
         modifiedById: updates.lastModifiedById,
         modifiedAt: now,
-      } as DocumentVersion);
+      };
+      // Only include summary if it exists (schema requires string, not undefined)
+      if (result.summary) {
+        versionRecord.summary = result.summary;
+      }
+      await db.collection<DocumentVersion>('document_versions').insertOne(versionRecord as DocumentVersion);
 
       // Regenerate embedding asynchronously
       updateDocumentEmbedding(documentId).catch((err) => {
