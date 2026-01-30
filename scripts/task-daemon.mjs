@@ -1524,7 +1524,8 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
     fullCmd = `${cmd} "$(cat '${tmpFile}')"`;
   }
 
-  console.log(`[DEBUG] Running with conversation capture (this may take a while)...`);
+  console.log(`[DEBUG] Full command: ${fullCmd}`);
+  console.log(`[DEBUG] Running with conversation capture...`);
 
   const conversation = {
     sessionId: null,
@@ -1539,14 +1540,20 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
   };
 
   return new Promise((resolve) => {
+    const startTime = Date.now();
+
     const child = spawn('sh', ['-c', fullCmd], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
+    console.log(`[DEBUG] Child process spawned (PID: ${child.pid})`);
+
     // Pipe prompt to stdin for claude commands (more reliable than $(cat ...))
     if (useStdinPipe) {
+      console.log(`[DEBUG] Writing ${prompt.length} bytes to stdin...`);
       child.stdin.write(prompt);
       child.stdin.end();
+      console.log(`[DEBUG] Stdin closed, waiting for response...`);
     }
 
     // Track the child process for graceful shutdown
@@ -1556,11 +1563,19 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
     let stderr = '';
     let resolved = false;
     let timeoutId = null;
+    let heartbeatId = null;
+    let lastActivityTime = Date.now();
+    let lastStdoutLength = 0;
+    let eventCount = 0;
 
     const cleanup = () => {
       if (timeoutId) {
         clearTimeout(timeoutId);
         timeoutId = null;
+      }
+      if (heartbeatId) {
+        clearInterval(heartbeatId);
+        heartbeatId = null;
       }
       activeChildProcess = null;
       if (tmpFile) {
@@ -1575,11 +1590,39 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
       resolve(result);
     };
 
+    // Heartbeat logging - shows progress every 10 seconds
+    heartbeatId = setInterval(() => {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      const sinceLast = Math.round((Date.now() - lastActivityTime) / 1000);
+      const newBytes = stdout.length - lastStdoutLength;
+      lastStdoutLength = stdout.length;
+
+      console.log(`[HEARTBEAT] ${elapsed}s elapsed | ${eventCount} events parsed | ${stdout.length} bytes received | ${sinceLast}s since last activity | +${newBytes} bytes`);
+
+      // Log last few chars of stdout for debugging (might show where it's stuck)
+      if (stdout.length > 0 && sinceLast > 30) {
+        const lastChunk = stdout.slice(-200).replace(/\n/g, '\\n');
+        console.log(`[HEARTBEAT] Last output: ...${lastChunk}`);
+      }
+    }, 10000);
+
     // Set up timeout
     timeoutId = setTimeout(() => {
       if (resolved) return;
-      console.log(`[WARN] Command timed out after ${Math.round(timeout / 1000)}s, terminating...`);
-      stderr += `\nCommand timed out after ${Math.round(timeout / 1000)} seconds`;
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      console.log(`[WARN] Command timed out after ${elapsed}s (limit: ${Math.round(timeout / 1000)}s)`);
+      console.log(`[WARN] State at timeout: ${eventCount} events, ${stdout.length} bytes stdout, ${stderr.length} bytes stderr`);
+
+      // Log what we received so far
+      if (stdout.length > 0) {
+        const lastLines = stdout.split('\n').slice(-5).join('\n');
+        console.log(`[WARN] Last stdout lines:\n${lastLines}`);
+      }
+      if (stderr.length > 0) {
+        console.log(`[WARN] Stderr: ${stderr.slice(-500)}`);
+      }
+
+      stderr += `\nCommand timed out after ${elapsed} seconds`;
 
       // Try to parse any conversation data we have so far
       parseConversationOutput(stdout, conversation);
@@ -1603,7 +1646,14 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
     }, timeout);
 
     child.stdout.on('data', (data) => {
-      stdout += data.toString();
+      const chunk = data.toString();
+      stdout += chunk;
+      lastActivityTime = Date.now();
+
+      // Count JSON events for progress tracking
+      const newEvents = (chunk.match(/^\{/gm) || []).length;
+      eventCount += newEvents;
+
       // Prevent memory exhaustion from very large outputs
       if (stdout.length > 50 * 1024 * 1024) { // 50MB limit
         console.log(`[WARN] stdout exceeded 50MB, truncating...`);
@@ -1612,7 +1662,15 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
     });
 
     child.stderr.on('data', (data) => {
-      stderr += data.toString();
+      const chunk = data.toString();
+      stderr += chunk;
+      lastActivityTime = Date.now();
+
+      // Log stderr in real-time for debugging (first 500 chars of each chunk)
+      if (chunk.trim()) {
+        console.log(`[STDERR] ${chunk.slice(0, 500).replace(/\n/g, '\\n')}${chunk.length > 500 ? '...' : ''}`);
+      }
+
       // Limit stderr size too
       if (stderr.length > 5 * 1024 * 1024) { // 5MB limit
         stderr = stderr.slice(-1 * 1024 * 1024); // Keep last 1MB
@@ -1620,6 +1678,10 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
     });
 
     child.on('close', (exitCode, signal) => {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      console.log(`[DEBUG] Process closed after ${elapsed}s - exitCode: ${exitCode}, signal: ${signal}`);
+      console.log(`[DEBUG] Final stats: ${eventCount} events, ${stdout.length} bytes stdout, ${stderr.length} bytes stderr`);
+
       // Parse conversation data from stdout
       parseConversationOutput(stdout, conversation);
 
@@ -1642,6 +1704,8 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
     });
 
     child.on('error', (error) => {
+      console.log(`[ERROR] Child process error: ${error.message}`);
+
       // Try to parse any conversation data from stdout even on failure
       parseConversationOutput(stdout, conversation);
 
