@@ -1425,7 +1425,7 @@ async function executeCommand(cmd, prompt, timeout = 600000) {
 /**
  * Parse NDJSON stream output into conversation object
  */
-function parseConversationOutput(stdout, conversation) {
+function parseConversationOutput(stdout, conversation, inputPrompt = null) {
   const lines = stdout.split('\n').filter(line => line.trim());
 
   for (const line of lines) {
@@ -1435,6 +1435,16 @@ function parseConversationOutput(stdout, conversation) {
       if (event.type === 'system' && event.subtype === 'init') {
         conversation.sessionId = event.session_id;
         conversation.model = event.model;
+
+        // Add the initial user prompt as the first message (if provided)
+        // The stream-json output doesn't include the initial prompt, so we add it manually
+        if (inputPrompt && conversation.messages.length === 0) {
+          conversation.messages.push({
+            type: 'user',
+            timestamp: new Date(),
+            content: inputPrompt,
+          });
+        }
       } else if (event.type === 'assistant') {
         // Claude's response - may contain tool_use blocks
         const msg = event.message;
@@ -1474,14 +1484,18 @@ function parseConversationOutput(stdout, conversation) {
         conversation.durationApiMs = event.duration_api_ms || 0;
         conversation.permissionDenials = event.permission_denials || [];
 
-        if (event.usage) {
-          conversation.usage = {
-            inputTokens: event.usage.input_tokens || 0,
-            outputTokens: event.usage.output_tokens || 0,
-            cacheCreationInputTokens: event.usage.cache_creation_input_tokens || 0,
-            cacheReadInputTokens: event.usage.cache_read_input_tokens || 0,
-            totalCostUsd: event.total_cost_usd || 0,
-          };
+        // Cost is at the top level of the result event
+        conversation.usage = {
+          inputTokens: event.usage?.input_tokens || 0,
+          outputTokens: event.usage?.output_tokens || 0,
+          cacheCreationInputTokens: event.usage?.cache_creation_input_tokens || 0,
+          cacheReadInputTokens: event.usage?.cache_read_input_tokens || 0,
+          totalCostUsd: event.total_cost_usd || 0,
+        };
+
+        // Store detailed model usage breakdown if available
+        if (event.modelUsage) {
+          conversation.modelUsage = event.modelUsage;
         }
       }
     } catch (parseErr) {
@@ -1625,7 +1639,7 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
       stderr += `\nCommand timed out after ${elapsed} seconds`;
 
       // Try to parse any conversation data we have so far
-      parseConversationOutput(stdout, conversation);
+      parseConversationOutput(stdout, conversation, prompt);
 
       // Kill the child process
       try {
@@ -1683,7 +1697,7 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
       console.log(`[DEBUG] Final stats: ${eventCount} events, ${stdout.length} bytes stdout, ${stderr.length} bytes stderr`);
 
       // Parse conversation data from stdout
-      parseConversationOutput(stdout, conversation);
+      parseConversationOutput(stdout, conversation, prompt);
 
       if (signal === 'SIGTERM' || signal === 'SIGKILL') {
         resolveOnce({
@@ -1707,7 +1721,7 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
       console.log(`[ERROR] Child process error: ${error.message}`);
 
       // Try to parse any conversation data from stdout even on failure
-      parseConversationOutput(stdout, conversation);
+      parseConversationOutput(stdout, conversation, prompt);
 
       resolveOnce({
         exitCode: 1,
@@ -2180,10 +2194,11 @@ async function processTask(config, task) {
       startTime
     );
 
-    // Store queued record reference in task metadata
-    if (queuedRecord) {
+    // Store session ID in task metadata for linking to conversation
+    // The sessionId is more reliable than _id since we're using async upload
+    if (conv.sessionId) {
       task.metadata = task.metadata || {};
-      task.metadata.lastConversationRecordId = queuedRecord._id;
+      task.metadata.lastConversationSessionId = conv.sessionId;
     }
   }
 
@@ -2207,7 +2222,7 @@ async function processTask(config, task) {
         exitCode: result.exitCode,
         message: errorInfo.substring(0, 2000),
       },
-      conversationRecordId: task.metadata?.lastConversationRecordId,
+      conversationSessionId: task.metadata?.lastConversationSessionId,
     };
 
     await updateTask(config, task._id, {
@@ -2312,7 +2327,7 @@ async function processTask(config, task) {
     confidence: parsedResponse.data.metadata?.confidence || null,
     suggestedTags,
     suggestedNextStage: parsedResponse.data.metadata?.suggestedNextStage || null,
-    conversationRecordId: task.metadata?.lastConversationRecordId || null,
+    conversationSessionId: task.metadata?.lastConversationSessionId || null,
     // Agent questions (for ASK action)
     ...(parsedResponse.data.questions && {
       questions: {
