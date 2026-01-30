@@ -3369,8 +3369,11 @@ class WorkflowExecutionService {
       // Handle trigger.* references - fetch from workflow run's original inputPayload
       if (varPath.startsWith('trigger.')) {
         const triggerPath = varPath.substring(8); // Remove 'trigger.' prefix
+        console.log(`[resolveInputMappingValue] Looking up trigger.* - workflowRunId: ${workflowRunId}`);
         const workflowRun = await this.workflowRuns.findOne({ _id: workflowRunId });
+        console.log(`[resolveInputMappingValue] workflowRun found: ${!!workflowRun}, has inputPayload: ${!!workflowRun?.inputPayload}`);
         if (workflowRun?.inputPayload) {
+          console.log(`[resolveInputMappingValue] inputPayload keys: ${Object.keys(workflowRun.inputPayload)}, has data: ${!!(workflowRun.inputPayload as Record<string, unknown>).data}`);
           // If path starts with 'payload.', the trigger data is in inputPayload directly
           // e.g., {{trigger.payload.data.field}} -> workflowRun.inputPayload.data.field
           if (triggerPath.startsWith('payload.')) {
