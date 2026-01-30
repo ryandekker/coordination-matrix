@@ -3488,10 +3488,15 @@ class WorkflowExecutionService {
 
     // If mapping is defined, resolve each template
     if (inputConfig.mapping && Object.keys(inputConfig.mapping).length > 0) {
+      console.log(`[resolveStepInput] Resolving mapping with ${Object.keys(inputConfig.mapping).length} entries`);
+      console.log(`[resolveStepInput] run.inputPayload keys: ${run.inputPayload ? Object.keys(run.inputPayload) : 'null'}`);
+      console.log(`[resolveStepInput] run.inputPayload.data: ${run.inputPayload?.data ? 'present' : 'missing'}`);
       const resolved: Record<string, unknown> = {};
       for (const [key, template] of Object.entries(inputConfig.mapping)) {
         // Resolve template variables like {{output.field}}
-        resolved[key] = await resolveTemplateValue(template, sourceData, run.inputPayload);
+        const resolvedValue = await resolveTemplateValue(template, sourceData, run.inputPayload);
+        console.log(`[resolveStepInput] ${key}: "${template}" -> ${JSON.stringify(resolvedValue)?.substring(0, 100)}`);
+        resolved[key] = resolvedValue;
       }
       return resolved;
     }

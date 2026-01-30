@@ -743,11 +743,24 @@ export async function resolveTemplateValue(
     triggerPayload: triggerData,
   };
 
+  // Debug logging for trigger.payload templates
+  if (template.includes('trigger.payload')) {
+    console.log(`[resolveTemplateValue] template: "${template}"`);
+    console.log(`[resolveTemplateValue] triggerData present: ${!!triggerData}`);
+    if (triggerData) {
+      console.log(`[resolveTemplateValue] triggerData keys: ${Object.keys(triggerData)}`);
+      console.log(`[resolveTemplateValue] triggerData.data: ${triggerData.data ? 'present' : 'missing'}`);
+    }
+  }
+
   // If the template is just a simple variable reference like "{{output.field}}"
   // extract the path and return the actual value (preserving type)
   const simpleMatch = template.match(/^\{\{([^}]+)\}\}$/);
   if (simpleMatch) {
     const result = resolvePathToValue(simpleMatch[1], context);
+    if (template.includes('trigger.payload')) {
+      console.log(`[resolveTemplateValue] resolvePathToValue result: found=${result.found}, value=${JSON.stringify(result.value)?.substring(0, 100)}`);
+    }
     return result.value; // Return raw value, not stringified
   }
 
