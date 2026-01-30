@@ -4935,9 +4935,32 @@ class WorkflowExecutionService {
     // Determine input payload - use provided, or resolve inputMapping, or fall back to stored config
     let finalInputPayload: Record<string, unknown>;
     // Support both legacy inputMapping and new inputConfig.mapping
-    const inputMapping = task.flowConfig?.inputMapping ||
+    // First try to get inputMapping from task config
+    let inputMapping = task.flowConfig?.inputMapping ||
       task.stepConfig?.inputMapping ||
       (task.stepConfig?.inputConfig as { mapping?: Record<string, unknown> } | undefined)?.mapping;
+
+    // If inputMapping not stored on task, look it up from the parent workflow definition
+    // This handles tasks created before the fix that copies inputConfig.mapping to stepConfig
+    if (!inputMapping && task.workflowRunId && task.workflowStepId) {
+      const workflowRun = await this.workflowRuns.findOne({ _id: new ObjectId(task.workflowRunId) });
+      if (workflowRun?.workflowId) {
+        const parentWorkflow = await this.workflows.findOne({ _id: new ObjectId(workflowRun.workflowId) });
+        if (parentWorkflow?.steps) {
+          const step = parentWorkflow.steps.find(
+            (s: { id?: string; _id?: ObjectId }) =>
+              s.id === task.workflowStepId || s._id?.toString() === task.workflowStepId
+          );
+          if (step) {
+            inputMapping = step.inputMapping || step.inputConfig?.mapping;
+            if (inputMapping) {
+              console.log(`[WorkflowExecutionService] Found inputMapping from parent workflow step: ${JSON.stringify(inputMapping).substring(0, 200)}`);
+            }
+          }
+        }
+      }
+    }
+
     const taskInputPayload = task.metadata?.inputPayload as Record<string, unknown> | undefined;
 
     if (inputPayload) {
