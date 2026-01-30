@@ -1476,9 +1476,15 @@ export interface WorkflowRun {
   currentStepIds: string[]
   completedStepIds: string[]
   failedStepId?: string | null
+  pausedStepId?: string | null
   error?: string | null
   startedAt?: string | null
   completedAt?: string | null
+  pausedAt?: string | null
+  // Rerun tracking
+  supersededBy?: string | null  // This run was replaced by another run
+  supersededAt?: string | null  // When this run was superseded
+  supersedes?: string | null    // This run replaces another run
   createdAt: string
   updatedAt: string
   _resolved?: {
@@ -1594,6 +1600,25 @@ export const workflowRunsApi = {
   cancel: async (id: string): Promise<ApiResponse<WorkflowRun>> => {
     const response = await authFetch(`${API_BASE}/workflow-runs/${id}/cancel`, {
       method: 'POST',
+    })
+    return handleResponse(response)
+  },
+
+  rerun: async (
+    id: string,
+    options?: { fromStart?: boolean }
+  ): Promise<ApiResponse<{
+    success: boolean
+    workflowRunId: string
+    message: string
+    rerunFromStep?: string
+    resetTaskIds?: string[]
+    error?: string
+  }>> => {
+    const response = await authFetch(`${API_BASE}/workflow-runs/${id}/rerun`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(options || {}),
     })
     return handleResponse(response)
   },

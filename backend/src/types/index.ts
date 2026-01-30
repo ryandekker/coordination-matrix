@@ -1344,6 +1344,15 @@ export interface WorkflowRun {
   error?: string;
   failedStepId?: string;
 
+  // Pause handling (for escalations)
+  pausedStepId?: string;
+  pausedAt?: Date | null;
+
+  // Rerun tracking - links between superseded and superseding runs
+  supersededBy?: ObjectId | null;  // This run was replaced by another run
+  supersededAt?: Date | null;      // When this run was superseded
+  supersedes?: ObjectId | null;    // This run replaces another run
+
   // Callback configuration
   callbackSecret?: string;
 
@@ -1363,8 +1372,10 @@ export type WorkflowRunEventType =
   | 'workflow.run.step.started'
   | 'workflow.run.step.completed'
   | 'workflow.run.step.failed'
+  | 'workflow.run.step.escalated'
   | 'workflow.run.completed'
   | 'workflow.run.failed'
+  | 'workflow.run.paused'
   | 'workflow.run.cancelled';
 
 export interface WorkflowRunEvent {
