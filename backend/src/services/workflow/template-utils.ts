@@ -190,6 +190,7 @@ export function resolveTemplateVariables(
 /**
  * Resolves a title template string by replacing {{variable}} placeholders.
  * Supports:
+ *   {{trigger.payload.path}} - Value from trigger payload (workflow input)
  *   {{input.path.to.value}} - Value from input payload
  *   {{item}} or {{_item}} - Current item in foreach loop
  *   {{_index}} - Current index in foreach loop
@@ -208,6 +209,13 @@ export function resolveTitleTemplate(
   // Replace all {{...}} patterns
   result = result.replace(/\{\{([^}]+)\}\}/g, (_match, path) => {
     const trimmedPath = path.trim();
+
+    // Handle trigger.payload.* prefix (maps to inputPayload)
+    if (trimmedPath.startsWith('trigger.payload.')) {
+      const payloadPath = trimmedPath.substring(16); // Remove 'trigger.payload.' prefix
+      const value = getValueByPath(inputPayload, payloadPath);
+      return value !== undefined && value !== null ? String(value) : '';
+    }
 
     // Handle input.* prefix explicitly
     if (trimmedPath.startsWith('input.')) {
@@ -253,6 +261,7 @@ export function resolveTitleTemplate(
  *   {{variables.name.path}} - Nested variable access
  *   {{variables.name[key].path}} - Bracket notation for dynamic keys
  *   {{variables.yaml[{{variables.test.testkey}}].my}} - Nested interpolation
+ *   {{trigger.payload.path}} - Value from trigger payload (workflow input)
  *   {{input.path}} - Input payload access
  *   {{item}}, {{_index}}, {{_total}} - Loop variables
  */
@@ -297,6 +306,23 @@ export async function resolveTitleTemplateWithPackages(
         }
         // If variable not found, leave as-is for potential later resolution
         return _match;
+      }
+
+      // Handle trigger.payload.* prefix (maps to inputPayload)
+      if (trimmedPath.startsWith('trigger.payload.') && inputPayload) {
+        const payloadPath = trimmedPath.substring(16); // Remove 'trigger.payload.' prefix
+        const value = getValueByPath(inputPayload, payloadPath);
+        if (value !== undefined && value !== null) {
+          if (typeof value === 'object') {
+            const obj = value as Record<string, unknown>;
+            if (obj.name) return String(obj.name);
+            if (obj.title) return String(obj.title);
+            if (obj.id) return String(obj.id);
+            return JSON.stringify(value);
+          }
+          return String(value);
+        }
+        return '';
       }
 
       // Handle input.* prefix explicitly
