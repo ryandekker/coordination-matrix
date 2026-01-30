@@ -35,7 +35,9 @@ import {
   Check,
   Code,
   FileSearch,
+  RotateCcw,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -307,6 +309,8 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
   const router = useRouter()
   const queryClient = useQueryClient()
   const [cancelConfirm, setCancelConfirm] = useState(false)
+  const [rerunConfirm, setRerunConfirm] = useState(false)
+  const [rerunFromStart, setRerunFromStart] = useState(true)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
 
   // Real-time updates - invalidate this run's data when related tasks change
@@ -342,6 +346,26 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workflow-run', runId] })
       setCancelConfirm(false)
+    },
+  })
+
+  const rerunMutation = useMutation({
+    mutationFn: (fromStart: boolean) => workflowRunsApi.rerun(runId, { fromStart }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['workflow-run', runId] })
+      queryClient.invalidateQueries({ queryKey: ['workflow-runs'] })
+      setRerunConfirm(false)
+      const result = data.data
+      if (result?.success) {
+        toast.success(result.message || 'Workflow rerun started')
+        // If a new workflow run was created, navigate to it
+        if (result.workflowRunId && result.workflowRunId !== runId) {
+          router.push(`/workflow-runs?id=${result.workflowRunId}`)
+        }
+      }
+    },
+    onError: (error) => {
+      toast.error(`Failed to rerun workflow: ${error instanceof Error ? error.message : 'Unknown error'}`)
     },
   })
 
@@ -460,6 +484,13 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
           </Button>
+          {/* Show Rerun button for failed, cancelled, or paused workflows (if not already superseded) */}
+          {(['failed', 'cancelled', 'paused'] as WorkflowRunStatus[]).includes(run.status) && !run.supersededBy && (
+            <Button variant="outline" size="sm" onClick={() => setRerunConfirm(true)}>
+              <RotateCcw className="h-4 w-4 mr-2" />
+              Rerun Workflow
+            </Button>
+          )}
           {isActive && (
             <Button variant="destructive" size="sm" onClick={() => setCancelConfirm(true)}>
               <Ban className="h-4 w-4 mr-2" />
@@ -497,6 +528,48 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
           </p>
         </div>
       </div>
+
+      {/* Show superseded banner if this run was replaced */}
+      {run.supersededBy && (
+        <div className="rounded-lg border border-blue-500/50 bg-blue-500/10 p-4">
+          <div className="flex items-start gap-2">
+            <RotateCcw className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-medium text-blue-700 dark:text-blue-400">This run has been rerun</p>
+              <p className="text-sm text-blue-600/80 dark:text-blue-400/80 mt-1">
+                A new workflow run was started to replace this one.
+              </p>
+              <Link
+                href={`/workflow-runs?id=${run.supersededBy}`}
+                className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 mt-2 font-medium"
+              >
+                View new run <ExternalLink className="h-3 w-3" />
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Show "this run supersedes" info if applicable */}
+      {run.supersedes && (
+        <div className="rounded-lg border border-muted bg-muted/30 p-4">
+          <div className="flex items-start gap-2">
+            <RotateCcw className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-medium text-muted-foreground">This is a rerun</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                This workflow run was started to replace a previous failed run.
+              </p>
+              <Link
+                href={`/workflow-runs?id=${run.supersedes}`}
+                className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mt-2"
+              >
+                View original run <ExternalLink className="h-3 w-3" />
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
 
       {run.error && (
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
@@ -733,6 +806,63 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
               onClick={() => cancelMutation.mutate()}
             >
               Cancel Run
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Rerun Workflow Dialog */}
+      <AlertDialog open={rerunConfirm} onOpenChange={setRerunConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Rerun Workflow</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-4">
+                <p>
+                  Choose how you want to rerun this workflow:
+                </p>
+                <div className="space-y-3">
+                  <label className="flex items-start gap-3 p-3 rounded-lg border cursor-pointer hover:bg-accent/50 transition-colors">
+                    <input
+                      type="radio"
+                      name="rerunMode"
+                      checked={rerunFromStart}
+                      onChange={() => setRerunFromStart(true)}
+                      className="mt-1"
+                    />
+                    <div>
+                      <p className="font-medium text-foreground">Start Fresh</p>
+                      <p className="text-sm text-muted-foreground">
+                        Create a new workflow run with the same input payload. This will run all steps from the beginning.
+                      </p>
+                    </div>
+                  </label>
+                  <label className="flex items-start gap-3 p-3 rounded-lg border cursor-pointer hover:bg-accent/50 transition-colors">
+                    <input
+                      type="radio"
+                      name="rerunMode"
+                      checked={!rerunFromStart}
+                      onChange={() => setRerunFromStart(false)}
+                      className="mt-1"
+                    />
+                    <div>
+                      <p className="font-medium text-foreground">Resume from Failed Step</p>
+                      <p className="text-sm text-muted-foreground">
+                        Reset the failed task and continue from where it stopped. Completed steps will not be re-executed.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => rerunMutation.mutate(rerunFromStart)}
+              disabled={rerunMutation.isPending}
+            >
+              {rerunMutation.isPending ? 'Starting...' : 'Rerun Workflow'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

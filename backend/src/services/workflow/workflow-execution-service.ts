@@ -2826,8 +2826,13 @@ class WorkflowExecutionService {
       return;
     }
 
-    if (task.status !== 'completed' && task.status !== 'failed') {
-      console.log(`[WorkflowExecutionService] Skipping - status is ${task.status}, not completed/failed`);
+    // Process completed, failed, and on_hold (with escalation) tasks
+    // on_hold with escalation from daemon should pause/fail the workflow
+    const isEscalatedHold = task.status === 'on_hold' &&
+      (task.metadata?.nextAction === 'ESCALATE' || task.metadata?.nextAction === 'HOLD');
+
+    if (task.status !== 'completed' && task.status !== 'failed' && !isEscalatedHold) {
+      console.log(`[WorkflowExecutionService] Skipping - status is ${task.status}, not completed/failed/escalated`);
       return;
     }
 
@@ -2937,7 +2942,77 @@ class WorkflowExecutionService {
       await this.advanceToNextStep(run, workflow, task);
     } else if (task.status === 'failed') {
       await this.handleStepFailure(run, workflow, task);
+    } else if (task.status === 'on_hold') {
+      // Task is on_hold due to escalation - pause the workflow
+      // This allows the user to resolve the issue and retry
+      await this.handleStepEscalation(run, workflow, task);
     }
+  }
+
+  /**
+   * Handle a step that has been escalated (on_hold).
+   * Unlike failure, this pauses the workflow rather than failing it,
+   * giving the user a chance to resolve the issue and retry.
+   */
+  private async handleStepEscalation(
+    run: WorkflowRun,
+    _workflow: Workflow,
+    escalatedTask: Task
+  ): Promise<void> {
+    const now = new Date();
+    const rawReason = escalatedTask.metadata?.nextActionReason ||
+      escalatedTask.metadata?.escalationReason;
+    const escalationReason = typeof rawReason === 'string'
+      ? rawReason
+      : 'Task escalated - requires human intervention';
+
+    console.log(`[WorkflowExecutionService] Handling step escalation for task ${escalatedTask._id}: ${escalationReason}`);
+
+    // Update workflow run to paused status
+    await this.workflowRuns.updateOne(
+      { _id: run._id },
+      {
+        $set: {
+          status: 'paused' as WorkflowRunStatus,
+          error: `Step "${escalatedTask.title}" escalated: ${escalationReason}`,
+          pausedStepId: escalatedTask.workflowStepId,
+          pausedAt: now,
+        },
+      }
+    );
+
+    // Update root task to on_hold as well
+    if (run.rootTaskId) {
+      await this.tasks.updateOne(
+        { _id: run.rootTaskId },
+        {
+          $set: {
+            status: 'on_hold' as TaskStatus,
+            updatedAt: now,
+            'metadata.pausedReason': escalationReason,
+          }
+        }
+      );
+    }
+
+    // Publish workflow paused event
+    const updatedRun = await this.workflowRuns.findOne({ _id: run._id });
+    if (updatedRun) {
+      await this.publish({
+        id: this.generateEventId(),
+        type: 'workflow.run.paused',
+        workflowRunId: run._id,
+        workflowRun: updatedRun,
+        stepId: escalatedTask.workflowStepId,
+        taskId: escalatedTask._id,
+        error: escalationReason,
+        actorId: null,
+        actorType: 'system',
+        timestamp: now,
+      });
+    }
+
+    console.log(`[WorkflowExecutionService] Workflow ${run._id} paused due to escalation at step ${escalatedTask.workflowStepId}`);
   }
 
   private async advanceToNextStep(
@@ -5210,6 +5285,402 @@ class WorkflowExecutionService {
 
     console.log(`[WorkflowExecutionService] Recovery complete: ${result.recovered}/${result.checked} tasks recovered`);
     return result;
+  }
+
+  // ============================================================================
+  // Rerun Failed Workflow
+  // ============================================================================
+
+  /**
+   * Rerun a failed workflow run.
+   * Options:
+   * - fromFailedStep (default): Restart from the step that failed
+   * - fromStart: Restart the entire workflow from the beginning
+   *
+   * When rerunning from the failed step:
+   * - The failed step's task is reset to pending
+   * - The workflow run status is set back to running
+   * - The workflow will continue from where it failed
+   *
+   * When rerunning from start:
+   * - All tasks are reset or a new workflow run is created
+   */
+  async rerunWorkflowRun(
+    runId: string,
+    options: {
+      fromStart?: boolean;
+      actorId?: ObjectId;
+    } = {}
+  ): Promise<{
+    success: boolean;
+    workflowRunId: string;
+    message: string;
+    rerunFromStep?: string;
+    resetTaskIds?: string[];
+    supersededRunId?: string;
+    error?: string;
+  }> {
+    const { fromStart = false, actorId } = options;
+    const now = new Date();
+    const _id = new ObjectId(runId);
+
+    console.log(`[WorkflowExecutionService] Rerunning workflow run ${runId}, fromStart=${fromStart}`);
+
+    // Get the workflow run
+    const run = await this.workflowRuns.findOne({ _id });
+    if (!run) {
+      return { success: false, workflowRunId: runId, message: 'Workflow run not found', error: 'Workflow run not found' };
+    }
+
+    // Only allow rerunning failed, cancelled, or paused workflows
+    if (!['failed', 'cancelled', 'paused'].includes(run.status)) {
+      return {
+        success: false,
+        workflowRunId: runId,
+        message: `Cannot rerun workflow with status "${run.status}". Only failed, paused, or cancelled workflows can be rerun.`,
+        error: `Invalid status: ${run.status}`
+      };
+    }
+
+    // Check if this run has already been superseded (already rerun with fromStart)
+    if (run.supersededBy) {
+      return {
+        success: false,
+        workflowRunId: runId,
+        message: `This workflow run has already been rerun. See workflow run ${run.supersededBy.toString()} for the new run.`,
+        error: 'Already superseded'
+      };
+    }
+
+    // Get the workflow definition
+    const workflow = await this.workflows.findOne({ _id: run.workflowId });
+    if (!workflow) {
+      return { success: false, workflowRunId: runId, message: 'Workflow definition not found', error: 'Workflow not found' };
+    }
+
+    if (fromStart) {
+      // Option 1: Start a completely new workflow run with the same input
+      // This is cleaner - creates a fresh run rather than resetting everything
+      const newRunResult = await this.startWorkflow({
+        workflowId: workflow._id.toString(),
+        inputPayload: run.inputPayload,
+        taskDefaults: run.taskDefaults ? {
+          assigneeId: run.taskDefaults.assigneeId?.toString(),
+          urgency: run.taskDefaults.urgency,
+          tags: run.taskDefaults.tags,
+          dueOffsetHours: run.taskDefaults.dueOffsetHours,
+        } : undefined,
+        executionOptions: run.executionOptions,
+        externalId: run.externalId,
+        source: run.source,
+      }, actorId);
+
+      // Mark old run as superseded
+      await this.workflowRuns.updateOne(
+        { _id },
+        {
+          $set: {
+            supersededBy: newRunResult.run._id,
+            supersededAt: now,
+          }
+        }
+      );
+
+      // Mark new run as superseding the old one
+      await this.workflowRuns.updateOne(
+        { _id: newRunResult.run._id },
+        {
+          $set: {
+            supersedes: _id,
+          }
+        }
+      );
+
+      return {
+        success: true,
+        workflowRunId: newRunResult.run._id.toString(),
+        message: `Started new workflow run ${newRunResult.run._id} (original run ${runId} marked as superseded)`,
+        rerunFromStep: workflow.steps[0]?.id,
+        supersededRunId: runId,
+      };
+    }
+
+    // Option 2: Rerun from the failed/paused step
+    // Find the step that caused the workflow to stop
+    const stoppedStepId = run.failedStepId || run.pausedStepId;
+    if (!stoppedStepId) {
+      return {
+        success: false,
+        workflowRunId: runId,
+        message: 'No failed or paused step recorded. Consider using fromStart=true to restart the entire workflow.',
+        error: 'No failedStepId or pausedStepId'
+      };
+    }
+
+    // Find the task for the stopped step
+    const stoppedTask = await this.tasks.findOne({
+      workflowRunId: _id,
+      workflowStepId: stoppedStepId,
+    });
+
+    if (!stoppedTask) {
+      return {
+        success: false,
+        workflowRunId: runId,
+        message: `Task for step ${stoppedStepId} not found. Consider using fromStart=true.`,
+        error: 'Stopped step task not found'
+      };
+    }
+
+    // Alias for readability in the rest of the function
+    const failedTask = stoppedTask;
+    const failedStepId = stoppedStepId;
+
+    const resetTaskIds: string[] = [];
+
+    // Archive the current result if it exists
+    if (failedTask.taskResult?.current) {
+      const history = failedTask.taskResult.history || [];
+      history.unshift(failedTask.taskResult.current);
+      const trimmedHistory = history.slice(0, 10); // Keep last 10 results
+      await this.tasks.updateOne(
+        { _id: failedTask._id },
+        {
+          $set: { 'taskResult.history': trimmedHistory },
+          $unset: { 'taskResult.current': '' }
+        }
+      );
+    }
+
+    // Reset the failed/paused task to pending
+    await this.tasks.updateOne(
+      { _id: failedTask._id },
+      {
+        $set: {
+          status: 'pending' as TaskStatus,
+          updatedAt: now,
+        },
+        $unset: {
+          'metadata.error': '',
+          'metadata.failedAt': '',
+          'metadata.escalatedAt': '',
+          'metadata.escalationReason': '',
+          'metadata.nextAction': '',
+          'metadata.nextActionReason': '',
+        }
+      }
+    );
+    resetTaskIds.push(failedTask._id.toString());
+
+    // Reset workflow run status to running
+    await this.workflowRuns.updateOne(
+      { _id },
+      {
+        $set: {
+          status: 'running' as WorkflowRunStatus,
+          updatedAt: now,
+        },
+        $unset: {
+          error: '',
+          failedStepId: '',
+          pausedStepId: '',
+          pausedAt: '',
+          completedAt: '',
+        },
+        $addToSet: {
+          currentStepIds: failedStepId,
+        },
+        $pull: {
+          completedStepIds: failedStepId,
+        }
+      }
+    );
+
+    // Also reset the root task if it was marked as failed or on_hold
+    if (run.rootTaskId) {
+      const rootTask = await this.tasks.findOne({ _id: run.rootTaskId });
+      if (rootTask && ['failed', 'on_hold'].includes(rootTask.status)) {
+        await this.tasks.updateOne(
+          { _id: run.rootTaskId },
+          {
+            $set: {
+              status: 'in_progress' as TaskStatus,
+              updatedAt: now,
+            },
+            $unset: {
+              'metadata.pausedReason': '',
+            }
+          }
+        );
+        resetTaskIds.push(run.rootTaskId.toString());
+      }
+    }
+
+    // Publish task status changed event to trigger re-execution
+    const oldStatus = stoppedTask.status;
+    const updatedTask = await this.tasks.findOne({ _id: failedTask._id });
+    if (updatedTask) {
+      await publishTaskEvent('task.status.changed', updatedTask, {
+        changes: [{ field: 'status', oldValue: oldStatus, newValue: 'pending' }],
+        actorId: actorId ?? null,
+        actorType: actorId ? 'user' : 'system',
+      });
+    }
+
+    // Publish workflow rerun event
+    const updatedRun = await this.workflowRuns.findOne({ _id });
+    if (updatedRun) {
+      await this.publish({
+        id: this.generateEventId(),
+        type: 'workflow.run.started', // Reuse started event type
+        workflowRunId: _id,
+        workflowRun: updatedRun,
+        actorId,
+        actorType: actorId ? 'user' : 'system',
+        timestamp: now,
+      });
+    }
+
+    console.log(`[WorkflowExecutionService] Rerun workflow ${runId} from step ${failedStepId}, reset ${resetTaskIds.length} tasks`);
+
+    return {
+      success: true,
+      workflowRunId: runId,
+      message: `Workflow rerun from step "${failedStepId}". Task ${failedTask._id} reset to pending.`,
+      rerunFromStep: failedStepId,
+      resetTaskIds,
+    };
+  }
+
+  /**
+   * Retry a failed task, optionally resetting related workflow state.
+   * This is a simpler operation than full workflow rerun - just resets the task.
+   */
+  async retryFailedTask(
+    taskId: ObjectId | string,
+    options: {
+      actorId?: ObjectId;
+      clearError?: boolean;
+    } = {}
+  ): Promise<{
+    success: boolean;
+    taskId: string;
+    message: string;
+    workflowResumed?: boolean;
+    error?: string;
+  }> {
+    const { actorId, clearError = true } = options;
+    const now = new Date();
+    const _taskId = typeof taskId === 'string' ? new ObjectId(taskId) : taskId;
+
+    const task = await this.tasks.findOne({ _id: _taskId });
+    if (!task) {
+      return { success: false, taskId: _taskId.toString(), message: 'Task not found', error: 'Task not found' };
+    }
+
+    // Only retry failed or on_hold tasks
+    if (!['failed', 'on_hold'].includes(task.status)) {
+      return {
+        success: false,
+        taskId: _taskId.toString(),
+        message: `Cannot retry task with status "${task.status}". Only failed or on_hold tasks can be retried.`,
+        error: `Invalid status: ${task.status}`
+      };
+    }
+
+    // Archive current result
+    if (task.taskResult?.current) {
+      const history = task.taskResult.history || [];
+      history.unshift(task.taskResult.current);
+      await this.tasks.updateOne(
+        { _id: _taskId },
+        {
+          $set: { 'taskResult.history': history.slice(0, 10) },
+          $unset: { 'taskResult.current': '' }
+        }
+      );
+    }
+
+    // Build update
+    const updateSet: Record<string, unknown> = {
+      status: 'pending' as TaskStatus,
+      updatedAt: now,
+    };
+
+    // Reset the task
+    if (clearError) {
+      await this.tasks.updateOne(
+        { _id: _taskId },
+        {
+          $set: updateSet,
+          $unset: {
+            'metadata.error': '',
+            'metadata.failedAt': '',
+            'metadata.escalatedAt': '',
+            'metadata.escalationReason': '',
+          },
+        }
+      );
+    } else {
+      await this.tasks.updateOne(
+        { _id: _taskId },
+        { $set: updateSet }
+      );
+    }
+
+    let workflowResumed = false;
+
+    // If this is a workflow task, also reset the workflow run if it failed
+    if (task.workflowRunId) {
+      const run = await this.workflowRuns.findOne({ _id: task.workflowRunId });
+      if (run && run.status === 'failed' && run.failedStepId === task.workflowStepId) {
+        await this.workflowRuns.updateOne(
+          { _id: task.workflowRunId },
+          {
+            $set: {
+              status: 'running' as WorkflowRunStatus,
+              updatedAt: now,
+            },
+            $unset: {
+              error: '',
+              failedStepId: '',
+              completedAt: '',
+            },
+            $addToSet: {
+              currentStepIds: task.workflowStepId,
+            }
+          }
+        );
+        workflowResumed = true;
+
+        // Also reset root task if failed
+        if (run.rootTaskId) {
+          await this.tasks.updateOne(
+            { _id: run.rootTaskId, status: 'failed' },
+            { $set: { status: 'in_progress' as TaskStatus, updatedAt: now } }
+          );
+        }
+      }
+    }
+
+    // Publish task status changed event
+    const updatedTask = await this.tasks.findOne({ _id: _taskId });
+    if (updatedTask) {
+      await publishTaskEvent('task.status.changed', updatedTask, {
+        changes: [{ field: 'status', oldValue: task.status, newValue: 'pending' }],
+        actorId: actorId ?? null,
+        actorType: actorId ? 'user' : 'system',
+      });
+    }
+
+    return {
+      success: true,
+      taskId: _taskId.toString(),
+      message: workflowResumed
+        ? `Task reset to pending and workflow run resumed`
+        : `Task reset to pending`,
+      workflowResumed,
+    };
   }
 }
 

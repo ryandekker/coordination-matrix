@@ -705,6 +705,42 @@ router.post('/:id/execute-step/:stepId', requireAuth, async (req: Request, res: 
 });
 
 // ============================================================================
+// Rerun Failed Workflow
+// POST /api/workflow-runs/:id/rerun
+// Requires authentication (JWT or API key)
+// Restarts a failed workflow from the failed step (default) or from the beginning
+// ============================================================================
+router.post('/:id/rerun', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { fromStart = false } = req.body;
+
+    if (!ObjectId.isValid(id)) {
+      res.status(400).json({ error: 'Invalid workflow run ID' });
+      return;
+    }
+
+    const actorId = req.user?.userId ? new ObjectId(req.user.userId) : undefined;
+
+    const result = await workflowExecutionService.rerunWorkflowRun(id, {
+      fromStart,
+      actorId,
+    });
+
+    if (!result.success) {
+      res.status(400).json({ error: result.error, message: result.message });
+      return;
+    }
+
+    res.json(result);
+  } catch (error: unknown) {
+    console.error('[WorkflowRuns] Rerun error:', error);
+    const message = error instanceof Error ? error.message : 'Failed to rerun workflow';
+    res.status(500).json({ error: message });
+  }
+});
+
+// ============================================================================
 // Recover Stuck Flow Tasks
 // POST /api/workflow-runs/recover-stuck-flows
 // Requires authentication (JWT or API key)

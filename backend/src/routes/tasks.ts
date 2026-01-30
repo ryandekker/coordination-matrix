@@ -1549,6 +1549,39 @@ tasksRouter.post('/:id/rerun', async (req: Request, res: Response, next: NextFun
   }
 });
 
+// POST /api/tasks/:id/retry - Retry a failed or on_hold task (simpler than full rerun)
+// This endpoint is optimized for resolving issues and retrying tasks
+// It also resumes the parent workflow if the task was the failed step
+tasksRouter.post('/:id/retry', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const taskId = toObjectId(req.params.id);
+    const { clearError = true } = req.body;
+    const actorId = req.user?.userId ? toObjectId(req.user.userId) : undefined;
+
+    const result = await workflowExecutionService.retryFailedTask(taskId, {
+      actorId,
+      clearError,
+    });
+
+    if (!result.success) {
+      res.status(400).json({ error: result.error, message: result.message });
+      return;
+    }
+
+    // Get the updated task
+    const db = getDb();
+    const updatedTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
+
+    res.json({
+      data: updatedTask,
+      message: result.message,
+      workflowResumed: result.workflowResumed,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // DELETE /api/tasks/:id - Delete a task
 tasksRouter.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
