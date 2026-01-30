@@ -167,7 +167,14 @@ export function resolvePathToValue(
   context: PathResolutionContext
 ): PathResolutionResult {
   const trimmedPath = path.trim();
-  const payload = context.inputPayload || context.triggerPayload;
+  // inputPayload is typically the "current" data (step input, source data)
+  // triggerPayload is the original workflow trigger data
+  const inputData = context.inputPayload;
+  const triggerData = context.triggerPayload;
+  // For backward compatibility, use inputPayload as fallback for trigger if triggerPayload not set
+  const effectiveTriggerData = triggerData || inputData;
+  // Default payload for input.* and direct lookups
+  const payload = inputData || triggerData;
 
   // 1. Variables prefix (highest priority - explicit variable lookup)
   if (trimmedPath.startsWith('variables.') && context.packageContext) {
@@ -183,26 +190,28 @@ export function resolvePathToValue(
   }
 
   // 2. trigger.payload.* prefix (explicit trigger payload reference)
-  if (trimmedPath.startsWith('trigger.payload.') && payload) {
+  //    MUST use triggerPayload specifically (the original workflow trigger data)
+  if (trimmedPath.startsWith('trigger.payload.') && effectiveTriggerData) {
     const subPath = trimmedPath.substring(16); // Remove 'trigger.payload.'
-    const value = getValueByPath(payload, subPath);
+    const value = getValueByPath(effectiveTriggerData, subPath);
     if (value !== undefined) {
       return { found: true, value };
     }
     return { found: false, value: undefined };
   }
 
-  // 3. trigger.* prefix (for backward compatibility, maps to payload)
-  if (trimmedPath.startsWith('trigger.') && payload) {
+  // 3. trigger.* prefix (for backward compatibility, maps to trigger payload)
+  //    MUST use triggerPayload specifically
+  if (trimmedPath.startsWith('trigger.') && effectiveTriggerData) {
     const subPath = trimmedPath.substring(8); // Remove 'trigger.'
-    const value = getValueByPath(payload, subPath);
+    const value = getValueByPath(effectiveTriggerData, subPath);
     if (value !== undefined) {
       return { found: true, value };
     }
     return { found: false, value: undefined };
   }
 
-  // 4. input.* prefix (explicit input reference)
+  // 4. input.* prefix (explicit input reference - uses current step input)
   if (trimmedPath.startsWith('input.') && payload) {
     const subPath = trimmedPath.substring(6); // Remove 'input.'
     const value = getValueByPath(payload, subPath);
