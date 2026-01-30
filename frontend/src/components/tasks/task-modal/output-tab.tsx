@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState, useCallback } from 'react'
-import { Copy, Check, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
+import { Copy, Check, ChevronDown, ChevronRight, ExternalLink, MessageSquare } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { JsonViewer } from '@/components/ui/json-viewer'
 import { Task, WebhookAttempt, ManualReviewDecision, AgentQuestionAnswer, AgentQuestionsOutput, tasksApi } from '@/lib/api'
@@ -272,30 +272,47 @@ export function OutputTab({ task, onRollback }: OutputTabProps) {
     )
   }
 
+  // Get conversation session ID from output metadata
+  const conversationSessionId = useMemo(() => {
+    const outputData = metadata?.output as Record<string, unknown> | undefined
+    return outputData?.conversationSessionId as string | undefined
+  }, [metadata])
+
   // Show output
   return (
     <div className="p-4 space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium">Task Output</h3>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={handleCopy}
-          className="h-7 px-2 gap-1.5"
-        >
-          {copied ? (
-            <>
-              <Check className="h-3.5 w-3.5 text-green-500" />
-              <span className="text-xs">Copied</span>
-            </>
-          ) : (
-            <>
-              <Copy className="h-3.5 w-3.5" />
-              <span className="text-xs">Copy</span>
-            </>
+        <div className="flex items-center gap-2">
+          {conversationSessionId && (
+            <Link
+              href={`/conversations/${conversationSessionId}`}
+              className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+              View Conversation
+            </Link>
           )}
-        </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleCopy}
+            className="h-7 px-2 gap-1.5"
+          >
+            {copied ? (
+              <>
+                <Check className="h-3.5 w-3.5 text-green-500" />
+                <span className="text-xs">Copied</span>
+              </>
+            ) : (
+              <>
+                <Copy className="h-3.5 w-3.5" />
+                <span className="text-xs">Copy</span>
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       {isJsonOutput && jsonData !== null ? (

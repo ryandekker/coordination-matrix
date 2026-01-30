@@ -570,6 +570,7 @@ function parseConfig() {
       'api-key': { type: 'string', short: 'k' },
       'api-url': { type: 'string', short: 'u' },
       interval: { type: 'string', short: 'i' },
+      timeout: { type: 'string', short: 't' },
       once: { type: 'boolean', short: 'o' },
       exec: { type: 'string', short: 'e' },
       'dry-run': { type: 'boolean', short: 'd' },
@@ -652,6 +653,7 @@ ${COLORS.bold}CONFIGURATION${COLORS.reset}
   --api-key, -k <key>            API key (or MATRIX_API_KEY env)
   --api-url, -u <url>            API URL (default: http://localhost:3001/api)
   --interval, -i <ms>            Polling interval (default: 5000)
+  --timeout, -t <ms>             Command execution timeout (default: 600000 = 10min)
   --exec, -e <cmd>               Command to run (default: "claude")
   --no-update, -n                Don't update task status after execution
   --log-level <level>            Log level: debug, info, warn, error
@@ -661,6 +663,7 @@ ${COLORS.bold}CONFIG FILE FORMAT${COLORS.reset} (YAML)
     apiUrl: https://api.example.com/api
     apiKey: cm_ak_live_xxxxx
     interval: 5000
+    timeout: 600000    # 10 min command timeout
     exec: claude
 
   jobs:
@@ -707,7 +710,7 @@ ${COLORS.bold}EXAMPLES${COLORS.reset}
   }
 
   // Build config from file + CLI overrides
-  let viewId, apiKey, apiUrl, interval, execCmd, maxPayloadSize;
+  let viewId, apiKey, apiUrl, interval, execCmd, maxPayloadSize, timeout;
 
   if (configData && values.job) {
     // Load from config file with job name
@@ -746,6 +749,7 @@ ${COLORS.bold}EXAMPLES${COLORS.reset}
     interval = parseInt(values.interval || job.interval || defaults.interval || '5000', 10);
     execCmd = values.exec || job.exec || defaults.exec || process.env.MATRIX_EXEC_CMD || 'claude';
     maxPayloadSize = parseInt(values['max-payload-size'] || job.maxPayloadSize || defaults.maxPayloadSize || '200000', 10);
+    timeout = parseInt(values.timeout || job.timeout || defaults.timeout || '600000', 10);
   } else if (values.view) {
     // Use CLI args / env vars only (explicit --view provided)
     viewId = values.view;
@@ -754,6 +758,7 @@ ${COLORS.bold}EXAMPLES${COLORS.reset}
     interval = parseInt(values.interval || '5000', 10);
     execCmd = values.exec || process.env.MATRIX_EXEC_CMD || 'claude';
     maxPayloadSize = parseInt(values['max-payload-size'] || '200000', 10);
+    timeout = parseInt(values.timeout || '600000', 10);
   } else if (configData && !values.job) {
     // No job or view specified - start all enabled jobs as background processes
     return {
@@ -786,12 +791,16 @@ ${COLORS.bold}EXAMPLES${COLORS.reset}
     dryRun: values['dry-run'] || false,
     noUpdate: values['no-update'] || false,
     maxPayloadSize,
+    timeout,
   };
 }
 
 // ============================================================================
 // API Helpers
 // ============================================================================
+
+// Default API request timeout (30 seconds)
+const API_TIMEOUT = 30000;
 
 function getHeaders(config) {
   const headers = {
@@ -804,12 +813,30 @@ function getHeaders(config) {
   return headers;
 }
 
+/**
+ * Fetch with timeout support to prevent hanging on unresponsive APIs
+ */
+async function fetchWithTimeout(url, options, timeout = API_TIMEOUT) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function fetchNextTask(config) {
   const url = `${config.apiUrl}/views/${config.viewId}/tasks?limit=1&resolveReferences=true`;
   log.debug(`Fetching next task from view`);
 
   try {
-    const response = await fetch(url, { headers: getHeaders(config) });
+    const response = await fetchWithTimeout(url, { headers: getHeaders(config) });
     if (!response.ok) {
       const error = await response.text();
       log.error(`API Error (${response.status}): ${error}`);
@@ -825,7 +852,11 @@ async function fetchNextTask(config) {
     log.debug(`No tasks in queue`);
     return null;
   } catch (error) {
-    log.error('Fetch error:', error.message || error);
+    if (error.name === 'AbortError') {
+      log.error('API request timed out');
+    } else {
+      log.error('Fetch error:', error.message || error);
+    }
     return null;
   }
 }
@@ -834,7 +865,7 @@ async function fetchUser(config, userId) {
   if (!userId) return null;
 
   try {
-    const response = await fetch(`${config.apiUrl}/users/${userId}`, {
+    const response = await fetchWithTimeout(`${config.apiUrl}/users/${userId}`, {
       headers: getHeaders(config),
     });
     if (!response.ok) return null;
@@ -849,7 +880,7 @@ async function fetchWorkflow(config, workflowId) {
   if (!workflowId) return null;
 
   try {
-    const response = await fetch(`${config.apiUrl}/workflows/${workflowId}`, {
+    const response = await fetchWithTimeout(`${config.apiUrl}/workflows/${workflowId}`, {
       headers: getHeaders(config),
     });
     if (!response.ok) return null;
@@ -875,7 +906,7 @@ async function updateTask(config, taskId, updates) {
   try {
     const bodyStr = JSON.stringify(updates);
     console.log(`[DEBUG] Update payload size: ${Math.round(bodyStr.length / 1024)}KB`);
-    const response = await fetch(`${config.apiUrl}/tasks/${taskId}`, {
+    const response = await fetchWithTimeout(`${config.apiUrl}/tasks/${taskId}`, {
       method: 'PATCH',
       headers: getHeaders(config),
       body: bodyStr,
@@ -888,18 +919,22 @@ async function updateTask(config, taskId, updates) {
     }
     return true;
   } catch (error) {
-    console.error('Update error:', error.message || error);
-    // Log additional error details for debugging
-    if (error.cause) console.error('  Cause:', error.cause);
-    if (error.code) console.error('  Code:', error.code);
-    if (error.stack) console.error('  Stack:', error.stack.split('\n').slice(0, 3).join('\n'));
+    if (error.name === 'AbortError') {
+      console.error('Update task request timed out');
+    } else {
+      console.error('Update error:', error.message || error);
+      // Log additional error details for debugging
+      if (error.cause) console.error('  Cause:', error.cause);
+      if (error.code) console.error('  Code:', error.code);
+      if (error.stack) console.error('  Stack:', error.stack.split('\n').slice(0, 3).join('\n'));
+    }
     return false;
   }
 }
 
 async function createTask(config, taskData) {
   try {
-    const response = await fetch(`${config.apiUrl}/tasks`, {
+    const response = await fetchWithTimeout(`${config.apiUrl}/tasks`, {
       method: 'POST',
       headers: getHeaders(config),
       body: JSON.stringify(taskData),
@@ -913,7 +948,11 @@ async function createTask(config, taskData) {
     const result = await response.json();
     return result.data;
   } catch (error) {
-    console.error('Create task error:', error.message || error);
+    if (error.name === 'AbortError') {
+      console.error('Create task request timed out');
+    } else {
+      console.error('Create task error:', error.message || error);
+    }
     return null;
   }
 }
@@ -925,7 +964,7 @@ async function addTaskComment(config, taskId, comment) {
   }
 
   try {
-    const response = await fetch(`${config.apiUrl}/activity-logs/task/${taskId}/comments`, {
+    const response = await fetchWithTimeout(`${config.apiUrl}/activity-logs/task/${taskId}/comments`, {
       method: 'POST',
       headers: getHeaders(config),
       body: JSON.stringify({
@@ -941,7 +980,11 @@ async function addTaskComment(config, taskId, comment) {
     }
     return true;
   } catch (error) {
-    console.error('Add comment error:', error.message || error);
+    if (error.name === 'AbortError') {
+      console.error('Add comment request timed out');
+    } else {
+      console.error('Add comment error:', error.message || error);
+    }
     return false;
   }
 }
@@ -952,7 +995,7 @@ async function addTaskComment(config, taskId, comment) {
 
 async function searchDocuments(config, query) {
   try {
-    const response = await fetch(`${config.apiUrl}/documents/search`, {
+    const response = await fetchWithTimeout(`${config.apiUrl}/documents/search`, {
       method: 'POST',
       headers: getHeaders(config),
       body: JSON.stringify(query),
@@ -966,7 +1009,11 @@ async function searchDocuments(config, query) {
     const result = await response.json();
     return result.data || [];
   } catch (error) {
-    console.error('Document search error:', error.message || error);
+    if (error.name === 'AbortError') {
+      console.error('Document search request timed out');
+    } else {
+      console.error('Document search error:', error.message || error);
+    }
     return [];
   }
 }
@@ -978,7 +1025,7 @@ async function createDocument(config, documentData) {
   }
 
   try {
-    const response = await fetch(`${config.apiUrl}/documents`, {
+    const response = await fetchWithTimeout(`${config.apiUrl}/documents`, {
       method: 'POST',
       headers: getHeaders(config),
       body: JSON.stringify(documentData),
@@ -992,7 +1039,11 @@ async function createDocument(config, documentData) {
     const result = await response.json();
     return result.data;
   } catch (error) {
-    console.error('Create document error:', error.message || error);
+    if (error.name === 'AbortError') {
+      console.error('Create document request timed out');
+    } else {
+      console.error('Create document error:', error.message || error);
+    }
     return null;
   }
 }
@@ -1004,7 +1055,7 @@ async function updateDocument(config, documentId, updates) {
   }
 
   try {
-    const response = await fetch(`${config.apiUrl}/documents/${documentId}`, {
+    const response = await fetchWithTimeout(`${config.apiUrl}/documents/${documentId}`, {
       method: 'PATCH',
       headers: getHeaders(config),
       body: JSON.stringify(updates),
@@ -1018,7 +1069,11 @@ async function updateDocument(config, documentId, updates) {
     const result = await response.json();
     return result.data;
   } catch (error) {
-    console.error('Update document error:', error.message || error);
+    if (error.name === 'AbortError') {
+      console.error('Update document request timed out');
+    } else {
+      console.error('Update document error:', error.message || error);
+    }
     return null;
   }
 }
@@ -1041,11 +1096,15 @@ async function processDocumentOperations(config, taskId, documentOperations) {
         if (doc) {
           results.push({ action: 'create', success: true, documentId: doc._id, title: doc.title });
           // Link to task
-          await fetch(`${config.apiUrl}/documents/${doc._id}/link-task`, {
-            method: 'POST',
-            headers: getHeaders(config),
-            body: JSON.stringify({ taskId }),
-          });
+          try {
+            await fetchWithTimeout(`${config.apiUrl}/documents/${doc._id}/link-task`, {
+              method: 'POST',
+              headers: getHeaders(config),
+              body: JSON.stringify({ taskId }),
+            });
+          } catch (linkErr) {
+            console.warn(`[Document] Failed to link document to task: ${linkErr.message}`);
+          }
         } else {
           results.push({ action: 'create', success: false, error: 'Failed to create document' });
         }
@@ -1236,9 +1295,16 @@ function parseResponse(responseText) {
 // Command Execution
 // ============================================================================
 
-async function executeCommand(cmd, prompt) {
+/**
+ * Execute command without conversation capture (simpler, faster)
+ * @param {string} cmd - Command to execute
+ * @param {string} prompt - Prompt to pass to the command
+ * @param {number} [timeout=600000] - Timeout in ms (default 10 minutes)
+ */
+async function executeCommand(cmd, prompt, timeout = 600000) {
   console.log(`[DEBUG] Executing command: ${cmd}`);
   console.log(`[DEBUG] Prompt preview: ${prompt.substring(0, 300)}${prompt.length > 300 ? '...' : ''}`);
+  console.log(`[DEBUG] Command timeout: ${Math.round(timeout / 1000)}s`);
 
   // Write prompt to a temp file to avoid shell escaping issues
   const tmpFile = join(tmpdir(), `task-daemon-${Date.now()}.txt`);
@@ -1270,28 +1336,75 @@ async function executeCommand(cmd, prompt) {
 
     let stdout = '';
     let stderr = '';
+    let resolved = false;
+    let timeoutId = null;
+
+    const cleanup = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      activeChildProcess = null;
+      try { unlinkSync(tmpFile); } catch {}
+    };
+
+    const resolveOnce = (result) => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      resolve(result);
+    };
+
+    // Set up timeout
+    timeoutId = setTimeout(() => {
+      if (resolved) return;
+      console.log(`[WARN] Command timed out after ${Math.round(timeout / 1000)}s, terminating...`);
+      stderr += `\nCommand timed out after ${Math.round(timeout / 1000)} seconds`;
+
+      // Kill the child process
+      try {
+        child.kill('SIGTERM');
+        // Give it 5 seconds to terminate gracefully, then SIGKILL
+        setTimeout(() => {
+          try { child.kill('SIGKILL'); } catch {}
+        }, 5000);
+      } catch {}
+
+      resolveOnce({
+        exitCode: 124, // Standard timeout exit code
+        stdout,
+        stderr,
+        timedOut: true,
+      });
+    }, timeout);
 
     child.stdout.on('data', (data) => {
       stdout += data.toString();
+      // Prevent memory exhaustion from very large outputs
+      if (stdout.length > 50 * 1024 * 1024) { // 50MB limit
+        console.log(`[WARN] stdout exceeded 50MB, truncating...`);
+        stdout = stdout.slice(-10 * 1024 * 1024); // Keep last 10MB
+      }
     });
 
     child.stderr.on('data', (data) => {
       stderr += data.toString();
+      // Limit stderr size too
+      if (stderr.length > 5 * 1024 * 1024) { // 5MB limit
+        stderr = stderr.slice(-1 * 1024 * 1024); // Keep last 1MB
+      }
     });
 
     child.on('close', (exitCode, signal) => {
-      activeChildProcess = null;
-      try { unlinkSync(tmpFile); } catch {}
-
       if (signal === 'SIGTERM' || signal === 'SIGKILL') {
-        resolve({
+        resolveOnce({
           exitCode: 143, // Standard exit code for SIGTERM
           stdout,
           stderr: stderr || `Process terminated by ${signal}`,
           terminated: true,
         });
       } else {
-        resolve({
+        resolveOnce({
           exitCode: exitCode || 0,
           stdout,
           stderr,
@@ -1300,9 +1413,7 @@ async function executeCommand(cmd, prompt) {
     });
 
     child.on('error', (error) => {
-      activeChildProcess = null;
-      try { unlinkSync(tmpFile); } catch {}
-      resolve({
+      resolveOnce({
         exitCode: 1,
         stdout: '',
         stderr: error.message,
@@ -1314,7 +1425,7 @@ async function executeCommand(cmd, prompt) {
 /**
  * Parse NDJSON stream output into conversation object
  */
-function parseConversationOutput(stdout, conversation) {
+function parseConversationOutput(stdout, conversation, inputPrompt = null) {
   const lines = stdout.split('\n').filter(line => line.trim());
 
   for (const line of lines) {
@@ -1324,6 +1435,16 @@ function parseConversationOutput(stdout, conversation) {
       if (event.type === 'system' && event.subtype === 'init') {
         conversation.sessionId = event.session_id;
         conversation.model = event.model;
+
+        // Add the initial user prompt as the first message (if provided)
+        // The stream-json output doesn't include the initial prompt, so we add it manually
+        if (inputPrompt && conversation.messages.length === 0) {
+          conversation.messages.push({
+            type: 'user',
+            timestamp: new Date(),
+            content: inputPrompt,
+          });
+        }
       } else if (event.type === 'assistant') {
         // Claude's response - may contain tool_use blocks
         const msg = event.message;
@@ -1363,14 +1484,18 @@ function parseConversationOutput(stdout, conversation) {
         conversation.durationApiMs = event.duration_api_ms || 0;
         conversation.permissionDenials = event.permission_denials || [];
 
-        if (event.usage) {
-          conversation.usage = {
-            inputTokens: event.usage.input_tokens || 0,
-            outputTokens: event.usage.output_tokens || 0,
-            cacheCreationInputTokens: event.usage.cache_creation_input_tokens || 0,
-            cacheReadInputTokens: event.usage.cache_read_input_tokens || 0,
-            totalCostUsd: event.total_cost_usd || 0,
-          };
+        // Cost is at the top level of the result event
+        conversation.usage = {
+          inputTokens: event.usage?.input_tokens || 0,
+          outputTokens: event.usage?.output_tokens || 0,
+          cacheCreationInputTokens: event.usage?.cache_creation_input_tokens || 0,
+          cacheReadInputTokens: event.usage?.cache_read_input_tokens || 0,
+          totalCostUsd: event.total_cost_usd || 0,
+        };
+
+        // Store detailed model usage breakdown if available
+        if (event.modelUsage) {
+          conversation.modelUsage = event.modelUsage;
         }
       }
     } catch (parseErr) {
@@ -1383,29 +1508,38 @@ function parseConversationOutput(stdout, conversation) {
 /**
  * Execute command with stream-json output to capture full conversation thread
  * Returns conversation data including tool calls and results
+ * @param {string} cmd - Command to execute
+ * @param {string} prompt - Prompt to pass to the command
+ * @param {number} [timeout=600000] - Timeout in ms (default 10 minutes)
  */
-async function executeCommandWithConversation(cmd, prompt) {
+async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
   console.log(`[DEBUG] Executing command with conversation capture: ${cmd}`);
   console.log(`[DEBUG] Prompt preview: ${prompt.substring(0, 300)}${prompt.length > 300 ? '...' : ''}`);
-
-  // Write prompt to a temp file to avoid shell escaping issues
-  const tmpFile = join(tmpdir(), `task-daemon-${Date.now()}.txt`);
-  writeFileSync(tmpFile, prompt);
+  console.log(`[DEBUG] Command timeout: ${Math.round(timeout / 1000)}s`);
 
   // For claude, insert --print --output-format stream-json --verbose
+  // Note: --verbose is REQUIRED when using --output-format stream-json with --print
   const claudeMatch = cmd.match(/^(.*\/)?claude(\s|$)/);
   let fullCmd;
+  let tmpFile = null;
+  let useStdinPipe = false;
+
   if (claudeMatch) {
     const claudeEndIdx = claudeMatch[0].length;
     const beforeArgs = cmd.substring(0, claudeEndIdx).trimEnd();
     const afterArgs = cmd.substring(claudeEndIdx);
-    fullCmd = `${beforeArgs} --print --output-format stream-json --verbose ${afterArgs}`.trim() + ` "$(cat '${tmpFile}')"`;
+    // Use stdin piping for claude - more reliable than $(cat ...) for large prompts
+    fullCmd = `${beforeArgs} --print --output-format stream-json --verbose ${afterArgs}`.trim();
+    useStdinPipe = true;
   } else {
-    // Non-claude command, fall back to simple execution
+    // Non-claude command, use temp file approach
+    tmpFile = join(tmpdir(), `task-daemon-${Date.now()}.txt`);
+    writeFileSync(tmpFile, prompt);
     fullCmd = `${cmd} "$(cat '${tmpFile}')"`;
   }
 
-  console.log(`[DEBUG] Running with conversation capture (this may take a while)...`);
+  console.log(`[DEBUG] Full command: ${fullCmd}`);
+  console.log(`[DEBUG] Running with conversation capture...`);
 
   const conversation = {
     sessionId: null,
@@ -1420,33 +1554,153 @@ async function executeCommandWithConversation(cmd, prompt) {
   };
 
   return new Promise((resolve) => {
+    const startTime = Date.now();
+
     const child = spawn('sh', ['-c', fullCmd], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+
+    console.log(`[DEBUG] Child process spawned (PID: ${child.pid})`);
+
+    // Pipe prompt to stdin for claude commands (more reliable than $(cat ...))
+    if (useStdinPipe) {
+      console.log(`[DEBUG] Writing ${prompt.length} bytes to stdin...`);
+      child.stdin.write(prompt);
+      child.stdin.end();
+      console.log(`[DEBUG] Stdin closed, waiting for response...`);
+    }
 
     // Track the child process for graceful shutdown
     activeChildProcess = child;
 
     let stdout = '';
     let stderr = '';
+    let resolved = false;
+    let timeoutId = null;
+    let heartbeatId = null;
+    let lastActivityTime = Date.now();
+    let lastStdoutLength = 0;
+    let eventCount = 0;
+
+    const cleanup = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      if (heartbeatId) {
+        clearInterval(heartbeatId);
+        heartbeatId = null;
+      }
+      activeChildProcess = null;
+      if (tmpFile) {
+        try { unlinkSync(tmpFile); } catch {}
+      }
+    };
+
+    const resolveOnce = (result) => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      resolve(result);
+    };
+
+    // Heartbeat logging - shows progress every 10 seconds
+    heartbeatId = setInterval(() => {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      const sinceLast = Math.round((Date.now() - lastActivityTime) / 1000);
+      const newBytes = stdout.length - lastStdoutLength;
+      lastStdoutLength = stdout.length;
+
+      console.log(`[HEARTBEAT] ${elapsed}s elapsed | ${eventCount} events parsed | ${stdout.length} bytes received | ${sinceLast}s since last activity | +${newBytes} bytes`);
+
+      // Log last few chars of stdout for debugging (might show where it's stuck)
+      if (stdout.length > 0 && sinceLast > 30) {
+        const lastChunk = stdout.slice(-200).replace(/\n/g, '\\n');
+        console.log(`[HEARTBEAT] Last output: ...${lastChunk}`);
+      }
+    }, 10000);
+
+    // Set up timeout
+    timeoutId = setTimeout(() => {
+      if (resolved) return;
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      console.log(`[WARN] Command timed out after ${elapsed}s (limit: ${Math.round(timeout / 1000)}s)`);
+      console.log(`[WARN] State at timeout: ${eventCount} events, ${stdout.length} bytes stdout, ${stderr.length} bytes stderr`);
+
+      // Log what we received so far
+      if (stdout.length > 0) {
+        const lastLines = stdout.split('\n').slice(-5).join('\n');
+        console.log(`[WARN] Last stdout lines:\n${lastLines}`);
+      }
+      if (stderr.length > 0) {
+        console.log(`[WARN] Stderr: ${stderr.slice(-500)}`);
+      }
+
+      stderr += `\nCommand timed out after ${elapsed} seconds`;
+
+      // Try to parse any conversation data we have so far
+      parseConversationOutput(stdout, conversation, prompt);
+
+      // Kill the child process
+      try {
+        child.kill('SIGTERM');
+        // Give it 5 seconds to terminate gracefully, then SIGKILL
+        setTimeout(() => {
+          try { child.kill('SIGKILL'); } catch {}
+        }, 5000);
+      } catch {}
+
+      resolveOnce({
+        exitCode: 124, // Standard timeout exit code
+        stdout: conversation.result || stdout,
+        stderr,
+        conversation,
+        timedOut: true,
+      });
+    }, timeout);
 
     child.stdout.on('data', (data) => {
-      stdout += data.toString();
+      const chunk = data.toString();
+      stdout += chunk;
+      lastActivityTime = Date.now();
+
+      // Count JSON events for progress tracking
+      const newEvents = (chunk.match(/^\{/gm) || []).length;
+      eventCount += newEvents;
+
+      // Prevent memory exhaustion from very large outputs
+      if (stdout.length > 50 * 1024 * 1024) { // 50MB limit
+        console.log(`[WARN] stdout exceeded 50MB, truncating...`);
+        stdout = stdout.slice(-10 * 1024 * 1024); // Keep last 10MB
+      }
     });
 
     child.stderr.on('data', (data) => {
-      stderr += data.toString();
+      const chunk = data.toString();
+      stderr += chunk;
+      lastActivityTime = Date.now();
+
+      // Log stderr in real-time for debugging (first 500 chars of each chunk)
+      if (chunk.trim()) {
+        console.log(`[STDERR] ${chunk.slice(0, 500).replace(/\n/g, '\\n')}${chunk.length > 500 ? '...' : ''}`);
+      }
+
+      // Limit stderr size too
+      if (stderr.length > 5 * 1024 * 1024) { // 5MB limit
+        stderr = stderr.slice(-1 * 1024 * 1024); // Keep last 1MB
+      }
     });
 
     child.on('close', (exitCode, signal) => {
-      activeChildProcess = null;
-      try { unlinkSync(tmpFile); } catch {}
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      console.log(`[DEBUG] Process closed after ${elapsed}s - exitCode: ${exitCode}, signal: ${signal}`);
+      console.log(`[DEBUG] Final stats: ${eventCount} events, ${stdout.length} bytes stdout, ${stderr.length} bytes stderr`);
 
       // Parse conversation data from stdout
-      parseConversationOutput(stdout, conversation);
+      parseConversationOutput(stdout, conversation, prompt);
 
       if (signal === 'SIGTERM' || signal === 'SIGKILL') {
-        resolve({
+        resolveOnce({
           exitCode: 143,
           stdout: conversation.result || stdout,
           stderr: stderr || `Process terminated by ${signal}`,
@@ -1454,7 +1708,7 @@ async function executeCommandWithConversation(cmd, prompt) {
           terminated: true,
         });
       } else {
-        resolve({
+        resolveOnce({
           exitCode: exitCode || 0,
           stdout: conversation.result || stdout,
           stderr,
@@ -1464,13 +1718,12 @@ async function executeCommandWithConversation(cmd, prompt) {
     });
 
     child.on('error', (error) => {
-      activeChildProcess = null;
-      try { unlinkSync(tmpFile); } catch {}
+      console.log(`[ERROR] Child process error: ${error.message}`);
 
       // Try to parse any conversation data from stdout even on failure
-      parseConversationOutput(stdout, conversation);
+      parseConversationOutput(stdout, conversation, prompt);
 
-      resolve({
+      resolveOnce({
         exitCode: 1,
         stdout: stdout || '',
         stderr: error.message,
@@ -1480,8 +1733,105 @@ async function executeCommandWithConversation(cmd, prompt) {
   });
 }
 
+// ============================================================================
+// Async Conversation Upload Queue
+// ============================================================================
+
+// Queue for background conversation uploads - doesn't block main task loop
+const conversationQueue = [];
+let conversationUploadRunning = false;
+const MAX_QUEUE_SIZE = 100;
+const UPLOAD_RETRY_DELAY = 5000;
+const MAX_UPLOAD_RETRIES = 3;
+
 /**
- * Create a conversation record in the database
+ * Queue a conversation record for async upload (non-blocking)
+ */
+function queueConversationUpload(config, taskId, jobName, execCommand, conversationData, startedAt) {
+  if (conversationQueue.length >= MAX_QUEUE_SIZE) {
+    log.warn(`Conversation queue full (${MAX_QUEUE_SIZE}), dropping oldest`);
+    conversationQueue.shift();
+  }
+
+  const record = {
+    taskId,
+    sessionId: conversationData.sessionId || `daemon-${Date.now()}`,
+    jobName,
+    model: conversationData.model,
+    execCommand,
+    status: conversationData.exitCode === 0 ? 'completed' : 'failed',
+    messages: conversationData.messages || [],
+    result: conversationData.result,
+    usage: conversationData.usage,
+    permissionDenials: conversationData.permissionDenials || [],
+    exitCode: conversationData.exitCode,
+    stderr: conversationData.stderr,
+    numTurns: conversationData.numTurns,
+    durationMs: conversationData.durationMs,
+    durationApiMs: conversationData.durationApiMs,
+    startedAt: startedAt.toISOString(),
+    completedAt: new Date().toISOString(),
+  };
+
+  conversationQueue.push({ config, record, retries: 0 });
+  log.debug(`Queued conversation upload (queue size: ${conversationQueue.length})`);
+
+  // Start background processor if not running
+  if (!conversationUploadRunning) {
+    processConversationQueue();
+  }
+
+  // Return a placeholder ID synchronously
+  return { _id: `pending-${record.sessionId}`, queued: true };
+}
+
+/**
+ * Background processor for conversation uploads
+ */
+async function processConversationQueue() {
+  if (conversationUploadRunning) return;
+  conversationUploadRunning = true;
+
+  while (conversationQueue.length > 0) {
+    const item = conversationQueue.shift();
+    const { config, record, retries } = item;
+
+    try {
+      const url = `${config.apiUrl}/conversation-records`;
+      const response = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: getHeaders(config),
+        body: JSON.stringify(record),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`HTTP ${response.status}: ${text}`);
+      }
+
+      const data = await response.json();
+      log.debug(`Uploaded conversation record: ${data.data?._id}`);
+    } catch (err) {
+      const errMsg = err.name === 'AbortError' ? 'Request timed out' : err.message;
+      log.warn(`Failed to upload conversation (attempt ${retries + 1}): ${errMsg}`);
+
+      // Retry with exponential backoff
+      if (retries < MAX_UPLOAD_RETRIES) {
+        item.retries = retries + 1;
+        conversationQueue.push(item); // Re-queue at end
+        await new Promise(r => setTimeout(r, UPLOAD_RETRY_DELAY * (retries + 1)));
+      } else {
+        log.error(`Giving up on conversation upload after ${MAX_UPLOAD_RETRIES} retries`);
+      }
+    }
+  }
+
+  conversationUploadRunning = false;
+}
+
+/**
+ * Create a conversation record in the database (synchronous for backwards compat)
+ * @deprecated Use queueConversationUpload for non-blocking uploads
  */
 async function createConversationRecord(config, taskId, jobName, execCommand, conversationData, startedAt) {
   const url = `${config.apiUrl}/conversation-records`;
@@ -1507,7 +1857,7 @@ async function createConversationRecord(config, taskId, jobName, execCommand, co
   };
 
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       method: 'POST',
       headers: getHeaders(config),
       body: JSON.stringify(record),
@@ -1779,7 +2129,8 @@ async function processTask(config, task) {
   }
 
   // Execute the command - use conversation capture for claude commands
-  console.log(`\nExecuting: ${config.exec}\n`);
+  const commandTimeout = config.timeout || 600000; // Default 10 minutes
+  console.log(`\nExecuting: ${config.exec} (timeout: ${Math.round(commandTimeout / 1000)}s)\n`);
   console.log('-'.repeat(40));
 
   const startTime = new Date();
@@ -1787,8 +2138,8 @@ async function processTask(config, task) {
 
   // Use conversation capture for claude commands to get full tool call traces
   const result = isClaudeCommand
-    ? await executeCommandWithConversation(config.exec, prompt)
-    : await executeCommand(config.exec, prompt);
+    ? await executeCommandWithConversation(config.exec, prompt, commandTimeout)
+    : await executeCommand(config.exec, prompt, commandTimeout);
 
   const duration = ((Date.now() - startTime.getTime()) / 1000).toFixed(1);
 
@@ -1796,6 +2147,24 @@ async function processTask(config, task) {
   if (result.terminated) {
     console.log(`\nCommand terminated due to shutdown after ${duration}s`);
     // Don't update task status when terminated - let the next daemon run pick it up
+    return;
+  }
+
+  // Handle timeout - task should be retried, so we reset to pending and add comment
+  if (result.timedOut) {
+    console.log(`\nCommand timed out after ${duration}s`);
+    log.warn('Task timed out - will be retried');
+
+    // Reset task to pending so it can be picked up again
+    await updateTask(config, task._id, {
+      status: 'pending',
+      metadata: {
+        ...(task.metadata || {}),
+        lastTimeoutAt: new Date().toISOString(),
+        timeoutCount: (task.metadata?.timeoutCount || 0) + 1,
+      },
+    });
+    await addTaskComment(config, task._id, `Daemon: Task timed out after ${Math.round(commandTimeout / 1000)}s. Will be retried.`);
     return;
   }
 
@@ -1814,8 +2183,9 @@ async function processTask(config, task) {
       console.log(`[WARN] ${conv.permissionDenials.length} permission denial(s)`);
     }
 
-    // Log conversation to database
-    const conversationRecord = await createConversationRecord(
+    // Queue conversation upload in background (non-blocking)
+    // This allows the main loop to continue processing tasks while uploads happen async
+    const queuedRecord = queueConversationUpload(
       config,
       task._id,
       config.jobName,
@@ -1824,10 +2194,11 @@ async function processTask(config, task) {
       startTime
     );
 
-    // Store conversation record ID in task metadata for reference
-    if (conversationRecord?._id) {
+    // Store session ID in task metadata for linking to conversation
+    // The sessionId is more reliable than _id since we're using async upload
+    if (conv.sessionId) {
       task.metadata = task.metadata || {};
-      task.metadata.lastConversationRecordId = conversationRecord._id;
+      task.metadata.lastConversationSessionId = conv.sessionId;
     }
   }
 
@@ -1851,7 +2222,7 @@ async function processTask(config, task) {
         exitCode: result.exitCode,
         message: errorInfo.substring(0, 2000),
       },
-      conversationRecordId: task.metadata?.lastConversationRecordId,
+      conversationSessionId: task.metadata?.lastConversationSessionId,
     };
 
     await updateTask(config, task._id, {
@@ -1956,7 +2327,7 @@ async function processTask(config, task) {
     confidence: parsedResponse.data.metadata?.confidence || null,
     suggestedTags,
     suggestedNextStage: parsedResponse.data.metadata?.suggestedNextStage || null,
-    conversationRecordId: task.metadata?.lastConversationRecordId || null,
+    conversationSessionId: task.metadata?.lastConversationSessionId || null,
     // Agent questions (for ASK action)
     ...(parsedResponse.data.questions && {
       questions: {
@@ -2112,6 +2483,20 @@ async function runDaemon(config) {
       // Always wait between iterations to avoid tight loops and give the system time
       await new Promise((resolve) => setTimeout(resolve, config.interval));
     }
+
+    // Wait for pending conversation uploads before exiting
+    if (conversationQueue.length > 0) {
+      log.info(`Waiting for ${conversationQueue.length} pending conversation upload(s)...`);
+      const uploadTimeout = 30000; // 30 seconds max wait
+      const startWait = Date.now();
+      while (conversationQueue.length > 0 && Date.now() - startWait < uploadTimeout) {
+        await new Promise(r => setTimeout(r, 500));
+      }
+      if (conversationQueue.length > 0) {
+        log.warn(`Exiting with ${conversationQueue.length} pending uploads (timeout)`);
+      }
+    }
+
     log.info('Shutdown complete.');
   }
 }
