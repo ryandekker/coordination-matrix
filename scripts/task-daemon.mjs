@@ -1503,8 +1503,8 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
   console.log(`[DEBUG] Prompt preview: ${prompt.substring(0, 300)}${prompt.length > 300 ? '...' : ''}`);
   console.log(`[DEBUG] Command timeout: ${Math.round(timeout / 1000)}s`);
 
-  // For claude, insert --print --output-format stream-json
-  // Note: --verbose is intentionally omitted as it can cause issues with streaming output
+  // For claude, insert --print --output-format stream-json --verbose
+  // Note: --verbose is REQUIRED when using --output-format stream-json with --print
   const claudeMatch = cmd.match(/^(.*\/)?claude(\s|$)/);
   let fullCmd;
   let tmpFile = null;
@@ -1515,7 +1515,7 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
     const beforeArgs = cmd.substring(0, claudeEndIdx).trimEnd();
     const afterArgs = cmd.substring(claudeEndIdx);
     // Use stdin piping for claude - more reliable than $(cat ...) for large prompts
-    fullCmd = `${beforeArgs} --print --output-format stream-json ${afterArgs}`.trim();
+    fullCmd = `${beforeArgs} --print --output-format stream-json --verbose ${afterArgs}`.trim();
     useStdinPipe = true;
   } else {
     // Non-claude command, use temp file approach
