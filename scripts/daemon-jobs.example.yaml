@@ -9,6 +9,7 @@
 #   interval        defaults/job    5000                         Polling interval (ms)
 #   exec            defaults/job    claude                       Command to execute
 #   maxPayloadSize  defaults/job    200000                       Max input payload bytes (~200KB)
+#   timeout         defaults/job    600000                       Command timeout in ms (10 min)
 #   enabled         job only        true                         Whether job runs
 #   description     job only        -                            Job description
 #   viewId          job only        -                            View/saved search ID
@@ -47,6 +48,10 @@ defaults:
   # Maximum payload size in bytes (default: 200000 = ~200KB)
   # Tasks with inputPayload larger than this will be held with an error
   maxPayloadSize: 200000
+
+  # Command execution timeout in milliseconds (default: 600000 = 10 minutes)
+  # Prevents daemon from hanging indefinitely on stuck tasks
+  timeout: 600000
 
 # Define your processing jobs
 jobs:
