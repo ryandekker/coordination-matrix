@@ -31,6 +31,71 @@ export function getValueByPath(obj: Record<string, unknown> | undefined, path: s
   return current;
 }
 
+/**
+ * Get a value from a path that may include array bracket notation
+ * Supports: "field", "nested.field", "array[0].field", "packages.name[branch].field"
+ */
+export function getValueByPathWithBrackets(
+  obj: Record<string, unknown> | undefined,
+  path: string
+): unknown {
+  if (!obj || !path) return undefined;
+
+  // Parse path with bracket notation
+  // e.g., "packages.email[personal].username" -> ["packages", "email", "[personal]", "username"]
+  const parts: string[] = [];
+  let current = '';
+  let inBracket = false;
+
+  for (let i = 0; i < path.length; i++) {
+    const char = path[i];
+
+    if (char === '[' && !inBracket) {
+      if (current) {
+        parts.push(current);
+        current = '';
+      }
+      inBracket = true;
+      current = '[';
+    } else if (char === ']' && inBracket) {
+      current += ']';
+      parts.push(current);
+      current = '';
+      inBracket = false;
+    } else if (char === '.' && !inBracket) {
+      if (current) {
+        parts.push(current);
+        current = '';
+      }
+    } else {
+      current += char;
+    }
+  }
+
+  if (current) {
+    parts.push(current);
+  }
+
+  // Traverse the path
+  let value: unknown = obj;
+
+  for (const part of parts) {
+    if (value === null || value === undefined) return undefined;
+    if (typeof value !== 'object') return undefined;
+
+    if (part.startsWith('[') && part.endsWith(']')) {
+      // Bracket notation - extract the key (remove brackets)
+      const key = part.slice(1, -1);
+      value = (value as Record<string, unknown>)[key];
+    } else {
+      // Regular property access
+      value = (value as Record<string, unknown>)[part];
+    }
+  }
+
+  return value;
+}
+
 export interface TemplateContext {
   workflowRunId: ObjectId;
   stepId: string;
@@ -39,6 +104,187 @@ export interface TemplateContext {
   inputPayload?: Record<string, unknown>;
   nextForeachStepId?: string;
   apiKey?: string; // For external API calls
+}
+
+// ============================================================================
+// CORE PATH RESOLUTION - Single source of truth for all template path handling
+// ============================================================================
+
+/**
+ * Context for resolving template paths.
+ * All template resolution functions should use this unified context.
+ */
+export interface PathResolutionContext {
+  /** Input payload data (workflow trigger data, step input, etc.) */
+  inputPayload?: Record<string, unknown>;
+  /** Trigger data (alias for inputPayload, used in some contexts) */
+  triggerPayload?: Record<string, unknown>;
+  /** Variable packages loaded from database */
+  packageContext?: PackageContext;
+}
+
+/**
+ * Result of path resolution
+ */
+export interface PathResolutionResult {
+  /** Whether the path was successfully resolved */
+  found: boolean;
+  /** The resolved value (undefined if not found) */
+  value: unknown;
+}
+
+/**
+ * Options for formatting resolved values
+ */
+export interface FormatOptions {
+  /** If true, try to extract meaningful identifier from objects (name, title, id) */
+  extractIdentifier?: boolean;
+  /** If true, return empty string for undefined/null; if false, return 'null' or leave unchanged */
+  emptyForMissing?: boolean;
+  /** If true and value not found, return the original match unchanged */
+  preserveUnresolved?: boolean;
+}
+
+/**
+ * CORE FUNCTION: Resolve a template path to its value.
+ *
+ * This is the SINGLE SOURCE OF TRUTH for all path resolution.
+ * All template functions should use this function.
+ *
+ * Supported path prefixes (in order of precedence):
+ *   - variables.*        -> Look up in packageContext.variables
+ *   - trigger.payload.*  -> Look up in inputPayload (or triggerPayload)
+ *   - trigger.*          -> Look up in inputPayload (or triggerPayload), stripping 'trigger.'
+ *   - input.*            -> Look up in inputPayload
+ *   - (direct path)      -> Look up directly in inputPayload
+ *
+ * @param path - The path to resolve (e.g., "trigger.payload.email.subject", "input.item", "label")
+ * @param context - The resolution context containing data sources
+ * @returns PathResolutionResult with found status and value
+ */
+export function resolvePathToValue(
+  path: string,
+  context: PathResolutionContext
+): PathResolutionResult {
+  const trimmedPath = path.trim();
+  const payload = context.inputPayload || context.triggerPayload;
+
+  // 1. Variables prefix (highest priority - explicit variable lookup)
+  if (trimmedPath.startsWith('variables.') && context.packageContext) {
+    const value = getValueByPathWithBrackets(
+      context.packageContext as unknown as Record<string, unknown>,
+      trimmedPath
+    );
+    if (value !== undefined) {
+      return { found: true, value };
+    }
+    // Variables not found - return not found (caller decides whether to preserve)
+    return { found: false, value: undefined };
+  }
+
+  // 2. trigger.payload.* prefix (explicit trigger payload reference)
+  if (trimmedPath.startsWith('trigger.payload.') && payload) {
+    const subPath = trimmedPath.substring(16); // Remove 'trigger.payload.'
+    const value = getValueByPath(payload, subPath);
+    if (value !== undefined) {
+      return { found: true, value };
+    }
+    return { found: false, value: undefined };
+  }
+
+  // 3. trigger.* prefix (for backward compatibility, maps to payload)
+  if (trimmedPath.startsWith('trigger.') && payload) {
+    const subPath = trimmedPath.substring(8); // Remove 'trigger.'
+    const value = getValueByPath(payload, subPath);
+    if (value !== undefined) {
+      return { found: true, value };
+    }
+    return { found: false, value: undefined };
+  }
+
+  // 4. input.* prefix (explicit input reference)
+  if (trimmedPath.startsWith('input.') && payload) {
+    const subPath = trimmedPath.substring(6); // Remove 'input.'
+    const value = getValueByPath(payload, subPath);
+    if (value !== undefined) {
+      return { found: true, value };
+    }
+    return { found: false, value: undefined };
+  }
+
+  // 5. Direct path lookup (no prefix - look directly in payload)
+  if (payload) {
+    const value = getValueByPath(payload, trimmedPath);
+    if (value !== undefined) {
+      return { found: true, value };
+    }
+  }
+
+  return { found: false, value: undefined };
+}
+
+/**
+ * CORE FUNCTION: Format a resolved value for template output.
+ *
+ * This is the SINGLE SOURCE OF TRUTH for value formatting.
+ * All template functions should use this function.
+ *
+ * @param value - The value to format
+ * @param options - Formatting options
+ * @returns Formatted string representation
+ */
+export function formatResolvedValue(
+  value: unknown,
+  options: FormatOptions = {}
+): string {
+  const { extractIdentifier = false, emptyForMissing = true } = options;
+
+  if (value === undefined || value === null) {
+    return emptyForMissing ? '' : 'null';
+  }
+
+  if (typeof value === 'object') {
+    if (extractIdentifier) {
+      // Try to get a meaningful identifier from the object
+      const obj = value as Record<string, unknown>;
+      if (obj.name) return String(obj.name);
+      if (obj.title) return String(obj.title);
+      if (obj.id) return String(obj.id);
+      if (obj._id) return String(obj._id);
+    }
+    return JSON.stringify(value);
+  }
+
+  return String(value);
+}
+
+/**
+ * CORE FUNCTION: Resolve a single template expression and format the result.
+ *
+ * Combines resolvePathToValue and formatResolvedValue into a single call.
+ *
+ * @param path - The path to resolve
+ * @param context - The resolution context
+ * @param options - Formatting options
+ * @param originalMatch - Original match string (for preserveUnresolved option)
+ * @returns Formatted string value
+ */
+export function resolveAndFormat(
+  path: string,
+  context: PathResolutionContext,
+  options: FormatOptions = {},
+  originalMatch?: string
+): string {
+  const result = resolvePathToValue(path, context);
+
+  if (!result.found) {
+    if (options.preserveUnresolved && originalMatch) {
+      return originalMatch;
+    }
+    return options.emptyForMissing !== false ? '' : 'null';
+  }
+
+  return formatResolvedValue(result.value, options);
 }
 
 /**
@@ -138,47 +384,29 @@ export function resolveTemplateVariables(
     return strValue;
   };
 
-  // Replace input payload variables ({{input.path.to.value}})
+  // Replace all remaining {{...}} patterns using core path resolution
+  // This handles: input.*, trigger.payload.*, trigger.*, and direct paths
   if (context.inputPayload) {
-    // Use a function that captures match index for context detection
-    const inputPattern = /\{\{input\.([^}]+)\}\}/g;
-    let match;
-    let lastIndex = 0;
-    let newResult = '';
-    while ((match = inputPattern.exec(result)) !== null) {
-      const path = match[1];
-      const value = getValueByPath(context.inputPayload!, path);
-      const inQuoted = isInQuotedContext(result, match.index);
-      newResult += result.slice(lastIndex, match.index) + formatValue(value, inQuoted);
-      lastIndex = match.index + match[0].length;
-    }
-    result = newResult + result.slice(lastIndex);
-  }
-
-  // Replace direct variable references ({{message}}, {{item}}, {{_index}}, etc.)
-  // This allows foreach items and other payload properties to be accessed without "input." prefix
-  if (context.inputPayload) {
+    const pathContext: PathResolutionContext = { inputPayload: context.inputPayload };
     const directPattern = /\{\{([^}]+)\}\}/g;
     let match;
     let lastIndex = 0;
     let newResult = '';
+
     while ((match = directPattern.exec(result)) !== null) {
       const trimmedPath = match[1].trim();
-      // Skip already-resolved system variables (they start with specific prefixes we've already handled)
+
+      // Skip already-resolved system variables
       if (['callbackUrl', 'systemWebhookUrl', 'foreachWebhookUrl', 'workflowRunId', 'stepId', 'taskId', 'callbackSecret', '_apiUrl', '_apiKey', '_workflowRunId'].includes(trimmedPath)) {
         newResult += result.slice(lastIndex, match.index) + match[0];
         lastIndex = match.index + match[0].length;
         continue;
       }
-      // Skip input. prefix (already handled above)
-      if (trimmedPath.startsWith('input.')) {
-        newResult += result.slice(lastIndex, match.index) + match[0];
-        lastIndex = match.index + match[0].length;
-        continue;
-      }
-      const value = getValueByPath(context.inputPayload!, trimmedPath);
+
+      // Use core path resolution
+      const resolved = resolvePathToValue(trimmedPath, pathContext);
       const inQuoted = isInQuotedContext(result, match.index);
-      newResult += result.slice(lastIndex, match.index) + formatValue(value, inQuoted);
+      newResult += result.slice(lastIndex, match.index) + formatValue(resolved.value, inQuoted);
       lastIndex = match.index + match[0].length;
     }
     result = newResult + result.slice(lastIndex);
@@ -189,13 +417,9 @@ export function resolveTemplateVariables(
 
 /**
  * Resolves a title template string by replacing {{variable}} placeholders.
- * Supports:
- *   {{trigger.payload.path}} - Value from trigger payload (workflow input)
- *   {{input.path.to.value}} - Value from input payload
- *   {{item}} or {{_item}} - Current item in foreach loop
- *   {{_index}} - Current index in foreach loop
- *   {{_total}} - Total count in foreach loop
- *   {{anyVariable}} - Direct lookup from input payload
+ *
+ * Uses the core resolveAndFormat function for consistent path resolution.
+ * See resolvePathToValue for supported path prefixes.
  */
 export function resolveTitleTemplate(
   template: string,
@@ -204,45 +428,11 @@ export function resolveTitleTemplate(
 ): string {
   if (!template) return fallbackTitle || '';
 
-  let result = template;
+  const context: PathResolutionContext = { inputPayload };
 
-  // Replace all {{...}} patterns
-  result = result.replace(/\{\{([^}]+)\}\}/g, (_match, path) => {
-    const trimmedPath = path.trim();
-
-    // Handle trigger.payload.* prefix (maps to inputPayload)
-    if (trimmedPath.startsWith('trigger.payload.')) {
-      const payloadPath = trimmedPath.substring(16); // Remove 'trigger.payload.' prefix
-      const value = getValueByPath(inputPayload, payloadPath);
-      return value !== undefined && value !== null ? String(value) : '';
-    }
-
-    // Handle input.* prefix explicitly
-    if (trimmedPath.startsWith('input.')) {
-      const inputPath = trimmedPath.substring(6); // Remove 'input.' prefix
-      const value = getValueByPath(inputPayload, inputPath);
-      return value !== undefined && value !== null ? String(value) : '';
-    }
-
-    // Handle direct property lookup (for item, _index, _total, etc.)
-    const value = getValueByPath(inputPayload, trimmedPath);
-    if (value !== undefined && value !== null) {
-      // For objects, provide a brief representation
-      if (typeof value === 'object') {
-        // Try to get a meaningful identifier from the object
-        const obj = value as Record<string, unknown>;
-        if (obj.name) return String(obj.name);
-        if (obj.title) return String(obj.title);
-        if (obj.id) return String(obj.id);
-        if (obj._id) return String(obj._id);
-        // Fallback to JSON for simple objects
-        return JSON.stringify(value);
-      }
-      return String(value);
-    }
-
-    // If not found, return empty string (variable not available)
-    return '';
+  // Replace all {{...}} patterns using core resolution
+  const result = template.replace(/\{\{([^}]+)\}\}/g, (match, path) => {
+    return resolveAndFormat(path, context, { extractIdentifier: true }, match);
   });
 
   // If the result is empty after substitution, use fallback
@@ -256,14 +446,10 @@ export function resolveTitleTemplate(
 /**
  * Async version of resolveTitleTemplate that supports variable packages with nested interpolation.
  *
- * Supports:
- *   {{variables.name}} - Simple variable access
- *   {{variables.name.path}} - Nested variable access
- *   {{variables.name[key].path}} - Bracket notation for dynamic keys
- *   {{variables.yaml[{{variables.test.testkey}}].my}} - Nested interpolation
- *   {{trigger.payload.path}} - Value from trigger payload (workflow input)
- *   {{input.path}} - Input payload access
- *   {{item}}, {{_index}}, {{_total}} - Loop variables
+ * Uses the core resolveAndFormat function for consistent path resolution.
+ * See resolvePathToValue for supported path prefixes.
+ *
+ * Supports nested interpolation like {{variables.{{input.configName}}.value}}
  */
 export async function resolveTitleTemplateWithPackages(
   template: string,
@@ -274,6 +460,7 @@ export async function resolveTitleTemplateWithPackages(
 
   // Load packages for variable resolution
   const packageContext = await loadPackageContext();
+  const context: PathResolutionContext = { inputPayload, packageContext };
 
   let result = template;
   let iterations = 0;
@@ -284,81 +471,20 @@ export async function resolveTitleTemplateWithPackages(
     const prevResult = result;
 
     // Match innermost expressions (those without nested {{ }})
-    result = result.replace(/\{\{([^{}]+)\}\}/g, (_match, path) => {
+    result = result.replace(/\{\{([^{}]+)\}\}/g, (match, path) => {
+      // For variables.*, preserve unresolved to allow nested interpolation
       const trimmedPath = path.trim();
+      const isVariablesPath = trimmedPath.startsWith('variables.');
 
-      // Handle variables.* prefix - supports nested interpolation
-      if (trimmedPath.startsWith('variables.') && packageContext) {
-        const value = getValueByPathWithBrackets(
-          packageContext as unknown as Record<string, unknown>,
-          trimmedPath
-        );
-        if (value !== undefined && value !== null) {
-          if (typeof value === 'object') {
-            // For objects in titles, try to get a meaningful identifier
-            const obj = value as Record<string, unknown>;
-            if (obj.name) return String(obj.name);
-            if (obj.title) return String(obj.title);
-            if (obj.id) return String(obj.id);
-            return JSON.stringify(value);
-          }
-          return String(value);
-        }
-        // If variable not found, leave as-is for potential later resolution
-        return _match;
-      }
-
-      // Handle trigger.payload.* prefix (maps to inputPayload)
-      if (trimmedPath.startsWith('trigger.payload.') && inputPayload) {
-        const payloadPath = trimmedPath.substring(16); // Remove 'trigger.payload.' prefix
-        const value = getValueByPath(inputPayload, payloadPath);
-        if (value !== undefined && value !== null) {
-          if (typeof value === 'object') {
-            const obj = value as Record<string, unknown>;
-            if (obj.name) return String(obj.name);
-            if (obj.title) return String(obj.title);
-            if (obj.id) return String(obj.id);
-            return JSON.stringify(value);
-          }
-          return String(value);
-        }
-        return '';
-      }
-
-      // Handle input.* prefix explicitly
-      if (trimmedPath.startsWith('input.') && inputPayload) {
-        const inputPath = trimmedPath.substring(6); // Remove 'input.' prefix
-        const value = getValueByPath(inputPayload, inputPath);
-        if (value !== undefined && value !== null) {
-          if (typeof value === 'object') {
-            const obj = value as Record<string, unknown>;
-            if (obj.name) return String(obj.name);
-            if (obj.title) return String(obj.title);
-            if (obj.id) return String(obj.id);
-            return JSON.stringify(value);
-          }
-          return String(value);
-        }
-        return '';
-      }
-
-      // Handle direct property lookup (for item, _index, _total, etc.)
-      if (inputPayload) {
-        const value = getValueByPath(inputPayload, trimmedPath);
-        if (value !== undefined && value !== null) {
-          if (typeof value === 'object') {
-            const obj = value as Record<string, unknown>;
-            if (obj.name) return String(obj.name);
-            if (obj.title) return String(obj.title);
-            if (obj.id) return String(obj.id);
-            return JSON.stringify(value);
-          }
-          return String(value);
-        }
-      }
-
-      // If not found, return empty string
-      return '';
+      return resolveAndFormat(
+        path,
+        context,
+        {
+          extractIdentifier: true,
+          preserveUnresolved: isVariablesPath, // Keep {{variables.x}} for later passes if not found
+        },
+        match
+      );
     });
 
     // If nothing changed, we're done
@@ -484,76 +610,13 @@ export function clearPackageCache(): void {
 }
 
 /**
- * Get a value from a path that may include array bracket notation
- * Supports: "field", "nested.field", "array[0].field", "packages.name[branch].field"
- */
-export function getValueByPathWithBrackets(
-  obj: Record<string, unknown> | undefined,
-  path: string
-): unknown {
-  if (!obj || !path) return undefined;
-
-  // Parse path with bracket notation
-  // e.g., "packages.email[personal].username" -> ["packages", "email", "[personal]", "username"]
-  const parts: string[] = [];
-  let current = '';
-  let inBracket = false;
-
-  for (let i = 0; i < path.length; i++) {
-    const char = path[i];
-
-    if (char === '[' && !inBracket) {
-      if (current) {
-        parts.push(current);
-        current = '';
-      }
-      inBracket = true;
-      current = '[';
-    } else if (char === ']' && inBracket) {
-      current += ']';
-      parts.push(current);
-      current = '';
-      inBracket = false;
-    } else if (char === '.' && !inBracket) {
-      if (current) {
-        parts.push(current);
-        current = '';
-      }
-    } else {
-      current += char;
-    }
-  }
-
-  if (current) {
-    parts.push(current);
-  }
-
-  // Traverse the path
-  let value: unknown = obj;
-
-  for (const part of parts) {
-    if (value === null || value === undefined) return undefined;
-    if (typeof value !== 'object') return undefined;
-
-    if (part.startsWith('[') && part.endsWith(']')) {
-      // Bracket notation - extract the key (remove brackets)
-      const key = part.slice(1, -1);
-      value = (value as Record<string, unknown>)[key];
-    } else {
-      // Regular property access
-      value = (value as Record<string, unknown>)[part];
-    }
-  }
-
-  return value;
-}
-
-/**
  * Resolve nested template expressions
  * Handles patterns like:
  *   {{variables.config.database.host}}     - dot notation
  *   {{variables.config[env].database}}     - bracket notation for dynamic keys
  *   {{variables.{{input.varName}}.field}}  - nested interpolation
+ *
+ * Uses the core resolveAndFormat function for consistent path resolution.
  *
  * Resolution order:
  * 1. Resolve innermost expressions first (those without nested braces)
@@ -564,6 +627,11 @@ export function resolveNestedExpressions(
   context: TemplateContext,
   packageContext?: PackageContext
 ): string {
+  const pathContext: PathResolutionContext = {
+    inputPayload: context.inputPayload,
+    packageContext,
+  };
+
   let result = template;
   let iterations = 0;
   const maxIterations = 10; // Safety limit to prevent infinite loops
@@ -574,47 +642,19 @@ export function resolveNestedExpressions(
     // Find and resolve innermost expressions (those without nested {{ }})
     // Pattern matches {{...}} where ... doesn't contain {{ or }}
     result = result.replace(/\{\{([^{}]+)\}\}/g, (match, expression) => {
-      const trimmed = expression.trim();
+      // For variables.*, preserve unresolved to allow nested interpolation
+      const trimmedPath = expression.trim();
+      const isVariablesPath = trimmedPath.startsWith('variables.');
 
-      // Try to resolve from variables ({{variables.name}} or {{variables.name.path}} or {{variables.name[key].path}})
-      if (trimmed.startsWith('variables.') && packageContext) {
-        // Use bracket-aware path resolution to support both dot and bracket notation
-        const value = getValueByPathWithBrackets(packageContext as unknown as Record<string, unknown>, trimmed);
-        if (value !== undefined) {
-          return typeof value === 'object' ? JSON.stringify(value) : String(value);
-        }
-        // If variable not found, leave as-is for potential later resolution
-        return match;
-      }
-
-      // Try trigger.payload prefix
-      if (trimmed.startsWith('trigger.payload.') && context.inputPayload) {
-        const path = trimmed.replace('trigger.payload.', '');
-        const value = getValueByPath(context.inputPayload, path);
-        if (value !== undefined) {
-          return typeof value === 'object' ? JSON.stringify(value) : String(value);
-        }
-      }
-
-      // Try input prefix
-      if (trimmed.startsWith('input.') && context.inputPayload) {
-        const path = trimmed.replace('input.', '');
-        const value = getValueByPath(context.inputPayload, path);
-        if (value !== undefined) {
-          return typeof value === 'object' ? JSON.stringify(value) : String(value);
-        }
-      }
-
-      // Try direct payload lookup
-      if (context.inputPayload) {
-        const value = getValueByPath(context.inputPayload, trimmed);
-        if (value !== undefined) {
-          return typeof value === 'object' ? JSON.stringify(value) : String(value);
-        }
-      }
-
-      // Return unchanged if we can't resolve
-      return match;
+      return resolveAndFormat(
+        expression,
+        pathContext,
+        {
+          extractIdentifier: false, // Don't extract identifiers in general template resolution
+          preserveUnresolved: isVariablesPath, // Keep {{variables.x}} for later passes if not found
+        },
+        match
+      );
     });
 
     // If nothing changed, we're done
@@ -679,6 +719,8 @@ export function resolveTemplateWithPackagesSync(
  * Resolve a single template value expression like "{{output.field}}" or "{{item.name}}"
  * Returns the extracted value (not a string), preserving the original type.
  *
+ * Uses the core resolvePathToValue function for consistent path resolution.
+ *
  * This is used for input mapping where we want to extract actual values,
  * not string representations.
  */
@@ -687,45 +729,23 @@ export async function resolveTemplateValue(
   sourceData: Record<string, unknown>,
   triggerData?: Record<string, unknown>
 ): Promise<unknown> {
+  const context: PathResolutionContext = {
+    inputPayload: sourceData,
+    triggerPayload: triggerData,
+  };
+
   // If the template is just a simple variable reference like "{{output.field}}"
-  // extract the path and return the actual value
+  // extract the path and return the actual value (preserving type)
   const simpleMatch = template.match(/^\{\{([^}]+)\}\}$/);
   if (simpleMatch) {
-    const path = simpleMatch[1].trim();
-
-    // Handle special prefixes
-    if (path.startsWith('trigger.')) {
-      return getValueByPath(triggerData || {}, path.substring(8));
-    }
-    if (path.startsWith('input.')) {
-      return getValueByPath(sourceData, path.substring(6));
-    }
-
-    // Direct path lookup in source data
-    return getValueByPath(sourceData, path);
+    const result = resolvePathToValue(simpleMatch[1], context);
+    return result.value; // Return raw value, not stringified
   }
 
   // If the template contains multiple variables or text,
-  // resolve it as a string template
-  const result = template.replace(/\{\{([^}]+)\}\}/g, (_match, path) => {
-    const trimmedPath = path.trim();
-
-    let value: unknown;
-    if (trimmedPath.startsWith('trigger.')) {
-      value = getValueByPath(triggerData || {}, trimmedPath.substring(8));
-    } else if (trimmedPath.startsWith('input.')) {
-      value = getValueByPath(sourceData, trimmedPath.substring(6));
-    } else {
-      value = getValueByPath(sourceData, trimmedPath);
-    }
-
-    if (value === undefined || value === null) {
-      return '';
-    }
-    if (typeof value === 'object') {
-      return JSON.stringify(value);
-    }
-    return String(value);
+  // resolve it as a string template using the core function
+  const result = template.replace(/\{\{([^}]+)\}\}/g, (match, path) => {
+    return resolveAndFormat(path, context, { extractIdentifier: false }, match);
   });
 
   return result;
