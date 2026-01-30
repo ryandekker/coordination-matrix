@@ -73,6 +73,16 @@ class WorkflowExecutionService {
       }
     });
 
+    // Handle decision step reruns when task is set to pending
+    eventBus.subscribe('task.status.changed', async (event: TaskEvent) => {
+      const task = event.task;
+      // Only process decision tasks that are part of a workflow and set to pending
+      if (task.taskType === 'decision' && task.workflowRunId && task.workflowStepId && task.status === 'pending') {
+        console.log(`[WorkflowExecutionService] Decision task ${task._id} set to pending - triggering rerun`);
+        await this.rerunDecisionTask(task._id);
+      }
+    });
+
     // Handle flow step auto-execution when task is set to pending (for reruns)
     eventBus.subscribe('task.status.changed', async (event: TaskEvent) => {
       const task = event.task;
@@ -2568,6 +2578,56 @@ class WorkflowExecutionService {
 
     // Execute the findDocument step
     await this.executeFindDocument(run, workflow, step, task, inputPayload);
+  }
+
+  /**
+   * Rerun a decision task that was set back to pending.
+   * Looks up the workflow run and step config to re-evaluate the decision.
+   */
+  async rerunDecisionTask(taskId: ObjectId | string): Promise<void> {
+    const id = typeof taskId === 'string' ? new ObjectId(taskId) : taskId;
+    const task = await this.tasks.findOne({ _id: id });
+
+    if (!task) {
+      console.error(`[WorkflowExecutionService] rerunDecisionTask: Task ${id} not found`);
+      return;
+    }
+
+    if (task.taskType !== 'decision') {
+      console.error(`[WorkflowExecutionService] rerunDecisionTask: Task ${id} is not a decision task`);
+      return;
+    }
+
+    if (!task.workflowRunId || !task.workflowStepId) {
+      console.error(`[WorkflowExecutionService] rerunDecisionTask: Task ${id} is not part of a workflow`);
+      return;
+    }
+
+    const run = await this.workflowRuns.findOne({ _id: task.workflowRunId });
+    if (!run) {
+      console.error(`[WorkflowExecutionService] rerunDecisionTask: Workflow run ${task.workflowRunId} not found`);
+      return;
+    }
+
+    const workflow = await this.workflows.findOne({ _id: run.workflowId });
+    if (!workflow) {
+      console.error(`[WorkflowExecutionService] rerunDecisionTask: Workflow ${run.workflowId} not found`);
+      return;
+    }
+
+    const step = workflow.steps.find(s => s.id === task.workflowStepId);
+    if (!step) {
+      console.error(`[WorkflowExecutionService] rerunDecisionTask: Step ${task.workflowStepId} not found in workflow`);
+      return;
+    }
+
+    // Get the input payload from the task's metadata (set when task was originally created)
+    const inputPayload = task.metadata?.inputPayload as Record<string, unknown> | undefined;
+
+    console.log(`[WorkflowExecutionService] Rerunning decision task ${id} for step ${step.name}`);
+
+    // Execute the decision step
+    await this.executeDecision(run, workflow, step, task, inputPayload);
   }
 
   // ============================================================================

@@ -1486,8 +1486,63 @@ tasksRouter.post('/:id/rerun', async (req: Request, res: Response, next: NextFun
       return;
     }
 
+    // FLOW: Reset and immediately execute the subflow
+    if (task.taskType === 'flow') {
+      console.log(`[Tasks] Rerun: re-executing flow task ${taskId}`);
+      await archiveCurrentResult(task);
+      await clearOutputMetadata(task);
+
+      // Refresh input if available
+      const refreshedInput = await getRefreshedInput(task);
+
+      // Reset task to pending first
+      await db.collection('tasks').updateOne(
+        { _id: taskId },
+        {
+          $set: {
+            status: 'pending',
+            updatedAt: now,
+            ...(refreshedInput && { 'metadata.inputPayload': refreshedInput }),
+          }
+        }
+      );
+
+      await publishTaskEvent('task.status.changed', { ...task, status: 'pending' } as Task, {
+        changes: [{ field: 'status', oldValue: task.status, newValue: 'pending' }],
+        actorId,
+        actorType: 'user',
+      });
+
+      // Now execute the flow immediately
+      const executeResult = await workflowExecutionService.executeFlowTask(
+        taskId.toString(),
+        refreshedInput || (task.metadata?.inputPayload as Record<string, unknown> | undefined)
+      );
+
+      if (!executeResult.success) {
+        // Even if execution fails, the task was reset - return the error
+        const updatedTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
+        res.json({
+          data: updatedTask,
+          message: `Flow task reset but execution failed: ${executeResult.error}`,
+          error: executeResult.error
+        });
+        return;
+      }
+
+      const updatedTask = await db.collection<Task>('tasks').findOne({ _id: taskId });
+      res.json({
+        data: updatedTask,
+        message: 'Flow task reset and re-executed',
+        attempt: executeResult.attempt
+      });
+      return;
+    }
+
     // =========================================================================
-    // Default rerun: agent, manual, decision, findDocument, flow, trigger
+    // Default rerun: agent, manual, trigger
+    // Note: code, findDocument, and decision tasks auto-execute via event bus
+    // when set to pending, so they also use this default handler.
     // =========================================================================
     console.log(`[Tasks] Rerun: resetting ${task.taskType || 'standard'} task ${taskId}`);
     await archiveCurrentResult(task);
