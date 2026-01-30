@@ -643,8 +643,14 @@ class WorkflowExecutionService {
     if (step.flowId) {
       config.flowId = step.flowId;
     }
+    // Support both legacy inputMapping and new inputConfig.mapping
     if (step.inputMapping) {
       config.inputMapping = step.inputMapping;
+    } else if (step.inputConfig?.mapping) {
+      config.inputMapping = step.inputConfig.mapping;
+    }
+    if (step.inputConfig) {
+      config.inputConfig = step.inputConfig;
     }
 
     // FindDocument step config
@@ -3305,11 +3311,15 @@ class WorkflowExecutionService {
     taskId: ObjectId,
     inputPayload?: Record<string, unknown>
   ): Promise<unknown> {
+    console.log(`[resolveInputMappingValue] CALLED with template: "${template}", workflowRunId: ${workflowRunId}`);
+
     // Check if the template is a simple variable reference (single {{...}})
     const simpleVarMatch = template.match(/^\{\{([^}]+)\}\}$/);
+    console.log(`[resolveInputMappingValue] simpleVarMatch: ${simpleVarMatch ? 'YES' : 'NO'}`);
 
     if (simpleVarMatch) {
       const varPath = simpleVarMatch[1].trim();
+      console.log(`[resolveInputMappingValue] varPath: "${varPath}"`);
 
       // Handle steps.* references - fetch from completed step task
       if (varPath.startsWith('steps.')) {
@@ -4924,7 +4934,10 @@ class WorkflowExecutionService {
 
     // Determine input payload - use provided, or resolve inputMapping, or fall back to stored config
     let finalInputPayload: Record<string, unknown>;
-    const inputMapping = task.flowConfig?.inputMapping || task.stepConfig?.inputMapping;
+    // Support both legacy inputMapping and new inputConfig.mapping
+    const inputMapping = task.flowConfig?.inputMapping ||
+      task.stepConfig?.inputMapping ||
+      (task.stepConfig?.inputConfig as { mapping?: Record<string, unknown> } | undefined)?.mapping;
     const taskInputPayload = task.metadata?.inputPayload as Record<string, unknown> | undefined;
 
     if (inputPayload) {
