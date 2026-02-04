@@ -267,6 +267,48 @@ jobs:
     exec: "claude --model opus"
 ```
 
+### Resilience Features
+
+The daemon includes several resilience mechanisms to recover from failures:
+
+- **Exponential Backoff**: API failures trigger increasing delays (2s → 5min max) with jitter
+- **Circuit Breaker**: After 5 consecutive API failures, blocks requests for 60s to let the API recover
+- **Task Update Retries**: Failed task updates retry up to 3 times with backoff
+- **Health Check**: Verifies API connectivity before starting the main loop
+- **Max Failure Threshold**: Exits after 20 consecutive API failures for process manager restart
+- **Clean Exit on Errors**: Unhandled exceptions trigger exit for clean restart by systemd/pm2
+
+**For long-running production deployments**, use a process manager (systemd, pm2, supervisord) that will automatically restart the daemon if it exits.
+
+### Running with PM2 (Recommended for Production)
+
+PM2 provides automatic restarts, logging, and monitoring. An ecosystem config is included:
+
+```bash
+# Install pm2 globally (one time)
+npm install -g pm2
+
+# Start all enabled daemon jobs
+pm2 start scripts/ecosystem.config.cjs
+
+# Common pm2 commands
+pm2 list                          # Show all running processes
+pm2 logs                          # Tail all logs
+pm2 logs daemon-claude-haiku      # Tail specific job
+pm2 restart all                   # Restart all daemons
+pm2 stop all                      # Stop all
+pm2 delete all                    # Remove from pm2
+
+# Make daemons survive reboot
+pm2 save                          # Save current process list
+pm2 startup                       # Generate OS startup script
+```
+
+The ecosystem config reads from `daemon-jobs.yaml` and creates a PM2 process for each enabled job with:
+- Automatic restart on crash (with exponential backoff)
+- Memory limit (500MB) with auto-restart
+- Separate log files in `logs/` directory
+
 ### Two Daemon Types
 
 | Feature | Task Daemon (task-daemon.mjs) | Automation Daemon |

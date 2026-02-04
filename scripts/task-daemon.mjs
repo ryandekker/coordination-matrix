@@ -55,6 +55,118 @@ let activeChildProcess = null;
 let shuttingDown = false;
 
 // ============================================================================
+// Resilience: Exponential Backoff & Circuit Breaker
+// ============================================================================
+
+class ExponentialBackoff {
+  constructor(options = {}) {
+    this.baseDelay = options.baseDelay || 1000;      // Start at 1 second
+    this.maxDelay = options.maxDelay || 300000;      // Max 5 minutes
+    this.multiplier = options.multiplier || 2;
+    this.jitter = options.jitter !== false;          // Add randomness by default
+    this.currentDelay = this.baseDelay;
+    this.failures = 0;
+  }
+
+  recordFailure() {
+    this.failures++;
+    this.currentDelay = Math.min(
+      this.baseDelay * Math.pow(this.multiplier, this.failures - 1),
+      this.maxDelay
+    );
+    return this.getDelay();
+  }
+
+  recordSuccess() {
+    this.failures = 0;
+    this.currentDelay = this.baseDelay;
+  }
+
+  getDelay() {
+    if (!this.jitter) return this.currentDelay;
+    // Add +/- 20% jitter to avoid thundering herd
+    const jitterRange = this.currentDelay * 0.2;
+    return Math.floor(this.currentDelay + (Math.random() * jitterRange * 2 - jitterRange));
+  }
+
+  getFailures() {
+    return this.failures;
+  }
+}
+
+class CircuitBreaker {
+  constructor(options = {}) {
+    this.failureThreshold = options.failureThreshold || 5;    // Open after 5 failures
+    this.resetTimeout = options.resetTimeout || 60000;        // Try again after 1 minute
+    this.halfOpenMaxAttempts = options.halfOpenMaxAttempts || 1;
+
+    this.state = 'CLOSED';  // CLOSED, OPEN, HALF_OPEN
+    this.failures = 0;
+    this.lastFailureTime = null;
+    this.halfOpenAttempts = 0;
+  }
+
+  canAttempt() {
+    if (this.state === 'CLOSED') return true;
+
+    if (this.state === 'OPEN') {
+      // Check if enough time has passed to try again
+      if (Date.now() - this.lastFailureTime >= this.resetTimeout) {
+        this.state = 'HALF_OPEN';
+        this.halfOpenAttempts = 0;
+        return true;
+      }
+      return false;
+    }
+
+    // HALF_OPEN - allow limited attempts
+    return this.halfOpenAttempts < this.halfOpenMaxAttempts;
+  }
+
+  recordSuccess() {
+    this.failures = 0;
+    this.state = 'CLOSED';
+    this.halfOpenAttempts = 0;
+  }
+
+  recordFailure() {
+    this.failures++;
+    this.lastFailureTime = Date.now();
+
+    if (this.state === 'HALF_OPEN') {
+      this.halfOpenAttempts++;
+      if (this.halfOpenAttempts >= this.halfOpenMaxAttempts) {
+        this.state = 'OPEN';
+      }
+    } else if (this.failures >= this.failureThreshold) {
+      this.state = 'OPEN';
+    }
+  }
+
+  getState() {
+    return this.state;
+  }
+
+  getFailures() {
+    return this.failures;
+  }
+
+  getTimeUntilRetry() {
+    if (this.state !== 'OPEN') return 0;
+    const elapsed = Date.now() - this.lastFailureTime;
+    return Math.max(0, this.resetTimeout - elapsed);
+  }
+}
+
+// Global resilience instances
+const apiBackoff = new ExponentialBackoff({ baseDelay: 2000, maxDelay: 300000 });
+const apiCircuitBreaker = new CircuitBreaker({ failureThreshold: 5, resetTimeout: 60000 });
+
+// Consecutive failure tracking for daemon health
+let consecutiveApiFailures = 0;
+const MAX_CONSECUTIVE_FAILURES = 20;  // Exit after 20 consecutive API failures
+
+// ============================================================================
 // Logger - Structured logging with levels and colors
 // ============================================================================
 
@@ -276,10 +388,16 @@ const stats = {
   lastTaskTitle: null,
   lastError: null,
   currentTask: null,
+  // Resilience stats
+  apiFailures: 0,
+  circuitBreakerState: 'CLOSED',
 };
 
 function saveStatus(jobName, extraData = {}) {
   ensurePidDir();
+  // Include resilience stats in status
+  stats.apiFailures = consecutiveApiFailures;
+  stats.circuitBreakerState = apiCircuitBreaker?.getState?.() || 'UNKNOWN';
   const status = {
     ...stats,
     ...extraData,
@@ -442,6 +560,14 @@ function showStatus(verbose = false) {
       console.log(`    Uptime:     ${formatDuration(uptime)}`);
       console.log(`    Tasks:      ${status.tasksProcessed} processed (${COLORS.green}${status.tasksSucceeded} ok${COLORS.reset}, ${COLORS.red}${status.tasksFailed} failed${COLORS.reset}) - ${successRate}`);
       console.log(`    Last task:  ${status.lastTaskAt ? formatTimeAgo(status.lastTaskAt) : 'never'}`);
+
+      // Show resilience status
+      if (status.circuitBreakerState && status.circuitBreakerState !== 'CLOSED') {
+        const cbColor = status.circuitBreakerState === 'OPEN' ? COLORS.red : COLORS.yellow;
+        console.log(`    ${cbColor}Circuit:    ${status.circuitBreakerState}${COLORS.reset} (API failures: ${status.apiFailures || 0})`);
+      } else if (verbose && status.apiFailures > 0) {
+        console.log(`    API fails:  ${status.apiFailures} consecutive`);
+      }
 
       if (status.currentTask) {
         console.log(`    ${COLORS.yellow}Processing:${COLORS.reset} ${status.currentTask.slice(0, 40)}...`);
@@ -831,33 +957,74 @@ async function fetchWithTimeout(url, options, timeout = API_TIMEOUT) {
   }
 }
 
+/**
+ * Check API health before starting the main loop
+ */
+async function checkApiHealth(config) {
+  // Try to fetch from the view to verify API connectivity
+  const url = `${config.apiUrl}/views/${config.viewId}`;
+  try {
+    const response = await fetchWithTimeout(url, { headers: getHeaders(config) }, 10000);
+    if (!response.ok) {
+      const error = await response.text();
+      return { healthy: false, error: `API returned ${response.status}: ${error.slice(0, 100)}` };
+    }
+    return { healthy: true };
+  } catch (error) {
+    return { healthy: false, error: error.message || 'Connection failed' };
+  }
+}
+
+/**
+ * Fetch next task with circuit breaker and backoff support.
+ * Returns: { task, error, isApiError }
+ * - task: the task object if found, null otherwise
+ * - error: error message if API call failed
+ * - isApiError: true if this was an API/network error (for backoff tracking)
+ */
 async function fetchNextTask(config) {
   const url = `${config.apiUrl}/views/${config.viewId}/tasks?limit=1&resolveReferences=true`;
   log.debug(`Fetching next task from view`);
+
+  // Check circuit breaker
+  if (!apiCircuitBreaker.canAttempt()) {
+    const retryIn = Math.ceil(apiCircuitBreaker.getTimeUntilRetry() / 1000);
+    log.warn(`Circuit breaker OPEN - API calls blocked. Retry in ${retryIn}s`);
+    return { task: null, error: 'Circuit breaker open', isApiError: true };
+  }
 
   try {
     const response = await fetchWithTimeout(url, { headers: getHeaders(config) });
     if (!response.ok) {
       const error = await response.text();
       log.error(`API Error (${response.status}): ${error}`);
-      return null;
+      apiCircuitBreaker.recordFailure();
+      return { task: null, error: `HTTP ${response.status}`, isApiError: true };
     }
+
+    // Success - reset circuit breaker and backoff
+    apiCircuitBreaker.recordSuccess();
+    apiBackoff.recordSuccess();
+    consecutiveApiFailures = 0;
 
     const result = await response.json();
     if (result.data && result.data.length > 0) {
       log.debug(`Found task: "${result.data[0].title}" (${result.data[0]._id})`);
-      return result.data[0];
+      return { task: result.data[0], error: null, isApiError: false };
     }
 
     log.debug(`No tasks in queue`);
-    return null;
+    return { task: null, error: null, isApiError: false };
   } catch (error) {
+    apiCircuitBreaker.recordFailure();
+
     if (error.name === 'AbortError') {
       log.error('API request timed out');
+      return { task: null, error: 'Request timeout', isApiError: true };
     } else {
       log.error('Fetch error:', error.message || error);
+      return { task: null, error: error.message, isApiError: true };
     }
-    return null;
   }
 }
 
@@ -891,7 +1058,10 @@ async function fetchWorkflow(config, workflowId) {
   }
 }
 
-async function updateTask(config, taskId, updates) {
+async function updateTask(config, taskId, updates, retryOptions = {}) {
+  const maxRetries = retryOptions.maxRetries ?? 3;
+  const retryDelay = retryOptions.retryDelay ?? 2000;
+
   if (config.noUpdate) {
     console.log(`[Skip update] Would update task ${taskId}:`, updates);
     return true;
@@ -903,33 +1073,57 @@ async function updateTask(config, taskId, updates) {
     updates.metadata.executionLog = updates.metadata.executionLog.substring(0, 100000) + '\n\n[truncated]';
   }
 
-  try {
-    const bodyStr = JSON.stringify(updates);
-    console.log(`[DEBUG] Update payload size: ${Math.round(bodyStr.length / 1024)}KB`);
-    const response = await fetchWithTimeout(`${config.apiUrl}/tasks/${taskId}`, {
-      method: 'PATCH',
-      headers: getHeaders(config),
-      body: bodyStr,
-    });
+  const bodyStr = JSON.stringify(updates);
 
-    if (!response.ok) {
-      const error = await response.text();
-      console.error(`Failed to update task (${response.status}): ${error}`);
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      if (attempt === 1) {
+        console.log(`[DEBUG] Update payload size: ${Math.round(bodyStr.length / 1024)}KB`);
+      } else {
+        log.warn(`Task update retry ${attempt}/${maxRetries} for ${taskId}`);
+      }
+
+      const response = await fetchWithTimeout(`${config.apiUrl}/tasks/${taskId}`, {
+        method: 'PATCH',
+        headers: getHeaders(config),
+        body: bodyStr,
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        const isRetryable = response.status >= 500 || response.status === 429;
+
+        if (isRetryable && attempt < maxRetries) {
+          log.warn(`Update failed (${response.status}), will retry: ${error.slice(0, 100)}`);
+          await new Promise(r => setTimeout(r, retryDelay * attempt));
+          continue;
+        }
+
+        console.error(`Failed to update task (${response.status}): ${error}`);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      const isLastAttempt = attempt >= maxRetries;
+
+      if (error.name === 'AbortError') {
+        log.error(`Update task request timed out (attempt ${attempt}/${maxRetries})`);
+      } else {
+        log.error(`Update error (attempt ${attempt}/${maxRetries}):`, error.message || error);
+        if (error.cause) console.error('  Cause:', error.cause);
+        if (error.code) console.error('  Code:', error.code);
+      }
+
+      if (!isLastAttempt) {
+        await new Promise(r => setTimeout(r, retryDelay * attempt));
+        continue;
+      }
+
+      if (error.stack) console.error('  Stack:', error.stack.split('\n').slice(0, 3).join('\n'));
       return false;
     }
-    return true;
-  } catch (error) {
-    if (error.name === 'AbortError') {
-      console.error('Update task request timed out');
-    } else {
-      console.error('Update error:', error.message || error);
-      // Log additional error details for debugging
-      if (error.cause) console.error('  Cause:', error.cause);
-      if (error.code) console.error('  Code:', error.code);
-      if (error.stack) console.error('  Stack:', error.stack.split('\n').slice(0, 3).join('\n'));
-    }
-    return false;
   }
+  return false;
 }
 
 async function createTask(config, taskData) {
@@ -2407,6 +2601,16 @@ async function runDaemon(config) {
     noUpdate: config.noUpdate,
   });
 
+  // Perform initial health check before starting the main loop
+  log.info('Checking API connectivity...');
+  const healthCheck = await checkApiHealth(config);
+  if (!healthCheck.healthy) {
+    log.error(`API health check failed: ${healthCheck.error}`);
+    log.error('Please verify API URL and credentials. Exiting.');
+    process.exit(1);
+  }
+  log.info('API connection verified.');
+
   // Handle graceful shutdown
   const handleShutdown = () => {
     if (shuttingDown) {
@@ -2436,8 +2640,33 @@ async function runDaemon(config) {
   process.on('SIGINT', handleShutdown);
   process.on('SIGTERM', handleShutdown);
 
+  /**
+   * Process next task with resilience handling.
+   * Returns: { hadTask: boolean, waitTime: number }
+   * - hadTask: true if a task was found and processed
+   * - waitTime: how long to wait before next iteration (includes backoff)
+   */
   const processNextTask = async () => {
-    const task = await fetchNextTask(config);
+    const { task, error, isApiError } = await fetchNextTask(config);
+
+    // Handle API errors with backoff
+    if (isApiError) {
+      consecutiveApiFailures++;
+      const backoffDelay = apiBackoff.recordFailure();
+
+      // Check if we should exit due to too many failures
+      if (consecutiveApiFailures >= MAX_CONSECUTIVE_FAILURES) {
+        log.error(`Exceeded ${MAX_CONSECUTIVE_FAILURES} consecutive API failures. Exiting for restart.`);
+        stats.lastError = `Exceeded max API failures: ${error}`;
+        if (config.jobName) saveStatus(config.jobName);
+        process.exit(1);
+      }
+
+      log.warn(`API failure ${consecutiveApiFailures}/${MAX_CONSECUTIVE_FAILURES}. ` +
+               `Circuit: ${apiCircuitBreaker.getState()}. Next retry in ${Math.ceil(backoffDelay/1000)}s`);
+
+      return { hadTask: false, waitTime: backoffDelay };
+    }
 
     if (task) {
       try {
@@ -2458,30 +2687,35 @@ async function runDaemon(config) {
         if (config.jobName) saveStatus(config.jobName);
         log.error(`Task processing error: ${err.message}`);
       }
-      return true;
+      return { hadTask: true, waitTime: config.interval };
     }
-    return false;
+    return { hadTask: false, waitTime: config.interval };
   };
 
   if (config.once) {
-    const hadTask = await processNextTask();
+    const { hadTask } = await processNextTask();
     if (!hadTask) {
       log.info('No tasks found in queue.');
     }
   } else {
     while (!shuttingDown) {
-      const hadTask = await processNextTask();
+      const { hadTask, waitTime } = await processNextTask();
 
       if (!hadTask) {
-        log.debug(`No tasks available, waiting ${config.interval}ms...`);
+        // Use backoff delay if it's larger than normal interval (indicates API issues)
+        if (waitTime > config.interval) {
+          log.debug(`Backing off for ${Math.ceil(waitTime/1000)}s due to API issues...`);
+        } else {
+          log.debug(`No tasks available, waiting ${config.interval}ms...`);
+        }
       } else {
         // After processing a task, wait before checking for the next one
         // This gives time for workflow transitions to complete and new tasks to appear
         log.debug(`Task processed, waiting ${config.interval}ms before next check...`);
       }
 
-      // Always wait between iterations to avoid tight loops and give the system time
-      await new Promise((resolve) => setTimeout(resolve, config.interval));
+      // Wait the appropriate time (either normal interval or backoff delay)
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
     }
 
     // Wait for pending conversation uploads before exiting
@@ -2617,19 +2851,23 @@ function startAllJobs(config) {
 }
 
 // ============================================================================
-// Global Error Handlers - Prevent daemon from crashing on unhandled errors
+// Global Error Handlers - Exit on unhandled errors so process managers can restart
 // ============================================================================
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error(`${COLORS.red}[FATAL] Unhandled Promise Rejection:${COLORS.reset}`, reason);
   console.error('Promise:', promise);
-  // Don't exit - let the daemon continue running
+  // Exit with code 1 so process managers (systemd, pm2, etc.) can restart us
+  // Continuing with corrupted state is worse than restarting cleanly
+  console.error('Exiting for clean restart...');
+  setTimeout(() => process.exit(1), 100);
 });
 
 process.on('uncaughtException', (error) => {
   console.error(`${COLORS.red}[FATAL] Uncaught Exception:${COLORS.reset}`, error);
   // For uncaught exceptions, we should exit as the process state may be corrupted
   // But give a moment to log the error
+  console.error('Exiting for clean restart...');
   setTimeout(() => process.exit(1), 100);
 });
 
