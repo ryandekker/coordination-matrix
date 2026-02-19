@@ -265,6 +265,19 @@ jobs:
     description: Complex reasoning tasks
     viewId: <saved-view-id>
     exec: "claude --model opus"
+
+  # Job with MCP server access
+  with-mcp:
+    description: Agent with external tools via MCP
+    viewId: <saved-view-id>
+    exec: "claude --model claude-sonnet-4-20250514"
+    mcpServers:
+      github:
+        type: http
+        url: https://api.github.com/mcp
+        headers:
+          Authorization: "Bearer ${GITHUB_TOKEN}"
+    strictMcpConfig: true  # Only use these MCP servers
 ```
 
 ### Resilience Features

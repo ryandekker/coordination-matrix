@@ -26,6 +26,10 @@
  *   --no-update, -n       Don't update task status after execution
  *   --stop                Stop all running daemon jobs
  *   --status              Show status of running daemon jobs
+ *
+ * MCP Servers (in config YAML):
+ *   mcpServers            defaults/job level - MCP server definitions (merged, job overrides defaults)
+ *   strictMcpConfig       job only - Only use configured MCP servers, ignore others
  *   --list, -l            List available jobs from config
  *   --help, -h            Show help
  *
@@ -682,6 +686,14 @@ function listJobs(configData) {
     if (job.description) {
       console.log(`      desc: ${job.description}`);
     }
+    // Show MCP servers (merged defaults + job)
+    const defaultMcp = configData.defaults?.mcpServers || {};
+    const jobMcp = job.mcpServers || {};
+    const merged = { ...defaultMcp, ...jobMcp };
+    const mcpNames = Object.keys(merged);
+    if (mcpNames.length > 0) {
+      console.log(`      mcp:  ${mcpNames.join(', ')}${job.strictMcpConfig ? ' (strict)' : ''}`);
+    }
   }
   console.log('');
 }
@@ -791,12 +803,21 @@ ${COLORS.bold}CONFIG FILE FORMAT${COLORS.reset} (YAML)
     interval: 5000
     timeout: 600000    # 10 min command timeout
     exec: claude
+    mcpServers:        # MCP servers for all jobs
+      weather:
+        type: http
+        url: https://api.weather.com/mcp
 
   jobs:
     content-review:
       description: Review content tasks
       viewId: abc123def456
       exec: "claude --model claude-sonnet-4-20250514"
+      mcpServers:      # Additional MCP servers for this job
+        github:
+          type: http
+          url: https://api.github.com/mcp
+      strictMcpConfig: true  # Only use configured MCP servers
 
     triage:
       enabled: false  # disable a job
@@ -837,6 +858,8 @@ ${COLORS.bold}EXAMPLES${COLORS.reset}
 
   // Build config from file + CLI overrides
   let viewId, apiKey, apiUrl, interval, execCmd, maxPayloadSize, timeout;
+  let mcpServers = null;
+  let strictMcpConfig = false;
 
   if (configData && values.job) {
     // Load from config file with job name
@@ -876,6 +899,15 @@ ${COLORS.bold}EXAMPLES${COLORS.reset}
     execCmd = values.exec || job.exec || defaults.exec || process.env.MATRIX_EXEC_CMD || 'claude';
     maxPayloadSize = parseInt(values['max-payload-size'] || job.maxPayloadSize || defaults.maxPayloadSize || '200000', 10);
     timeout = parseInt(values.timeout || job.timeout || defaults.timeout || '600000', 10);
+
+    // MCP servers: merge defaults + job-level (job overrides defaults for same server name)
+    const defaultMcp = defaults.mcpServers || {};
+    const jobMcp = job.mcpServers || {};
+    const merged = { ...defaultMcp, ...jobMcp };
+    if (Object.keys(merged).length > 0) {
+      mcpServers = merged;
+    }
+    strictMcpConfig = job.strictMcpConfig || false;
   } else if (values.view) {
     // Use CLI args / env vars only (explicit --view provided)
     viewId = values.view;
@@ -918,6 +950,8 @@ ${COLORS.bold}EXAMPLES${COLORS.reset}
     noUpdate: values['no-update'] || false,
     maxPayloadSize,
     timeout,
+    mcpServers,
+    strictMcpConfig,
   };
 }
 
@@ -1928,6 +1962,49 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
 }
 
 // ============================================================================
+// MCP Config Helper - Build exec command with MCP server configuration
+// ============================================================================
+
+/**
+ * Build the exec command string, optionally injecting --mcp-config for Claude commands.
+ * Writes MCP server config to a temp JSON file and appends the flag.
+ * @param {object} config - Daemon config object
+ * @returns {{ cmd: string, mcpTempFile: string|null }} - Modified command and temp file path to clean up
+ */
+function buildExecCommand(config) {
+  let cmd = config.exec;
+  let mcpTempFile = null;
+
+  // Only inject MCP config for Claude commands that have mcpServers configured
+  if (!config.mcpServers || Object.keys(config.mcpServers).length === 0) {
+    return { cmd, mcpTempFile };
+  }
+
+  const isClaudeCommand = /^(.*\/)?claude(\s|$)/.test(cmd);
+  if (!isClaudeCommand) {
+    log.warn('mcpServers configured but exec command is not Claude CLI - MCP config ignored');
+    return { cmd, mcpTempFile };
+  }
+
+  // Write MCP config to a temp JSON file
+  const mcpConfig = { mcpServers: config.mcpServers };
+  mcpTempFile = join(tmpdir(), `daemon-mcp-${Date.now()}.json`);
+  writeFileSync(mcpTempFile, JSON.stringify(mcpConfig, null, 2));
+
+  // Append --mcp-config flag to the command
+  cmd += ` --mcp-config ${mcpTempFile}`;
+
+  // Optionally add --strict-mcp-config
+  if (config.strictMcpConfig) {
+    cmd += ' --strict-mcp-config';
+  }
+
+  log.debug(`MCP config written to ${mcpTempFile}`, Object.keys(config.mcpServers));
+
+  return { cmd, mcpTempFile };
+}
+
+// ============================================================================
 // Async Conversation Upload Queue
 // ============================================================================
 
@@ -2305,12 +2382,20 @@ async function processTask(config, task) {
   // Assemble the prompt
   const prompt = assemblePrompt(task, agent, workflowStep);
 
+  // Build exec command with MCP config if configured
+  const { cmd: execCmd, mcpTempFile } = buildExecCommand(config);
+
   if (config.dryRun) {
     console.log('[Dry Run] Assembled prompt:');
     console.log('-'.repeat(40));
     console.log(prompt);
     console.log('-'.repeat(40));
-    console.log(`[Dry Run] Command: ${config.exec}`);
+    console.log(`[Dry Run] Command: ${execCmd}`);
+    if (mcpTempFile) {
+      console.log(`[Dry Run] MCP config: ${mcpTempFile}`);
+      console.log(`[Dry Run] MCP servers: ${Object.keys(config.mcpServers).join(', ')}`);
+      try { unlinkSync(mcpTempFile); } catch {}
+    }
     return;
   }
 
@@ -2319,21 +2404,28 @@ async function processTask(config, task) {
   const claimed = await updateTask(config, task._id, { status: 'in_progress' });
   if (!claimed) {
     console.error('Failed to claim task, skipping...');
+    if (mcpTempFile) { try { unlinkSync(mcpTempFile); } catch {} }
     return;
   }
 
   // Execute the command - use conversation capture for claude commands
   const commandTimeout = config.timeout || 600000; // Default 10 minutes
-  console.log(`\nExecuting: ${config.exec} (timeout: ${Math.round(commandTimeout / 1000)}s)\n`);
+  console.log(`\nExecuting: ${execCmd} (timeout: ${Math.round(commandTimeout / 1000)}s)\n`);
   console.log('-'.repeat(40));
 
   const startTime = new Date();
-  const isClaudeCommand = /^(.*\/)?claude(\s|$)/.test(config.exec);
+  const isClaudeCommand = /^(.*\/)?claude(\s|$)/.test(execCmd);
 
   // Use conversation capture for claude commands to get full tool call traces
-  const result = isClaudeCommand
-    ? await executeCommandWithConversation(config.exec, prompt, commandTimeout)
-    : await executeCommand(config.exec, prompt, commandTimeout);
+  let result;
+  try {
+    result = isClaudeCommand
+      ? await executeCommandWithConversation(execCmd, prompt, commandTimeout)
+      : await executeCommand(execCmd, prompt, commandTimeout);
+  } finally {
+    // Clean up MCP temp file
+    if (mcpTempFile) { try { unlinkSync(mcpTempFile); } catch {} }
+  }
 
   const duration = ((Date.now() - startTime.getTime()) / 1000).toFixed(1);
 
@@ -2599,7 +2691,14 @@ async function runDaemon(config) {
     exec: config.exec,
     dryRun: config.dryRun,
     noUpdate: config.noUpdate,
+    mcpServers: config.mcpServers ? Object.keys(config.mcpServers) : null,
+    strictMcpConfig: config.strictMcpConfig || false,
   });
+
+  if (config.mcpServers) {
+    const serverNames = Object.keys(config.mcpServers);
+    log.info(`MCP servers: ${serverNames.join(', ')}${config.strictMcpConfig ? ' (strict)' : ''}`);
+  }
 
   // Perform initial health check before starting the main loop
   log.info('Checking API connectivity...');

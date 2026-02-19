@@ -74,6 +74,19 @@ jobs:
     enabled: false
     description: This job won't run
     viewId: xyz789
+
+  # Job with MCP servers
+  mcp-agent:
+    description: Agent with external tool access via MCP
+    viewId: def456ghi789
+    exec: "claude --model claude-sonnet-4-20250514"
+    mcpServers:
+      github:
+        type: http
+        url: https://api.github.com/mcp
+        headers:
+          Authorization: "Bearer ${GITHUB_TOKEN}"
+    strictMcpConfig: true
 ```
 
 ### CLI Options
@@ -315,6 +328,80 @@ node scripts/task-daemon.mjs --view <viewId> \
 ```bash
 # Use any CLI that accepts prompt via stdin
 node scripts/task-daemon.mjs --view <viewId> --exec "my-custom-llm --json" --once
+```
+
+## MCP Server Configuration
+
+Jobs can be configured with [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) servers, giving Claude access to external tools and data sources.
+
+### How It Works
+
+When a job has `mcpServers` configured:
+
+1. The daemon writes the MCP config to a temporary JSON file
+2. Appends `--mcp-config <tempfile>` to the Claude CLI command
+3. If `strictMcpConfig: true`, also adds `--strict-mcp-config` (ignores project/user MCP configs)
+4. Cleans up the temp file after execution
+
+### Configuration
+
+MCP servers can be defined at the `defaults` level (all jobs) or per-job (merged, job overrides defaults for same server name):
+
+```yaml
+defaults:
+  mcpServers:
+    # Shared MCP server available to all jobs
+    shared-db:
+      type: http
+      url: https://db-mcp.internal.example.com/mcp
+
+jobs:
+  with-mcp:
+    viewId: abc123
+    exec: "claude --model claude-sonnet-4-20250514"
+    mcpServers:
+      # HTTP transport - remote MCP server
+      github:
+        type: http
+        url: https://api.github.com/mcp
+        headers:
+          Authorization: "Bearer ${GITHUB_TOKEN}"
+
+      # stdio transport - local MCP server process
+      filesystem:
+        type: stdio
+        command: npx
+        args: ["-y", "@anthropic/mcp-filesystem"]
+        env:
+          ALLOWED_DIRS: "/tmp/workspace"
+
+    # Only use these MCP servers (ignore ~/.claude.json, .mcp.json, etc.)
+    strictMcpConfig: true
+```
+
+### Supported Transports
+
+| Transport | Fields | Use Case |
+|-----------|--------|----------|
+| `http` | `url`, `headers` | Remote MCP servers |
+| `sse` | `url`, `headers` | Server-Sent Events (legacy) |
+| `stdio` | `command`, `args`, `env` | Local process MCP servers |
+
+### Environment Variables
+
+Claude CLI expands environment variables in MCP config values:
+
+- `${VAR}` — expands to the environment variable value
+- `${VAR:-default}` — uses a default if the variable is not set
+
+### Verifying MCP Config
+
+```bash
+# Dry run shows the MCP config and command that would be used
+node scripts/task-daemon.mjs --config scripts/daemon-jobs.yaml --job with-mcp --once --dry-run
+
+# List jobs to see which have MCP servers
+node scripts/task-daemon.mjs --config scripts/daemon-jobs.yaml --list
 ```
 
 ## Comparison with Event-Based Daemon
