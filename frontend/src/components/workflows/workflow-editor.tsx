@@ -78,6 +78,7 @@ import {
   Loader2,
   Pause,
   FileJson,
+  Beaker,
 } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { TokenBrowser } from './token-browser'
@@ -89,6 +90,7 @@ import type { WorkflowStep, WorkflowStepType, Workflow, WorkflowEditorProps, Loo
 import { STEP_TYPES, getStepTypeInfo } from './editor/constants'
 import { detectLoopScopes } from './editor/utils'
 import { StepConfigPanel } from './step-config-panel'
+import { SimulationPanel } from './simulation-panel'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
@@ -533,6 +535,10 @@ export function WorkflowEditor({
                   <TabsTrigger value="settings" className="gap-1.5 h-7">
                     <Info className="h-4 w-4" />
                     Settings
+                  </TabsTrigger>
+                  <TabsTrigger value="test" className="gap-1.5 h-7">
+                    <Beaker className="h-4 w-4" />
+                    Test
                   </TabsTrigger>
                 </TabsList>
               </div>
@@ -1249,6 +1255,15 @@ export function WorkflowEditor({
 
               </div>
               </div>
+            </TabsContent>
+
+            <TabsContent value="test" className="flex-1 overflow-hidden mt-0 min-h-0">
+              <SimulationPanel
+                steps={steps}
+                workflowId={workflow?._id}
+                workflowName={watch('name')}
+                samplePayload={samplePayload}
+              />
             </TabsContent>
 
           </Tabs>

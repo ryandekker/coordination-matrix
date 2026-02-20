@@ -1296,6 +1296,22 @@ export interface Workflow {
   createdById?: ObjectId | null;
 }
 
+// Step-level execution log entry for workflow run tracing
+export interface WorkflowRunStepLog {
+  stepId: string;
+  stepName: string;
+  stepType: string;
+  taskId?: string;
+  status: 'started' | 'completed' | 'failed' | 'skipped';
+  startedAt: Date;
+  completedAt?: Date;
+  durationMs?: number;
+  inputSummary?: Record<string, unknown>;
+  outputSummary?: Record<string, unknown>;
+  error?: string;
+  errorCode?: string;
+}
+
 export interface WorkflowRun {
   _id: ObjectId;
   workflowId: ObjectId;
@@ -1343,6 +1359,9 @@ export interface WorkflowRun {
   // Error handling
   error?: string;
   failedStepId?: string;
+
+  // Execution trace - step-by-step log of what happened during the run
+  stepLog?: WorkflowRunStepLog[];
 
   // Pause handling (for escalations)
   pausedStepId?: string;

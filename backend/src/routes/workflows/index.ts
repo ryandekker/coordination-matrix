@@ -6,6 +6,8 @@ import { Workflow, WorkflowStep, VALID_STEP_TYPES } from './types.js';
 import { handleExportMultiJson, handleImportMultiJson } from './multi-workflow.js';
 import { aiPromptRoutes } from './ai-prompts.js';
 import { executeCode } from '../../services/workflow/code-executor.js';
+import { validateWorkflow } from '../../services/workflow/workflow-validator.js';
+import { simulateWorkflow } from '../../services/workflow/workflow-simulator.js';
 import { loadUserGroups, hasResourceAccess } from '../../middleware/group-access.js';
 import { isAdmin } from '../../middleware/authorize.js';
 
@@ -172,6 +174,56 @@ workflowsRouter.get('/stats', async (_req: Request, res: Response, next: NextFun
 workflowsRouter.get('/export-multi', handleExportMultiJson);
 workflowsRouter.post('/import-multi', handleImportMultiJson);
 
+// POST /api/workflows/validate - Validate a workflow definition (does not save)
+// Accepts a workflow definition and returns structured diagnostics
+workflowsRouter.post('/validate', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { steps, checkReferences } = req.body;
+
+    if (!steps || !Array.isArray(steps)) {
+      throw createError('steps array is required', 400);
+    }
+
+    const normalizedSteps = ensureStepIds(steps);
+    const result = await validateWorkflow(normalizedSteps, {
+      checkReferences: checkReferences !== false,
+    });
+
+    res.json({ data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/workflows/simulate - Simulate an unsaved workflow definition with sample data
+// Runs an end-to-end dry-run without creating tasks or workflow runs
+workflowsRouter.post('/simulate', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { steps, name, inputPayload, mockOutputs, maxForeachItems, executeWebhooks, timeoutMs } = req.body;
+
+    if (!steps || !Array.isArray(steps)) {
+      throw createError('steps array is required', 400);
+    }
+
+    if (!inputPayload || typeof inputPayload !== 'object') {
+      throw createError('inputPayload object is required', 400);
+    }
+
+    const normalizedSteps = ensureStepIds(steps);
+    const result = await simulateWorkflow(normalizedSteps, {
+      inputPayload,
+      mockOutputs,
+      maxForeachItems,
+      executeWebhooks,
+      timeoutMs,
+    }, name || 'Unsaved Workflow');
+
+    res.json({ data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/workflows/:id - Get a specific workflow
 workflowsRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -314,10 +366,13 @@ workflowsRouter.post('/', async (req: Request, res: Response, next: NextFunction
       createdById: req.body.createdById ? new ObjectId(req.body.createdById) : null,
     };
 
+    // Run validation on the workflow steps (non-blocking - always saves)
+    const validation = await validateWorkflow(newWorkflow.steps, { checkReferences: true });
+
     const result = await db.collection<Workflow>('workflows').insertOne(newWorkflow as Workflow);
     const inserted = await db.collection<Workflow>('workflows').findOne({ _id: result.insertedId });
 
-    res.status(201).json({ data: inserted });
+    res.status(201).json({ data: inserted, validation });
   } catch (error) {
     next(error);
   }
@@ -382,7 +437,12 @@ workflowsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
       throw createError('Workflow not found', 404);
     }
 
-    res.json({ data: result });
+    // Run validation on updated workflow steps (non-blocking)
+    const validation = result.steps
+      ? await validateWorkflow(result.steps, { checkReferences: true })
+      : undefined;
+
+    res.json({ data: result, ...(validation && { validation }) });
   } catch (error) {
     next(error);
   }
@@ -1067,6 +1127,57 @@ workflowsRouter.post('/:workflowId/steps/:stepId/test-execute', async (req: Requ
           },
         });
     }
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/workflows/:workflowId/simulate - Simulate a saved workflow with sample data
+// Runs an end-to-end dry-run without creating tasks or workflow runs.
+// Works on inactive workflows (skips isActive check).
+workflowsRouter.post('/:workflowId/simulate', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { workflowId } = req.params;
+    const { inputPayload, mockOutputs, maxForeachItems, executeWebhooks, timeoutMs } = req.body;
+
+    if (!ObjectId.isValid(workflowId)) {
+      throw createError('Invalid workflow ID', 400);
+    }
+
+    const workflow = await db.collection<Workflow>('workflows').findOne({
+      _id: new ObjectId(workflowId),
+    });
+
+    if (!workflow) {
+      throw createError('Workflow not found', 404);
+    }
+
+    // Use provided inputPayload, or fall back to workflow's samplePayload
+    let effectiveInput = inputPayload;
+    if (!effectiveInput && workflow.samplePayload) {
+      try {
+        effectiveInput = typeof workflow.samplePayload === 'string'
+          ? JSON.parse(workflow.samplePayload)
+          : workflow.samplePayload;
+      } catch {
+        throw createError('Workflow has a samplePayload but it is not valid JSON. Provide inputPayload instead.', 400);
+      }
+    }
+
+    if (!effectiveInput || typeof effectiveInput !== 'object') {
+      throw createError('inputPayload is required (or workflow must have a samplePayload)', 400);
+    }
+
+    const result = await simulateWorkflow(workflow.steps || [], {
+      inputPayload: effectiveInput,
+      mockOutputs,
+      maxForeachItems,
+      executeWebhooks,
+      timeoutMs,
+    }, workflow.name);
+
+    res.json({ data: result });
   } catch (error) {
     next(error);
   }

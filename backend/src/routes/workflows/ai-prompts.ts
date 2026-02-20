@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { getDb } from '../../db/connection.js';
 import { Workflow } from './types.js';
+import { getValidationRulesReference } from '../../services/workflow/workflow-validator.js';
 
 export const aiPromptRoutes = Router();
 
@@ -55,6 +56,32 @@ aiPromptRoutes.get('/ai-prompt-context', async (_req: Request, res: Response, ne
       templateVariables: getTemplateVariableReference(),
       mermaidSyntax: getMermaidSyntaxReference(),
       rules: getWorkflowRules(),
+      validationRules: getValidationRulesReference(),
+      testingApis: {
+        validate: {
+          method: 'POST',
+          path: '/api/workflows/validate',
+          body: '{ steps: WorkflowStep[], checkReferences?: boolean }',
+          description: 'Validate a workflow definition and get structured diagnostics',
+        },
+        simulateUnsaved: {
+          method: 'POST',
+          path: '/api/workflows/simulate',
+          body: '{ steps, name, inputPayload, mockOutputs?, maxForeachItems? }',
+          description: 'Simulate an unsaved workflow with sample data',
+        },
+        simulateSaved: {
+          method: 'POST',
+          path: '/api/workflows/:id/simulate',
+          body: '{ inputPayload?, mockOutputs?, maxForeachItems? }',
+          description: 'Simulate a saved workflow (uses samplePayload if inputPayload not provided)',
+        },
+        executionTrace: {
+          method: 'GET',
+          path: '/api/workflow-runs/:id/trace',
+          description: 'Get step-by-step execution trace for a real workflow run',
+        },
+      },
     };
 
     res.json({ data: promptContext });
@@ -910,7 +937,77 @@ flowchart TD
 3. Include ALL classDef declarations for step types you use
 4. Use \`%% @step(id): {json}\` comments for step configuration
 5. Decision branch labels must be quoted: \`-->|"Label"|\`
-6. Node shapes carry semantic meaning - use the correct shape for each type`;
+6. Node shapes carry semantic meaning - use the correct shape for each type
+
+---
+
+## Workflow Testing & Validation
+
+After creating or updating a workflow, you should validate and test it before activating.
+
+### Recommended Workflow Creation Loop
+
+1. **Create** the workflow with \`isActive: false\`
+2. **Validate** with \`POST /api/workflows/validate\` (accepts raw steps array)
+3. **Fix** any errors reported in the diagnostics
+4. **Simulate** with \`POST /api/workflows/:id/simulate\` using sample data
+5. **Fix** any simulation failures (check trace for input/output at each step)
+6. **Activate** with \`PATCH /api/workflows/:id\` setting \`isActive: true\`
+
+### Validation API
+
+\`\`\`
+POST /api/workflows/validate
+Body: { "steps": [...], "checkReferences": true }
+Response: { "data": { "valid": boolean, "diagnostics": [...], "summary": { "errors": N, "warnings": N }, "stepGraph": { "reachableSteps": [...], "unreachableSteps": [...] } } }
+\`\`\`
+
+Each diagnostic has: \`{ level, code, stepId, stepName, field, message, suggestion }\`
+
+**Key validation rules:**
+- All connections must reference existing step IDs
+- ForEach steps need \`itemsPath\`
+- Join steps need \`awaitStepId\` pointing to a ForEach step
+- Flow steps need \`flowId\` referencing an existing workflow
+- Code steps need \`codeConfig.code\`
+- Decision steps need conditions + \`defaultConnection\`
+- Template \`{{steps.STEP_ID.*}}\` must reference valid step IDs
+- No cycles allowed in step connections
+- All steps must be reachable from the start
+
+### Simulation API
+
+\`\`\`
+POST /api/workflows/:id/simulate
+Body: {
+  "inputPayload": { ... },
+  "mockOutputs": {
+    "agent_step_id": { "result": "mock agent output" },
+    "manual_step_id": { "approved": true }
+  },
+  "maxForeachItems": 3
+}
+Response: { "data": { "success": boolean, "trace": [...], "finalOutput": {...}, "validation": {...} } }
+\`\`\`
+
+For unsaved workflows: \`POST /api/workflows/simulate\` with steps + name in body.
+
+Each trace entry shows: \`{ stepId, stepName, stepType, status, input, output, error?, suggestion? }\`
+
+**Simulation behavior by step type:**
+- **code, decision, foreach, join**: Fully executed with real logic
+- **agent, manual**: Use provided \`mockOutputs\` or generate placeholder
+- **webhook, external**: Show resolved request (dry-run), use mock if provided
+- **flow, findDocument**: Use mock output if provided
+
+### Execution Trace API (for debugging real runs)
+
+\`\`\`
+GET /api/workflow-runs/:id/trace
+Response: { "data": { "trace": [...], "status": "...", "error": "...", "failedStepId": "..." } }
+\`\`\`
+
+Each trace entry includes input/output summaries, duration, and error details.`;
 
   if (includeContext) {
     prompt += `\n\n---\n\n## Available Context\n`;

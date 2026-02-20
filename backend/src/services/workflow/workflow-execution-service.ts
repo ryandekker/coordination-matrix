@@ -13,6 +13,7 @@ import {
   WorkflowRunStatus,
   WorkflowRunEvent,
   WorkflowRunEventType,
+  WorkflowRunStepLog,
   StartWorkflowInput,
   TaskEvent,
   Document,
@@ -271,6 +272,53 @@ class WorkflowExecutionService {
   }
 
   // ============================================================================
+  // Step Logging - Execution Trace
+  // ============================================================================
+
+  /**
+   * Append a step log entry to the workflow run's stepLog array.
+   * Truncates input/output summaries to prevent document bloat.
+   */
+  private async appendStepLog(
+    runId: ObjectId,
+    entry: WorkflowRunStepLog
+  ): Promise<void> {
+    try {
+      await this.workflowRuns.updateOne(
+        { _id: runId },
+        { $push: { stepLog: entry } as any }
+      );
+    } catch (error) {
+      console.error(`[WorkflowExecutionService] Failed to append step log for run ${runId}:`, error);
+    }
+  }
+
+  /** Truncate an object to a summary suitable for logging (max ~2KB) */
+  private truncateForLog(obj: unknown): Record<string, unknown> | undefined {
+    if (!obj || typeof obj !== 'object') return undefined;
+    try {
+      const str = JSON.stringify(obj);
+      if (str.length <= 2048) return obj as Record<string, unknown>;
+      // Truncate by keeping only top-level keys with shortened values
+      const summary: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+        if (typeof value === 'string' && value.length > 200) {
+          summary[key] = value.substring(0, 200) + '...';
+        } else if (Array.isArray(value)) {
+          summary[key] = `[Array(${value.length})]`;
+        } else if (typeof value === 'object' && value !== null) {
+          summary[key] = `{Object(${Object.keys(value).length} keys)}`;
+        } else {
+          summary[key] = value;
+        }
+      }
+      return summary;
+    } catch {
+      return { _truncated: true };
+    }
+  }
+
+  // ============================================================================
   // Start Workflow
   // ============================================================================
 
@@ -471,6 +519,17 @@ class WorkflowExecutionService {
     );
 
     const task = await this.createTaskForStep(run, workflow, step, parentTask, inputPayload);
+
+    // Log step started to execution trace
+    await this.appendStepLog(run._id, {
+      stepId: step.id,
+      stepName: step.name,
+      stepType: step.stepType,
+      taskId: task._id.toString(),
+      status: 'started',
+      startedAt: new Date(),
+      inputSummary: this.truncateForLog(inputPayload),
+    });
 
     await this.publish({
       id: this.generateEventId(),
@@ -2911,6 +2970,46 @@ class WorkflowExecutionService {
       console.log(`[WorkflowExecutionService] Skipping - workflow not found`);
       return;
     }
+
+    // Log step completion/failure to execution trace
+    const stepLogEntry: Partial<WorkflowRunStepLog> = {
+      stepId: task.workflowStepId!,
+      stepName: task.title,
+      stepType: task.taskType || 'unknown',
+      taskId: task._id.toString(),
+      completedAt: new Date(),
+    };
+    if (task.status === 'completed') {
+      stepLogEntry.status = 'completed';
+      stepLogEntry.outputSummary = this.truncateForLog(
+        task.stepOutput?.data ?? task.metadata?.output ?? task.metadata?.response
+      );
+    } else if (task.status === 'failed') {
+      stepLogEntry.status = 'failed';
+      const errorMsg = typeof task.metadata?.error === 'string'
+        ? task.metadata.error
+        : task.metadata?.nextActionReason as string || `Step "${task.title}" failed`;
+      stepLogEntry.error = errorMsg;
+    } else if (isEscalatedHold) {
+      stepLogEntry.status = 'failed';
+      stepLogEntry.error = typeof task.metadata?.nextActionReason === 'string'
+        ? task.metadata.nextActionReason
+        : 'Task escalated - requires human intervention';
+      stepLogEntry.errorCode = 'ESCALATED';
+    }
+    // Update the matching started entry or push a new one
+    await this.workflowRuns.updateOne(
+      { _id: run._id, 'stepLog.stepId': task.workflowStepId, 'stepLog.status': 'started' },
+      {
+        $set: {
+          'stepLog.$.status': stepLogEntry.status,
+          'stepLog.$.completedAt': stepLogEntry.completedAt,
+          'stepLog.$.outputSummary': stepLogEntry.outputSummary,
+          'stepLog.$.error': stepLogEntry.error,
+          'stepLog.$.errorCode': stepLogEntry.errorCode,
+        },
+      }
+    );
 
     await this.publish({
       id: this.generateEventId(),
