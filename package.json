@@ -48,6 +48,11 @@
     "pm2:save": "pm2 save",
     "pm2:startup": "pm2 startup",
     "migrate:defaults": "node scripts/migrate-defaults.mjs",
+    "check": "node scripts/post-agent-check.mjs",
+    "check:all": "node scripts/post-agent-check.mjs --scope all",
+    "check:quick": "node scripts/post-agent-check.mjs --steps git,typecheck,lint,audit",
+    "check:fix": "node scripts/post-agent-check.mjs --fix",
+    "check:full": "node scripts/post-agent-check.mjs --scope all --steps git,typecheck,lint,test,build,audit",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f"

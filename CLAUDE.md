@@ -91,6 +91,38 @@ npm run cli workflows --brief
 npm run cli tasks --status pending --brief
 ```
 
+## Post-Agent Validation
+
+After completing any code changes, **always run the validation suite before committing**:
+
+```bash
+# Default: check changed files (typecheck, lint, test, audit)
+npm run check
+
+# Quick: skip tests (typecheck, lint, audit only)
+npm run check:quick
+
+# Full: all files, all steps including build
+npm run check:full
+
+# Auto-fix lint issues
+npm run check:fix
+```
+
+Fix any reported errors before committing. The `check` script runs:
+1. **Git Status** - Identifies changed files
+2. **TypeScript** - `tsc --noEmit` type checking
+3. **Linting** - ESLint for backend and frontend
+4. **Tests** - Vitest unit tests
+5. **Build** - Full build verification (only with `check:full`)
+6. **Audit** - Checks for debug console.logs, TODOs, merge conflicts, sensitive files
+
+**Rules enforced by hooks:**
+- Do NOT use `--no-verify` with git commit
+- Do NOT disable ESLint rules or use `@ts-ignore` to work around errors
+- Do NOT set `NEXT_DISABLE_ESLINT=true` or similar environment bypasses
+- Fix the root cause of lint/type errors instead of suppressing them
+
 ## API Documentation
 
 Full API documentation is available at:
