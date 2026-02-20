@@ -55,7 +55,14 @@
     "check:full": "node scripts/post-agent-check.mjs --scope all --steps git,typecheck,lint,test,build,audit",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f"
+    "docker:logs": "docker compose logs -f",
+    "deploy": "bash scripts/deploy/deploy.sh",
+    "deploy:test": "bash scripts/deploy/01-test.sh",
+    "deploy:build": "bash scripts/deploy/02-build.sh",
+    "deploy:backend": "bash scripts/deploy/03-deploy-backend.sh",
+    "deploy:frontend": "bash scripts/deploy/04-deploy-frontend.sh",
+    "deploy:migrate": "bash scripts/deploy/05-migrate.sh",
+    "deploy:verify": "bash scripts/deploy/06-verify.sh"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
