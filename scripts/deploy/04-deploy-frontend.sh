@@ -40,7 +40,7 @@ echo "$build_output"
 echo ""
 echo "--- Deploying to Cloudflare Pages ---"
 deploy_output=$(npx wrangler pages deploy .vercel/output/static \
-  --project-name coordination-matrix 2>&1) || {
+  --project-name coordination-matrix --branch prod --commit-dirty=true 2>&1) || {
   duration=$(elapsed_seconds)
   echo "$deploy_output"
   tail_text=$(json_escape "$(echo "$deploy_output" | tail -10)")

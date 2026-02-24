@@ -368,6 +368,18 @@ The ecosystem config reads from `daemon-jobs.yaml` and creates a PM2 process for
 
 For production/remote deployments, always use `task-daemon.mjs`.
 
+## Production Architecture (Quick Reference)
+
+| Component | Platform | URL |
+|-----------|----------|-----|
+| Frontend | Cloudflare Pages | `cm.hcizero.com` (root), `coordination-matrix.pages.dev` |
+| Backend API | Render | `cm.hcizero.com/api/*` (proxied through Cloudflare) |
+| Database | MongoDB Atlas | Internal connection string |
+
+**URL routing:** `cm.hcizero.com` is a Cloudflare Pages site. All root paths serve the frontend. Only `/api/*` is proxied to the Render backend. The backend's `/health` endpoint is **not** reachable at `cm.hcizero.com/health` — use an authenticated `/api/tasks?limit=1` request as a liveness check instead.
+
+**Cloudflare Pages production branch:** `prod`. Frontend deploys via `wrangler pages deploy --branch prod`. Without `--branch prod`, deploys land as previews only.
+
 ## Production API Debugging
 
 For debugging production (cm.hcizero.com), use the API key from `daemon-jobs.yaml` with `X-API-Key` header.

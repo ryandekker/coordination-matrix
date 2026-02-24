@@ -5,47 +5,85 @@ Production deployment and migration instructions for Coordination Matrix.
 ## Production Architecture
 
 ```
-                    ┌─────────────────────────────────────┐
-                    │         Cloudflare Pages            │
-                    │  https://coordination-matrix.pages  │
-                    │         (Static Frontend)           │
-                    └────────────────┬────────────────────┘
-                                     │ API calls
-                    ┌────────────────▼────────────────────┐
-                    │            Render                   │
-                    │    (Backend - Express.js API)       │
-                    │   Auto-deploys from prod branch     │
-                    └────────────────┬────────────────────┘
-                                     │
-                    ┌────────────────▼────────────────────┐
-                    │         MongoDB Atlas               │
-                    │       (Managed Database)            │
-                    └─────────────────────────────────────┘
+     Browser
+       │
+       ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    cm.hcizero.com                             │
+│                  (Cloudflare DNS)                             │
+│                                                              │
+│   /*  ──────────►  Cloudflare Pages (frontend)               │
+│                    coordination-matrix.pages.dev              │
+│                    Next.js app (static + edge functions)      │
+│                                                              │
+│   /api/*  ─────►  Render (backend, via Cloudflare proxy)     │
+│                    Express.js API, port 3001                  │
+│                    Backend /health endpoint lives here        │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+                         │
+                         ▼
+               ┌───────────────────┐
+               │   MongoDB Atlas   │
+               │ (Managed cluster) │
+               └───────────────────┘
 ```
+
+### URL Routing (Important)
+
+All traffic flows through `cm.hcizero.com` via Cloudflare:
+
+| URL Pattern | Serves | Platform |
+|-------------|--------|----------|
+| `cm.hcizero.com/*` | Frontend (Next.js pages) | Cloudflare Pages |
+| `cm.hcizero.com/api/*` | Backend API (proxied) | Render |
+| `cm.hcizero.com/health` | **Frontend 404** (not backend!) | Cloudflare Pages |
+| `coordination-matrix.pages.dev` | Frontend (alias) | Cloudflare Pages |
+
+**Key detail:** The backend's `/health` endpoint is **not** reachable through `cm.hcizero.com/health` because Cloudflare Pages handles all non-`/api` routes as frontend paths. To directly health-check the backend, use the Render service URL or check via `/api/tasks` with authentication.
 
 ## Production Services
 
-| Service | Platform | Deployment |
-|---------|----------|------------|
-| Frontend | Cloudflare Pages | Auto-deploys from `prod` branch |
-| Backend | Render | Auto-deploys from `prod` branch |
-| Database | MongoDB Atlas | Managed cluster |
+| Service | Platform | URL | Deploys From |
+|---------|----------|-----|-------------|
+| Frontend | Cloudflare Pages | `cm.hcizero.com`, `coordination-matrix.pages.dev` | `wrangler pages deploy --branch prod` |
+| Backend | Render | `cm.hcizero.com/api/*` (proxied) | Auto-deploys from `prod` branch push |
+| Database | MongoDB Atlas | Internal connection string | Managed |
+
+### Cloudflare Pages Production Branch
+
+The Cloudflare Pages project has **`prod`** set as the production branch. When deploying with `wrangler pages deploy`, you **must** pass `--branch prod` for the deploy to go to production. Without this flag, deploys land as previews and will NOT be served on `cm.hcizero.com` or `coordination-matrix.pages.dev`.
 
 ## Deployment Workflow
 
-### Deploying to Production
-
-1. **Merge to prod branch** - Both Cloudflare Pages and Render watch the `prod` branch
-2. **Run migrations** - After backend deploys, run any pending migrations (see below)
-3. **Verify** - Check the health endpoint and frontend
+### Automated Deploy (Recommended)
 
 ```bash
-# Merge main to prod
-git checkout prod
-git merge main
-git push origin prod
+# Full 6-step pipeline: test → build → deploy backend → deploy frontend → migrate → verify
+npm run deploy
 
-# Wait for deployments to complete, then run migrations
+# Resume from a specific step (e.g., after fixing a failure)
+bash scripts/deploy/deploy.sh --from 3
+
+# Run a single step
+bash scripts/deploy/deploy.sh --step 4
+```
+
+### Manual Deploy
+
+```bash
+# 1. Merge main to prod and push (triggers Render auto-deploy)
+git checkout prod && git merge main && git push origin prod
+git checkout main
+
+# 2. Build and deploy frontend to Cloudflare Pages
+cd frontend
+npx @cloudflare/next-on-pages
+npx wrangler pages deploy .vercel/output/static \
+  --project-name coordination-matrix --branch prod
+cd ..
+
+# 3. Run migrations
 MONGODB_URI="mongodb+srv://..." npm --prefix backend run db:migrate
 ```
 
@@ -58,15 +96,16 @@ MONGODB_URI="mongodb+srv://..." npm --prefix backend run db:migrate
 | `MONGODB_URI` | MongoDB Atlas connection string |
 | `NODE_ENV` | `production` |
 | `JWT_SECRET` | Secure random string (use `openssl rand -hex 32`) |
-| `CORS_ORIGIN` | `https://coordination-matrix.pages.dev` |
+| `CORS_ORIGIN` | `https://cm.hcizero.com` |
 | `PORT` | `3001` (Render default) |
 
 **Cloudflare Pages (Frontend):**
 
+The frontend uses relative `/api` paths in production (no `NEXT_PUBLIC_API_URL` needed). The Cloudflare proxy rule routes `/api/*` to Render.
+
 | Variable | Description |
 |----------|-------------|
-| `NEXT_PUBLIC_API_URL` | Backend API URL (Render URL + `/api`) |
-| `NEXT_PUBLIC_APP_NAME` | Application display name |
+| `NEXT_PUBLIC_APP_NAME` | Application display name (optional) |
 
 ---
 
@@ -293,10 +332,14 @@ server {
 ### Health Checks
 
 ```bash
-# Backend health
-curl https://api.yourdomain.com/health
+# Backend health (cloud production — must go through /api since Cloudflare handles root)
+# Use authenticated API request as a liveness check:
+curl -s -H "X-API-Key: $API_KEY" https://cm.hcizero.com/api/tasks?limit=1
 
-# MongoDB health (via Docker)
+# Backend health (if you have the direct Render URL):
+curl https://<render-service>.onrender.com/health
+
+# MongoDB health (self-hosted Docker only)
 docker compose exec mongodb mongosh --eval "db.adminCommand('ping')"
 ```
 

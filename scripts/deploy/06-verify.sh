@@ -38,21 +38,30 @@ run_check() {
 }
 
 # Check 1: Backend health endpoint
+# NOTE: In production, cm.hcizero.com serves the frontend (Cloudflare Pages)
+# at the root and proxies /api/* to the backend (Render). The backend's /health
+# endpoint is only reachable via the Render service URL directly, not through
+# the Cloudflare proxy. Use /api/tasks with auth as the backend liveness check.
 echo "--- Checking backend health ---"
-health_response=$(curl -s -o /dev/stdout -w "\n%{http_code}" \
-  --max-time 10 "$PROD_BACKEND_URL/health" 2>/dev/null) || true
-http_code=$(echo "$health_response" | tail -1)
-health_body=$(echo "$health_response" | sed '$d')
+if [[ -n "${RENDER_HEALTH_URL:-}" ]]; then
+  # Direct Render health check (bypasses Cloudflare)
+  health_response=$(curl -sL -o /dev/stdout -w "\n%{http_code}" \
+    --max-time 10 "$RENDER_HEALTH_URL/health" 2>/dev/null) || true
+  http_code=$(echo "$health_response" | tail -1)
+  health_body=$(echo "$health_response" | sed '$d')
 
-if [[ "$http_code" == "200" ]]; then
-  health_status=$(echo "$health_body" | jq -r '.status' 2>/dev/null || echo "")
-  if [[ "$health_status" == "healthy" ]]; then
-    run_check "Backend health" "status=healthy" "true"
+  if [[ "$http_code" == "200" ]]; then
+    health_status=$(echo "$health_body" | jq -r '.status' 2>/dev/null || echo "")
+    if [[ "$health_status" == "healthy" ]]; then
+      run_check "Backend health" "status=healthy" "true"
+    else
+      run_check "Backend health" "Unexpected status: $health_status" "false"
+    fi
   else
-    run_check "Backend health" "Unexpected status: $health_status" "false"
+    run_check "Backend health" "HTTP $http_code (via Render URL)" "false"
   fi
 else
-  run_check "Backend health" "HTTP $http_code" "false"
+  echo "  SKIP: No RENDER_HEALTH_URL configured, backend health checked via API below"
 fi
 
 # Check 2: Frontend accessibility
