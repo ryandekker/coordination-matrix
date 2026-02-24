@@ -13,6 +13,7 @@ import {
   WorkflowRunStatus,
   WorkflowRunEvent,
   WorkflowRunEventType,
+  WorkflowRunStepLog,
   StartWorkflowInput,
   TaskEvent,
   Document,
@@ -271,6 +272,53 @@ class WorkflowExecutionService {
   }
 
   // ============================================================================
+  // Step Logging - Execution Trace
+  // ============================================================================
+
+  /**
+   * Append a step log entry to the workflow run's stepLog array.
+   * Truncates input/output summaries to prevent document bloat.
+   */
+  private async appendStepLog(
+    runId: ObjectId,
+    entry: WorkflowRunStepLog
+  ): Promise<void> {
+    try {
+      await this.workflowRuns.updateOne(
+        { _id: runId },
+        { $push: { stepLog: entry } as any }
+      );
+    } catch (error) {
+      console.error(`[WorkflowExecutionService] Failed to append step log for run ${runId}:`, error);
+    }
+  }
+
+  /** Truncate an object to a summary suitable for logging (max ~2KB) */
+  private truncateForLog(obj: unknown): Record<string, unknown> | undefined {
+    if (!obj || typeof obj !== 'object') return undefined;
+    try {
+      const str = JSON.stringify(obj);
+      if (str.length <= 2048) return obj as Record<string, unknown>;
+      // Truncate by keeping only top-level keys with shortened values
+      const summary: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+        if (typeof value === 'string' && value.length > 200) {
+          summary[key] = value.substring(0, 200) + '...';
+        } else if (Array.isArray(value)) {
+          summary[key] = `[Array(${value.length})]`;
+        } else if (typeof value === 'object' && value !== null) {
+          summary[key] = `{Object(${Object.keys(value).length} keys)}`;
+        } else {
+          summary[key] = value;
+        }
+      }
+      return summary;
+    } catch {
+      return { _truncated: true };
+    }
+  }
+
+  // ============================================================================
   // Start Workflow
   // ============================================================================
 
@@ -471,6 +519,17 @@ class WorkflowExecutionService {
     );
 
     const task = await this.createTaskForStep(run, workflow, step, parentTask, inputPayload);
+
+    // Log step started to execution trace
+    await this.appendStepLog(run._id, {
+      stepId: step.id,
+      stepName: step.name,
+      stepType: step.stepType,
+      taskId: task._id.toString(),
+      status: 'started',
+      startedAt: new Date(),
+      inputSummary: this.truncateForLog(inputPayload),
+    });
 
     await this.publish({
       id: this.generateEventId(),
@@ -2052,7 +2111,7 @@ class WorkflowExecutionService {
 
   private async executeFindDocument(
     run: WorkflowRun,
-    workflow: Workflow,
+    _workflow: Workflow,
     step: WorkflowStep,
     findDocTask: Task,
     inputPayload?: Record<string, unknown>
@@ -2060,37 +2119,69 @@ class WorkflowExecutionService {
     const config = step.findDocumentConfig;
     console.log(`[WorkflowExecutionService] Executing findDocument step: ${step.id}`);
 
-    // Helper to advance to the next step after successful completion
-    const advanceToNextStep = async (outputData: Record<string, unknown>) => {
-      // Find and execute the next step based on connections
-      const connection = step.connections?.[0];
-      if (connection?.targetStepId) {
-        const nextStep = workflow.steps.find(s => s.id === connection.targetStepId);
-        if (nextStep) {
-          const parentTask = await this.tasks.findOne({ _id: findDocTask.parentId! });
-          if (parentTask) {
-            // Merge the found documents into the input payload for the next step
-            const nextInputPayload = {
-              ...inputPayload,
-              output: { data: outputData },
-            };
-            await this.executeStep(run, workflow, nextStep, parentTask, nextInputPayload);
+    // Helper to mark task complete with stepOutput and publish event for standard advanceToNextStep
+    const completeFindDocTask = async (
+      outputData: Record<string, unknown>,
+      documents: Array<{ id: string; title: string; type: string; score?: number }>,
+      metadataFields: Record<string, unknown>
+    ) => {
+      const stepOutput = this.buildStepOutput(outputData, {
+        summary: `Found ${documents.length} document(s)`,
+        documents,
+      });
+
+      await this.tasks.updateOne(
+        { _id: findDocTask._id },
+        {
+          $set: {
+            status: 'completed' as TaskStatus,
+            updatedAt: new Date(),
+            stepOutput,
+            'metadata.output': outputData,
+            ...Object.fromEntries(
+              Object.entries(metadataFields).map(([k, v]) => [`metadata.${k}`, v])
+            ),
           }
         }
+      );
+
+      // Publish event to trigger standard workflow advancement
+      const updatedTask = await this.tasks.findOne({ _id: findDocTask._id });
+      if (updatedTask) {
+        await eventBus.publish({
+          type: 'task.status.changed',
+          taskId: updatedTask._id,
+          task: updatedTask,
+          changes: [{ field: 'status', oldValue: 'in_progress', newValue: 'completed' }],
+          actorId: null,
+          actorType: 'system',
+        });
       }
     };
 
-    if (!config) {
-      console.warn(`[WorkflowExecutionService] FindDocument step ${step.id} has no findDocumentConfig`);
+    // Helper to mark task as failed with consistent metadata structure
+    const failFindDocTask = async (
+      error: string,
+      metadataFields: Record<string, unknown> = {}
+    ) => {
       await this.tasks.updateOne(
         { _id: findDocTask._id },
         {
           $set: {
             status: 'failed' as TaskStatus,
-            'metadata.error': 'No findDocumentConfig provided',
+            'metadata.error': error,
+            'metadata.output': { error, ...metadataFields },
+            ...Object.fromEntries(
+              Object.entries(metadataFields).map(([k, v]) => [`metadata.${k}`, v])
+            ),
           }
         }
       );
+    };
+
+    if (!config) {
+      console.warn(`[WorkflowExecutionService] FindDocument step ${step.id} has no findDocumentConfig`);
+      await failFindDocTask('No findDocumentConfig provided');
       return;
     }
 
@@ -2110,34 +2201,18 @@ class WorkflowExecutionService {
         if (!document) {
           if (failIfNotFound) {
             console.warn(`[WorkflowExecutionService] FindDocument step ${step.id} - document not found`);
-            await this.tasks.updateOne(
-              { _id: findDocTask._id },
-              {
-                $set: {
-                  status: 'failed' as TaskStatus,
-                  'metadata.error': `Document ${config.documentId} not found`,
-                  'metadata.mode': 'static',
-                  'metadata.documentId': config.documentId,
-                }
-              }
-            );
+            await failFindDocTask(`Document ${config.documentId} not found`, {
+              mode: 'static',
+              documentId: config.documentId,
+            });
             return;
           }
-          // Not failing, just store null and advance
-          const emptyResult: Record<string, unknown> = { [storeAs]: [] };
-          await this.tasks.updateOne(
-            { _id: findDocTask._id },
-            {
-              $set: {
-                status: 'completed' as TaskStatus,
-                [`metadata.${storeAs}`]: null,
-                'metadata.mode': 'static',
-                'metadata.documentId': config.documentId,
-                'metadata.resultCount': 0,
-              }
-            }
+          // Not failing, just store empty and advance
+          await completeFindDocTask(
+            { [storeAs]: null },
+            [],
+            { mode: 'static', documentId: config.documentId, resultCount: 0 }
           );
-          await advanceToNextStep(emptyResult);
           return;
         }
 
@@ -2145,33 +2220,18 @@ class WorkflowExecutionService {
         const { embedding, ...documentWithoutEmbedding } = document as Record<string, unknown>;
         const docResult = { document: documentWithoutEmbedding };
 
-        await this.tasks.updateOne(
-          { _id: findDocTask._id },
-          {
-            $set: {
-              status: 'completed' as TaskStatus,
-              [`metadata.${storeAs}`]: docResult,
-              'metadata.mode': 'static',
-              'metadata.documentId': config.documentId,
-              'metadata.resultCount': 1,
-            }
-          }
+        await completeFindDocTask(
+          { [storeAs]: docResult },
+          [{ id: String(document._id), title: String(document.title || ''), type: String(document.type || ''), score: 1.0 }],
+          { mode: 'static', documentId: config.documentId, resultCount: 1 }
         );
         console.log(`[WorkflowExecutionService] FindDocument step ${step.id} (static) completed successfully`);
-        await advanceToNextStep({ [storeAs]: docResult });
         return;
       } catch (error) {
         console.error(`[WorkflowExecutionService] FindDocument step ${step.id} (static) failed:`, error);
-        await this.tasks.updateOne(
-          { _id: findDocTask._id },
-          {
-            $set: {
-              status: 'failed' as TaskStatus,
-              'metadata.error': error instanceof Error ? error.message : 'Failed to fetch document',
-              'metadata.mode': 'static',
-              'metadata.documentId': config.documentId,
-            }
-          }
+        await failFindDocTask(
+          error instanceof Error ? error.message : 'Failed to fetch document',
+          { mode: 'static', documentId: config.documentId }
         );
         return;
       }
@@ -2179,7 +2239,8 @@ class WorkflowExecutionService {
 
     // Dynamic mode: semantic search
     // Resolve the search prompt with template variables from inputPayload
-    let searchPrompt = config.searchPrompt || '';
+    const originalTemplate = config.searchPrompt || '';
+    let searchPrompt = originalTemplate;
     if (searchPrompt && inputPayload) {
       const templateContext = {
         workflowRunId: run._id,
@@ -2192,15 +2253,24 @@ class WorkflowExecutionService {
     }
 
     if (!searchPrompt) {
-      console.warn(`[WorkflowExecutionService] FindDocument step ${step.id} has no search prompt after resolution`);
-      await this.tasks.updateOne(
-        { _id: findDocTask._id },
+      // Build diagnostic info about what keys are available for template resolution
+      const availableKeys = inputPayload ? Object.keys(inputPayload) : [];
+      const outputKeys = inputPayload?.output && typeof inputPayload.output === 'object'
+        ? Object.keys(inputPayload.output as Record<string, unknown>)
+        : [];
+
+      console.warn(`[WorkflowExecutionService] FindDocument step ${step.id} has no search prompt after resolution. ` +
+        `Template: "${originalTemplate}", Available top-level keys: [${availableKeys.join(', ')}], ` +
+        `output keys: [${outputKeys.join(', ')}]`);
+
+      await failFindDocTask(
+        `Search prompt resolved to empty. Template "${originalTemplate}" did not match any data. ` +
+        `Available output keys: [${outputKeys.join(', ')}]`,
         {
-          $set: {
-            status: 'failed' as TaskStatus,
-            'metadata.error': 'No search prompt provided or resolved to empty',
-            'metadata.mode': 'dynamic',
-          }
+          mode: 'dynamic',
+          searchPromptTemplate: originalTemplate,
+          availableOutputKeys: outputKeys,
+          availableTopLevelKeys: availableKeys,
         }
       );
       return;
@@ -2223,23 +2293,16 @@ class WorkflowExecutionService {
 
       if (searchResults.length === 0 && failIfNotFound) {
         console.warn(`[WorkflowExecutionService] FindDocument step ${step.id} found no documents and failIfNotFound is true`);
-        await this.tasks.updateOne(
-          { _id: findDocTask._id },
-          {
-            $set: {
-              status: 'failed' as TaskStatus,
-              'metadata.error': 'No documents found matching search criteria',
-              'metadata.mode': 'dynamic',
-              'metadata.searchPrompt': searchPrompt,
-              'metadata.searchConfig': {
-                documentTypes: config.documentTypes,
-                documentStatus: config.documentStatus || ['approved'],
-                tags: config.tags,
-                minScore: config.minScore || 0.5,
-              },
-            }
-          }
-        );
+        await failFindDocTask('No documents found matching search criteria', {
+          mode: 'dynamic',
+          searchPrompt,
+          searchConfig: {
+            documentTypes: config.documentTypes,
+            documentStatus: config.documentStatus || ['approved'],
+            tags: config.tags,
+            minScore: config.minScore || 0.5,
+          },
+        });
         return;
       }
 
@@ -2256,36 +2319,26 @@ class WorkflowExecutionService {
             highlights: r.highlights,
           }));
 
-      // Mark task as completed with the found document(s)
-      await this.tasks.updateOne(
-        { _id: findDocTask._id },
-        {
-          $set: {
-            status: 'completed' as TaskStatus,
-            [`metadata.${storeAs}`]: documentResult,
-            'metadata.mode': 'dynamic',
-            'metadata.searchPrompt': searchPrompt,
-            'metadata.resultCount': searchResults.length,
-          }
-        }
+      // Build documents summary for stepOutput
+      const docsSummary = searchResults.map(r => ({
+        id: String(r.document._id || ''),
+        title: String(r.document.title || ''),
+        type: String(r.document.type || ''),
+        score: r.score,
+      }));
+
+      await completeFindDocTask(
+        { [storeAs]: documentResult },
+        docsSummary,
+        { mode: 'dynamic', searchPrompt, resultCount: searchResults.length }
       );
 
       console.log(`[WorkflowExecutionService] FindDocument step ${step.id} (dynamic) completed successfully`);
-
-      // Advance to the next step
-      await advanceToNextStep({ [storeAs]: documentResult });
     } catch (error) {
       console.error(`[WorkflowExecutionService] FindDocument step ${step.id} (dynamic) failed:`, error);
-      await this.tasks.updateOne(
-        { _id: findDocTask._id },
-        {
-          $set: {
-            status: 'failed' as TaskStatus,
-            'metadata.error': error instanceof Error ? error.message : 'Search failed',
-            'metadata.mode': 'dynamic',
-            'metadata.searchPrompt': searchPrompt,
-          }
-        }
+      await failFindDocTask(
+        error instanceof Error ? error.message : 'Search failed',
+        { mode: 'dynamic', searchPrompt }
       );
     }
   }
@@ -2917,6 +2970,46 @@ class WorkflowExecutionService {
       console.log(`[WorkflowExecutionService] Skipping - workflow not found`);
       return;
     }
+
+    // Log step completion/failure to execution trace
+    const stepLogEntry: Partial<WorkflowRunStepLog> = {
+      stepId: task.workflowStepId!,
+      stepName: task.title,
+      stepType: task.taskType || 'unknown',
+      taskId: task._id.toString(),
+      completedAt: new Date(),
+    };
+    if (task.status === 'completed') {
+      stepLogEntry.status = 'completed';
+      stepLogEntry.outputSummary = this.truncateForLog(
+        task.stepOutput?.data ?? task.metadata?.output ?? task.metadata?.response
+      );
+    } else if (task.status === 'failed') {
+      stepLogEntry.status = 'failed';
+      const errorMsg = typeof task.metadata?.error === 'string'
+        ? task.metadata.error
+        : task.metadata?.nextActionReason as string || `Step "${task.title}" failed`;
+      stepLogEntry.error = errorMsg;
+    } else if (isEscalatedHold) {
+      stepLogEntry.status = 'failed';
+      stepLogEntry.error = typeof task.metadata?.nextActionReason === 'string'
+        ? task.metadata.nextActionReason
+        : 'Task escalated - requires human intervention';
+      stepLogEntry.errorCode = 'ESCALATED';
+    }
+    // Update the matching started entry or push a new one
+    await this.workflowRuns.updateOne(
+      { _id: run._id, 'stepLog.stepId': task.workflowStepId, 'stepLog.status': 'started' },
+      {
+        $set: {
+          'stepLog.$.status': stepLogEntry.status,
+          'stepLog.$.completedAt': stepLogEntry.completedAt,
+          'stepLog.$.outputSummary': stepLogEntry.outputSummary,
+          'stepLog.$.error': stepLogEntry.error,
+          'stepLog.$.errorCode': stepLogEntry.errorCode,
+        },
+      }
+    );
 
     await this.publish({
       id: this.generateEventId(),

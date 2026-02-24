@@ -28,6 +28,8 @@ import {
   Copy,
   Code,
   FileSearch,
+  Loader2,
+  List,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -47,7 +49,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
-import { workflowRunsApi, WorkflowRun, WorkflowRunStatus, Task, Workflow } from '@/lib/api'
+import { workflowRunsApi, WorkflowRun, WorkflowRunStatus, Task, Workflow, authFetch } from '@/lib/api'
 
 const STATUS_CONFIG: Record<WorkflowRunStatus, { icon: React.ElementType; color: string; bgColor: string; label: string }> = {
   pending: { icon: Clock, color: 'text-gray-500', bgColor: 'bg-gray-50', label: 'Pending' },
@@ -194,6 +196,207 @@ function TaskNode({ task, depth, allTasks }: TaskNodeProps) {
         )}
       </Collapsible>
     </div>
+  )
+}
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
+
+interface TraceEntry {
+  stepId: string
+  stepName: string
+  stepType: string
+  status: 'started' | 'completed' | 'failed' | 'skipped'
+  startedAt: string
+  completedAt?: string
+  durationMs?: number
+  inputSummary?: Record<string, unknown>
+  outputSummary?: Record<string, unknown>
+  error?: string
+  errorCode?: string
+  taskId?: string
+  taskStatus?: string
+}
+
+interface TraceData {
+  runId: string
+  workflowName: string
+  status: string
+  error?: string
+  trace: TraceEntry[]
+  totalSteps: number
+  completedStepIds: string[]
+  currentStepIds: string[]
+}
+
+function ExecutionTrace({ runId }: { runId: string }) {
+  const [traceData, setTraceData] = useState<TraceData | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [isOpen, setIsOpen] = useState(false)
+  const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
+  const [hasLoaded, setHasLoaded] = useState(false)
+
+  const loadTrace = async () => {
+    if (hasLoaded) return
+    setIsLoading(true)
+    try {
+      const response = await authFetch(`${API_BASE}/workflow-runs/${runId}/trace`)
+      if (response.ok) {
+        const json = await response.json()
+        setTraceData(json.data)
+        // Auto-expand failed steps
+        const failedIds = new Set<string>()
+        for (const entry of json.data.trace || []) {
+          if (entry.status === 'failed') failedIds.add(entry.stepId)
+        }
+        setExpandedSteps(failedIds)
+      }
+    } catch (err) {
+      console.error('Failed to load trace:', err)
+    } finally {
+      setIsLoading(false)
+      setHasLoaded(true)
+    }
+  }
+
+  const toggleStep = (stepId: string) => {
+    setExpandedSteps(prev => {
+      const next = new Set(prev)
+      if (next.has(stepId)) next.delete(stepId)
+      else next.add(stepId)
+      return next
+    })
+  }
+
+  const handleToggle = (open: boolean) => {
+    setIsOpen(open)
+    if (open && !hasLoaded) {
+      loadTrace()
+    }
+  }
+
+  const stepTypeConfig = (stepType: string) => {
+    const config = TASK_TYPE_CONFIG[stepType as TaskType]
+    return config || TASK_TYPE_CONFIG.standard
+  }
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={handleToggle}>
+      <div className="rounded-lg border bg-card">
+        <CollapsibleTrigger asChild>
+          <button className="w-full flex items-center gap-2 p-4 hover:bg-muted/50 transition-colors text-left">
+            {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            <List className="h-4 w-4 text-muted-foreground" />
+            <h2 className="font-semibold">Execution Trace</h2>
+            {traceData && (
+              <span className="text-sm text-muted-foreground">
+                ({traceData.trace.length} entries)
+              </span>
+            )}
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="px-4 pb-4">
+            {isLoading && (
+              <div className="flex items-center gap-2 py-4">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="text-sm text-muted-foreground">Loading trace...</span>
+              </div>
+            )}
+
+            {!isLoading && traceData && traceData.trace.length === 0 && (
+              <p className="text-sm text-muted-foreground py-2">No execution trace available yet.</p>
+            )}
+
+            {!isLoading && traceData && traceData.trace.length > 0 && (
+              <div className="space-y-1">
+                {traceData.trace.map((entry, i) => {
+                  const typeConfig = stepTypeConfig(entry.stepType)
+                  const TypeIcon = typeConfig.icon
+                  const isExpanded = expandedSteps.has(entry.stepId)
+                  const statusColor = entry.status === 'completed' ? 'text-green-500'
+                    : entry.status === 'failed' ? 'text-red-500'
+                    : entry.status === 'started' ? 'text-blue-500'
+                    : 'text-gray-400'
+                  const StatusIcon = entry.status === 'completed' ? CheckCircle
+                    : entry.status === 'failed' ? XCircle
+                    : entry.status === 'started' ? Play
+                    : Clock
+
+                  return (
+                    <div key={`${entry.stepId}-${i}`} className="border rounded">
+                      <button
+                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/50 transition-colors text-left text-sm"
+                        onClick={() => toggleStep(entry.stepId)}
+                      >
+                        {isExpanded ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
+                        <StatusIcon className={cn('h-4 w-4 flex-shrink-0', statusColor)} />
+                        <TypeIcon className={cn('h-3.5 w-3.5 flex-shrink-0', typeConfig.color)} />
+                        <span className="font-medium truncate">{entry.stepName}</span>
+                        <Badge variant="outline" className="text-xs">
+                          {entry.stepType}
+                        </Badge>
+                        <Badge variant="outline" className={cn('text-xs', statusColor)}>
+                          {entry.status}
+                        </Badge>
+                        {entry.durationMs !== undefined && (
+                          <span className="text-xs text-muted-foreground ml-auto">
+                            {entry.durationMs < 1000 ? `${entry.durationMs}ms` : `${(entry.durationMs / 1000).toFixed(1)}s`}
+                          </span>
+                        )}
+                      </button>
+
+                      {isExpanded && (
+                        <div className="px-3 pb-3 border-t space-y-2 text-sm">
+                          {entry.error && (
+                            <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/30 rounded p-2 mt-2">
+                              <p className="text-red-600 font-medium text-xs">{entry.error}</p>
+                              {entry.errorCode && (
+                                <p className="text-red-500/70 text-xs mt-0.5">Code: {entry.errorCode}</p>
+                              )}
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-2 gap-2 mt-2">
+                            {entry.inputSummary && Object.keys(entry.inputSummary).length > 0 && (
+                              <div>
+                                <span className="text-xs font-medium text-muted-foreground uppercase">Input</span>
+                                <pre className="font-mono text-xs bg-muted/50 rounded p-2 mt-0.5 overflow-x-auto max-h-32 overflow-y-auto">
+                                  {JSON.stringify(entry.inputSummary, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                            {entry.outputSummary && Object.keys(entry.outputSummary).length > 0 && (
+                              <div>
+                                <span className="text-xs font-medium text-muted-foreground uppercase">Output</span>
+                                <pre className="font-mono text-xs bg-muted/50 rounded p-2 mt-0.5 overflow-x-auto max-h-32 overflow-y-auto">
+                                  {JSON.stringify(entry.outputSummary, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
+                            <span>Started: {new Date(entry.startedAt).toLocaleTimeString()}</span>
+                            {entry.completedAt && (
+                              <span>Completed: {new Date(entry.completedAt).toLocaleTimeString()}</span>
+                            )}
+                            {entry.taskId && (
+                              <Link href={`/tasks?taskId=${entry.taskId}`} className="text-blue-500 hover:underline">
+                                View Task
+                              </Link>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
   )
 }
 
@@ -412,6 +615,9 @@ export default function WorkflowRunDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Execution Trace */}
+      <ExecutionTrace runId={runId} />
 
       {/* Input/Output Payloads */}
       {(run.inputPayload || run.outputPayload) && (

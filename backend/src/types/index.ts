@@ -878,6 +878,10 @@ export interface UserPreference {
 
 export type UserRole = 'admin' | 'operator' | 'reviewer' | 'viewer';
 
+// Agent complexity levels - determines which capability documents are available
+// 1 = basic (haiku-class), 2 = intermediate (sonnet-class), 3 = advanced (opus-class)
+export type AgentComplexity = 1 | 2 | 3;
+
 export interface User {
   _id: ObjectId;
   email?: string;                 // Optional for agent users
@@ -887,6 +891,7 @@ export interface User {
   isAgent?: boolean;              // Is this user an AI agent?
   isSystem?: boolean;             // Is this the system user? (for automated workflow tasks)
   agentPrompt?: string;           // Agent's base prompt/persona
+  agentComplexity?: AgentComplexity; // Agent's capability level (1=basic, 2=intermediate, 3=advanced)
   profilePicture?: string;        // URL to profile picture (for humans)
   botColor?: string;              // Custom color for bot users (hex code)
   defaultGroupId?: ObjectId;      // User's preferred/default group
@@ -1296,6 +1301,22 @@ export interface Workflow {
   createdById?: ObjectId | null;
 }
 
+// Step-level execution log entry for workflow run tracing
+export interface WorkflowRunStepLog {
+  stepId: string;
+  stepName: string;
+  stepType: string;
+  taskId?: string;
+  status: 'started' | 'completed' | 'failed' | 'skipped';
+  startedAt: Date;
+  completedAt?: Date;
+  durationMs?: number;
+  inputSummary?: Record<string, unknown>;
+  outputSummary?: Record<string, unknown>;
+  error?: string;
+  errorCode?: string;
+}
+
 export interface WorkflowRun {
   _id: ObjectId;
   workflowId: ObjectId;
@@ -1343,6 +1364,9 @@ export interface WorkflowRun {
   // Error handling
   error?: string;
   failedStepId?: string;
+
+  // Execution trace - step-by-step log of what happened during the run
+  stepLog?: WorkflowRunStepLog[];
 
   // Pause handling (for escalations)
   pausedStepId?: string;
@@ -1620,7 +1644,11 @@ export interface Tag {
 // Document Types (Markdown Documentation)
 // ============================================================================
 
-export type DocumentType = 'sop' | 'strategy' | 'plan' | 'template' | 'reference' | 'output' | 'custom' | 'workflow-prompt';
+export type DocumentType = 'sop' | 'strategy' | 'plan' | 'template' | 'reference' | 'output' | 'custom' | 'workflow-prompt' | 'capability';
+
+// Capability document complexity - determines which agents can access this capability
+// 1 = basic (all agents), 2 = intermediate (sonnet+), 3 = advanced (opus only)
+export type CapabilityComplexity = 1 | 2 | 3;
 
 export type DocumentStatus = 'draft' | 'review' | 'approved' | 'archived';
 
@@ -1640,6 +1668,10 @@ export interface Document {
   type: DocumentType;
   status: DocumentStatus;
   tags?: string[];
+
+  // Capability document fields (only used when type='capability')
+  capabilityId?: string;           // Unique identifier for capability (e.g., 'ask-questions')
+  capabilityComplexity?: CapabilityComplexity;  // Required complexity level to access (1-3)
 
   // Ownership
   createdById: ObjectId | null;

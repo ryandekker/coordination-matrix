@@ -1197,7 +1197,7 @@ db.createCollection('documents', {
         // Classification
         type: {
           bsonType: 'string',
-          enum: ['sop', 'strategy', 'plan', 'template', 'reference', 'output', 'custom', 'workflow-prompt'],
+          enum: ['sop', 'strategy', 'plan', 'template', 'reference', 'output', 'custom', 'workflow-prompt', 'capability'],
           description: 'Document type - required'
         },
         status: {
@@ -1209,6 +1209,17 @@ db.createCollection('documents', {
           bsonType: 'array',
           items: { bsonType: 'string' },
           description: 'Document tags for categorization'
+        },
+
+        // Capability document fields (only used when type='capability')
+        capabilityId: {
+          bsonType: 'string',
+          description: 'Unique identifier for capability (e.g., ask-questions)'
+        },
+        capabilityComplexity: {
+          bsonType: 'int',
+          enum: [1, 2, 3],
+          description: 'Required agent complexity level to access (1=basic, 2=intermediate, 3=advanced)'
         },
 
         // Ownership

@@ -254,6 +254,7 @@ interface TaskDataTableProps {
   onExpandAllChange: (enabled: boolean) => void
   autoExpandIds?: string[]
   hasActiveFilters?: boolean
+  nestWorkflowsEnabled?: boolean
 }
 
 // Helper to organize flat filtered results into a tree structure
@@ -583,6 +584,7 @@ function TaskRow({
   onCancelInlineCreation,
   onSubmitInlineCreation,
   isCreatingTask,
+  nestWorkflowsEnabled,
 }: {
   task: Task
   fieldConfigs: FieldConfig[]
@@ -617,6 +619,7 @@ function TaskRow({
   onCancelInlineCreation: () => void
   onSubmitInlineCreation: (title: string, parentId: string | null) => void
   isCreatingTask: boolean
+  nestWorkflowsEnabled: boolean
 }) {
   const isFlowTask = task.taskType === 'flow'
 
@@ -638,10 +641,19 @@ function TaskRow({
   // Check if children are pre-attached (from filtering) - they have _id property
   const hasPreAttachedChildren = Boolean(task.children && task.children.length > 0 && task.children[0]._id)
 
-  // Fetch children when expanded (including flow tasks - they now expand inline)
-  // Skip fetching if we already have pre-attached children from filtering
-  // Skip fetching for flow tasks that spawned subflows - they link to root, not expand
-  const { data: childrenData } = useTaskChildren(isExpanded && !hasPreAttachedChildren && !hasSpawnedSubflow ? task._id : null, {
+  // Determine which task's children to fetch when expanded:
+  // - If nest workflows is enabled and this flow step spawned a subflow, fetch the
+  //   spawned root task's children (the subflow steps) instead of this task's own children
+  // - If nest workflows is disabled and this has a spawned subflow, don't fetch (show ref link instead)
+  // - Otherwise, fetch this task's own children
+  const childrenFetchId = (() => {
+    if (!isExpanded || hasPreAttachedChildren) return null
+    if (hasSpawnedSubflow && nestWorkflowsEnabled) return spawnedRootTaskId!
+    if (hasSpawnedSubflow && !nestWorkflowsEnabled) return null
+    return task._id
+  })()
+
+  const { data: childrenData } = useTaskChildren(childrenFetchId, {
     page: childrenPage,
     limit: CHILDREN_PAGE_SIZE,
   })
@@ -651,6 +663,7 @@ function TaskRow({
   const childrenPagination = childrenData?.pagination
   // Use childCount (number) from backend if available, otherwise fall back to checking children array
   const hasChildren = hasPreAttachedChildren
+    || (nestWorkflowsEnabled && hasSpawnedSubflow)
     || (isExpanded ? children.length > 0 : ((task as Task & { childCount?: number }).childCount ?? 0) > 0 || Boolean(task.children && task.children.length > 0))
   const hasMoreChildren = !hasPreAttachedChildren && childrenPagination && childrenPagination.totalPages > 1
 
@@ -676,12 +689,14 @@ function TaskRow({
       return
     }
 
-    // Auto-expand children with grandchildren that haven't been processed yet
+    // Auto-expand children with grandchildren (or spawned subflows) that haven't been processed yet
     if (isExpanded && children.length > 0) {
       children.forEach(child => {
+        const childHasContent = (child.children && child.children.length > 0) ||
+          ((child as Task & { childCount?: number }).childCount ?? 0) > 0 ||
+          (nestWorkflowsEnabled && Boolean(child.metadata?.spawnedRootTaskId))
         if (
-          child.children &&
-          child.children.length > 0 &&
+          childHasContent &&
           !autoExpandedChildrenRef.current.has(child._id)
         ) {
           // Mark as processed first to prevent re-expansion
@@ -695,9 +710,9 @@ function TaskRow({
     }
   }, [expandAllEnabled, isExpanded, children, expandedRows, toggleRowExpansion])
 
-  // Flow tasks that have spawned a subflow show as reference links
-  // They link to the subflow's root task (which is at the top level)
-  const isFlowPlaceholder = hasSpawnedSubflow
+  // Flow tasks that have spawned a subflow show as reference links (unless nesting is enabled)
+  // When nesting is enabled, they expand inline instead
+  const isFlowPlaceholder = hasSpawnedSubflow && !nestWorkflowsEnabled
 
   return (
     <>
@@ -869,6 +884,7 @@ function TaskRow({
             onCancelInlineCreation={onCancelInlineCreation}
             onSubmitInlineCreation={onSubmitInlineCreation}
             isCreatingTask={isCreatingTask}
+            nestWorkflowsEnabled={nestWorkflowsEnabled}
           />
         ))}
       {/* Pagination row for children when there are multiple pages */}
@@ -947,6 +963,7 @@ export function TaskDataTable({
   onExpandAllChange,
   autoExpandIds,
   hasActiveFilters = false,
+  nestWorkflowsEnabled = false,
 }: TaskDataTableProps) {
   const router = useRouter()
   const { user } = useAuth()
@@ -1001,6 +1018,15 @@ export function TaskDataTable({
       setExpandedRows(new Set())
     }
   }, [hasActiveFilters])
+
+  // When nestWorkflowsEnabled toggles, collapse all rows (expanded children become stale)
+  const prevNestWorkflows = useRef(nestWorkflowsEnabled)
+  useEffect(() => {
+    if (prevNestWorkflows.current !== nestWorkflowsEnabled) {
+      prevNestWorkflows.current = nestWorkflowsEnabled
+      setExpandedRows(new Set())
+    }
+  }, [nestWorkflowsEnabled])
 
   // Highlight a row (clears others, persists until another is clicked)
   // Clear first to restart animation if same row is clicked again
@@ -1119,8 +1145,12 @@ export function TaskDataTable({
 
   // Get task IDs that have children (for expand all functionality)
   const tasksWithChildren = useMemo(() => {
-    return organizedTasks.filter(t => t.children && t.children.length > 0).map(t => t._id)
-  }, [organizedTasks])
+    return organizedTasks.filter(t =>
+      (t.children && t.children.length > 0) ||
+      ((t as Task & { childCount?: number }).childCount ?? 0) > 0 ||
+      (nestWorkflowsEnabled && t.metadata?.spawnedRootTaskId)
+    ).map(t => t._id)
+  }, [organizedTasks, nestWorkflowsEnabled])
 
   // Track previous expandAllEnabled to detect changes
   const prevExpandAllEnabled = useRef(expandAllEnabled)
@@ -1275,10 +1305,13 @@ export function TaskDataTable({
         // toggle should only be controlled by the toolbar button.
       } else {
         newExpanded.add(taskId)
-        // Check if all tasks with children are now expanded
-        const allExpanded = tasksWithChildren.every(id => newExpanded.has(id) || id === taskId)
-        if (allExpanded) {
-          onExpandAllChange(true)
+        // Check if all tasks with children are now expanded (defer to avoid setState-during-render)
+        if (tasksWithChildren.length > 0) {
+          const allExpanded = tasksWithChildren.every(id => newExpanded.has(id) || id === taskId)
+          if (allExpanded) {
+            // Use queueMicrotask to avoid calling parent setState inside this state updater
+            queueMicrotask(() => onExpandAllChange(true))
+          }
         }
       }
       return newExpanded
@@ -1754,6 +1787,7 @@ export function TaskDataTable({
                   onCancelInlineCreation={handleCancelInlineCreation}
                   onSubmitInlineCreation={handleSubmitInlineCreation}
                   isCreatingTask={createTask.isPending}
+                  nestWorkflowsEnabled={nestWorkflowsEnabled}
                 />
               ))
             )}

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useCallback } from 'react'
-import { Search, Filter, Columns, ChevronDown, X, Bookmark, Tag as TagIcon, ChevronsDownUp, ChevronsUpDown, Archive, Workflow as WorkflowIcon, FolderKanban } from 'lucide-react'
+import { Search, Filter, Columns, ChevronDown, X, Bookmark, Tag as TagIcon, ChevronsDownUp, ChevronsUpDown, Archive, Workflow as WorkflowIcon, FolderKanban, GitBranch } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -51,6 +51,8 @@ interface TaskToolbarProps {
   hasAnyChildren?: boolean
   expandAllEnabled?: boolean
   onExpandAllChange?: (enabled: boolean) => void
+  nestWorkflowsEnabled?: boolean
+  onNestWorkflowsChange?: (enabled: boolean) => void
 }
 
 export function TaskToolbar({
@@ -73,6 +75,8 @@ export function TaskToolbar({
   hasAnyChildren,
   expandAllEnabled,
   onExpandAllChange,
+  nestWorkflowsEnabled,
+  onNestWorkflowsChange,
 }: TaskToolbarProps) {
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false)
   const [saveName, setSaveName] = useState('')
@@ -732,6 +736,18 @@ export function TaskToolbar({
         <Button variant="outline" size="sm" onClick={openSaveModal}>
           <Bookmark className="mr-2 h-4 w-4" />
           Save
+        </Button>
+      )}
+
+      {/* Nest Workflows Toggle */}
+      {onNestWorkflowsChange && (
+        <Button
+          variant={nestWorkflowsEnabled ? "default" : "outline"}
+          size="sm"
+          onClick={() => onNestWorkflowsChange(!nestWorkflowsEnabled)}
+          title={nestWorkflowsEnabled ? 'Show workflows as references' : 'Nest workflows inline'}
+        >
+          <GitBranch className="h-4 w-4" />
         </Button>
       )}
 

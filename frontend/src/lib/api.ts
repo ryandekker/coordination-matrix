@@ -1306,6 +1306,10 @@ export interface ViewFolder {
   updatedAt?: string
 }
 
+// Agent complexity levels - determines which capability documents are available
+// 1 = basic (haiku-class), 2 = intermediate (sonnet-class), 3 = advanced (opus-class)
+export type AgentComplexity = 1 | 2 | 3
+
 export interface User {
   _id: string
   email?: string                  // Optional for agent users
@@ -1315,6 +1319,7 @@ export interface User {
   isAgent?: boolean               // Is this user an AI agent?
   isSystem?: boolean              // Is this the system user? (for automated workflow tasks)
   agentPrompt?: string            // Agent's base prompt/persona
+  agentComplexity?: AgentComplexity // Agent's capability level (1=basic, 2=intermediate, 3=advanced)
   profilePicture?: string         // URL to profile picture (for humans)
   botColor?: string               // Custom color for bot users (hex code)
   createdAt?: string
@@ -2161,8 +2166,11 @@ export const webhooksApi = {
 }
 
 // Document Types
-export type DocumentType = 'sop' | 'strategy' | 'plan' | 'template' | 'reference' | 'output' | 'custom' | 'workflow-prompt'
+export type DocumentType = 'sop' | 'strategy' | 'plan' | 'template' | 'reference' | 'output' | 'custom' | 'workflow-prompt' | 'capability'
 export type DocumentStatus = 'draft' | 'review' | 'approved' | 'archived'
+
+// Capability document complexity - determines which agents can access
+export type CapabilityComplexity = 1 | 2 | 3
 
 export interface Document {
   _id: string
@@ -2179,6 +2187,9 @@ export interface Document {
   workflowRunId?: string | null
   version: number
   metadata?: Record<string, unknown>
+  // Capability document fields (only for type='capability')
+  capabilityId?: string
+  capabilityComplexity?: CapabilityComplexity
   createdAt: string
   updatedAt: string
   _resolved?: {

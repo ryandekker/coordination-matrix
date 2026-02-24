@@ -37,7 +37,8 @@
       "Bash(npx tsc:*)",
       "Bash(node scripts/task-daemon.mjs:*)",
       "Bash(MATRIX_API_URL=http://localhost:3100 npm run cli:*)",
-      "Bash(docker info:*)"
+      "Bash(docker info:*)",
+      "Bash(bash:*)"
     ],
     "deny": [],
     "ask": []

@@ -1,0 +1,16 @@
+# Capability Documents Index
+# These files are the source of truth for daemon agent capabilities.
+# Run `node scripts/migrate-capabilities.mjs` to deploy to production.
+#
+# Each capability .md file uses YAML frontmatter for metadata:
+#   capabilityId: unique identifier (used in REQUEST_DOCS)
+#   title: human-readable name
+#   complexity: 1 (basic/all), 2 (intermediate/sonnet+), 3 (advanced/opus)
+#   tags: array of tags
+#   summary: one-line description for the capability manifest
+
+capabilities:
+  - file: ask-questions.md
+  - file: document-operations.md
+  - file: delegation-patterns.md
+  - file: create-workflow.md

@@ -54,7 +54,7 @@ async function logDocumentActivity(
 export const documentsRouter = Router();
 
 // Valid document types and statuses
-const VALID_TYPES: DocumentType[] = ['sop', 'strategy', 'plan', 'template', 'reference', 'output', 'custom', 'workflow-prompt'];
+const VALID_TYPES: DocumentType[] = ['sop', 'strategy', 'plan', 'template', 'reference', 'output', 'custom', 'workflow-prompt', 'capability'];
 const VALID_STATUSES: DocumentStatus[] = ['draft', 'review', 'approved', 'archived'];
 
 // Helper to resolve references
@@ -1157,6 +1157,144 @@ documentsRouter.post('/batch-embeddings', async (req: Request, res: Response, ne
       success: true,
       message: `Generated embeddings for ${updated} documents`,
       updatedCount: updated,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================================
+// Capability Document Endpoints
+// ============================================================================
+
+// GET /api/documents/capabilities - List available capabilities for an agent complexity level
+// Query params: ?complexity=1|2|3 (defaults to 1)
+documentsRouter.get('/capabilities', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const complexity = Math.min(3, Math.max(1, parseInt(req.query.complexity as string) || 1)) as 1 | 2 | 3;
+
+    // Find all capability documents that this complexity level can access
+    const capabilities = await db.collection<Document>('documents')
+      .find({
+        type: 'capability',
+        status: 'approved',
+        capabilityComplexity: { $lte: complexity },
+      })
+      .project({
+        _id: 1,
+        title: 1,
+        summary: 1,
+        capabilityId: 1,
+        capabilityComplexity: 1,
+        tags: 1,
+      })
+      .sort({ capabilityComplexity: 1, title: 1 })
+      .toArray();
+
+    // Return a manifest format for easy agent consumption
+    res.json({
+      agentComplexity: complexity,
+      capabilities: capabilities.map(cap => ({
+        id: cap.capabilityId,
+        documentId: cap._id.toString(),
+        title: cap.title,
+        summary: cap.summary || '',
+        complexity: cap.capabilityComplexity,
+        tags: cap.tags || [],
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/documents/capabilities/:capabilityId - Get full capability documentation
+// Query params: ?complexity=1|2|3 (for access control)
+documentsRouter.get('/capabilities/:capabilityId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { capabilityId } = req.params;
+    const complexity = Math.min(3, Math.max(1, parseInt(req.query.complexity as string) || 1)) as 1 | 2 | 3;
+
+    // Find the capability document
+    const capability = await db.collection<Document>('documents').findOne({
+      type: 'capability',
+      capabilityId,
+      status: 'approved',
+    });
+
+    if (!capability) {
+      throw createError(`Capability '${capabilityId}' not found`, 404);
+    }
+
+    // Check if agent has sufficient complexity
+    if (capability.capabilityComplexity && capability.capabilityComplexity > complexity) {
+      throw createError(
+        `Capability '${capabilityId}' requires complexity level ${capability.capabilityComplexity}, agent has ${complexity}`,
+        403
+      );
+    }
+
+    res.json({
+      id: capability.capabilityId,
+      documentId: capability._id.toString(),
+      title: capability.title,
+      summary: capability.summary || '',
+      content: capability.content,
+      complexity: capability.capabilityComplexity,
+      tags: capability.tags || [],
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/documents/capabilities/batch - Get multiple capabilities at once
+// Body: { capabilityIds: string[], complexity: 1|2|3 }
+documentsRouter.post('/capabilities/batch', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const { capabilityIds, complexity: reqComplexity } = req.body;
+    const complexity = Math.min(3, Math.max(1, parseInt(reqComplexity) || 1)) as 1 | 2 | 3;
+
+    if (!Array.isArray(capabilityIds) || capabilityIds.length === 0) {
+      throw createError('capabilityIds must be a non-empty array', 400);
+    }
+
+    // Limit batch size
+    if (capabilityIds.length > 10) {
+      throw createError('Maximum 10 capabilities per batch request', 400);
+    }
+
+    // Find all requested capability documents
+    const capabilities = await db.collection<Document>('documents')
+      .find({
+        type: 'capability',
+        capabilityId: { $in: capabilityIds },
+        status: 'approved',
+        capabilityComplexity: { $lte: complexity },
+      })
+      .toArray();
+
+    // Build response with found capabilities and list of unavailable ones
+    const found = capabilities.map(cap => ({
+      id: cap.capabilityId,
+      documentId: cap._id.toString(),
+      title: cap.title,
+      summary: cap.summary || '',
+      content: cap.content,
+      complexity: cap.capabilityComplexity,
+      tags: cap.tags || [],
+    }));
+
+    const foundIds = new Set(capabilities.map(c => c.capabilityId));
+    const notFound = capabilityIds.filter(id => !foundIds.has(id));
+
+    res.json({
+      agentComplexity: complexity,
+      capabilities: found,
+      notFound,
     });
   } catch (error) {
     next(error);

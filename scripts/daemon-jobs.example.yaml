@@ -10,9 +10,11 @@
 #   exec            defaults/job    claude                       Command to execute
 #   maxPayloadSize  defaults/job    200000                       Max input payload bytes (~200KB)
 #   timeout         defaults/job    600000                       Command timeout in ms (10 min)
+#   mcpServers      defaults/job    -                            MCP server definitions (merged)
 #   enabled         job only        true                         Whether job runs
 #   description     job only        -                            Job description
 #   viewId          job only        -                            View/saved search ID
+#   strictMcpConfig job only        false                        Only use configured MCP servers
 #
 # Tool Configuration:
 #   Use --allowedTools to give Claude access to tools for real work:
@@ -113,6 +115,32 @@ jobs:
     viewId: OLD_VIEW_ID
     exec: "legacy-command"
 
+  # Example: Job with MCP servers
+  # MCP servers give Claude access to external tools and data sources via the
+  # Model Context Protocol. The daemon writes the config to a temp file and
+  # passes --mcp-config to Claude CLI automatically.
+  mcp-enabled-agent:
+    description: Agent with MCP server access
+    viewId: YOUR_MCP_VIEW_ID
+    exec: "claude --model claude-sonnet-4-20250514"
+    # MCP servers for this job (merged with defaults.mcpServers)
+    mcpServers:
+      # HTTP/SSE transport - connect to a remote MCP server
+      github:
+        type: http
+        url: https://api.github.com/mcp
+        headers:
+          Authorization: "Bearer ${GITHUB_TOKEN}"
+      # stdio transport - spawn a local MCP server process
+      filesystem:
+        type: stdio
+        command: npx
+        args: ["-y", "@anthropic/mcp-filesystem"]
+        env:
+          ALLOWED_DIRS: "/tmp/workspace"
+    # When true, ONLY these MCP servers are used (ignores ~/.claude.json, .mcp.json, etc.)
+    strictMcpConfig: true
+
 # Tips:
 # - Create views in the UI that filter tasks by status, tags, or assignee
 # - Each job should target a specific view/queue of tasks
@@ -128,3 +156,11 @@ jobs:
 # - With Bash enabled, Claude can execute real HTTP requests
 # - Conversation logs capture ALL tool calls for debugging/auditing
 # - View conversation history at /conversations in the UI
+#
+# MCP Tips:
+# - mcpServers at defaults level apply to ALL jobs; job-level overrides per server name
+# - Use strictMcpConfig: true to prevent the daemon from using project/user MCP configs
+# - Supports http, sse, and stdio transports (same format as Claude Code's .mcp.json)
+# - Environment variables in values are expanded by Claude CLI: ${VAR} or ${VAR:-default}
+# - Use --dry-run to verify MCP config is being passed correctly
+# - MCP servers are initialized per task execution (temp config file, cleaned up after)

@@ -359,6 +359,116 @@ router.get('/:id', requireAuth, async (req: Request, res: Response): Promise<voi
 });
 
 // ============================================================================
+// Get Execution Trace for a Workflow Run
+// GET /api/workflow-runs/:id/trace
+// Returns step-by-step execution log with input/output at each stage
+// ============================================================================
+router.get('/:id/trace', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const db = getDb();
+
+    if (!ObjectId.isValid(id)) {
+      res.status(400).json({ error: 'Invalid workflow run ID' });
+      return;
+    }
+
+    const run = await db.collection('workflow_runs').findOne({ _id: new ObjectId(id) });
+    if (!run) {
+      res.status(404).json({ error: 'Workflow run not found' });
+      return;
+    }
+
+    // Get the workflow definition for step names/types
+    const workflow = run.workflowId
+      ? await db.collection('workflows').findOne({ _id: run.workflowId })
+      : null;
+
+    // Get all tasks for this run to build a comprehensive trace
+    const tasks = await db.collection('tasks').find({
+      workflowRunId: new ObjectId(id),
+      workflowStepId: { $exists: true, $ne: null },
+    }).sort({ createdAt: 1 }).toArray();
+
+    // Build trace from stepLog if available, otherwise from tasks
+    const stepLog = (run.stepLog as any[]) || [];
+
+    // Enrich step log with task data
+    const enrichedTrace = stepLog.map((entry: any) => {
+      const task = tasks.find(t => t.workflowStepId === entry.stepId);
+      const step = workflow?.steps?.find((s: any) => s.id === entry.stepId);
+
+      return {
+        ...entry,
+        stepType: entry.stepType || step?.stepType || task?.taskType || 'unknown',
+        stepName: entry.stepName || step?.name || task?.title || entry.stepId,
+        taskStatus: task?.status,
+        taskId: entry.taskId || task?._id?.toString(),
+        durationMs: entry.startedAt && entry.completedAt
+          ? new Date(entry.completedAt).getTime() - new Date(entry.startedAt).getTime()
+          : undefined,
+      };
+    });
+
+    // Also include tasks that may not be in stepLog (e.g., from before logging was added)
+    const loggedStepIds = new Set(stepLog.map((e: any) => e.stepId));
+    const unloggedTasks = tasks.filter(t => t.workflowStepId && !loggedStepIds.has(t.workflowStepId));
+
+    const fallbackTrace = unloggedTasks.map(task => {
+      const step = workflow?.steps?.find((s: any) => s.id === task.workflowStepId);
+      return {
+        stepId: task.workflowStepId,
+        stepName: step?.name || task.title,
+        stepType: step?.stepType || task.taskType || 'unknown',
+        taskId: task._id.toString(),
+        taskStatus: task.status,
+        status: task.status === 'completed' ? 'completed'
+          : task.status === 'failed' ? 'failed'
+          : task.status === 'in_progress' ? 'started'
+          : 'started',
+        startedAt: task.createdAt,
+        completedAt: ['completed', 'failed'].includes(task.status) ? task.updatedAt : undefined,
+        durationMs: ['completed', 'failed'].includes(task.status) && task.createdAt && task.updatedAt
+          ? new Date(task.updatedAt).getTime() - new Date(task.createdAt).getTime()
+          : undefined,
+        outputSummary: task.stepOutput?.data
+          ? (JSON.stringify(task.stepOutput.data).length > 2048
+            ? { _truncated: true, keys: Object.keys(task.stepOutput.data) }
+            : task.stepOutput.data)
+          : undefined,
+        error: task.metadata?.error || (task.status === 'failed' ? `Task "${task.title}" failed` : undefined),
+      };
+    });
+
+    const fullTrace = [...enrichedTrace, ...fallbackTrace];
+
+    res.json({
+      data: {
+        runId: id,
+        workflowName: workflow?.name || 'Unknown',
+        status: run.status,
+        error: run.error,
+        failedStepId: run.failedStepId,
+        inputPayload: run.inputPayload,
+        outputPayload: run.outputPayload,
+        startedAt: run.startedAt || run.createdAt,
+        completedAt: run.completedAt,
+        durationMs: run.completedAt && (run.startedAt || run.createdAt)
+          ? new Date(run.completedAt).getTime() - new Date(run.startedAt || run.createdAt).getTime()
+          : undefined,
+        trace: fullTrace,
+        totalSteps: workflow?.steps?.length || 0,
+        completedStepIds: run.completedStepIds || [],
+        currentStepIds: run.currentStepIds || [],
+      },
+    });
+  } catch (error) {
+    console.error('[WorkflowRuns] Trace error:', error);
+    res.status(500).json({ error: 'Failed to get execution trace' });
+  }
+});
+
+// ============================================================================
 // Get Child Tasks for a Workflow Run Task (lazy loading)
 // GET /api/workflow-runs/:id/tasks/:taskId/children
 // ============================================================================

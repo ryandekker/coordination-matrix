@@ -1576,4 +1576,93 @@ if (versions.length > 0) {
   db.document_versions.insertMany(versions);
 }
 
+// ============================================================================
+// CAPABILITY DOCUMENTS - On-demand documentation for daemon agents
+//
+// Source of truth: docs/capabilities/*.md
+// These seed entries provide minimal content for local development.
+// Run `node scripts/migrate-capabilities.mjs` to deploy full content
+// from the codebase files to any environment.
+// ============================================================================
+
+const capabilityDocuments = [
+  {
+    title: 'Ask Questions',
+    capabilityId: 'ask-questions',
+    capabilityComplexity: 1,
+    type: 'capability',
+    status: 'approved',
+    tags: ['capability', 'questions', 'human-input'],
+    summary: 'Ask structured questions to humans when you need input to proceed.',
+    content: '# Ask Questions\n\nUse `nextAction: "ASK"` with a `questions` array to ask humans for input.\nSupported types: text, choice, multiselect, confirm, number.\n\nRun migrate-capabilities.mjs for full documentation.',
+    version: 1,
+    createdById: null,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  },
+  {
+    title: 'Document Operations',
+    capabilityId: 'document-operations',
+    capabilityComplexity: 2,
+    type: 'capability',
+    status: 'approved',
+    tags: ['capability', 'documents', 'storage'],
+    summary: 'Create, update, and search documents in the document store.',
+    content: '# Document Operations\n\nInclude a `documentOperations` array in your response.\nSupported actions: create, update, search.\n\nRun migrate-capabilities.mjs for full documentation.',
+    version: 1,
+    createdById: null,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  },
+  {
+    title: 'Delegation Patterns',
+    capabilityId: 'delegation-patterns',
+    capabilityComplexity: 3,
+    type: 'capability',
+    status: 'approved',
+    tags: ['capability', 'delegation', 'advanced', 'escalation'],
+    summary: 'Patterns for task continuation, escalation, and workflow recommendations.',
+    content: '# Delegation Patterns\n\nActions: COMPLETE, CONTINUE (follow-up task), ESCALATE (human review), HOLD (wait).\nIn workflows, follow the workflow structure. Ad-hoc tasks have more autonomy.\n\nRun migrate-capabilities.mjs for full documentation.',
+    version: 1,
+    createdById: null,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  },
+  {
+    title: 'Create Workflow',
+    capabilityId: 'create-workflow',
+    capabilityComplexity: 3,
+    type: 'capability',
+    status: 'approved',
+    tags: ['capability', 'workflow', 'creation', 'advanced'],
+    summary: 'Create and import workflow definitions via the API.',
+    content: '# Create Workflow\n\nCreate workflows by posting JSON to the workflows API.\nStep types: trigger, agent, manual, external, webhook, decision, foreach, join, flow, code, findDocument.\n\nRun migrate-capabilities.mjs for full documentation.',
+    version: 1,
+    createdById: null,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  }
+];
+
+db.documents.insertMany(capabilityDocuments);
+
+// Create version records for capability documents
+const insertedCapDocs = db.documents.find({ type: 'capability' }).toArray();
+const capVersions = insertedCapDocs.map(doc => ({
+  documentId: doc._id,
+  version: 1,
+  title: doc.title,
+  content: doc.content,
+  summary: doc.summary,
+  changeDescription: 'Initial version',
+  modifiedById: null,
+  modifiedAt: doc.createdAt
+}));
+
+if (capVersions.length > 0) {
+  db.document_versions.insertMany(capVersions);
+}
+
+print('Capability documents inserted: ' + capabilityDocuments.length);
+
 print('Seed data inserted successfully!');

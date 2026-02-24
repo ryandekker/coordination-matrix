@@ -60,6 +60,7 @@ const TYPE_LABELS: Record<DocumentType, string> = {
   output: 'Output',
   custom: 'Custom',
   'workflow-prompt': 'Workflow Prompt',
+  capability: 'Capability',
 }
 
 interface AttachedDocumentsProps {

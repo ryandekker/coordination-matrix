@@ -42,7 +42,7 @@ This starts MongoDB (Docker), backend, and frontend with hot reload. First time 
 
 **Key commands:**
 - `npm run dev` - Start everything with hot reload
-- `npm run db:reset` - Reset database (clears data, re-seeds)
+- `npm run db:migrate` - Run pending database migrations
 - `npm run docker:up` - Full Docker mode (production-like)
 
 See [DEVELOPMENT.md](./DEVELOPMENT.md) for full details.
@@ -76,7 +76,7 @@ coordination-matrix/
 After making changes:
 1. Backend changes auto-reload via `tsx watch`
 2. Frontend changes auto-reload via Next.js fast refresh
-3. For database schema changes, run `npm run db:reset`
+3. For database schema changes, write a migration in `backend/src/migrations/` and run `npm run db:migrate`
 
 **For API testing (preferred method):** Use the CLI tool rather than the web UI, as the web UI requires authentication setup. The CLI stores credentials in `~/.matrix-cli.json`:
 
@@ -90,6 +90,38 @@ npm run cli workflows --brief
 # List tasks
 npm run cli tasks --status pending --brief
 ```
+
+## Post-Agent Validation
+
+After completing any code changes, **always run the validation suite before committing**:
+
+```bash
+# Default: check changed files (typecheck, lint, test, audit)
+npm run check
+
+# Quick: skip tests (typecheck, lint, audit only)
+npm run check:quick
+
+# Full: all files, all steps including build
+npm run check:full
+
+# Auto-fix lint issues
+npm run check:fix
+```
+
+Fix any reported errors before committing. The `check` script runs:
+1. **Git Status** - Identifies changed files
+2. **TypeScript** - `tsc --noEmit` type checking
+3. **Linting** - ESLint for backend and frontend
+4. **Tests** - Vitest unit tests
+5. **Build** - Full build verification (only with `check:full`)
+6. **Audit** - Checks for debug console.logs, TODOs, merge conflicts, sensitive files
+
+**Rules enforced by hooks:**
+- Do NOT use `--no-verify` with git commit
+- Do NOT disable ESLint rules or use `@ts-ignore` to work around errors
+- Do NOT set `NEXT_DISABLE_ESLINT=true` or similar environment bypasses
+- Fix the root cause of lint/type errors instead of suppressing them
 
 ## API Documentation
 
@@ -175,9 +207,13 @@ See `./scripts/matrix-cli.mjs --help` for all commands.
 2. Custom components go in `frontend/src/components/`
 
 **Modify database schema:**
-1. Update `mongo-init/01-init-db.js` for schema validation
-2. Update seed data in `mongo-init/02-seed-data.js` if needed
-3. Run `npm run db:reset` to apply
+1. Create a migration file in `backend/src/migrations/` (see existing ones for pattern)
+2. Register it in `backend/src/migrations/index.ts`
+3. Run `npm run db:migrate` to apply
+4. Also update `mongo-init/01-init-db.js` so fresh installs have the schema
+
+> **Do NOT run `npm run db:reset`** — it destroys all data and requires human confirmation.
+> Use `npm run db:migrate` for all schema changes. Migrations are non-destructive and required for production.
 
 ## Task Daemon
 
@@ -265,7 +301,62 @@ jobs:
     description: Complex reasoning tasks
     viewId: <saved-view-id>
     exec: "claude --model opus"
+
+  # Job with MCP server access
+  with-mcp:
+    description: Agent with external tools via MCP
+    viewId: <saved-view-id>
+    exec: "claude --model claude-sonnet-4-20250514"
+    mcpServers:
+      github:
+        type: http
+        url: https://api.github.com/mcp
+        headers:
+          Authorization: "Bearer ${GITHUB_TOKEN}"
+    strictMcpConfig: true  # Only use these MCP servers
 ```
+
+### Resilience Features
+
+The daemon includes several resilience mechanisms to recover from failures:
+
+- **Exponential Backoff**: API failures trigger increasing delays (2s → 5min max) with jitter
+- **Circuit Breaker**: After 5 consecutive API failures, blocks requests for 60s to let the API recover
+- **Task Update Retries**: Failed task updates retry up to 3 times with backoff
+- **Health Check**: Verifies API connectivity before starting the main loop
+- **Max Failure Threshold**: Exits after 20 consecutive API failures for process manager restart
+- **Clean Exit on Errors**: Unhandled exceptions trigger exit for clean restart by systemd/pm2
+
+**For long-running production deployments**, use a process manager (systemd, pm2, supervisord) that will automatically restart the daemon if it exits.
+
+### Running with PM2 (Recommended for Production)
+
+PM2 provides automatic restarts, logging, and monitoring. An ecosystem config is included:
+
+```bash
+# Install pm2 globally (one time)
+npm install -g pm2
+
+# Start all enabled daemon jobs
+pm2 start scripts/ecosystem.config.cjs
+
+# Common pm2 commands
+pm2 list                          # Show all running processes
+pm2 logs                          # Tail all logs
+pm2 logs daemon-claude-haiku      # Tail specific job
+pm2 restart all                   # Restart all daemons
+pm2 stop all                      # Stop all
+pm2 delete all                    # Remove from pm2
+
+# Make daemons survive reboot
+pm2 save                          # Save current process list
+pm2 startup                       # Generate OS startup script
+```
+
+The ecosystem config reads from `daemon-jobs.yaml` and creates a PM2 process for each enabled job with:
+- Automatic restart on crash (with exponential backoff)
+- Memory limit (500MB) with auto-restart
+- Separate log files in `logs/` directory
 
 ### Two Daemon Types
 

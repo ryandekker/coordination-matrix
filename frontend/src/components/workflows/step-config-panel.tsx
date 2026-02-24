@@ -499,19 +499,28 @@ function FindDocumentConfig({
         <>
           <div className="space-y-1">
             <label className="text-sm font-medium">Search Prompt</label>
-            <TokenBrowser
-              workflowId={workflowId}
-              previousSteps={previousSteps}
-              currentStepIndex={stepIndex}
-              loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
-              onSelectToken={() => {}}
-              variant="text"
-              fieldLabel="Search Query"
-              fieldValue={step.findDocumentConfig?.searchPrompt || ''}
-              onFieldValueChange={(value) => onUpdate({
-                findDocumentConfig: { ...step.findDocumentConfig, searchPrompt: value }
-              })}
-            />
+            <div className="flex gap-2">
+              <Input
+                value={step.findDocumentConfig?.searchPrompt || ''}
+                onChange={(e) => onUpdate({
+                  findDocumentConfig: { ...step.findDocumentConfig, searchPrompt: e.target.value }
+                })}
+                placeholder="e.g., {{output.result.search_query}}"
+                className="font-mono text-sm h-8 flex-1"
+              />
+              <TokenBrowser
+                workflowId={workflowId}
+                previousSteps={previousSteps}
+                currentStepIndex={stepIndex}
+                loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
+                onSelectToken={() => {}}
+                fieldLabel="Search Query"
+                fieldValue={step.findDocumentConfig?.searchPrompt || ''}
+                onFieldValueChange={(value) => onUpdate({
+                  findDocumentConfig: { ...step.findDocumentConfig, searchPrompt: value }
+                })}
+              />
+            </div>
             <p className="text-xs text-muted-foreground">
               Use template variables like {`{{input.field}}`} to build dynamic search queries from previous step data.
             </p>

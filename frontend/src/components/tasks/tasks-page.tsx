@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { Plus, ChevronLeft, Workflow } from 'lucide-react'
 import { TaskDataTable } from './task-data-table'
@@ -13,6 +13,7 @@ import { useTasks, useTask, useLookups, useFieldConfigs, useViews, useViewFolder
 import { useEventStream } from '@/hooks/use-event-stream'
 import { useGroupContext } from '@/lib/group-context'
 import { Task, View, FieldConfig } from '@/lib/api'
+import { toast } from 'sonner'
 
 // Fallback field configs when API returns empty or fails - ensures basic functionality
 const FALLBACK_FIELD_CONFIGS: FieldConfig[] = [
@@ -112,6 +113,7 @@ export function TasksPage() {
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState<string[]>([])
   const [expandAllEnabled, setExpandAllEnabled] = useState(false)
+  const [nestWorkflowsEnabled, setNestWorkflowsEnabled] = useState(false)
 
   // Fetch task from URL if taskId is provided
   const { data: taskFromUrl } = useTask(taskIdFromUrl)
@@ -156,8 +158,13 @@ export function TasksPage() {
       }
       return [parentWithChildren]
     }
+    // When nest workflows is enabled, hide subflow root tasks from top-level
+    // They will appear inline under their parent flow step
+    if (nestWorkflowsEnabled) {
+      return rawTasks.filter(task => !task.metadata?.triggerTaskId)
+    }
     return rawTasks
-  }, [parentIdFromUrl, flowParentTask?.data, rawTasks])
+  }, [parentIdFromUrl, flowParentTask?.data, rawTasks, nestWorkflowsEnabled])
   const pagination = tasksData?.pagination
   const lookups = lookupsData?.data || {}
   // Use API field configs if available, otherwise fall back to defaults
@@ -172,8 +179,12 @@ export function TasksPage() {
 
   // Check if any tasks have children (for expand all button)
   const hasAnyChildren = useMemo(() => {
-    return tasks.some(t => t.children && t.children.length > 0)
-  }, [tasks])
+    return tasks.some(t =>
+      (t.children && t.children.length > 0) ||
+      ((t as Task & { childCount?: number }).childCount ?? 0) > 0 ||
+      (nestWorkflowsEnabled && t.metadata?.spawnedRootTaskId)
+    )
+  }, [tasks, nestWorkflowsEnabled])
 
   // Threshold for large lists where expand all defaults to off
   const LARGE_LIST_THRESHOLD = 50
@@ -188,9 +199,60 @@ export function TasksPage() {
     }
   }, [isLargeList])
 
+  // Estimate total descendant count from visible tasks' childCount fields
+  const EXPAND_ALL_WARNING_THRESHOLD = 100
+  const estimatedDescendants = useMemo(() => {
+    return tasks.reduce((sum, t) => {
+      const childCount = (t as Task & { childCount?: number }).childCount ?? 0
+      return sum + childCount
+    }, 0)
+  }, [tasks])
+
   const handleExpandAllChange = useCallback((enabled: boolean) => {
-    setExpandAllEnabled(enabled)
-    localStorage.setItem('taskList.expandAllPreference', String(enabled))
+    if (!enabled) {
+      setExpandAllEnabled(false)
+      localStorage.setItem('taskList.expandAllPreference', 'false')
+      return
+    }
+    // Warn if expanding would load many items
+    if (estimatedDescendants > EXPAND_ALL_WARNING_THRESHOLD) {
+      toast(`This will load ~${estimatedDescendants} child items, which may be slow.`, {
+        action: {
+          label: 'Expand anyway',
+          onClick: () => {
+            setExpandAllEnabled(true)
+            localStorage.setItem('taskList.expandAllPreference', 'true')
+          },
+        },
+        duration: 8000,
+      })
+      return
+    }
+    setExpandAllEnabled(true)
+    localStorage.setItem('taskList.expandAllPreference', 'true')
+  }, [estimatedDescendants])
+
+  // Load nest workflows preference from localStorage on mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const savedPref = localStorage.getItem('taskList.nestWorkflowsPreference')
+    if (savedPref !== null) {
+      setNestWorkflowsEnabled(savedPref === 'true')
+    }
+  }, [])
+
+  // Reset expand-all when toggling nest workflows mode (expanded rows become stale)
+  const prevNestWorkflows = useRef(nestWorkflowsEnabled)
+  useEffect(() => {
+    if (prevNestWorkflows.current !== nestWorkflowsEnabled) {
+      prevNestWorkflows.current = nestWorkflowsEnabled
+      setExpandAllEnabled(false)
+    }
+  }, [nestWorkflowsEnabled])
+
+  const handleNestWorkflowsChange = useCallback((enabled: boolean) => {
+    setNestWorkflowsEnabled(enabled)
+    localStorage.setItem('taskList.nestWorkflowsPreference', String(enabled))
   }, [])
 
   // Apply projectId filter from URL
@@ -484,6 +546,8 @@ export function TasksPage() {
         hasAnyChildren={hasAnyChildren}
         expandAllEnabled={expandAllEnabled}
         onExpandAllChange={handleExpandAllChange}
+        nestWorkflowsEnabled={nestWorkflowsEnabled}
+        onNestWorkflowsChange={handleNestWorkflowsChange}
       />
 
       <TaskDataTable
@@ -506,6 +570,7 @@ export function TasksPage() {
         onExpandAllChange={handleExpandAllChange}
         autoExpandIds={parentIdFromUrl ? [parentIdFromUrl] : undefined}
         hasActiveFilters={hasActiveFilters}
+        nestWorkflowsEnabled={nestWorkflowsEnabled}
       />
 
       <TaskModal

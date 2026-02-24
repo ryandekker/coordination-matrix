@@ -34,7 +34,8 @@ Changes to backend or frontend code will automatically reload.
 | `npm run dev:daemon` | Start the automation daemon |
 | `npm run db:start` | Start MongoDB |
 | `npm run db:stop` | Stop MongoDB |
-| `npm run db:reset` | Reset MongoDB (clears all data, re-seeds) |
+| `npm run db:reset` | Reset MongoDB (requires human confirmation, clears all data) |
+| `npm run db:migrate` | Run pending database migrations (non-destructive) |
 | `npm run db:logs` | View MongoDB logs |
 | `npm run build` | Build both backend and frontend |
 | `npm run lint` | Lint both backend and frontend |
@@ -87,13 +88,26 @@ docker compose -f docker-compose.dev.yml --profile tools up -d
 # Login: admin / admin (default)
 ```
 
+### Database Migrations (Preferred)
+
+For schema changes, use the migration system:
+
+```bash
+npm run db:migrate          # Run pending migrations
+npm run db:migrate:status   # Check migration status
+```
+
+Migrations are non-destructive and required for production deployments.
+
 ### Reset Database
 
-To clear all data and re-seed:
+To clear all data and re-seed (requires interactive confirmation):
 
 ```bash
 npm run db:reset
 ```
+
+> **Note:** This command is blocked in non-interactive environments (CI, AI agents). Use `npm run db:reset -- -y` to bypass the prompt if needed.
 
 ### Connect with MongoDB Shell
 

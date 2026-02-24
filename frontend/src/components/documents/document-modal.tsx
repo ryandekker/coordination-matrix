@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import dynamic from 'next/dynamic'
-import { Document, DocumentType, DocumentStatus } from '@/lib/api'
+import { Document, DocumentType, DocumentStatus, CapabilityComplexity } from '@/lib/api'
 import {
   useCreateDocument,
   useUpdateDocument,
@@ -56,6 +56,7 @@ const DOCUMENT_TYPES: { value: DocumentType; label: string; description: string 
   { value: 'output', label: 'Output', description: 'Agent-generated deliverables' },
   { value: 'custom', label: 'Custom', description: 'Other document types' },
   { value: 'workflow-prompt', label: 'Workflow Prompt', description: 'Reusable prompts for workflow agent steps' },
+  { value: 'capability', label: 'Capability', description: 'On-demand documentation for daemon agents' },
 ]
 
 const DOCUMENT_STATUSES: { value: DocumentStatus; label: string }[] = [
@@ -87,6 +88,9 @@ export function DocumentModal({
   const [showHistory, setShowHistory] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
+  // Capability-specific fields
+  const [capabilityId, setCapabilityId] = useState('')
+  const [capabilityComplexity, setCapabilityComplexity] = useState<CapabilityComplexity>(1)
 
   const lastSavedRef = useRef<{
     title: string
@@ -111,6 +115,8 @@ export function DocumentModal({
       setType(document.type)
       setStatus(document.status)
       setTags(document.tags?.join(', ') || '')
+      setCapabilityId(document.capabilityId || '')
+      setCapabilityComplexity(document.capabilityComplexity || 1)
       lastSavedRef.current = {
         title: document.title,
         content: document.content,
@@ -126,6 +132,8 @@ export function DocumentModal({
       setType('custom')
       setStatus('draft')
       setTags('')
+      setCapabilityId('')
+      setCapabilityComplexity(1)
       lastSavedRef.current = null
     }
     setHasChanges(false)
@@ -170,6 +178,11 @@ export function DocumentModal({
           status,
           tags: tagArray.length > 0 ? tagArray : undefined,
           groupId: currentGroupId || undefined,
+          // Capability fields (only for capability documents)
+          ...(type === 'capability' && capabilityId.trim() && {
+            capabilityId: capabilityId.trim(),
+            capabilityComplexity,
+          }),
         })
         toast.success('Document created')
         onOpenChange(false)
@@ -183,6 +196,11 @@ export function DocumentModal({
             type,
             status,
             tags: tagArray,
+            // Capability fields (only for capability documents)
+            ...(type === 'capability' && {
+              capabilityId: capabilityId.trim() || undefined,
+              capabilityComplexity,
+            }),
           },
         })
         lastSavedRef.current = { title, content, summary, type, status, tags }
@@ -357,6 +375,43 @@ export function DocumentModal({
                 {DOCUMENT_TYPES.find(t => t.value === type)?.description}
               </p>
             </div>
+
+            {/* Capability-specific fields */}
+            {type === 'capability' && (
+              <>
+                <div className="space-y-2">
+                  <Label>Capability ID</Label>
+                  <Input
+                    value={capabilityId}
+                    onChange={(e) => setCapabilityId(e.target.value)}
+                    placeholder="e.g., ask-questions"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Unique identifier agents use to request this capability
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Complexity Level</Label>
+                  <Select
+                    value={String(capabilityComplexity)}
+                    onValueChange={(v) => setCapabilityComplexity(Number(v) as CapabilityComplexity)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">1 - Basic (all agents)</SelectItem>
+                      <SelectItem value="2">2 - Intermediate (sonnet+)</SelectItem>
+                      <SelectItem value="3">3 - Advanced (opus only)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Minimum agent complexity required to access this capability
+                  </p>
+                </div>
+              </>
+            )}
 
             <div className="space-y-2">
               <Label>Status</Label>
