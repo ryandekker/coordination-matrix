@@ -154,7 +154,7 @@ usersRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) 
 usersRouter.post('/', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { email, displayName, role, isAgent, isSystem, agentPrompt, profilePicture, botColor } = req.body;
+    const { email, displayName, role, isAgent, isSystem, agentPrompt, agentComplexity, profilePicture, botColor } = req.body;
 
     if (!displayName) {
       throw createError('displayName is required', 400);
@@ -198,6 +198,12 @@ usersRouter.post('/', requireRole('admin'), async (req: Request, res: Response, 
       newUser.isAgent = true;
       if (agentPrompt) {
         newUser.agentPrompt = agentPrompt;
+      }
+      // Set agent complexity (1=basic/haiku, 2=intermediate/sonnet, 3=advanced/opus)
+      if (agentComplexity && [1, 2, 3].includes(agentComplexity)) {
+        newUser.agentComplexity = agentComplexity;
+      } else {
+        newUser.agentComplexity = 2; // Default to intermediate
       }
       // Set bot color for agent users
       if (botColor) {
@@ -254,15 +260,26 @@ usersRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     }
 
     // Handle agent-specific fields
-    // isAgent, agentPrompt, and botColor can be updated
+    // isAgent, agentPrompt, agentComplexity, and botColor can be updated
     // If isAgent is being set to false/undefined, clear agent fields
     if (updates.isAgent === false) {
       updates.agentPrompt = null;
+      updates.agentComplexity = null;
       updates.botColor = null;
     }
     // If isAgent is being set to true, clear human-specific fields
     if (updates.isAgent === true) {
       updates.profilePicture = null;
+      // Set default complexity if not provided
+      if (!updates.agentComplexity) {
+        updates.agentComplexity = 2; // Default to intermediate
+      }
+    }
+    // Validate agentComplexity if provided
+    if (updates.agentComplexity !== undefined && updates.agentComplexity !== null) {
+      if (![1, 2, 3].includes(updates.agentComplexity)) {
+        throw createError('agentComplexity must be 1, 2, or 3', 400);
+      }
     }
 
     const result = await db.collection<User>('users').findOneAndUpdate(

@@ -281,9 +281,8 @@ Response schema:
   "status": "SUCCESS" | "PARTIAL" | "BLOCKED" | "FAILED",
   "summary": "1-2 sentence summary of what was done",
   "output": { /* Structured result object - schema defined by task/workflow */ },
-  "nextAction": "COMPLETE" | "CONTINUE" | "ESCALATE" | "HOLD" | "ASK",
-  "nextActionReason": "Optional: reason for CONTINUE/ESCALATE/HOLD/ASK",
-  "questions": [ /* Only for nextAction: ASK - questions for human to answer */ ],
+  "nextAction": "COMPLETE" | "CONTINUE" | "ESCALATE" | "HOLD" | "ASK" | "REQUEST_DOCS",
+  "nextActionReason": "Optional: reason for action",
   "metadata": {
     "confidence": 0.0-1.0,
     "suggestedTags": [],
@@ -291,68 +290,40 @@ Response schema:
   }
 }
 
-## Asking Questions (nextAction: ASK)
+## Available Actions
+- COMPLETE: Task finished successfully
+- CONTINUE: Task done, create follow-up task
+- ESCALATE: Need human intervention
+- HOLD: Pause task
+- ASK: Request human input via questions (request 'ask-questions' capability first)
+- REQUEST_DOCS: Request capability documentation before proceeding
 
-When you need human input to proceed, use nextAction: "ASK" and include a "questions" array.
-The task will be placed on hold and the human can answer questions through the UI.
-
-Questions schema:
+## Requesting Capabilities
+Before using advanced features (like ASK), request the documentation:
 {
-  "questions": [
-    {
-      "id": "unique-question-id",
-      "type": "text" | "choice" | "multiselect" | "confirm" | "number",
-      "question": "The question to ask",
-      "description": "Optional longer explanation",
-      "required": true | false,
-      "options": [ /* For choice/multiselect types */
-        { "value": "opt1", "label": "Option 1", "description": "Optional description" }
-      ],
-      "placeholder": "Optional placeholder text",
-      "defaultValue": "Optional default",
-      "validation": { /* Optional */
-        "min": 0, "max": 100,           /* For number type */
-        "minLength": 1, "maxLength": 500 /* For text type */
-      }
-    }
-  ],
-  "context": "Optional explanation of why you need this information"
-}
-
-Example - asking for clarification:
-{
-  "status": "BLOCKED",
-  "summary": "Need clarification on deployment target",
-  "output": { "partialWork": "Prepared deployment configs" },
-  "nextAction": "ASK",
-  "nextActionReason": "Cannot proceed without knowing the deployment environment",
-  "questions": [
-    {
-      "id": "deploy-env",
-      "type": "choice",
-      "question": "Which environment should this be deployed to?",
-      "required": true,
-      "options": [
-        { "value": "staging", "label": "Staging", "description": "Test environment" },
-        { "value": "production", "label": "Production", "description": "Live environment" }
-      ]
-    },
-    {
-      "id": "notify-team",
-      "type": "confirm",
-      "question": "Should I notify the team after deployment?",
-      "defaultValue": true
-    }
-  ],
-  "context": "The task mentions deployment but doesn't specify the target environment."
+  "status": "PARTIAL",
+  "summary": "Need capability documentation",
+  "output": {},
+  "nextAction": "REQUEST_DOCS",
+  "requestedCapabilities": ["ask-questions"]
 }
 
 Rules:
-- status: SUCCESS if task fully completed, PARTIAL if partially done, BLOCKED if cannot proceed, FAILED if error
-- nextAction: COMPLETE to finish, CONTINUE to spawn follow-up, ESCALATE for human help, HOLD to pause, ASK to request human input
-- output: A structured JSON object containing your work result. Follow the schema specified in the workflow/task instructions.
-- questions: Only include when nextAction is ASK. Task will resume after human answers.
+- status: SUCCESS if fully completed, PARTIAL if partially done, BLOCKED if cannot proceed, FAILED if error
+- output: A structured JSON object containing your work result
 - Respond with ONLY the JSON object, nothing else`;
+
+// Capability manifest template - injected based on agent complexity
+function getCapabilityManifest(capabilities) {
+  if (!capabilities || capabilities.length === 0) {
+    return '';
+  }
+  const lines = capabilities.map(c => `- ${c.id}: ${c.summary}`);
+  return `
+## Available Capabilities
+Request documentation with REQUEST_DOCS before using these:
+${lines.join('\n')}`;
+}
 
 // ============================================================================
 // PID File Management
@@ -1092,10 +1063,52 @@ async function fetchWorkflow(config, workflowId) {
   }
 }
 
+// Fetch capability manifest (list of available capabilities for agent's complexity level)
+async function fetchCapabilityManifest(config, agentComplexity = 2) {
+  try {
+    const response = await fetchWithTimeout(
+      `${config.apiUrl}/documents/capabilities?complexity=${agentComplexity}`,
+      { headers: getHeaders(config) }
+    );
+    if (!response.ok) {
+      log.warn(`Failed to fetch capabilities: ${response.status}`);
+      return null;
+    }
+    return await response.json();
+  } catch (error) {
+    log.warn('Error fetching capabilities:', error.message);
+    return null;
+  }
+}
+
+// Fetch specific capability documents by ID
+async function fetchCapabilityDocs(config, capabilityIds, agentComplexity = 2) {
+  if (!capabilityIds || capabilityIds.length === 0) return [];
+
+  try {
+    const response = await fetchWithTimeout(
+      `${config.apiUrl}/documents/capabilities/batch`,
+      {
+        method: 'POST',
+        headers: getHeaders(config),
+        body: JSON.stringify({ capabilityIds, complexity: agentComplexity }),
+      }
+    );
+    if (!response.ok) {
+      log.warn(`Failed to fetch capability docs: ${response.status}`);
+      return [];
+    }
+    const result = await response.json();
+    return result.capabilities || [];
+  } catch (error) {
+    log.warn('Error fetching capability docs:', error.message);
+    return [];
+  }
+}
+
 async function updateTask(config, taskId, updates, retryOptions = {}) {
   const maxRetries = retryOptions.maxRetries ?? 3;
   const retryDelay = retryOptions.retryDelay ?? 2000;
-
   if (config.noUpdate) {
     console.log(`[Skip update] Would update task ${taskId}:`, updates);
     return true;
@@ -1384,11 +1397,44 @@ async function processDocumentOperations(config, taskId, documentOperations) {
 // Prompt Assembly
 // ============================================================================
 
-function assemblePrompt(task, agent, workflowStep) {
+/**
+ * Assemble the prompt for the daemon agent
+ * @param {Object} task - The task to process
+ * @param {Object} agent - The agent (user) assigned to the task
+ * @param {Object} workflowStep - The workflow step configuration
+ * @param {Object} options - Additional options
+ * @param {Array} options.capabilityManifest - List of available capabilities
+ * @param {Array} options.loadedCapabilities - Full capability documents to include
+ */
+function assemblePrompt(task, agent, workflowStep, options = {}) {
+  const { capabilityManifest, loadedCapabilities } = options;
   const sections = [];
 
   // 1. Base daemon prompt (ensures JSON output)
   sections.push(BASE_DAEMON_PROMPT);
+
+  // 1.5. Capability manifest (what's available)
+  if (capabilityManifest && capabilityManifest.length > 0) {
+    sections.push(getCapabilityManifest(capabilityManifest));
+  }
+
+  // 1.6. Loaded capability documentation (requested via REQUEST_DOCS)
+  if (loadedCapabilities && loadedCapabilities.length > 0) {
+    for (const cap of loadedCapabilities) {
+      sections.push(`## Capability: ${cap.title}\n${cap.content}`);
+    }
+  }
+
+  // 1.7. Workflow context awareness (injected for all tasks)
+  const isInWorkflow = !!task.workflowStage;
+  if (isInWorkflow) {
+    sections.push(`## Workflow Context
+You are executing step "${task.workflowStage}" within a workflow.
+- Complete your assigned step and use COMPLETE when done
+- The workflow engine will handle what happens next
+- Use ESCALATE if you encounter something unexpected
+- Do NOT spawn subtasks outside the workflow design`);
+  }
 
   // 2. Agent prompt (persona, capabilities)
   if (agent?.isAgent && agent?.agentPrompt) {
@@ -1460,7 +1506,7 @@ Your response MUST be a JSON object with this exact structure:
   "status": "SUCCESS" | "PARTIAL" | "BLOCKED" | "FAILED",
   "summary": "Brief summary of what was done",
   "output": { /* Your task-specific result goes here */ },
-  "nextAction": "COMPLETE" | "CONTINUE" | "ESCALATE" | "HOLD"
+  "nextAction": "COMPLETE" | "CONTINUE" | "ESCALATE" | "HOLD" | "ASK" | "REQUEST_DOCS"
 }
 
 If the task instructions specify an output format, that format goes INSIDE the "output" field.
@@ -1508,6 +1554,7 @@ function parseResponse(responseText) {
         documentOperations: parsed.documentOperations || [],
         questions: parsed.questions || null,
         questionsContext: parsed.context || null,
+        requestedCapabilities: parsed.requestedCapabilities || null,
       },
     };
   } catch (e) {
@@ -2242,8 +2289,26 @@ async function processTask(config, task) {
 
   // Fetch agent (assignee) if exists
   const agent = await fetchUser(config, task.assigneeId);
+  const agentComplexity = agent?.agentComplexity || 2; // Default to intermediate
   if (agent?.isAgent) {
-    log.debug(`Using agent: ${agent.displayName}`);
+    log.debug(`Using agent: ${agent.displayName} (complexity: ${agentComplexity})`);
+  }
+
+  // Fetch capability manifest based on agent complexity
+  let capabilityManifest = [];
+  const capManifestResult = await fetchCapabilityManifest(config, agentComplexity);
+  if (capManifestResult?.capabilities) {
+    capabilityManifest = capManifestResult.capabilities;
+    log.debug(`Loaded ${capabilityManifest.length} capabilities for complexity level ${agentComplexity}`);
+  }
+
+  // Check if there are pre-loaded capabilities from a previous REQUEST_DOCS action
+  let loadedCapabilities = [];
+  const previousRequestedCaps = task.metadata?.requestedCapabilities;
+  if (previousRequestedCaps && Array.isArray(previousRequestedCaps) && previousRequestedCaps.length > 0) {
+    log.info(`Loading ${previousRequestedCaps.length} previously requested capabilities...`);
+    loadedCapabilities = await fetchCapabilityDocs(config, previousRequestedCaps, agentComplexity);
+    log.debug(`Loaded capability docs: ${loadedCapabilities.map(c => c.id).join(', ')}`);
   }
 
   // Fetch workflow and step if exists
@@ -2379,8 +2444,11 @@ async function processTask(config, task) {
     console.log(`[DEBUG] Payload size: ${Math.round(payloadSize / 1024)}KB (limit: ${Math.round(config.maxPayloadSize / 1024)}KB)`);
   }
 
-  // Assemble the prompt
-  const prompt = assemblePrompt(task, agent, workflowStep);
+  // Assemble the prompt with capability information
+  const prompt = assemblePrompt(task, agent, workflowStep, {
+    capabilityManifest,
+    loadedCapabilities,
+  });
 
   // Build exec command with MCP config if configured
   const { cmd: execCmd, mcpTempFile } = buildExecCommand(config);
@@ -2559,6 +2627,36 @@ async function processTask(config, task) {
   console.log(`  Next Action: ${parsedResponse.data.nextAction}`);
   console.log(`  Summary: ${parsedResponse.data.summary}`);
 
+  // Handle REQUEST_DOCS action - store requested capabilities and re-queue task
+  if (parsedResponse.data.nextAction === 'REQUEST_DOCS') {
+    const requestedCaps = parsedResponse.data.requestedCapabilities || [];
+    if (requestedCaps.length === 0) {
+      log.warn('REQUEST_DOCS action but no requestedCapabilities provided');
+    } else {
+      log.info(`Agent requested capabilities: ${requestedCaps.join(', ')}`);
+    }
+
+    // Store requested capabilities in task metadata and reset to pending
+    // The next daemon run will load these capabilities and include them in the prompt
+    await updateTask(config, task._id, {
+      status: 'pending',
+      metadata: {
+        ...(task.metadata || {}),
+        requestedCapabilities: requestedCaps,
+        lastRequestedAt: new Date().toISOString(),
+      },
+    });
+
+    await addTaskComment(
+      config,
+      task._id,
+      `Daemon: Agent requested capability documentation: ${requestedCaps.join(', ')}. Task re-queued with loaded capabilities.`
+    );
+
+    // Task will be picked up again with the capabilities loaded
+    return;
+  }
+
   // Determine task status based on nextAction
   let newStatus;
   switch (parsedResponse.data.nextAction) {
@@ -2639,10 +2737,13 @@ async function processTask(config, task) {
     log.info('Document operations completed', { results: docResults.length });
   }
 
-  // Merge with existing metadata
+  // Merge with existing metadata, clearing temporary fields
   const updatedMetadata = {
     ...(task.metadata || {}),
     output,
+    // Clear requestedCapabilities after task completion (they've been used)
+    requestedCapabilities: undefined,
+    lastRequestedAt: undefined,
   };
 
   // Only unassign on failures (ESCALATE/HOLD), otherwise keep current assignee
