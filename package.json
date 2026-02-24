@@ -17,7 +17,7 @@
     "dev:daemon": "cd backend && npm run daemon:watch",
     "db:start": "docker compose -f docker-compose.dev.yml up -d",
     "db:stop": "docker compose -f docker-compose.dev.yml down",
-    "db:reset": "docker compose -f docker-compose.dev.yml down -v && docker compose -f docker-compose.dev.yml up -d",
+    "db:reset": "node scripts/db-reset.mjs",
     "db:logs": "docker compose -f docker-compose.dev.yml logs -f mongodb",
     "db:migrate": "cd backend && npm run db:migrate",
     "db:migrate:status": "cd backend && npm run db:migrate:status",

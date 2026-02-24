@@ -42,7 +42,7 @@ This starts MongoDB (Docker), backend, and frontend with hot reload. First time 
 
 **Key commands:**
 - `npm run dev` - Start everything with hot reload
-- `npm run db:reset` - Reset database (clears data, re-seeds)
+- `npm run db:migrate` - Run pending database migrations
 - `npm run docker:up` - Full Docker mode (production-like)
 
 See [DEVELOPMENT.md](./DEVELOPMENT.md) for full details.
@@ -76,7 +76,7 @@ coordination-matrix/
 After making changes:
 1. Backend changes auto-reload via `tsx watch`
 2. Frontend changes auto-reload via Next.js fast refresh
-3. For database schema changes, run `npm run db:reset`
+3. For database schema changes, write a migration in `backend/src/migrations/` and run `npm run db:migrate`
 
 **For API testing (preferred method):** Use the CLI tool rather than the web UI, as the web UI requires authentication setup. The CLI stores credentials in `~/.matrix-cli.json`:
 
@@ -207,9 +207,13 @@ See `./scripts/matrix-cli.mjs --help` for all commands.
 2. Custom components go in `frontend/src/components/`
 
 **Modify database schema:**
-1. Update `mongo-init/01-init-db.js` for schema validation
-2. Update seed data in `mongo-init/02-seed-data.js` if needed
-3. Run `npm run db:reset` to apply
+1. Create a migration file in `backend/src/migrations/` (see existing ones for pattern)
+2. Register it in `backend/src/migrations/index.ts`
+3. Run `npm run db:migrate` to apply
+4. Also update `mongo-init/01-init-db.js` so fresh installs have the schema
+
+> **Do NOT run `npm run db:reset`** — it destroys all data and requires human confirmation.
+> Use `npm run db:migrate` for all schema changes. Migrations are non-destructive and required for production.
 
 ## Task Daemon
 
