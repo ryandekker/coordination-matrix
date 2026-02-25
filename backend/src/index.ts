@@ -49,6 +49,7 @@ import { variablePackagesRouter } from './routes/variable-packages.js';
 import groupsRouter from './routes/groups.js';
 import projectsRouter from './routes/projects.js';
 import { conversationRecordsRouter } from './routes/conversation-records.js';
+import { dashboardRouter } from './routes/dashboard.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { requireAuth } from './middleware/auth.js';
 import { requireScope, SCOPES } from './middleware/authorize.js';
@@ -235,6 +236,9 @@ app.use('/api', generalApiRateLimiter);
 // Protected API Routes - require authentication and scope checks for API keys
 // Note: JWT-authenticated users bypass scope checks (they use role-based access)
 // API key users must have appropriate scopes
+
+// Dashboard - kanban board and human task views
+app.use('/api/dashboard', requireAuth, requireScope(SCOPES.TASKS_READ), dashboardRouter);
 
 // Tasks - most daemon operations use this
 app.use('/api/tasks', requireAuth, requireScope(SCOPES.TASKS_READ), tasksRouter);

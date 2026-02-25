@@ -24,7 +24,7 @@ export function resolveUserPlaceholder(value: string, currentUserId?: string): s
 // The req parameter is optional for backward compatibility, but required for group filtering
 export function buildFilter(query: Record<string, unknown>, currentUserId?: string, req?: Request): Filter<Task> {
   const filter: Filter<Task> = {};
-  const { search, filters, parentId, rootOnly, status, urgency, assigneeId, tags, includeArchived, workflowId, workflowRunId, workflowStage, hasWorkflow, groupId, projectId } = query;
+  const { search, filters, parentId, rootOnly, status, urgency, assigneeId, tags, includeArchived, workflowId, workflowRunId, workflowStage, hasWorkflow, groupId, projectId, creatorType } = query;
 
   // By default, exclude archived tasks unless explicitly requested
   const shouldIncludeArchived = includeArchived === 'true' || includeArchived === true;
@@ -177,6 +177,15 @@ export function buildFilter(query: Record<string, unknown>, currentUserId?: stri
       filter.projectId = { $in: projectId.map((id) => toObjectId(id as string)) };
     } else {
       filter.projectId = toObjectId(projectId as string);
+    }
+  }
+
+  // Creator type filter
+  if (creatorType) {
+    if (Array.isArray(creatorType)) {
+      (filter as Record<string, unknown>).creatorType = { $in: creatorType };
+    } else {
+      (filter as Record<string, unknown>).creatorType = creatorType as string;
     }
   }
 

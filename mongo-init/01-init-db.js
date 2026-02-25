@@ -79,6 +79,11 @@ db.createCollection('tasks', {
           bsonType: ['objectId', 'null'],
           description: 'Creator user ID'
         },
+        creatorType: {
+          bsonType: 'string',
+          enum: ['human', 'agent', 'system'],
+          description: 'Type of creator: human, agent, or system'
+        },
         // Tags
         tags: {
           bsonType: 'array',
@@ -183,6 +188,9 @@ db.tasks.createIndex({ createdAt: -1 });
 db.tasks.createIndex({ tags: 1 });
 db.tasks.createIndex({ externalId: 1 });
 db.tasks.createIndex({ spawnedWorkflowRunId: 1 });  // For finding tasks that spawned workflows
+db.tasks.createIndex({ createdById: 1 });
+db.tasks.createIndex({ creatorType: 1 });
+db.tasks.createIndex({ creatorType: 1, status: 1, assigneeId: 1 });  // For dashboard/kanban queries
 db.tasks.createIndex({ title: 'text', summary: 'text' });
 // Group and project indexes for access control
 db.tasks.createIndex({ groupId: 1, status: 1, createdAt: -1 });

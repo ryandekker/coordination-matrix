@@ -704,6 +704,9 @@ export interface Task {
   assigneeId?: ObjectId | null;
   createdById?: ObjectId | null;
 
+  // Creator type - denormalized from the creator user's flags for efficient filtering
+  creatorType?: 'human' | 'agent' | 'system';
+
   // Tags
   tags?: string[];
 

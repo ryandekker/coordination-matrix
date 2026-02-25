@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useCallback } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { cn } from '@/lib/utils'
@@ -35,7 +36,8 @@ import {
   Bot,
 } from 'lucide-react'
 import { Logo } from '@/components/ui/logo'
-import { View, ViewFolder } from '@/lib/api'
+import { Badge } from '@/components/ui/badge'
+import { View, ViewFolder, authFetch } from '@/lib/api'
 import { useViews, useDeleteView, useViewFolders, useCreateViewFolder, useUpdateViewFolder, useDeleteViewFolder, useUpdateView } from '@/hooks/use-tasks'
 import { useAuth } from '@/lib/auth'
 import { useGroupContext } from '@/lib/group-context'
@@ -271,6 +273,20 @@ export function Sidebar() {
   const deleteFolderMutation = useDeleteViewFolder()
   const updateViewMutation = useUpdateView()
 
+  // Escalation badge: count of on_hold tasks with 'escalated' tag
+  const { data: escalationData } = useQuery({
+    queryKey: ['escalation-count'],
+    queryFn: async () => {
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
+      const res = await authFetch(`${API_BASE}/tasks?status=on_hold&tags=escalated&limit=1`)
+      if (!res.ok) return { pagination: { total: 0 } }
+      return res.json()
+    },
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+  })
+  const escalationCount = escalationData?.pagination?.total || 0
+
   // Filter out the default "All Tasks" view since we have that as a static nav item
   const allViews = useMemo(() =>
     (viewsData?.data || []).filter((v: View) => v.name !== 'All Tasks'),
@@ -401,7 +417,12 @@ export function Sidebar() {
                 )}
               >
                 <item.icon className="h-4 w-4" />
-                {item.name}
+                <span className="flex-1">{item.name}</span>
+                {item.name === 'Dashboard' && escalationCount > 0 && (
+                  <Badge variant="destructive" className="h-5 min-w-[20px] px-1 text-[10px] font-semibold">
+                    {escalationCount}
+                  </Badge>
+                )}
               </Link>
             )
           })}

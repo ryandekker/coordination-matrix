@@ -29,6 +29,8 @@ import { migration as addWorkflowRequestsCollection } from './2026-01-14-002-add
 import { migration as addSystemUser } from './2026-01-21-001-add-system-user.js';
 import { migration as addCodeTaskType } from './2026-01-23-001-add-code-task-type.js';
 import { migration as addHumanInstructionField } from './2026-02-25-001-add-human-instruction-field.js';
+import { migration as addCreatorTypeAndProjectColumn } from './2026-02-25-002-add-creator-type-and-project-column.js';
+import { migration as addSystemSavedViews } from './2026-02-25-003-add-system-saved-views.js';
 
 // Register all migrations in order
 export const migrations: Migration[] = [
@@ -53,4 +55,6 @@ export const migrations: Migration[] = [
   addSystemUser,
   addCodeTaskType,
   addHumanInstructionField,
+  addCreatorTypeAndProjectColumn,
+  addSystemSavedViews,
 ];
