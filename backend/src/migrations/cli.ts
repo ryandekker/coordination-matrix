@@ -12,14 +12,24 @@ import { MongoClient } from 'mongodb';
 import { MigrationRunner } from './runner.js';
 import { migrations } from './index.js';
 
-// Default to authenticated local connection using standard dev credentials
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://admin:adminpassword@localhost:27017';
+// Migrations may need admin privileges (createCollection, collMod, index creation).
+// Prefer MONGODB_ADMIN_URI when available (e.g. on Render), fall back to MONGODB_URI.
+const MONGODB_URI = process.env.MONGODB_ADMIN_URI || process.env.MONGODB_URI || 'mongodb://admin:adminpassword@localhost:27017';
 const DB_NAME = process.env.DB_NAME || 'coordination_matrix';
+
+function maskUri(uri: string): string {
+  try {
+    return uri.replace(/:\/\/([^:]+):([^@]+)@/, '://$1:****@');
+  } catch {
+    return '(unable to parse)';
+  }
+}
 
 async function main() {
   const command = process.argv[2] || 'run';
 
-  console.log(`[Migration CLI] Connecting to MongoDB at ${MONGODB_URI}...`);
+  const uriSource = process.env.MONGODB_ADMIN_URI ? 'MONGODB_ADMIN_URI' : 'MONGODB_URI';
+  console.log(`[Migration CLI] Connecting to MongoDB via ${uriSource} (${maskUri(MONGODB_URI)})...`);
   const client = new MongoClient(MONGODB_URI);
 
   try {

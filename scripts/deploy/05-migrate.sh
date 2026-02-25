@@ -11,7 +11,9 @@ echo ""
 
 cd "$PROJECT_ROOT"
 
+# Export both URIs — migration CLI prefers MONGODB_ADMIN_URI for admin privileges
 export MONGODB_URI
+export MONGODB_ADMIN_URI
 
 # Check migration status first (read-only)
 echo "--- Checking pending migrations ---"
