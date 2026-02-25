@@ -743,6 +743,13 @@ function WorkflowRunDetail({ runId }: { runId: string }) {
         })()}
       </div>
 
+      {run.humanInstruction && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/30 p-4">
+          <h2 className="text-sm font-semibold mb-1">Human Instruction</h2>
+          <p className="text-sm">{run.humanInstruction}</p>
+        </div>
+      )}
+
       {(run.inputPayload || run.outputPayload) && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {run.inputPayload && Object.keys(run.inputPayload).length > 0 && (

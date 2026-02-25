@@ -1216,6 +1216,7 @@ export interface Task {
   title: string
   summary?: string
   extraPrompt?: string
+  humanInstruction?: string
   status: string
   urgency?: string
   groupId?: string | null
@@ -1524,6 +1525,7 @@ export interface WorkflowRun {
   rootTaskId?: string | null
   inputPayload?: Record<string, unknown>
   outputPayload?: Record<string, unknown>
+  humanInstruction?: string
   currentStepIds: string[]
   completedStepIds: string[]
   failedStepId?: string | null

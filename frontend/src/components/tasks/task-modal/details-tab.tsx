@@ -299,6 +299,40 @@ export function DetailsTab({
         isRetrying={isRetrying}
       />
 
+      {/* Human Instruction */}
+      {(task.humanInstruction || !task.parentId) && (
+        <div className={cn(
+          "space-y-2 rounded-lg border p-3",
+          task.humanInstruction
+            ? "border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/30"
+            : "border-dashed border-muted-foreground/25"
+        )}>
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium">Human Instruction</label>
+            {task.parentId && task.humanInstruction && (
+              <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                Inherited
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            The original human request that this work should fulfill
+          </p>
+          <textarea
+            {...register('humanInstruction')}
+            placeholder="What should be accomplished..."
+            rows={2}
+            readOnly={!!task.parentId && !!task.humanInstruction}
+            className={cn(
+              'flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm',
+              'placeholder:text-muted-foreground resize-y overflow-auto',
+              'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+              task.parentId && task.humanInstruction && 'opacity-75 cursor-default'
+            )}
+          />
+        </div>
+      )}
+
       {/* Summary */}
       <div className="space-y-2">
         <label className="text-sm font-medium">Summary</label>

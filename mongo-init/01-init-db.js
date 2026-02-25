@@ -24,6 +24,10 @@ db.createCollection('tasks', {
           bsonType: 'string',
           description: 'Extra prompt for AI tasks'
         },
+        humanInstruction: {
+          bsonType: 'string',
+          description: 'Original human request/goal — propagated unchanged to all child tasks'
+        },
         status: {
           bsonType: 'string',
           enum: ['pending', 'in_progress', 'on_hold', 'waiting', 'completed', 'failed', 'cancelled', 'archived'],
@@ -199,6 +203,8 @@ db.tasks.createIndex({ parentId: 1, status: 1, createdAt: 1 });
 db.tasks.createIndex({ workflowStepId: 1, status: 1 });
 // For assignee-based queries with status and date sort
 db.tasks.createIndex({ assigneeId: 1, status: 1, createdAt: -1 });
+// Sparse index for human instruction search
+db.tasks.createIndex({ humanInstruction: 1 }, { sparse: true });
 
 // ============================================================================
 // FIELD CONFIGURATIONS - Dynamic field definitions

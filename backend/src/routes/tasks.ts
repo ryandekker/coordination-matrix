@@ -701,6 +701,10 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       if (!taskData.projectId && parent.projectId) {
         projectId = parent.projectId;
       }
+      // Inherit humanInstruction from parent if not explicitly set
+      if (!taskData.humanInstruction && parent.humanInstruction) {
+        taskData.humanInstruction = parent.humanInstruction;
+      }
     }
 
     // Handle explicit groupId and projectId
@@ -723,6 +727,7 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       title: taskData.title,
       summary: taskData.summary || '',
       extraPrompt: taskData.extraPrompt || '',
+      ...(taskData.humanInstruction && { humanInstruction: taskData.humanInstruction }),
       status: taskData.status || 'pending',
       urgency: taskData.urgency || 'normal',
       groupId,
@@ -802,6 +807,7 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
               ...(insertedTask.metadata || {}),
             },
             inputPayload,
+            ...(insertedTask.humanInstruction && { humanInstruction: insertedTask.humanInstruction }),
           },
           actorId
         );

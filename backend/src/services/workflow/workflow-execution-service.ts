@@ -358,6 +358,15 @@ class WorkflowExecutionService {
 
     const triggerTaskId = input.triggerTaskId ? new ObjectId(input.triggerTaskId) : null;
 
+    // Resolve humanInstruction: use explicit value, or inherit from trigger task
+    let humanInstruction = input.humanInstruction;
+    if (!humanInstruction && triggerTaskId) {
+      const triggerTask = await this.tasks.findOne({ _id: triggerTaskId });
+      if (triggerTask?.humanInstruction) {
+        humanInstruction = triggerTask.humanInstruction;
+      }
+    }
+
     const run: Omit<WorkflowRun, '_id'> = {
       workflowId,
       status: 'running',
@@ -371,6 +380,7 @@ class WorkflowExecutionService {
       ...(workflow.groupId && { groupId: workflow.groupId }),
       ...(workflow.projectId && { projectId: workflow.projectId }),
       ...(input.inputPayload && { inputPayload: input.inputPayload }),
+      ...(humanInstruction && { humanInstruction }),
       ...(taskDefaults && { taskDefaults }),
       ...(input.executionOptions && { executionOptions: input.executionOptions }),
       ...(input.externalId && { externalId: input.externalId }),
@@ -451,6 +461,7 @@ class WorkflowExecutionService {
       createdById: actorId ?? null,
       createdAt: now,
       updatedAt: now,
+      ...(run.humanInstruction && { humanInstruction: run.humanInstruction }),
       metadata: {
         workflowRunId: run._id.toString(),
         ...(run.inputPayload && { inputPayload: run.inputPayload }),
@@ -1064,6 +1075,7 @@ class WorkflowExecutionService {
       assigneeId,
       createdAt: now,
       updatedAt: now,
+      ...(run.humanInstruction && { humanInstruction: run.humanInstruction }),
       // New unified step input field
       stepInput: inputPayload,
       metadata: {

@@ -637,6 +637,7 @@ export interface Task {
   title: string;
   summary?: string;
   extraPrompt?: string;
+  humanInstruction?: string;      // Original human request/goal — propagated unchanged to all child tasks
   status: TaskStatus;
   urgency?: Urgency;
 
@@ -1401,6 +1402,9 @@ export interface WorkflowRun {
   inputPayload?: Record<string, unknown>;
   outputPayload?: Record<string, unknown>;
 
+  // Original human request/goal — propagated to all tasks in this run
+  humanInstruction?: string;
+
   // Task defaults - applied to all tasks created in this run
   taskDefaults?: {
     assigneeId?: ObjectId;
@@ -1496,6 +1500,9 @@ export interface StartWorkflowInput {
 
   // Input data that flows through the workflow
   inputPayload?: Record<string, unknown>;
+
+  // Original human request/goal — propagated to all tasks in this run
+  humanInstruction?: string;
 
   // Defaults applied to all tasks created in this run
   taskDefaults?: WorkflowTaskDefaults;

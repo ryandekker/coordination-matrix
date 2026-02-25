@@ -1425,6 +1425,15 @@ function assemblePrompt(task, agent, workflowStep, options = {}) {
     }
   }
 
+  // 1.8. Human instruction (original request from the human who initiated this work)
+  if (task.humanInstruction) {
+    sections.push(`## Human Instruction
+The human who initiated this work requested:
+"${task.humanInstruction}"
+
+Keep this goal in mind as you complete your assigned step. Your work should contribute toward fulfilling this request.`);
+  }
+
   // 1.7. Workflow context awareness (injected for all tasks)
   const isInWorkflow = !!task.workflowStage;
   if (isInWorkflow) {
@@ -2261,6 +2270,7 @@ async function handleStageTransition(config, task, workflow, parsedResponse) {
       parentId: task._id,
       assigneeId: task.assigneeId,
       extraPrompt: parsedResponse.data.nextActionReason,
+      ...(task.humanInstruction && { humanInstruction: task.humanInstruction }),
       status: 'pending',
       metadata: { previousOutput: parsedResponse.data.output },
       tags: task.tags || [],
