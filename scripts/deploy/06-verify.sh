@@ -140,6 +140,7 @@ fi
 echo "--- Checking migration status ---"
 if [[ -n "${MONGODB_URI:-}" ]]; then
   export MONGODB_URI
+  export MONGODB_ADMIN_URI
   migrate_status=$(cd "$PROJECT_ROOT/backend" && npx tsx src/migrations/cli.ts status 2>&1) || true
   pending=$(echo "$migrate_status" | grep -c '○' || echo "0")
   if [[ "$pending" -eq 0 ]]; then

@@ -93,7 +93,8 @@ MONGODB_URI="mongodb+srv://..." npm --prefix backend run db:migrate
 
 | Variable | Description |
 |----------|-------------|
-| `MONGODB_URI` | MongoDB Atlas connection string |
+| `MONGODB_URI` | MongoDB Atlas connection string (standard app user) |
+| `MONGODB_ADMIN_URI` | MongoDB Atlas admin connection string (for migrations — needs `createCollection`, `collMod`, index privileges). Falls back to `MONGODB_URI` if not set. |
 | `NODE_ENV` | `production` |
 | `JWT_SECRET` | Secure random string (use `openssl rand -hex 32`) |
 | `CORS_ORIGIN` | `https://cm.hcizero.com` |
@@ -447,6 +448,7 @@ docker compose exec mongodb mongorestore \
 | `MONGO_ROOT_USER` | Yes | admin | MongoDB admin username |
 | `MONGO_ROOT_PASSWORD` | Yes | adminpassword | MongoDB admin password |
 | `MONGODB_URI` | No | auto | Full MongoDB connection string (overrides above) |
+| `MONGODB_ADMIN_URI` | No | - | Admin MongoDB URI for migrations (falls back to `MONGODB_URI`) |
 | `NODE_ENV` | No | development | Environment (production/development) |
 | `JWT_SECRET` | Yes | - | Secret for JWT token signing |
 | `PORT` | No | 3001 | Backend API port |
