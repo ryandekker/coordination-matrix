@@ -16,6 +16,10 @@ build/
 out/
 .vercel/
 
+# Generated at deploy time by scripts/deploy/02-build.sh and 04-deploy-frontend.sh
+backend/build-info.json
+frontend/public/build-info.json
+
 # Logs
 logs/
 *.log

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useCallback } from 'react'
-import { Search, Filter, Columns, ChevronDown, X, Bookmark, Tag as TagIcon, ChevronsDownUp, ChevronsUpDown, Archive, Workflow as WorkflowIcon, FolderKanban, GitBranch } from 'lucide-react'
+import { Search, Filter, Columns, ChevronDown, X, Bookmark, Tag as TagIcon, ChevronsDownUp, ChevronsUpDown, Archive, Workflow as WorkflowIcon, FolderKanban, GitBranch, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -91,6 +91,7 @@ export function TaskToolbar({
 
   const statusOptions = lookups.task_status || []
   const urgencyOptions = lookups.urgency || []
+  const creatorTypeOptions = lookups.creator_type || []
 
   // Filter users by search term (exclude system user from assignment options)
   const filteredUsers = useMemo(() => {
@@ -312,6 +313,17 @@ export function TaskToolbar({
     })
   }, [filters, onFilterChange])
 
+  const handleCreatorTypeFilter = useCallback((type: string, checked: boolean) => {
+    const currentTypes = (filters.creatorType as string[]) || []
+    const newTypes = checked
+      ? [...currentTypes, type]
+      : currentTypes.filter((t) => t !== type)
+    onFilterChange({
+      ...filters,
+      creatorType: newTypes.length > 0 ? newTypes : undefined,
+    })
+  }, [filters, onFilterChange])
+
   const clearAllFilters = useCallback(() => {
     onFilterChange({})
     onSearchChange('')
@@ -396,8 +408,17 @@ export function TaskToolbar({
       }
     }
 
+    // Creator type filter
+    const creatorTypeFilters = toArray(filters.creatorType)
+    creatorTypeFilters.forEach((type) => {
+      const opt = creatorTypeOptions.find((ct) => ct.code === type)
+      if (opt) {
+        result.push({ key: `creatorType-${type}`, label: 'Creator', value: opt.displayName, color: opt.color })
+      }
+    })
+
     return result
-  }, [search, filters, statusOptions, urgencyOptions, users, availableTags, workflows, projects])
+  }, [search, filters, statusOptions, urgencyOptions, users, availableTags, workflows, projects, creatorTypeOptions])
 
   const removeFilter = useCallback((filterKey: string) => {
     if (filterKey === 'search') {
@@ -427,8 +448,11 @@ export function TaskToolbar({
     } else if (filterKey.startsWith('project-')) {
       const projectId = filterKey.replace('project-', '')
       handleProjectFilter(projectId, false)
+    } else if (filterKey.startsWith('creatorType-')) {
+      const type = filterKey.replace('creatorType-', '')
+      handleCreatorTypeFilter(type, false)
     }
-  }, [onSearchChange, handleStatusFilter, handleUrgencyFilter, handleAssigneeFilter, handleTagFilter, handleIncludeArchivedChange, handleHasWorkflowFilter, handleWorkflowFilter, handleWorkflowStageFilter, handleProjectFilter])
+  }, [onSearchChange, handleStatusFilter, handleUrgencyFilter, handleAssigneeFilter, handleTagFilter, handleIncludeArchivedChange, handleHasWorkflowFilter, handleWorkflowFilter, handleWorkflowStageFilter, handleProjectFilter, handleCreatorTypeFilter])
 
   return (
     <div className="space-y-2">
@@ -646,6 +670,36 @@ export function TaskToolbar({
                 ))
               )}
             </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+
+      {/* Creator Type Filter */}
+      {creatorTypeOptions.length > 0 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm">
+              <Users className="mr-2 h-4 w-4" />
+              Creator
+              <ChevronDown className="ml-2 h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-48">
+            <DropdownMenuLabel>Filter by Creator Type</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {creatorTypeOptions.map((ct) => (
+              <DropdownMenuCheckboxItem
+                key={ct.code}
+                checked={((filters.creatorType as string[]) || []).includes(ct.code)}
+                onCheckedChange={(checked) => handleCreatorTypeFilter(ct.code, checked)}
+              >
+                <span
+                  className="mr-2 h-2 w-2 rounded-full"
+                  style={{ backgroundColor: ct.color }}
+                />
+                {ct.displayName}
+              </DropdownMenuCheckboxItem>
+            ))}
           </DropdownMenuContent>
         </DropdownMenu>
       )}

@@ -701,6 +701,10 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       if (!taskData.projectId && parent.projectId) {
         projectId = parent.projectId;
       }
+      // Inherit humanInstruction from parent if not explicitly set
+      if (!taskData.humanInstruction && parent.humanInstruction) {
+        taskData.humanInstruction = parent.humanInstruction;
+      }
     }
 
     // Handle explicit groupId and projectId
@@ -719,10 +723,35 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
     // Capture triggerWorkflowId for flow tasks
     const triggerWorkflowId = taskData.triggerWorkflowId ? toObjectId(taskData.triggerWorkflowId) : null;
 
+    // Resolve createdById: explicit > authenticated user > null
+    const createdById = taskData.createdById
+      ? toObjectId(taskData.createdById)
+      : req.user?.userId
+        ? toObjectId(req.user.userId)
+        : null;
+
+    // Compute creatorType from the creator user's flags
+    let creatorType: 'human' | 'agent' | 'system' = 'human';
+    if (taskData.creatorType) {
+      // Allow explicit override (e.g., from daemon/workflow engine)
+      creatorType = taskData.creatorType;
+    } else if (createdById) {
+      const creatorUser = await db.collection('users').findOne(
+        { _id: createdById },
+        { projection: { isAgent: 1, isSystem: 1 } }
+      );
+      if (creatorUser?.isSystem) {
+        creatorType = 'system';
+      } else if (creatorUser?.isAgent) {
+        creatorType = 'agent';
+      }
+    }
+
     const newTask: Document = {
       title: taskData.title,
       summary: taskData.summary || '',
       extraPrompt: taskData.extraPrompt || '',
+      ...(taskData.humanInstruction && { humanInstruction: taskData.humanInstruction }),
       status: taskData.status || 'pending',
       urgency: taskData.urgency || 'normal',
       groupId,
@@ -733,7 +762,8 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       externalId: taskData.externalId || '',
       externalHoldDate: taskData.externalHoldDate ? new Date(taskData.externalHoldDate) : null,
       assigneeId: taskData.assigneeId ? toObjectId(taskData.assigneeId) : null,
-      createdById: taskData.createdById ? toObjectId(taskData.createdById) : null,
+      createdById,
+      creatorType,
       tags: taskData.tags || [],
       createdAt: now,
       updatedAt: now,
@@ -751,12 +781,8 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
     const result = await db.collection('tasks').insertOne(newTask);
     let insertedTask = await db.collection<Task>('tasks').findOne({ _id: result.insertedId });
 
-    // Get actor from request body, or fall back to authenticated user
-    const actorId = taskData.createdById
-      ? toObjectId(taskData.createdById)
-      : req.user?.userId
-        ? toObjectId(req.user.userId)
-        : null;
+    // Actor is the resolved createdById (already computed above)
+    const actorId = createdById;
 
     // Publish task.created event unless silent
     if (!silent && insertedTask) {
@@ -802,6 +828,7 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
               ...(insertedTask.metadata || {}),
             },
             inputPayload,
+            ...(insertedTask.humanInstruction && { humanInstruction: insertedTask.humanInstruction }),
           },
           actorId
         );
@@ -983,6 +1010,48 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
             });
           }
         }
+      }
+    }
+
+    // Auto-complete parent task when all subtasks finish (decomposition join)
+    if (result.status === 'completed' && result.parentId) {
+      try {
+        const parent = await db.collection<Task>('tasks').findOne({ _id: result.parentId });
+        if (parent && parent.status === 'waiting') {
+          // Count incomplete sibling tasks (excluding this one)
+          const incompleteCount = await db.collection('tasks').countDocuments({
+            parentId: result.parentId,
+            _id: { $ne: result._id },
+            status: { $nin: ['completed', 'cancelled', 'archived'] },
+            taskType: { $ne: 'join' },  // Don't count join tasks as blockers
+          });
+
+          if (incompleteCount === 0) {
+            // All subtasks done - auto-complete the parent
+            const parentResult = await db.collection<Task>('tasks').findOneAndUpdate(
+              { _id: result.parentId, status: 'waiting' },
+              { $set: { status: 'completed', updatedAt: new Date() } },
+              { returnDocument: 'after' }
+            );
+            if (parentResult) {
+              console.log(`[Tasks] Auto-completed parent task ${result.parentId} (all subtasks done)`);
+              await publishTaskEvent('task.status.changed', parentResult, {
+                changes: [{ field: 'status', oldValue: 'waiting', newValue: 'completed' }],
+                actorId: null,
+                actorType: 'system',
+              });
+
+              // Also complete any join tasks under this parent
+              await db.collection('tasks').updateMany(
+                { parentId: result.parentId, taskType: 'join', status: 'waiting' },
+                { $set: { status: 'completed', updatedAt: new Date() } }
+              );
+            }
+          }
+        }
+      } catch (autoCompleteError) {
+        console.error(`[Tasks] Error in parent auto-completion:`, autoCompleteError);
+        // Don't fail the original update
       }
     }
 

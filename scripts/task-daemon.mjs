@@ -281,7 +281,7 @@ Response schema:
   "status": "SUCCESS" | "PARTIAL" | "BLOCKED" | "FAILED",
   "summary": "1-2 sentence summary of what was done",
   "output": { /* Structured result object - schema defined by task/workflow */ },
-  "nextAction": "COMPLETE" | "CONTINUE" | "ESCALATE" | "HOLD" | "ASK" | "REQUEST_DOCS",
+  "nextAction": "COMPLETE" | "CONTINUE" | "ESCALATE" | "HOLD" | "ASK" | "REQUEST_DOCS" | "DECOMPOSE",
   "nextActionReason": "Optional: reason for action",
   "metadata": {
     "confidence": 0.0-1.0,
@@ -293,10 +293,11 @@ Response schema:
 ## Available Actions
 - COMPLETE: Task finished successfully
 - CONTINUE: Task done, create follow-up task
-- ESCALATE: Need human intervention
+- ESCALATE: Need human intervention (surfaces to human dashboard)
 - HOLD: Pause task
 - ASK: Request human input via questions (request 'ask-questions' capability first)
 - REQUEST_DOCS: Request capability documentation before proceeding
+- DECOMPOSE: Break task into subtasks (advanced agents only, not in workflows unless allowed)
 
 ## Requesting Capabilities
 Before using advanced features (like ASK), request the documentation:
@@ -1425,15 +1426,46 @@ function assemblePrompt(task, agent, workflowStep, options = {}) {
     }
   }
 
+  // 1.8. Human instruction (original request from the human who initiated this work)
+  if (task.humanInstruction) {
+    sections.push(`## Human Instruction
+The human who initiated this work requested:
+"${task.humanInstruction}"
+
+Keep this goal in mind as you complete your assigned step. Your work should contribute toward fulfilling this request.`);
+  }
+
   // 1.7. Workflow context awareness (injected for all tasks)
   const isInWorkflow = !!task.workflowStage;
   if (isInWorkflow) {
+    const allowDecompose = task.metadata?.allowDecompose === true;
     sections.push(`## Workflow Context
 You are executing step "${task.workflowStage}" within a workflow.
 - Complete your assigned step and use COMPLETE when done
 - The workflow engine will handle what happens next
 - Use ESCALATE if you encounter something unexpected
-- Do NOT spawn subtasks outside the workflow design`);
+${allowDecompose ? '- You may use DECOMPOSE if this step requires breaking into subtasks' : '- Do NOT use DECOMPOSE or spawn subtasks outside the workflow design'}`);
+  }
+
+  // 1.8. DECOMPOSE guidance for capable agents outside workflows
+  const agentComplexity = agent?.agentComplexity || 2;
+  const canDecompose = agentComplexity >= 3 || task.metadata?.allowDecompose === true;
+  if (canDecompose && !isInWorkflow) {
+    sections.push(`## Task Decomposition (DECOMPOSE)
+If this task is too complex for a single pass, you may use DECOMPOSE to break it into subtasks.
+Include a "subtasks" array in your response:
+{
+  "status": "PARTIAL",
+  "summary": "Breaking task into subtasks",
+  "output": { "analysisNotes": "..." },
+  "nextAction": "DECOMPOSE",
+  "subtasks": [
+    { "title": "Subtask title", "extraPrompt": "Detailed instructions", "tags": [], "urgency": "normal" }
+  ]
+}
+Each subtask will be created as a child task and processed independently.
+A join task will be created to reconverge results when all subtasks complete.
+Only decompose when genuinely needed - keep individual tasks granular and focused.`);
   }
 
   // 2. Agent prompt (persona, capabilities)
@@ -2261,6 +2293,7 @@ async function handleStageTransition(config, task, workflow, parsedResponse) {
       parentId: task._id,
       assigneeId: task.assigneeId,
       extraPrompt: parsedResponse.data.nextActionReason,
+      ...(task.humanInstruction && { humanInstruction: task.humanInstruction }),
       status: 'pending',
       metadata: { previousOutput: parsedResponse.data.output },
       tags: task.tags || [],
@@ -2268,6 +2301,95 @@ async function handleStageTransition(config, task, workflow, parsedResponse) {
 
     if (newTask) {
       console.log(`[CONTINUE] Created task: ${newTask._id}`);
+    }
+  }
+
+  // If DECOMPOSE, create subtasks and a join task
+  if (nextAction === 'DECOMPOSE') {
+    const subtasks = parsedResponse.data.subtasks || [];
+    const isInWorkflow = !!task.workflowStage;
+    const agentComplexity = agent?.agentComplexity || 2;
+    const allowDecompose = task.metadata?.allowDecompose === true;
+
+    // Guard: DECOMPOSE requires complexity 3 unless explicitly allowed
+    // Also blocked inside workflows unless explicitly allowed
+    if (agentComplexity < 3 && !allowDecompose) {
+      console.log(`[DECOMPOSE] Blocked: agent complexity ${agentComplexity} < 3 and not explicitly allowed`);
+    } else if (isInWorkflow && !allowDecompose) {
+      console.log(`[DECOMPOSE] Blocked: task is in a workflow and decompose not explicitly allowed`);
+    } else if (subtasks.length === 0) {
+      console.log(`[DECOMPOSE] No subtasks provided, skipping`);
+    } else {
+      const maxSubtasks = 20;
+      const subtasksToCreate = subtasks.slice(0, maxSubtasks);
+      if (subtasks.length > maxSubtasks) {
+        console.log(`[DECOMPOSE] Warning: truncating ${subtasks.length} subtasks to ${maxSubtasks}`);
+      }
+
+      console.log(`[DECOMPOSE] Creating ${subtasksToCreate.length} subtasks...`);
+
+      const createdSubtaskIds = [];
+      for (const subtask of subtasksToCreate) {
+        if (!subtask.title) {
+          console.log(`[DECOMPOSE] Skipping subtask without title`);
+          continue;
+        }
+
+        const newTask = await createTask(config, {
+          title: subtask.title,
+          extraPrompt: subtask.extraPrompt || '',
+          parentId: task._id,
+          groupId: task.groupId,
+          projectId: task.projectId,
+          workflowId: task.workflowId || undefined,
+          workflowRunId: task.workflowRunId || undefined,
+          assigneeId: subtask.assigneeId || task.assigneeId,
+          status: 'pending',
+          urgency: subtask.urgency || task.urgency || 'normal',
+          tags: [...new Set([...(task.tags || []), ...(subtask.tags || [])])],
+          creatorType: 'agent',
+          metadata: {
+            decomposedFrom: task._id,
+            parentTitle: task.title,
+          },
+        });
+
+        if (newTask) {
+          createdSubtaskIds.push(newTask._id);
+          console.log(`[DECOMPOSE] Created subtask: ${newTask._id} - ${subtask.title}`);
+        }
+      }
+
+      // Create a join task that will auto-complete the parent when all subtasks finish
+      if (createdSubtaskIds.length > 0) {
+        const joinTask = await createTask(config, {
+          title: `Join: ${task.title}`,
+          parentId: task._id,
+          groupId: task.groupId,
+          projectId: task.projectId,
+          taskType: 'join',
+          executionMode: 'immediate',
+          status: 'waiting',
+          assigneeId: null,
+          creatorType: 'system',
+          tags: ['auto-join'],
+          metadata: {
+            decomposedFrom: task._id,
+            expectedSubtaskCount: createdSubtaskIds.length,
+            subtaskIds: createdSubtaskIds,
+          },
+          joinConfig: {
+            mode: 'all',
+            expectedCount: createdSubtaskIds.length,
+          },
+        });
+
+        if (joinTask) {
+          console.log(`[DECOMPOSE] Created join task: ${joinTask._id} (waiting for ${createdSubtaskIds.length} subtasks)`);
+        }
+      }
+
+      console.log(`[DECOMPOSE] Created ${createdSubtaskIds.length} subtasks`);
     }
   }
 }
@@ -2309,6 +2431,19 @@ async function processTask(config, task) {
     log.info(`Loading ${previousRequestedCaps.length} previously requested capabilities...`);
     loadedCapabilities = await fetchCapabilityDocs(config, previousRequestedCaps, agentComplexity);
     log.debug(`Loaded capability docs: ${loadedCapabilities.map(c => c.id).join(', ')}`);
+  }
+
+  // Auto-load capabilities matching task tags (if no capabilities were already loaded)
+  if (loadedCapabilities.length === 0 && task.tags?.length > 0 && capabilityManifest.length > 0) {
+    const matchingCaps = capabilityManifest
+      .filter(cap => cap.tags?.some(t => task.tags.includes(t)))
+      .map(cap => cap.id);
+
+    if (matchingCaps.length > 0) {
+      log.info(`Auto-loading ${matchingCaps.length} capabilities matching task tags: ${matchingCaps.join(', ')}`);
+      loadedCapabilities = await fetchCapabilityDocs(config, matchingCaps, agentComplexity);
+      log.debug(`Auto-loaded capability docs: ${loadedCapabilities.map(c => c.id).join(', ')}`);
+    }
   }
 
   // Fetch workflow and step if exists
@@ -2669,6 +2804,9 @@ async function processTask(config, task) {
     case 'ASK':
       newStatus = 'on_hold';
       break;
+    case 'DECOMPOSE':
+      newStatus = 'waiting';  // Parent waits for subtasks to complete
+      break;
     default:
       newStatus = 'completed';
   }
@@ -2745,6 +2883,16 @@ async function processTask(config, task) {
     requestedCapabilities: undefined,
     lastRequestedAt: undefined,
   };
+
+  // Enrich escalation metadata when ESCALATE is used
+  if (parsedResponse.data.nextAction === 'ESCALATE') {
+    const existingTags = new Set(tagsUpdate || task.tags || []);
+    existingTags.add('escalated');
+    tagsUpdate = Array.from(existingTags);
+    updatedMetadata.escalatedAt = new Date().toISOString();
+    updatedMetadata.escalatedFrom = task.assigneeId || null;
+    updatedMetadata.escalationReason = parsedResponse.data.nextActionReason || parsedResponse.data.summary;
+  }
 
   // Only unassign on failures (ESCALATE/HOLD), otherwise keep current assignee
   const isFailure = newStatus === 'on_hold';

@@ -576,11 +576,68 @@ export interface TaskResult {
   history?: TaskResultEntry[];        // Previous results (capped, e.g., last 10)
 }
 
+// ============================================================================
+// Execution Summary - Programmatic rollup of what happened in a task/workflow
+// ============================================================================
+
+export type ExecutionOutcome = 'success' | 'partial' | 'failed' | 'escalated';
+
+export interface ExecutionSummaryStep {
+  stepName: string;
+  stepType: string;
+  outcome: 'success' | 'failed' | 'skipped';
+  summary?: string;
+  error?: string;
+  durationMs?: number;
+}
+
+export interface ExecutionSummaryChildFlow {
+  taskId: string;
+  title: string;
+  workflowName?: string;
+  outcome: ExecutionOutcome;
+  summary?: string;
+  error?: string;
+}
+
+export interface ExecutionSummaryStats {
+  total: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+}
+
+export interface ExecutionSummaryError {
+  stepName: string;
+  error: string;
+  taskId: string;
+}
+
+export interface ExecutionSummary {
+  outcome: ExecutionOutcome;
+  completedAt: Date;
+  durationMs?: number;
+
+  trigger?: {
+    source: string;
+    inputSummary?: string;
+  };
+
+  steps?: ExecutionSummaryStep[];
+
+  stats?: ExecutionSummaryStats;
+
+  childFlowSummaries?: ExecutionSummaryChildFlow[];
+
+  errorChain?: ExecutionSummaryError[];
+}
+
 export interface Task {
   _id: ObjectId;
   title: string;
   summary?: string;
   extraPrompt?: string;
+  humanInstruction?: string;      // Original human request/goal — propagated unchanged to all child tasks
   status: TaskStatus;
   urgency?: Urgency;
 
@@ -647,6 +704,9 @@ export interface Task {
   assigneeId?: ObjectId | null;
   createdById?: ObjectId | null;
 
+  // Creator type - denormalized from the creator user's flags for efficient filtering
+  creatorType?: 'human' | 'agent' | 'system';
+
   // Tags
   tags?: string[];
 
@@ -667,6 +727,9 @@ export interface Task {
   // Unified step input/output (new model for workflow tasks)
   stepInput?: Record<string, unknown>;   // Resolved input data received by this step
   stepOutput?: StepOutput;               // Standardized output produced by this step
+
+  // Programmatic rollup of execution outcome (built at completion time)
+  executionSummary?: ExecutionSummary;
 
   // Manual review fields (for manual workflow steps)
   reviewDecision?: ManualReviewDecision;
@@ -1342,6 +1405,9 @@ export interface WorkflowRun {
   inputPayload?: Record<string, unknown>;
   outputPayload?: Record<string, unknown>;
 
+  // Original human request/goal — propagated to all tasks in this run
+  humanInstruction?: string;
+
   // Task defaults - applied to all tasks created in this run
   taskDefaults?: {
     assigneeId?: ObjectId;
@@ -1437,6 +1503,9 @@ export interface StartWorkflowInput {
 
   // Input data that flows through the workflow
   inputPayload?: Record<string, unknown>;
+
+  // Original human request/goal — propagated to all tasks in this run
+  humanInstruction?: string;
 
   // Defaults applied to all tasks created in this run
   taskDefaults?: WorkflowTaskDefaults;

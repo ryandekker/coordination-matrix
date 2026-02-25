@@ -950,6 +950,50 @@ export interface StepInputConfig {
   extractPath?: string
 }
 
+// Execution summary - programmatic rollup of what happened in a task/workflow
+export type ExecutionOutcome = 'success' | 'partial' | 'failed' | 'escalated'
+
+export interface ExecutionSummaryStep {
+  stepName: string
+  stepType: string
+  outcome: 'success' | 'failed' | 'skipped'
+  summary?: string
+  error?: string
+  durationMs?: number
+}
+
+export interface ExecutionSummaryChildFlow {
+  taskId: string
+  title: string
+  workflowName?: string
+  outcome: ExecutionOutcome
+  summary?: string
+  error?: string
+}
+
+export interface ExecutionSummary {
+  outcome: ExecutionOutcome
+  completedAt: string
+  durationMs?: number
+  trigger?: {
+    source: string
+    inputSummary?: string
+  }
+  steps?: ExecutionSummaryStep[]
+  stats?: {
+    total: number
+    succeeded: number
+    failed: number
+    skipped: number
+  }
+  childFlowSummaries?: ExecutionSummaryChildFlow[]
+  errorChain?: Array<{
+    stepName: string
+    error: string
+    taskId: string
+  }>
+}
+
 // Standardized step output
 export interface StepOutput {
   data: unknown
@@ -1172,6 +1216,7 @@ export interface Task {
   title: string
   summary?: string
   extraPrompt?: string
+  humanInstruction?: string
   status: string
   urgency?: string
   groupId?: string | null
@@ -1224,6 +1269,8 @@ export interface Task {
   stepOutput?: StepOutput
   // Decision result: which branch was selected
   decisionResult?: string
+  // Programmatic rollup of execution outcome (built at completion time)
+  executionSummary?: ExecutionSummary
   // Manual review fields (for manual workflow steps)
   reviewDecision?: ManualReviewDecision
   reviewComment?: string
@@ -1478,6 +1525,7 @@ export interface WorkflowRun {
   rootTaskId?: string | null
   inputPayload?: Record<string, unknown>
   outputPayload?: Record<string, unknown>
+  humanInstruction?: string
   currentStepIds: string[]
   completedStepIds: string[]
   failedStepId?: string | null

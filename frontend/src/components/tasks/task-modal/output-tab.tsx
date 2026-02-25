@@ -12,6 +12,7 @@ import { TaskResultDisplay } from '../task-result-display'
 import { DecisionOptionsPanel } from '../decision-options-panel'
 import { ManualReviewPanel } from './manual-review-panel'
 import { AgentQuestionsPanel } from './agent-questions-panel'
+import { ExecutionSummarySection } from './execution-summary-section'
 import { useUpdateTask } from '@/hooks/use-tasks'
 import { toast } from 'sonner'
 import { useQueryClient } from '@tanstack/react-query'
@@ -174,90 +175,124 @@ export function OutputTab({ task, onRollback }: OutputTabProps) {
     setTimeout(() => setCopied(false), 2000)
   }, [formattedOutput])
 
+  // Get conversation session ID from output metadata
+  const conversationSessionId = useMemo(() => {
+    const outputData = metadata?.output as Record<string, unknown> | undefined
+    return outputData?.conversationSessionId as string | undefined
+  }, [metadata])
+
+  // Execution summary banner — shown at the top of the Output tab when present
+  const executionSummaryBanner = task.executionSummary ? (
+    <div className="p-4 pb-0">
+      <div className="rounded-lg border bg-muted/30 p-3">
+        <ExecutionSummarySection summary={task.executionSummary} defaultOpen={true} />
+      </div>
+    </div>
+  ) : null
+
   // For decision tasks, show the DecisionOptionsPanel
   if (taskType === 'decision') {
     return (
-      <div className="p-4 space-y-4">
-        <DecisionOptionsPanel task={task} />
-        {/* Also show task result if available */}
-        {task.taskResult?.current && (
-          <div className="pt-4 border-t">
-            <TaskResultDisplay
-              taskResult={task.taskResult}
-              taskType={task.taskType}
-            />
-          </div>
-        )}
-      </div>
+      <>
+        {executionSummaryBanner}
+        <div className="p-4 space-y-4">
+          <DecisionOptionsPanel task={task} />
+          {/* Also show task result if available */}
+          {task.taskResult?.current && (
+            <div className="pt-4 border-t">
+              <TaskResultDisplay
+                taskResult={task.taskResult}
+                taskType={task.taskType}
+              />
+            </div>
+          )}
+        </div>
+      </>
     )
   }
 
   // For manual tasks pending review, show the review panel
   if (needsReview || hasBeenReviewed) {
     return (
-      <ManualReviewPanel
-        task={task}
-        previousStepOutput={metadata as Record<string, unknown> | null}
-        onReview={handleReview}
-        onRollback={onRollback}
-        isSubmitting={isSubmitting}
-      />
+      <>
+        {executionSummaryBanner}
+        <ManualReviewPanel
+          task={task}
+          previousStepOutput={metadata as Record<string, unknown> | null}
+          onReview={handleReview}
+          onRollback={onRollback}
+          isSubmitting={isSubmitting}
+        />
+      </>
     )
   }
 
   // For tasks with agent questions (ASK action), show the questions panel
   if (hasAgentQuestions && agentQuestionsData) {
     return (
-      <AgentQuestionsPanel
-        task={task}
-        questionsData={agentQuestionsData}
-        onSubmitAnswers={handleSubmitAnswers}
-        isSubmitting={isSubmitting}
-      />
+      <>
+        {executionSummaryBanner}
+        <AgentQuestionsPanel
+          task={task}
+          questionsData={agentQuestionsData}
+          onSubmitAnswers={handleSubmitAnswers}
+          isSubmitting={isSubmitting}
+        />
+      </>
     )
   }
 
   // If task has structured taskResult, show TaskResultDisplay
   if (task.taskResult?.current) {
     return (
-      <div className="p-4">
-        <TaskResultDisplay
-          taskResult={task.taskResult}
-          taskType={task.taskType}
-        />
-      </div>
+      <>
+        {executionSummaryBanner}
+        <div className="p-4">
+          <TaskResultDisplay
+            taskResult={task.taskResult}
+            taskType={task.taskType}
+          />
+        </div>
+      </>
     )
   }
 
   // For external/webhook tasks, show attempts history
   if (taskType === 'external' && attempts.length > 0) {
     return (
-      <div className="p-4 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium">Webhook Attempts</h3>
-          <span className="text-xs text-muted-foreground">
-            {attempts.length} attempt{attempts.length > 1 ? 's' : ''}
-          </span>
+      <>
+        {executionSummaryBanner}
+        <div className="p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium">Webhook Attempts</h3>
+            <span className="text-xs text-muted-foreground">
+              {attempts.length} attempt{attempts.length > 1 ? 's' : ''}
+            </span>
+          </div>
+          <div className="space-y-3">
+            {[...attempts].reverse().map((attempt, reverseIndex) => {
+              const index = attempts.length - 1 - reverseIndex
+              return (
+                <WebhookAttemptCard
+                  key={index}
+                  attempt={attempt}
+                  taskId={task._id}
+                  attemptIndex={index}
+                />
+              )
+            })}
+          </div>
         </div>
-        <div className="space-y-3">
-          {[...attempts].reverse().map((attempt, reverseIndex) => {
-            const index = attempts.length - 1 - reverseIndex
-            return (
-              <WebhookAttemptCard
-                key={index}
-                attempt={attempt}
-                taskId={task._id}
-                attemptIndex={index}
-              />
-            )
-          })}
-        </div>
-      </div>
+      </>
     )
   }
 
   // For tasks without output
   if (!hasOutput) {
+    if (executionSummaryBanner) {
+      // If there's an execution summary but no other output, show just the summary
+      return executionSummaryBanner
+    }
     return (
       <div className="p-4 flex flex-col items-center justify-center h-full min-h-[200px] text-center">
         <p className="text-sm text-muted-foreground">
@@ -272,63 +307,60 @@ export function OutputTab({ task, onRollback }: OutputTabProps) {
     )
   }
 
-  // Get conversation session ID from output metadata
-  const conversationSessionId = useMemo(() => {
-    const outputData = metadata?.output as Record<string, unknown> | undefined
-    return outputData?.conversationSessionId as string | undefined
-  }, [metadata])
-
   // Show output
   return (
-    <div className="p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">Task Output</h3>
-        <div className="flex items-center gap-2">
-          {conversationSessionId && (
-            <Link
-              href={`/conversations/${conversationSessionId}`}
-              className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
-            >
-              <MessageSquare className="h-3.5 w-3.5" />
-              View Conversation
-            </Link>
-          )}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={handleCopy}
-            className="h-7 px-2 gap-1.5"
-          >
-            {copied ? (
-              <>
-                <Check className="h-3.5 w-3.5 text-green-500" />
-                <span className="text-xs">Copied</span>
-              </>
-            ) : (
-              <>
-                <Copy className="h-3.5 w-3.5" />
-                <span className="text-xs">Copy</span>
-              </>
+    <>
+      {executionSummaryBanner}
+      <div className="p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium">Task Output</h3>
+          <div className="flex items-center gap-2">
+            {conversationSessionId && (
+              <Link
+                href={`/conversations/${conversationSessionId}`}
+                className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+              >
+                <MessageSquare className="h-3.5 w-3.5" />
+                View Conversation
+              </Link>
             )}
-          </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleCopy}
+              className="h-7 px-2 gap-1.5"
+            >
+              {copied ? (
+                <>
+                  <Check className="h-3.5 w-3.5 text-green-500" />
+                  <span className="text-xs">Copied</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3.5 w-3.5" />
+                  <span className="text-xs">Copy</span>
+                </>
+              )}
+            </Button>
+          </div>
         </div>
-      </div>
 
-      {isJsonOutput && jsonData !== null ? (
-        <div className="p-3 bg-muted/50 rounded-lg border">
-          <JsonViewer
-            data={jsonData}
-            defaultExpanded={true}
-            maxInitialDepth={3}
-          />
-        </div>
-      ) : (
-        <pre className="p-3 bg-muted rounded-lg text-xs font-mono overflow-auto max-h-[500px] whitespace-pre-wrap break-all">
-          {formattedOutput}
-        </pre>
-      )}
-    </div>
+        {isJsonOutput && jsonData !== null ? (
+          <div className="p-3 bg-muted/50 rounded-lg border">
+            <JsonViewer
+              data={jsonData}
+              defaultExpanded={true}
+              maxInitialDepth={3}
+            />
+          </div>
+        ) : (
+          <pre className="p-3 bg-muted rounded-lg text-xs font-mono overflow-auto max-h-[500px] whitespace-pre-wrap break-all">
+            {formattedOutput}
+          </pre>
+        )}
+      </div>
+    </>
   )
 }
 

@@ -272,7 +272,11 @@ export function taskHasOutput(task: { metadata?: Record<string, unknown>; webhoo
 }
 
 // Smart default tab based on task type, status and content
-export function getSmartDefaultTab(task: { status: string; taskType?: string; metadata?: Record<string, unknown>; webhookConfig?: { attempts?: Array<{ responseBody?: unknown }> } }): TaskModalTab {
+export function getSmartDefaultTab(task: { status: string; taskType?: string; metadata?: Record<string, unknown>; webhookConfig?: { attempts?: Array<{ responseBody?: unknown }> }; executionSummary?: unknown }): TaskModalTab {
+  // For tasks with an execution summary, always show output tab (where the summary is rendered)
+  if (task.executionSummary) {
+    return TASK_MODAL_TABS.OUTPUT
+  }
   // For completed/failed tasks with output, show output first
   if (['completed', 'failed'].includes(task.status) && taskHasOutput(task)) {
     return TASK_MODAL_TABS.OUTPUT

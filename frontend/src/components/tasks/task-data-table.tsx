@@ -396,6 +396,11 @@ const TitleCell = memo(function TitleCell({
           >
             {renderCellValue(task, fieldConfig)}
           </div>
+          {task.status === 'waiting' && hasChildren && (
+            <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded flex-shrink-0" title="Waiting for subtasks to complete">
+              decomposed
+            </span>
+          )}
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
             <Button
               variant="ghost"
@@ -1536,6 +1541,25 @@ export function TaskDataTable({
                 />
               )}
               <span className="truncate max-w-[120px]">{resolvedWorkflow.name}</span>
+            </div>
+          )
+        }
+        return <span className="block text-center text-muted-foreground">-</span>
+      }
+
+      // For project references, show name with color indicator
+      if (fieldConfig.referenceCollection === 'projects') {
+        const resolvedProject = ref as { displayName?: string; color?: string } | undefined
+        if (resolvedProject?.displayName) {
+          return (
+            <div className="flex items-center justify-center gap-1.5">
+              {resolvedProject.color && (
+                <div
+                  className="w-2.5 h-2.5 rounded flex-shrink-0 border border-black/10"
+                  style={{ backgroundColor: resolvedProject.color }}
+                />
+              )}
+              <span className="truncate max-w-[120px]">{resolvedProject.displayName}</span>
             </div>
           )
         }

@@ -10,6 +10,35 @@ echo ""
 
 cd "$PROJECT_ROOT"
 
+# Generate build-info.json with git metadata for version tracking.
+# Both backend and frontend read this to expose deploy identifiers
+# via /api/health (backend) and /build-info.json (frontend static).
+echo "--- Generating build-info.json ---"
+BUILD_COMMIT_SHA=$(git rev-parse --short HEAD)
+BUILD_COMMIT_FULL=$(git rev-parse HEAD)
+BUILD_COMMIT_MSG=$(git log -1 --format='%s' HEAD)
+BUILD_BRANCH=$(git branch --show-current)
+BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+BUILD_INFO=$(cat <<BUILDEOF
+{
+  "commitSha": "$BUILD_COMMIT_SHA",
+  "commitFull": "$BUILD_COMMIT_FULL",
+  "commitMessage": "$BUILD_COMMIT_MSG",
+  "branch": "$BUILD_BRANCH",
+  "buildTimestamp": "$BUILD_TIMESTAMP"
+}
+BUILDEOF
+)
+
+echo "$BUILD_INFO" > backend/build-info.json
+echo "$BUILD_INFO" > frontend/public/build-info.json
+echo "Build info: $BUILD_COMMIT_SHA ($BUILD_BRANCH) at $BUILD_TIMESTAMP"
+
+# Export for Next.js NEXT_PUBLIC_* env vars (baked into client bundle)
+export NEXT_PUBLIC_BUILD_COMMIT="$BUILD_COMMIT_SHA"
+export NEXT_PUBLIC_BUILD_TIMESTAMP="$BUILD_TIMESTAMP"
+
 # Build backend
 echo "--- Building backend (tsc) ---"
 backend_output=$(cd backend && npm run build 2>&1) || {

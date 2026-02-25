@@ -38,7 +38,18 @@
       "Bash(node scripts/task-daemon.mjs:*)",
       "Bash(MATRIX_API_URL=http://localhost:3100 npm run cli:*)",
       "Bash(docker info:*)",
-      "Bash(bash:*)"
+      "Bash(bash:*)",
+      "Bash(git show:*)",
+      "Bash(source:*)",
+      "Bash(load_secrets)",
+      "Bash(npx wrangler:*)",
+      "Bash(python3:*)",
+      "Bash(grep:*)",
+      "Bash(npm run check:quick:*)",
+      "Bash(npx eslint:*)",
+      "Bash(npm --prefix backend run lint)",
+      "Bash(git stash:*)",
+      "Bash(npx vitest run)"
     ],
     "deny": [],
     "ask": []

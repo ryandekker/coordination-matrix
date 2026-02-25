@@ -24,6 +24,10 @@ db.createCollection('tasks', {
           bsonType: 'string',
           description: 'Extra prompt for AI tasks'
         },
+        humanInstruction: {
+          bsonType: 'string',
+          description: 'Original human request/goal — propagated unchanged to all child tasks'
+        },
         status: {
           bsonType: 'string',
           enum: ['pending', 'in_progress', 'on_hold', 'waiting', 'completed', 'failed', 'cancelled', 'archived'],
@@ -74,6 +78,11 @@ db.createCollection('tasks', {
         createdById: {
           bsonType: ['objectId', 'null'],
           description: 'Creator user ID'
+        },
+        creatorType: {
+          bsonType: 'string',
+          enum: ['human', 'agent', 'system'],
+          description: 'Type of creator: human, agent, or system'
         },
         // Tags
         tags: {
@@ -179,6 +188,9 @@ db.tasks.createIndex({ createdAt: -1 });
 db.tasks.createIndex({ tags: 1 });
 db.tasks.createIndex({ externalId: 1 });
 db.tasks.createIndex({ spawnedWorkflowRunId: 1 });  // For finding tasks that spawned workflows
+db.tasks.createIndex({ createdById: 1 });
+db.tasks.createIndex({ creatorType: 1 });
+db.tasks.createIndex({ creatorType: 1, status: 1, assigneeId: 1 });  // For dashboard/kanban queries
 db.tasks.createIndex({ title: 'text', summary: 'text' });
 // Group and project indexes for access control
 db.tasks.createIndex({ groupId: 1, status: 1, createdAt: -1 });
@@ -199,6 +211,8 @@ db.tasks.createIndex({ parentId: 1, status: 1, createdAt: 1 });
 db.tasks.createIndex({ workflowStepId: 1, status: 1 });
 // For assignee-based queries with status and date sort
 db.tasks.createIndex({ assigneeId: 1, status: 1, createdAt: -1 });
+// Sparse index for human instruction search
+db.tasks.createIndex({ humanInstruction: 1 }, { sparse: true });
 
 // ============================================================================
 // FIELD CONFIGURATIONS - Dynamic field definitions

@@ -1,5 +1,5 @@
-import { TasksPage } from '@/components/tasks/tasks-page'
+import { DashboardPage } from '@/components/dashboard/dashboard-page'
 
 export default function Home() {
-  return <TasksPage />
+  return <DashboardPage />
 }

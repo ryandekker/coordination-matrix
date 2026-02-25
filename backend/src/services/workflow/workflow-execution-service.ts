@@ -19,6 +19,11 @@ import {
   Document,
   TaskStepConfig,
   FlowAttempt,
+  ExecutionSummary,
+  ExecutionSummaryStep,
+  ExecutionSummaryChildFlow,
+  ExecutionSummaryError,
+  ExecutionOutcome,
 } from '../../types/index.js';
 
 import { resolveTemplateWithPackages, getValueByPath, resolveTitleTemplateWithPackages, getBaseUrl, resolveTemplateValue } from './template-utils.js';
@@ -353,6 +358,15 @@ class WorkflowExecutionService {
 
     const triggerTaskId = input.triggerTaskId ? new ObjectId(input.triggerTaskId) : null;
 
+    // Resolve humanInstruction: use explicit value, or inherit from trigger task
+    let humanInstruction = input.humanInstruction;
+    if (!humanInstruction && triggerTaskId) {
+      const triggerTask = await this.tasks.findOne({ _id: triggerTaskId });
+      if (triggerTask?.humanInstruction) {
+        humanInstruction = triggerTask.humanInstruction;
+      }
+    }
+
     const run: Omit<WorkflowRun, '_id'> = {
       workflowId,
       status: 'running',
@@ -366,6 +380,7 @@ class WorkflowExecutionService {
       ...(workflow.groupId && { groupId: workflow.groupId }),
       ...(workflow.projectId && { projectId: workflow.projectId }),
       ...(input.inputPayload && { inputPayload: input.inputPayload }),
+      ...(humanInstruction && { humanInstruction }),
       ...(taskDefaults && { taskDefaults }),
       ...(input.executionOptions && { executionOptions: input.executionOptions }),
       ...(input.externalId && { externalId: input.externalId }),
@@ -446,6 +461,7 @@ class WorkflowExecutionService {
       createdById: actorId ?? null,
       createdAt: now,
       updatedAt: now,
+      ...(run.humanInstruction && { humanInstruction: run.humanInstruction }),
       metadata: {
         workflowRunId: run._id.toString(),
         ...(run.inputPayload && { inputPayload: run.inputPayload }),
@@ -776,6 +792,231 @@ class WorkflowExecutionService {
     };
   }
 
+  /**
+   * Build an ExecutionSummary for a workflow run's root task.
+   * Called at workflow completion or failure to provide a high-level
+   * programmatic rollup of what happened.
+   */
+  private async buildExecutionSummary(
+    run: WorkflowRun,
+    allTasks: Task[],
+    workflow: Workflow,
+    outcome: ExecutionOutcome,
+    failedTask?: Task
+  ): Promise<ExecutionSummary> {
+    const now = new Date();
+    const startTime = run.startedAt || run.createdAt;
+    const durationMs = startTime ? now.getTime() - new Date(startTime).getTime() : undefined;
+
+    // Build trigger info
+    const trigger: ExecutionSummary['trigger'] = {
+      source: run.source || `workflow: ${workflow.name}`,
+    };
+    if (run.inputPayload) {
+      const keys = Object.keys(run.inputPayload);
+      trigger.inputSummary = keys.length > 0
+        ? keys.slice(0, 5).join(', ') + (keys.length > 5 ? ` (+${keys.length - 5} more)` : '')
+        : undefined;
+    }
+
+    // Build step trace from stepLog
+    const steps: ExecutionSummaryStep[] = [];
+    if (run.stepLog && run.stepLog.length > 0) {
+      for (const entry of run.stepLog) {
+        // Find the corresponding task for richer summary data
+        const stepTask = allTasks.find(t => t.workflowStepId === entry.stepId);
+        const stepSummary = this.extractTaskSummary(stepTask);
+
+        steps.push({
+          stepName: entry.stepName,
+          stepType: entry.stepType,
+          outcome: entry.status === 'completed' ? 'success'
+            : entry.status === 'failed' ? 'failed'
+            : 'skipped',
+          summary: stepSummary || undefined,
+          error: entry.error || undefined,
+          durationMs: entry.durationMs || undefined,
+        });
+      }
+    }
+
+    // Build child flow summaries for any flow-type tasks
+    const childFlowSummaries: ExecutionSummaryChildFlow[] = [];
+    const flowTasks = allTasks.filter(t => t.taskType === 'flow' && t.spawnedWorkflowRunId);
+    for (const flowTask of flowTasks) {
+      const childSummary: ExecutionSummaryChildFlow = {
+        taskId: flowTask._id.toString(),
+        title: flowTask.title,
+        outcome: flowTask.status === 'completed' ? 'success'
+          : flowTask.status === 'failed' ? 'failed'
+          : 'escalated',
+      };
+
+      // Pull from the child's own executionSummary if available
+      if (flowTask.executionSummary) {
+        childSummary.outcome = flowTask.executionSummary.outcome;
+        // Use the child's step trace to build a brief summary
+        const childSteps = flowTask.executionSummary.steps;
+        if (childSteps && childSteps.length > 0) {
+          const succeeded = childSteps.filter(s => s.outcome === 'success').length;
+          const failed = childSteps.filter(s => s.outcome === 'failed').length;
+          childSummary.summary = `${succeeded}/${childSteps.length} steps succeeded` +
+            (failed > 0 ? `, ${failed} failed` : '');
+        }
+        if (flowTask.executionSummary.errorChain?.[0]) {
+          childSummary.error = flowTask.executionSummary.errorChain[0].error;
+        }
+      } else {
+        // Fallback: extract from workflowResult
+        childSummary.summary = this.extractTaskSummary(flowTask) || undefined;
+        if (flowTask.workflowResult?.error) {
+          childSummary.error = flowTask.workflowResult.error;
+        }
+      }
+
+      // Try to get workflow name from the flow config
+      if (flowTask.flowConfig?.workflowId) {
+        const childWorkflow = await this.workflows.findOne({
+          _id: new ObjectId(flowTask.flowConfig.workflowId),
+        });
+        if (childWorkflow) {
+          childSummary.workflowName = childWorkflow.name;
+        }
+      }
+
+      childFlowSummaries.push(childSummary);
+    }
+
+    // Build error chain for failures
+    const errorChain: ExecutionSummaryError[] = [];
+    if (outcome === 'failed' && failedTask) {
+      this.buildErrorChain(errorChain, failedTask, allTasks);
+    }
+
+    // Build stats for foreach parents
+    let stats: ExecutionSummary['stats'] = undefined;
+    const foreachTasks = allTasks.filter(t => t.taskType === 'foreach' && t.batchCounters);
+    if (foreachTasks.length > 0) {
+      let total = 0, succeeded = 0, failed = 0;
+      for (const ft of foreachTasks) {
+        const counters = ft.batchCounters!;
+        total += counters.expectedCount || 0;
+        succeeded += counters.processedCount || 0;
+        failed += counters.failedCount || 0;
+      }
+      stats = {
+        total,
+        succeeded,
+        failed,
+        skipped: Math.max(0, total - succeeded - failed),
+      };
+    }
+
+    return {
+      outcome,
+      completedAt: now,
+      durationMs,
+      trigger,
+      steps: steps.length > 0 ? steps : undefined,
+      stats,
+      childFlowSummaries: childFlowSummaries.length > 0 ? childFlowSummaries : undefined,
+      errorChain: errorChain.length > 0 ? errorChain : undefined,
+    };
+  }
+
+  /**
+   * Build an ExecutionSummary for a foreach parent task based on its children.
+   */
+  private buildForeachExecutionSummary(
+    parentTask: Task,
+    children: Task[]
+  ): ExecutionSummary {
+    const now = new Date();
+    const succeeded = children.filter(c => c.status === 'completed').length;
+    const failed = children.filter(c => c.status === 'failed').length;
+    const total = children.length;
+    const skipped = Math.max(0, total - succeeded - failed);
+
+    const outcome: ExecutionOutcome = failed > 0
+      ? (succeeded > 0 ? 'partial' : 'failed')
+      : 'success';
+
+    const errorChain: ExecutionSummaryError[] = [];
+    if (failed > 0) {
+      const failedChildren = children.filter(c => c.status === 'failed');
+      for (const child of failedChildren.slice(0, 5)) {
+        const errorMsg = typeof child.metadata?.error === 'string'
+          ? child.metadata.error
+          : this.extractTaskSummary(child) || 'Unknown error';
+        errorChain.push({
+          stepName: child.title,
+          error: errorMsg,
+          taskId: child._id.toString(),
+        });
+      }
+    }
+
+    const startTime = parentTask.createdAt;
+    const durationMs = startTime ? now.getTime() - new Date(startTime).getTime() : undefined;
+
+    return {
+      outcome,
+      completedAt: now,
+      durationMs,
+      stats: { total, succeeded, failed, skipped },
+      errorChain: errorChain.length > 0 ? errorChain : undefined,
+    };
+  }
+
+  /**
+   * Extract a human-readable summary string from a task's output data.
+   */
+  private extractTaskSummary(task: Task | null | undefined): string | null {
+    if (!task) return null;
+    // Prefer stepOutput.summary
+    if (task.stepOutput?.summary) return task.stepOutput.summary;
+    // Then daemon output summary
+    const meta = task.metadata as Record<string, unknown> | undefined;
+    if (meta?.output && typeof meta.output === 'object') {
+      const output = meta.output as Record<string, unknown>;
+      if (typeof output.summary === 'string') return output.summary;
+    }
+    if (typeof meta?.summary === 'string') return meta.summary;
+    // TaskResult summary
+    if (task.taskResult?.current?.summary) return task.taskResult.current.summary;
+    return null;
+  }
+
+  /**
+   * Build an error chain by tracing the failure through nested tasks.
+   * Most specific error first (the leaf task that actually failed).
+   */
+  private buildErrorChain(
+    chain: ExecutionSummaryError[],
+    failedTask: Task,
+    _allTasks: Task[]
+  ): void {
+    // Start with the immediate failed task
+    const errorMsg = typeof failedTask.metadata?.error === 'string'
+      ? failedTask.metadata.error
+      : typeof failedTask.metadata?.nextActionReason === 'string'
+        ? failedTask.metadata.nextActionReason
+        : failedTask.workflowResult?.error
+          || `Step "${failedTask.title}" failed`;
+
+    chain.push({
+      stepName: failedTask.title,
+      error: errorMsg,
+      taskId: failedTask._id.toString(),
+    });
+
+    // If this is a flow task with a spawned workflow, look for the child's failed task
+    if (failedTask.taskType === 'flow' && failedTask.executionSummary?.errorChain) {
+      // Append the child's error chain (already ordered most-specific-first)
+      chain.push(...failedTask.executionSummary.errorChain);
+    }
+  }
+
   private async createTaskForStep(
     run: WorkflowRun,
     workflow: Workflow,
@@ -834,6 +1075,7 @@ class WorkflowExecutionService {
       assigneeId,
       createdAt: now,
       updatedAt: now,
+      ...(run.humanInstruction && { humanInstruction: run.humanInstruction }),
       // New unified step input field
       stepInput: inputPayload,
       metadata: {
@@ -1872,9 +2114,18 @@ class WorkflowExecutionService {
         }
       );
 
+      // Build execution summary for the foreach parent task
+      const foreachTask = await this.tasks.findOne({ _id: foreachTaskId });
+      const foreachSummary = foreachTask
+        ? this.buildForeachExecutionSummary(foreachTask, children)
+        : undefined;
+
       await this.tasks.updateOne(
         { _id: foreachTaskId },
-        { $set: { status: 'completed' as TaskStatus } }
+        { $set: {
+          status: 'completed' as TaskStatus,
+          ...(foreachSummary && { executionSummary: foreachSummary }),
+        } }
       );
 
       console.log(`[WorkflowExecutionService] Join ${joinStatus}: ${statusReason}`);
@@ -3613,7 +3864,7 @@ class WorkflowExecutionService {
 
   private async handleStepFailure(
     run: WorkflowRun,
-    _workflow: Workflow,
+    workflow: Workflow,
     failedTask: Task
   ): Promise<void> {
     const now = new Date();
@@ -3630,10 +3881,29 @@ class WorkflowExecutionService {
       }
     );
 
+    // Re-fetch run with updated stepLog for summary building
+    const updatedRunForSummary = await this.workflowRuns.findOne({ _id: run._id });
+    const allTasks = await this.tasks.find({ workflowRunId: run._id }).toArray();
+
+    // Build execution summary capturing the failure
+    let executionSummary: ExecutionSummary | undefined;
+    if (updatedRunForSummary) {
+      try {
+        executionSummary = await this.buildExecutionSummary(
+          updatedRunForSummary, allTasks, workflow, 'failed', failedTask
+        );
+      } catch (err) {
+        console.error(`[WorkflowExecutionService] Failed to build execution summary for failed run ${run._id}:`, err);
+      }
+    }
+
     if (run.rootTaskId) {
       await this.tasks.updateOne(
         { _id: run.rootTaskId },
-        { $set: { status: 'failed' as TaskStatus } }
+        { $set: {
+          status: 'failed' as TaskStatus,
+          ...(executionSummary && { executionSummary }),
+        } }
       );
     }
 
@@ -3681,6 +3951,11 @@ class WorkflowExecutionService {
           'taskResult.current.error': `Step "${failedTask.title}" failed`,
           'taskResult.current.spawnedWorkflow.status': 'failed',
         };
+
+        // Propagate execution summary to the flow task for parent rollup
+        if (executionSummary) {
+          updateFields.executionSummary = executionSummary;
+        }
 
         // Update the flow attempt if we have one
         if (attemptIndex >= 0) {
@@ -3750,9 +4025,11 @@ class WorkflowExecutionService {
   private async completeWorkflow(run: WorkflowRun): Promise<void> {
     const now = new Date();
 
-    const completedTasks = await this.tasks
-      .find({ workflowRunId: run._id, status: 'completed' })
+    const allTasks = await this.tasks
+      .find({ workflowRunId: run._id })
       .toArray();
+
+    const completedTasks = allTasks.filter(t => t.status === 'completed');
 
     const outputPayload: Record<string, unknown> = {};
     for (const task of completedTasks) {
@@ -3773,6 +4050,22 @@ class WorkflowExecutionService {
       }
     );
 
+    // Re-fetch run to get the latest stepLog for summary building
+    const updatedRun = await this.workflowRuns.findOne({ _id: run._id });
+    const workflow = await this.workflows.findOne({ _id: run.workflowId });
+
+    // Build execution summary for the root task
+    let executionSummary: ExecutionSummary | undefined;
+    if (workflow && updatedRun) {
+      try {
+        executionSummary = await this.buildExecutionSummary(
+          updatedRun, allTasks, workflow, 'success'
+        );
+      } catch (err) {
+        console.error(`[WorkflowExecutionService] Failed to build execution summary for run ${run._id}:`, err);
+      }
+    }
+
     if (run.rootTaskId) {
       const rootTask = await this.tasks.findOne({ _id: run.rootTaskId });
       const oldStatus = rootTask?.status || 'in_progress';
@@ -3783,6 +4076,7 @@ class WorkflowExecutionService {
           $set: {
             status: 'completed' as TaskStatus,
             metadata: { ...outputPayload, completedAt: now },
+            ...(executionSummary && { executionSummary }),
             updatedAt: now,
           },
         }
@@ -3865,6 +4159,11 @@ class WorkflowExecutionService {
           'taskResult.current.spawnedWorkflow.outputPayload': outputPayload,
         };
 
+        // Propagate execution summary to the flow task for parent rollup
+        if (executionSummary) {
+          updateFields.executionSummary = executionSummary;
+        }
+
         // Update the flow attempt if we have one
         if (attemptIndex >= 0) {
           updateFields[`flowConfig.attempts.${attemptIndex}.status`] = 'success';
@@ -3913,13 +4212,13 @@ class WorkflowExecutionService {
       }
     }
 
-    const updatedRun = await this.workflowRuns.findOne({ _id: run._id });
-    if (updatedRun) {
+    const finalRun = await this.workflowRuns.findOne({ _id: run._id });
+    if (finalRun) {
       await this.publish({
         id: this.generateEventId(),
         type: 'workflow.run.completed',
         workflowRunId: run._id,
-        workflowRun: updatedRun,
+        workflowRun: finalRun,
         actorId: null,
         actorType: 'system',
         timestamp: now,
