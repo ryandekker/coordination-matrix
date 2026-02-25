@@ -576,6 +576,62 @@ export interface TaskResult {
   history?: TaskResultEntry[];        // Previous results (capped, e.g., last 10)
 }
 
+// ============================================================================
+// Execution Summary - Programmatic rollup of what happened in a task/workflow
+// ============================================================================
+
+export type ExecutionOutcome = 'success' | 'partial' | 'failed' | 'escalated';
+
+export interface ExecutionSummaryStep {
+  stepName: string;
+  stepType: string;
+  outcome: 'success' | 'failed' | 'skipped';
+  summary?: string;
+  error?: string;
+  durationMs?: number;
+}
+
+export interface ExecutionSummaryChildFlow {
+  taskId: string;
+  title: string;
+  workflowName?: string;
+  outcome: ExecutionOutcome;
+  summary?: string;
+  error?: string;
+}
+
+export interface ExecutionSummaryStats {
+  total: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+}
+
+export interface ExecutionSummaryError {
+  stepName: string;
+  error: string;
+  taskId: string;
+}
+
+export interface ExecutionSummary {
+  outcome: ExecutionOutcome;
+  completedAt: Date;
+  durationMs?: number;
+
+  trigger?: {
+    source: string;
+    inputSummary?: string;
+  };
+
+  steps?: ExecutionSummaryStep[];
+
+  stats?: ExecutionSummaryStats;
+
+  childFlowSummaries?: ExecutionSummaryChildFlow[];
+
+  errorChain?: ExecutionSummaryError[];
+}
+
 export interface Task {
   _id: ObjectId;
   title: string;
@@ -667,6 +723,9 @@ export interface Task {
   // Unified step input/output (new model for workflow tasks)
   stepInput?: Record<string, unknown>;   // Resolved input data received by this step
   stepOutput?: StepOutput;               // Standardized output produced by this step
+
+  // Programmatic rollup of execution outcome (built at completion time)
+  executionSummary?: ExecutionSummary;
 
   // Manual review fields (for manual workflow steps)
   reviewDecision?: ManualReviewDecision;

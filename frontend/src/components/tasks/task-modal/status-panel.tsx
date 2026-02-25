@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
-import { format, formatDistanceToNow } from 'date-fns'
+import { formatDistanceToNow } from 'date-fns'
 import {
   CheckCircle2,
   XCircle,
@@ -18,6 +18,7 @@ import { Task, LookupValue } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { getTaskTypeConfig } from '@/lib/task-type-config'
 import { ListTree } from 'lucide-react'
+import { ExecutionSummarySection } from './execution-summary-section'
 
 interface StatusPanelProps {
   task: Task
@@ -69,6 +70,10 @@ export function StatusPanel({
 
   // Determine error message
   const errorMessage = useMemo(() => {
+    // Prefer execution summary error chain for richer errors
+    if (task.executionSummary?.errorChain?.[0]?.error) {
+      return task.executionSummary.errorChain[0].error
+    }
     if (metadata?.error && typeof metadata.error === 'string') {
       return metadata.error
     }
@@ -76,7 +81,7 @@ export function StatusPanel({
       return lastAttempt.errorMessage
     }
     return null
-  }, [metadata, lastAttempt])
+  }, [task.executionSummary, metadata, lastAttempt])
 
   // Waiting reason
   const waitingReason = metadata?.waitingReason as string | undefined
@@ -450,6 +455,11 @@ export function StatusPanel({
   return (
     <div className={cn('rounded-lg border p-4', panelBgClass)}>
       {renderContent()}
+      {task.executionSummary && (
+        <div className="mt-3">
+          <ExecutionSummarySection summary={task.executionSummary} />
+        </div>
+      )}
       {renderChildStatusSummary()}
     </div>
   )
