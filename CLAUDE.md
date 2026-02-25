@@ -376,9 +376,19 @@ For production/remote deployments, always use `task-daemon.mjs`.
 | Backend API | Render | `cm.hcizero.com/api/*` (proxied through Cloudflare) |
 | Database | MongoDB Atlas | Internal connection string |
 
-**URL routing:** `cm.hcizero.com` is a Cloudflare Pages site. All root paths serve the frontend. Only `/api/*` is proxied to the Render backend. The backend's `/health` endpoint is **not** reachable at `cm.hcizero.com/health` — use an authenticated `/api/tasks?limit=1` request as a liveness check instead.
+**URL routing:** `cm.hcizero.com` is a Cloudflare Pages site. All root paths serve the frontend. Only `/api/*` is proxied to the Render backend.
 
 **Cloudflare Pages production branch:** `prod`. Frontend deploys via `wrangler pages deploy --branch prod`. Without `--branch prod`, deploys land as previews only.
+
+**Health & version endpoints (no auth required):**
+- `cm.hcizero.com/api/health` — backend liveness + deployed commit SHA
+- `cm.hcizero.com/build-info.json` — frontend deployed commit SHA
+
+```bash
+# Quick version check after deploy
+curl -s https://cm.hcizero.com/api/health | jq '.version.commitSha'
+curl -s https://cm.hcizero.com/build-info.json | jq '.commitSha'
+```
 
 ## Production API Debugging
 

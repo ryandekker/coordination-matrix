@@ -109,6 +109,71 @@ The frontend uses relative `/api` paths in production (no `NEXT_PUBLIC_API_URL` 
 
 ---
 
+## Health Check & Version Endpoints
+
+The deploy pipeline generates `build-info.json` files containing the git commit SHA, branch, and build timestamp. These are used by health endpoints to identify which version is running.
+
+### Endpoints
+
+| Endpoint | Type | Auth | URL in Production | Returns |
+|----------|------|------|-------------------|---------|
+| `/api/health` | Backend (Express) | None | `cm.hcizero.com/api/health` | `{status, timestamp, version}` |
+| `/build-info.json` | Frontend (static) | None | `cm.hcizero.com/build-info.json` | `{commitSha, branch, buildTimestamp, ...}` |
+
+### Backend `/api/health` Response
+
+```json
+{
+  "status": "healthy",
+  "timestamp": "2026-02-24T22:05:00.000Z",
+  "version": {
+    "commitSha": "a5e5988",
+    "commitFull": "a5e598852e7fa1d2a9f44b42782dbd9bc3710f09",
+    "commitMessage": "Fix frontend deploy...",
+    "branch": "main",
+    "buildTimestamp": "2026-02-24T22:00:00Z"
+  }
+}
+```
+
+If `build-info.json` was not generated (e.g. running locally without the deploy pipeline), `version` will be `null`.
+
+### Frontend `/build-info.json` Response
+
+```json
+{
+  "commitSha": "a5e5988",
+  "commitFull": "a5e598852e7fa1d2a9f44b42782dbd9bc3710f09",
+  "commitMessage": "Fix frontend deploy...",
+  "branch": "main",
+  "buildTimestamp": "2026-02-24T22:00:00Z"
+}
+```
+
+### Quick Version Check
+
+```bash
+# Check backend version
+curl -s https://cm.hcizero.com/api/health | jq '.version.commitSha'
+
+# Check frontend version
+curl -s https://cm.hcizero.com/build-info.json | jq '.commitSha'
+
+# Compare both (should match after a deploy)
+echo "Backend: $(curl -s https://cm.hcizero.com/api/health | jq -r '.version.commitSha')"
+echo "Frontend: $(curl -s https://cm.hcizero.com/build-info.json | jq -r '.commitSha')"
+```
+
+### How Build Info is Generated
+
+The deploy pipeline (`scripts/deploy/02-build.sh` and `04-deploy-frontend.sh`) captures git metadata and writes:
+- `backend/build-info.json` — read by Express at startup, served via `/api/health`
+- `frontend/public/build-info.json` — included as a static file in the Cloudflare Pages build
+
+Both files are in `.gitignore` since they are generated at deploy time.
+
+---
+
 ## Database Migrations
 
 The migration system allows safe, incremental schema updates without data loss.
@@ -332,14 +397,13 @@ server {
 ### Health Checks
 
 ```bash
-# Backend health (cloud production — must go through /api since Cloudflare handles root)
-# Use authenticated API request as a liveness check:
-curl -s -H "X-API-Key: $API_KEY" https://cm.hcizero.com/api/tasks?limit=1
+# Backend health + version (public, no auth required)
+curl -s https://cm.hcizero.com/api/health | jq .
 
-# Backend health (if you have the direct Render URL):
-curl https://<render-service>.onrender.com/health
+# Frontend version (static file)
+curl -s https://cm.hcizero.com/build-info.json | jq .
 
-# MongoDB health (self-hosted Docker only)
+# Self-hosted Docker: MongoDB health
 docker compose exec mongodb mongosh --eval "db.adminCommand('ping')"
 ```
 

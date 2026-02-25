@@ -1,10 +1,11 @@
 // OpenAPI path definitions for Health and Auth endpoints
 
 export const healthPaths = {
-  '/health': {
+  '/api/health': {
     get: {
       tags: ['Health'],
-      summary: 'Health check',
+      summary: 'Health check with deploy version info',
+      description: 'Public endpoint (no auth). Returns server status and deployed version. In production, reachable at cm.hcizero.com/api/health.',
       security: [],
       responses: {
         200: {
@@ -16,6 +17,18 @@ export const healthPaths = {
                 properties: {
                   status: { type: 'string', example: 'healthy' },
                   timestamp: { type: 'string', format: 'date-time' },
+                  version: {
+                    type: 'object',
+                    nullable: true,
+                    description: 'Build info from deploy pipeline. Null if build-info.json was not generated.',
+                    properties: {
+                      commitSha: { type: 'string', example: 'a5e5988' },
+                      commitFull: { type: 'string', example: 'a5e598852e7fa1d2a9f44b42782dbd9bc3710f09' },
+                      commitMessage: { type: 'string', example: 'Fix frontend deploy' },
+                      branch: { type: 'string', example: 'main' },
+                      buildTimestamp: { type: 'string', format: 'date-time' },
+                    },
+                  },
                 },
               },
             },
