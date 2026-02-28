@@ -1199,6 +1199,8 @@ class WorkflowExecutionService {
         type: 'output',
         status: 'review',
         tags: [],
+        groupId: task.groupId || null,
+        projectId: task.projectId || null,
         createdById: null, // System-generated
         lastModifiedById: null,
         relatedTaskIds: [task._id],

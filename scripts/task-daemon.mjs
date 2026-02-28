@@ -283,6 +283,7 @@ Response schema:
   "output": { /* Structured result object - schema defined by task/workflow */ },
   "nextAction": "COMPLETE" | "CONTINUE" | "ESCALATE" | "HOLD" | "ASK" | "REQUEST_DOCS" | "DECOMPOSE",
   "nextActionReason": "Optional: reason for action",
+  "documentOperations": [ /* Optional: create, update, or search documents */ ],
   "metadata": {
     "confidence": 0.0-1.0,
     "suggestedTags": [],
@@ -299,8 +300,13 @@ Response schema:
 - REQUEST_DOCS: Request capability documentation before proceeding
 - DECOMPOSE: Break task into subtasks (advanced agents only, not in workflows unless allowed)
 
+## Document Operations (optional, can accompany any nextAction)
+Include a "documentOperations" array to create, update, or search documents.
+Created documents are automatically linked to the current task.
+Request 'document-operations' capability via REQUEST_DOCS for full schema and options.
+
 ## Requesting Capabilities
-Before using advanced features (like ASK), request the documentation:
+Before using advanced features (like ASK or document operations), request the documentation:
 {
   "status": "PARTIAL",
   "summary": "Need capability documentation",
@@ -1320,7 +1326,7 @@ async function updateDocument(config, documentId, updates) {
   }
 }
 
-async function processDocumentOperations(config, taskId, documentOperations) {
+async function processDocumentOperations(config, task, documentOperations) {
   const results = [];
 
   for (const op of documentOperations) {
@@ -1334,6 +1340,9 @@ async function processDocumentOperations(config, taskId, documentOperations) {
           type: op.document?.type || 'output',
           status: op.document?.status || 'draft',
           tags: op.document?.tags,
+          groupId: task.groupId || undefined,
+          projectId: task.projectId || undefined,
+          workflowRunId: task.workflowRunId || undefined,
         });
         if (doc) {
           results.push({ action: 'create', success: true, documentId: doc._id, title: doc.title });
@@ -1342,7 +1351,7 @@ async function processDocumentOperations(config, taskId, documentOperations) {
             await fetchWithTimeout(`${config.apiUrl}/documents/${doc._id}/link-task`, {
               method: 'POST',
               headers: getHeaders(config),
-              body: JSON.stringify({ taskId }),
+              body: JSON.stringify({ taskId: task._id }),
             });
           } catch (linkErr) {
             console.warn(`[Document] Failed to link document to task: ${linkErr.message}`);
@@ -1538,7 +1547,8 @@ Your response MUST be a JSON object with this exact structure:
   "status": "SUCCESS" | "PARTIAL" | "BLOCKED" | "FAILED",
   "summary": "Brief summary of what was done",
   "output": { /* Your task-specific result goes here */ },
-  "nextAction": "COMPLETE" | "CONTINUE" | "ESCALATE" | "HOLD" | "ASK" | "REQUEST_DOCS"
+  "nextAction": "COMPLETE" | "CONTINUE" | "ESCALATE" | "HOLD" | "ASK" | "REQUEST_DOCS",
+  "documentOperations": [ /* Optional: create/update/search documents */ ]
 }
 
 If the task instructions specify an output format, that format goes INSIDE the "output" field.
@@ -2870,7 +2880,7 @@ async function processTask(config, task) {
   // Process document operations if any
   if (parsedResponse.data.documentOperations?.length > 0) {
     log.info(`Processing ${parsedResponse.data.documentOperations.length} document operations...`);
-    const docResults = await processDocumentOperations(config, task._id, parsedResponse.data.documentOperations);
+    const docResults = await processDocumentOperations(config, task, parsedResponse.data.documentOperations);
     output.documentOperations = docResults;
     log.info('Document operations completed', { results: docResults.length });
   }
