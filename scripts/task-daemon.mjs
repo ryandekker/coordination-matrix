@@ -1060,6 +1060,48 @@ async function fetchUser(config, userId) {
   }
 }
 
+async function fetchAgentUsers(config) {
+  try {
+    const response = await fetchWithTimeout(`${config.apiUrl}/users?isAgent=true`, {
+      headers: getHeaders(config),
+    });
+    if (!response.ok) return [];
+    const result = await response.json();
+    const users = result.data || [];
+    return users
+      .filter(u => u.isActive && u.isAgent)
+      .map(u => ({
+        id: u._id,
+        name: u.displayName,
+        complexity: u.agentComplexity || null,
+        prompt: u.agentPrompt ? u.agentPrompt.substring(0, 100) + (u.agentPrompt.length > 100 ? '...' : '') : null,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+async function fetchActiveWorkflows(config) {
+  try {
+    const response = await fetchWithTimeout(`${config.apiUrl}/workflows`, {
+      headers: getHeaders(config),
+    });
+    if (!response.ok) return [];
+    const result = await response.json();
+    const workflows = result.data || [];
+    return workflows
+      .filter(w => w.isActive)
+      .map(w => ({
+        id: w._id,
+        name: w.name,
+        description: w.description || null,
+        triggerType: w.trigger?.type || null,
+      }));
+  } catch {
+    return [];
+  }
+}
+
 async function fetchWorkflow(config, workflowId) {
   if (!workflowId) return null;
 
@@ -1436,15 +1478,16 @@ async function processRoutingOperations(config, task, routingOperations) {
   for (const op of routingOperations) {
     switch (op.action) {
       case 'assign': {
-        // Reassign the task to a different agent or user
+        // Reassign the task to a different agent or user and reset to pending
+        // so the target agent's daemon picks it up
         const assigneeId = op.assigneeId;
         if (!assigneeId) {
           results.push({ action: 'assign', success: false, error: 'Missing assigneeId' });
           break;
         }
-        console.log(`[Routing] Assigning task ${task._id} to ${assigneeId}`);
-        const assigned = await updateTask(config, task._id, { assignee: assigneeId });
-        results.push({ action: 'assign', success: !!assigned, assigneeId });
+        console.log(`[Routing] Assigning task ${task._id} to ${assigneeId} and resetting to pending`);
+        const assigned = await updateTask(config, task._id, { assignee: assigneeId, status: 'pending' });
+        results.push({ action: 'assign', success: !!assigned, assigneeId, statusReset: true });
         break;
       }
       case 'triggerWorkflow': {
@@ -1525,7 +1568,7 @@ async function processRoutingOperations(config, task, routingOperations) {
  * @param {Array} options.loadedCapabilities - Full capability documents to include
  */
 function assemblePrompt(task, agent, workflowStep, options = {}) {
-  const { capabilityManifest, loadedCapabilities, linkedDocuments } = options;
+  const { capabilityManifest, loadedCapabilities, linkedDocuments, routingContext } = options;
   const sections = [];
 
   // 1. Base daemon prompt (ensures JSON output)
@@ -1540,6 +1583,32 @@ function assemblePrompt(task, agent, workflowStep, options = {}) {
   if (loadedCapabilities && loadedCapabilities.length > 0) {
     for (const cap of loadedCapabilities) {
       sections.push(`## Capability: ${cap.title}\n${cap.content}`);
+    }
+  }
+
+  // 1.7. Dynamic routing context (agents, workflows) — injected when task-routing is loaded
+  if (routingContext) {
+    const { agents, workflows } = routingContext;
+    const lines = [];
+    if (agents && agents.length > 0) {
+      lines.push('## Available Agents');
+      lines.push('Use these IDs with the `assign` routing operation:');
+      for (const a of agents) {
+        const desc = a.prompt ? ` — ${a.prompt}` : '';
+        lines.push(`- **${a.name}** (${a.id}): complexity ${a.complexity || '?'}${desc}`);
+      }
+    }
+    if (workflows && workflows.length > 0) {
+      lines.push('');
+      lines.push('## Available Workflows');
+      lines.push('Use these IDs with the `triggerWorkflow` routing operation:');
+      for (const w of workflows) {
+        const desc = w.description ? ` — ${w.description}` : '';
+        lines.push(`- **${w.name}** (${w.id})${desc}`);
+      }
+    }
+    if (lines.length > 0) {
+      sections.push(lines.join('\n'));
     }
   }
 
@@ -2714,11 +2783,25 @@ async function processTask(config, task) {
   // Fetch linked documents for context
   const linkedDocuments = await fetchLinkedDocuments(config, task._id);
 
+  // Fetch routing context if task-routing capability is loaded
+  let routingContext = null;
+  const hasRoutingCapability = loadedCapabilities.some(c => c.id === 'task-routing');
+  if (hasRoutingCapability) {
+    log.info('Fetching routing context (agents + workflows)...');
+    const [agents, workflows] = await Promise.all([
+      fetchAgentUsers(config),
+      fetchActiveWorkflows(config),
+    ]);
+    routingContext = { agents, workflows };
+    log.debug(`Routing context: ${agents.length} agents, ${workflows.length} workflows`);
+  }
+
   // Assemble the prompt with capability information
   const prompt = assemblePrompt(task, agent, workflowStep, {
     capabilityManifest,
     loadedCapabilities,
     linkedDocuments,
+    routingContext,
   });
 
   // Build exec command with MCP config if configured
