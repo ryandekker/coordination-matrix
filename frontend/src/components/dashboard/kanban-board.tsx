@@ -9,6 +9,7 @@ const COLUMN_ORDER = [
   'needs_attention',
   'questions',
   'pending',
+  'processing',
   'in_progress',
   'review',
   'done_recent',
@@ -18,6 +19,7 @@ const COLUMN_CONFIG: Record<string, { label: string; indicatorColor: string }> =
   needs_attention: { label: 'Needs Attention', indicatorColor: 'bg-amber-500' },
   questions: { label: 'Questions', indicatorColor: 'bg-purple-500' },
   pending: { label: 'Pending', indicatorColor: 'bg-gray-400' },
+  processing: { label: 'Processing', indicatorColor: 'bg-cyan-500' },
   in_progress: { label: 'In Progress', indicatorColor: 'bg-blue-500' },
   review: { label: 'Review', indicatorColor: 'bg-violet-500' },
   done_recent: { label: 'Done', indicatorColor: 'bg-green-500' },
@@ -34,7 +36,7 @@ export function KanbanBoard({ columns, onTaskClick }: KanbanBoardProps) {
   const orderedKeys = [...COLUMN_ORDER, ...extraKeys].filter((k) => k in columns)
 
   return (
-    <div className="grid grid-cols-6 border border-border rounded-lg overflow-hidden">
+    <div className="grid grid-cols-7 border border-border rounded-lg overflow-hidden">
       {orderedKeys.map((key, index) => {
         const column = columns[key]
         const config = COLUMN_CONFIG[key] || {

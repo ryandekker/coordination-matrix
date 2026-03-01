@@ -98,7 +98,7 @@ async function resolveDocumentReferences(doc: Document): Promise<DocumentWithRes
 // Build filter from query params
 function buildFilter(query: Record<string, unknown>): Record<string, unknown> {
   const filter: Record<string, unknown> = {};
-  const { search, type, status, tags, includeArchived, createdById, workflowRunId, parentDocumentId, groupId, projectId, filters } = query;
+  const { search, type, status, tags, includeArchived, createdById, workflowRunId, parentDocumentId, groupId, projectId, relatedTaskId, filters } = query;
 
   // Group filter
   if (groupId && typeof groupId === 'string' && ObjectId.isValid(groupId)) {
@@ -150,6 +150,11 @@ function buildFilter(query: Record<string, unknown>): Record<string, unknown> {
   // Workflow run filter
   if (workflowRunId && typeof workflowRunId === 'string' && ObjectId.isValid(workflowRunId)) {
     filter.workflowRunId = new ObjectId(workflowRunId);
+  }
+
+  // Related task filter (documents linked to a specific task)
+  if (relatedTaskId && typeof relatedTaskId === 'string' && ObjectId.isValid(relatedTaskId)) {
+    filter.relatedTaskIds = new ObjectId(relatedTaskId);
   }
 
   // Parent document filter

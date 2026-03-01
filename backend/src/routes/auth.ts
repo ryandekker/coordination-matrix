@@ -347,7 +347,7 @@ router.post('/provision', registrationRateLimiter, async (req: Request, res: Res
     }
 
     // Check if user already exists
-    let user = await usersCollection.findOne({ email: normalizedEmail });
+    const user = await usersCollection.findOne({ email: normalizedEmail });
 
     if (user) {
       // User exists - just return a login token

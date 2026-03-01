@@ -12,5 +12,6 @@
 capabilities:
   - file: ask-questions.md
   - file: document-operations.md
+  - file: task-routing.md
   - file: delegation-patterns.md
   - file: create-workflow.md

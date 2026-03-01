@@ -3304,7 +3304,7 @@ class WorkflowExecutionService {
         if (!joinTask) {
           const childStep = workflow.steps.find(s => s.id === task.workflowStepId);
           if (childStep) {
-            let nextStepIds = childStep.connections?.map(c => c.targetStepId) || [];
+            const nextStepIds = childStep.connections?.map(c => c.targetStepId) || [];
             if (nextStepIds.length === 0) {
               const childIndex = workflow.steps.findIndex(s => s.id === childStep.id);
               const nextStep = workflow.steps[childIndex + 1];
@@ -4865,7 +4865,7 @@ class WorkflowExecutionService {
           'webhookConfig.requestBody': 0,
         };
 
-    let tasks = (await this.tasks
+    const tasks = (await this.tasks
       .find(filter)
       .sort({ createdAt: 1, _id: 1 })
       .limit(limit + 1)

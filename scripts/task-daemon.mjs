@@ -283,6 +283,8 @@ Response schema:
   "output": { /* Structured result object - schema defined by task/workflow */ },
   "nextAction": "COMPLETE" | "CONTINUE" | "ESCALATE" | "HOLD" | "ASK" | "REQUEST_DOCS" | "DECOMPOSE",
   "nextActionReason": "Optional: reason for action",
+  "documentOperations": [ /* Optional: create, update, or search documents */ ],
+  "routingOperations": [ /* Optional: assign, triggerWorkflow, or addTags */ ],
   "metadata": {
     "confidence": 0.0-1.0,
     "suggestedTags": [],
@@ -298,6 +300,15 @@ Response schema:
 - ASK: Request human input via questions (request 'ask-questions' capability first)
 - REQUEST_DOCS: Request capability documentation before proceeding
 - DECOMPOSE: Break task into subtasks (advanced agents only, not in workflows unless allowed)
+
+## Document Operations (optional, can accompany any nextAction)
+Include a "documentOperations" array to create, update, or search documents.
+Created documents are automatically linked to the current task.
+Request 'document-operations' capability via REQUEST_DOCS for full schema and options.
+
+## Routing Operations (optional, can accompany any nextAction)
+Include a "routingOperations" array to assign tasks, trigger workflows, or add tags.
+Request 'task-routing' capability via REQUEST_DOCS for full schema and options.
 
 ## Requesting Capabilities
 Before using advanced features (like ASK), request the documentation:
@@ -1260,6 +1271,27 @@ async function searchDocuments(config, query) {
   }
 }
 
+async function fetchLinkedDocuments(config, taskId) {
+  try {
+    const response = await fetchWithTimeout(`${config.apiUrl}/documents?relatedTaskId=${taskId}&limit=10`, {
+      method: 'GET',
+      headers: getHeaders(config),
+    });
+    if (!response.ok) return [];
+    const result = await response.json();
+    const docs = result.data?.documents || result.data || [];
+    return docs.map(d => ({
+      id: d._id,
+      title: d.title,
+      type: d.type,
+      status: d.status,
+      summary: d.summary || null,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 async function createDocument(config, documentData) {
   if (config.noUpdate) {
     console.log(`[Skip create] Would create document:`, documentData.title);
@@ -1395,6 +1427,91 @@ async function processDocumentOperations(config, taskId, documentOperations) {
 }
 
 // ============================================================================
+// Routing Operations Processing
+// ============================================================================
+
+async function processRoutingOperations(config, task, routingOperations) {
+  const results = [];
+
+  for (const op of routingOperations) {
+    switch (op.action) {
+      case 'assign': {
+        // Reassign the task to a different agent or user
+        const assigneeId = op.assigneeId;
+        if (!assigneeId) {
+          results.push({ action: 'assign', success: false, error: 'Missing assigneeId' });
+          break;
+        }
+        console.log(`[Routing] Assigning task ${task._id} to ${assigneeId}`);
+        const assigned = await updateTask(config, task._id, { assignee: assigneeId });
+        results.push({ action: 'assign', success: !!assigned, assigneeId });
+        break;
+      }
+      case 'triggerWorkflow': {
+        // Trigger a workflow run for this task
+        const workflowId = op.workflowId;
+        if (!workflowId) {
+          results.push({ action: 'triggerWorkflow', success: false, error: 'Missing workflowId' });
+          break;
+        }
+        console.log(`[Routing] Triggering workflow ${workflowId} for task ${task._id}`);
+        try {
+          const input = {
+            workflowId,
+            input: {
+              title: task.title,
+              summary: task.summary || '',
+              tags: task.tags || [],
+              ...(task.metadata?.inputPayload || {}),
+              ...(op.input || {}),
+            },
+            source: 'routing-agent',
+            externalId: task._id,
+          };
+          const response = await fetchWithTimeout(`${config.apiUrl}/workflow-runs`, {
+            method: 'POST',
+            headers: getHeaders(config),
+            body: JSON.stringify(input),
+          });
+          if (response.ok) {
+            const result = await response.json();
+            const runId = result.data?.workflowRunId || result.data?._id;
+            results.push({ action: 'triggerWorkflow', success: true, workflowId, workflowRunId: runId });
+          } else {
+            const error = await response.text();
+            console.error(`[Routing] Failed to trigger workflow (${response.status}): ${error}`);
+            results.push({ action: 'triggerWorkflow', success: false, workflowId, error: `HTTP ${response.status}` });
+          }
+        } catch (err) {
+          console.error(`[Routing] Error triggering workflow: ${err.message}`);
+          results.push({ action: 'triggerWorkflow', success: false, workflowId, error: err.message });
+        }
+        break;
+      }
+      case 'addTags': {
+        // Add tags to the task
+        const newTags = op.tags;
+        if (!Array.isArray(newTags) || newTags.length === 0) {
+          results.push({ action: 'addTags', success: false, error: 'Missing or empty tags array' });
+          break;
+        }
+        console.log(`[Routing] Adding tags to task ${task._id}: ${newTags.join(', ')}`);
+        const existingTags = new Set(task.tags || []);
+        newTags.forEach(t => existingTags.add(t));
+        const updated = await updateTask(config, task._id, { tags: Array.from(existingTags) });
+        results.push({ action: 'addTags', success: !!updated, tags: newTags });
+        break;
+      }
+      default:
+        console.warn(`[Routing] Unknown operation: ${op.action}`);
+        results.push({ action: op.action, success: false, error: 'Unknown operation' });
+    }
+  }
+
+  return results;
+}
+
+// ============================================================================
 // Prompt Assembly
 // ============================================================================
 
@@ -1408,7 +1525,7 @@ async function processDocumentOperations(config, taskId, documentOperations) {
  * @param {Array} options.loadedCapabilities - Full capability documents to include
  */
 function assemblePrompt(task, agent, workflowStep, options = {}) {
-  const { capabilityManifest, loadedCapabilities } = options;
+  const { capabilityManifest, loadedCapabilities, linkedDocuments } = options;
   const sections = [];
 
   // 1. Base daemon prompt (ensures JSON output)
@@ -1517,6 +1634,18 @@ Only decompose when genuinely needed - keep individual tasks granular and focuse
     }
   }
 
+  // 7.2. Linked documents (fetched from API — documents already associated with this task)
+  if (linkedDocuments && linkedDocuments.length > 0) {
+    sections.push(`## Linked Documents
+The following documents are linked to this task. You can update them using documentOperations with action "update" and the document id.
+\`\`\`json
+${JSON.stringify(linkedDocuments, null, 2)}
+\`\`\`
+
+To update a linked document, include it in your documentOperations array:
+{ "action": "update", "documentId": "<id>", "changes": { "content": "...", "status": "..." } }`);
+  }
+
   // 7.5. Include answered questions from previous ASK action
   // When a task was put on hold with ASK and questions were answered, include those answers
   const previousOutput = task.metadata?.output;
@@ -1538,7 +1667,9 @@ Your response MUST be a JSON object with this exact structure:
   "status": "SUCCESS" | "PARTIAL" | "BLOCKED" | "FAILED",
   "summary": "Brief summary of what was done",
   "output": { /* Your task-specific result goes here */ },
-  "nextAction": "COMPLETE" | "CONTINUE" | "ESCALATE" | "HOLD" | "ASK" | "REQUEST_DOCS"
+  "nextAction": "COMPLETE" | "CONTINUE" | "ESCALATE" | "HOLD" | "ASK" | "REQUEST_DOCS",
+  "documentOperations": [ /* Optional: create/update/search documents */ ],
+  "routingOperations": [ /* Optional: assign/triggerWorkflow/addTags */ ]
 }
 
 If the task instructions specify an output format, that format goes INSIDE the "output" field.
@@ -1584,6 +1715,7 @@ function parseResponse(responseText) {
         nextActionReason: parsed.nextActionReason || '',
         metadata: parsed.metadata || {},
         documentOperations: parsed.documentOperations || [],
+        routingOperations: parsed.routingOperations || [],
         questions: parsed.questions || null,
         questionsContext: parsed.context || null,
         requestedCapabilities: parsed.requestedCapabilities || null,
@@ -2579,10 +2711,14 @@ async function processTask(config, task) {
     console.log(`[DEBUG] Payload size: ${Math.round(payloadSize / 1024)}KB (limit: ${Math.round(config.maxPayloadSize / 1024)}KB)`);
   }
 
+  // Fetch linked documents for context
+  const linkedDocuments = await fetchLinkedDocuments(config, task._id);
+
   // Assemble the prompt with capability information
   const prompt = assemblePrompt(task, agent, workflowStep, {
     capabilityManifest,
     loadedCapabilities,
+    linkedDocuments,
   });
 
   // Build exec command with MCP config if configured
@@ -2873,6 +3009,14 @@ async function processTask(config, task) {
     const docResults = await processDocumentOperations(config, task._id, parsedResponse.data.documentOperations);
     output.documentOperations = docResults;
     log.info('Document operations completed', { results: docResults.length });
+  }
+
+  // Process routing operations if any
+  if (parsedResponse.data.routingOperations?.length > 0) {
+    log.info(`Processing ${parsedResponse.data.routingOperations.length} routing operations...`);
+    const routingResults = await processRoutingOperations(config, task, parsedResponse.data.routingOperations);
+    output.routingOperations = routingResults;
+    log.info('Routing operations completed', { results: routingResults.length });
   }
 
   // Merge with existing metadata, clearing temporary fields
