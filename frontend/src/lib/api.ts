@@ -1486,6 +1486,8 @@ export interface Workflow {
   rootTaskTitleTemplate?: string
   // Sample payload template for triggering this workflow - helps agents/callers know what data to provide
   samplePayload?: string
+  // JSON Schema defining the expected structure of inputPayload when starting workflow runs
+  inputSchema?: Record<string, unknown>
   // Organization and display
   folderId?: string | null
   color?: string  // Pastel hex color for visual identification

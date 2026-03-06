@@ -1099,10 +1099,27 @@ async function fetchActiveWorkflows(config) {
         name: w.name,
         description: w.description || null,
         triggerType: w.trigger?.type || null,
+        inputSummary: w.inputSchema ? summarizeSchemaForDaemon(w.inputSchema) : null,
       }));
   } catch {
     return [];
   }
+}
+
+/**
+ * Generate a concise summary of a JSON Schema for agent routing context.
+ * Example: "documentTitle (string, required), priority (string)"
+ */
+function summarizeSchemaForDaemon(schema) {
+  if (!schema || !schema.properties) return null;
+  const required = new Set(schema.required || []);
+  const parts = [];
+  for (const [name, prop] of Object.entries(schema.properties)) {
+    const type = prop.type || 'any';
+    const marker = required.has(name) ? ', required' : '';
+    parts.push(`${name} (${type}${marker})`);
+  }
+  return parts.join(', ');
 }
 
 async function fetchWorkflow(config, workflowId) {
@@ -1607,7 +1624,8 @@ function assemblePrompt(task, agent, workflowStep, options = {}) {
       lines.push('Use these IDs with the `triggerWorkflow` routing operation:');
       for (const w of workflows) {
         const desc = w.description ? ` — ${w.description}` : '';
-        lines.push(`- **${w.name}** (${w.id})${desc}`);
+        const schemaInfo = w.inputSummary ? `\n  Input: ${w.inputSummary}` : '';
+        lines.push(`- **${w.name}** (${w.id})${desc}${schemaInfo}`);
       }
     }
     if (lines.length > 0) {

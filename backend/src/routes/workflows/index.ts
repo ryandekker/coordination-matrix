@@ -178,7 +178,7 @@ workflowsRouter.post('/import-multi', handleImportMultiJson);
 // Accepts a workflow definition and returns structured diagnostics
 workflowsRouter.post('/validate', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { steps, checkReferences } = req.body;
+    const { steps, checkReferences, inputSchema, rootTaskTitleTemplate } = req.body;
 
     if (!steps || !Array.isArray(steps)) {
       throw createError('steps array is required', 400);
@@ -187,6 +187,8 @@ workflowsRouter.post('/validate', async (req: Request, res: Response, next: Next
     const normalizedSteps = ensureStepIds(steps);
     const result = await validateWorkflow(normalizedSteps, {
       checkReferences: checkReferences !== false,
+      inputSchema,
+      rootTaskTitleTemplate,
     });
 
     res.json({ data: result });
@@ -332,7 +334,7 @@ function ensureStepIds(steps: WorkflowStep[]): WorkflowStep[] {
 workflowsRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { name, description, steps, mermaidDiagram, isActive, folderId, color, groupId } = req.body;
+    const { name, description, steps, mermaidDiagram, isActive, folderId, color, groupId, inputSchema, samplePayload, rootTaskTitleTemplate } = req.body;
 
     if (!name) {
       throw createError('name is required', 400);
@@ -361,13 +363,20 @@ workflowsRouter.post('/', async (req: Request, res: Response, next: NextFunction
       folderId: folderId ? new ObjectId(folderId) : null,
       color: color || undefined,
       groupId: workflowGroupId,
+      ...(inputSchema && { inputSchema }),
+      ...(samplePayload && { samplePayload }),
+      ...(rootTaskTitleTemplate && { rootTaskTitleTemplate }),
       createdAt: now,
       updatedAt: now,
       createdById: req.body.createdById ? new ObjectId(req.body.createdById) : null,
     };
 
     // Run validation on the workflow steps (non-blocking - always saves)
-    const validation = await validateWorkflow(newWorkflow.steps, { checkReferences: true });
+    const validation = await validateWorkflow(newWorkflow.steps, {
+      checkReferences: true,
+      inputSchema,
+      rootTaskTitleTemplate,
+    });
 
     const result = await db.collection<Workflow>('workflows').insertOne(newWorkflow as Workflow);
     const inserted = await db.collection<Workflow>('workflows').findOne({ _id: result.insertedId });
@@ -439,7 +448,11 @@ workflowsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
 
     // Run validation on updated workflow steps (non-blocking)
     const validation = result.steps
-      ? await validateWorkflow(result.steps, { checkReferences: true })
+      ? await validateWorkflow(result.steps, {
+          checkReferences: true,
+          inputSchema: result.inputSchema as Record<string, unknown> | undefined,
+          rootTaskTitleTemplate: result.rootTaskTitleTemplate as string | undefined,
+        })
       : undefined;
 
     res.json({ data: result, ...(validation && { validation }) });

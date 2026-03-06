@@ -16,6 +16,7 @@ import {
   ChevronUp,
   Clock,
   AlertCircle,
+  ShieldCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -418,6 +419,34 @@ export function FlowTaskConfig({
           {selectedWorkflow.description && (
             <p className="opacity-80 mt-0.5">{selectedWorkflow.description}</p>
           )}
+          {selectedWorkflow.inputSchema && (() => {
+            const schema = selectedWorkflow.inputSchema as Record<string, unknown>
+            const properties = (schema.properties || {}) as Record<string, Record<string, unknown>>
+            const required = new Set((schema.required || []) as string[])
+            const entries = Object.entries(properties)
+            if (entries.length === 0) return null
+            return (
+              <div className="mt-1 pt-1 border-t border-pink-200/50 dark:border-pink-700/50">
+                <p className="font-medium flex items-center gap-1">
+                  <ShieldCheck className="h-2.5 w-2.5" />
+                  Input Schema
+                </p>
+                <ul className="mt-0.5 space-y-0.5">
+                  {entries.map(([name, rawProp]) => {
+                    const prop = rawProp as Record<string, unknown>
+                    return (
+                      <li key={name}>
+                        <code className="bg-pink-100 dark:bg-pink-900/30 px-0.5 rounded">{name}</code>
+                        <span className="opacity-70"> ({String(prop.type || 'any')})</span>
+                        {required.has(name) && <span className="text-red-600 dark:text-red-400 ml-0.5">*</span>}
+                        {typeof prop.description === 'string' && <span className="opacity-60"> — {prop.description}</span>}
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            )
+          })()}
           {selectedWorkflow.samplePayload && (
             <p className="opacity-70 mt-0.5 flex items-center gap-1">
               <FileDown className="h-2.5 w-2.5" />

@@ -28,6 +28,7 @@ import {
 
 import { resolveTemplateWithPackages, getValueByPath, resolveTitleTemplateWithPackages, getBaseUrl, resolveTemplateValue } from './template-utils.js';
 import { stripUndefined } from './mongo-utils.js';
+import { validateAgainstSchema } from './schema-validator.js';
 import { searchDocuments } from '../embedding-service.js';
 import { SYSTEM_USER_ID, isSystemExecutedTaskType } from '../system-user.js';
 import { executeCode as executeCodeSandbox } from './code-executor.js';
@@ -345,6 +346,20 @@ class WorkflowExecutionService {
 
     if (!workflow.steps || workflow.steps.length === 0) {
       throw new Error(`Workflow ${workflow.name} has no steps`);
+    }
+
+    // Validate inputPayload against inputSchema if defined
+    if (workflow.inputSchema) {
+      const schemaResult = validateAgainstSchema(
+        input.inputPayload || {},
+        workflow.inputSchema
+      );
+      if (!schemaResult.valid) {
+        const errorMessages = schemaResult.errors
+          .map(e => `${e.path === '/' ? '' : e.path}: ${e.message}`)
+          .join('; ');
+        throw new Error(`Input validation failed: ${errorMessages}`);
+      }
     }
 
     const taskDefaults = input.taskDefaults ? {

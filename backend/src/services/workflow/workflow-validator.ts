@@ -951,19 +951,194 @@ async function validateCrossReferences(steps: WorkflowStep[]): Promise<WorkflowD
 }
 
 // ============================================================================
+// Input Schema Cross-Reference Validation
+// ============================================================================
+
+const INPUT_FIELD_REGEX = /\{\{(?:input\.|trigger\.payload\.)([^}]+)\}\}/g;
+
+interface InputFieldRef {
+  stepId?: string;
+  stepName?: string;
+  field: string;
+  fullPath: string;
+}
+
+/**
+ * Extract all input/trigger.payload field references from template strings across the workflow.
+ * Returns a Map from top-level field name to its reference locations.
+ */
+function extractInputFieldReferences(
+  steps: WorkflowStep[],
+  rootTaskTitleTemplate?: string
+): Map<string, InputFieldRef[]> {
+  const fieldRefs = new Map<string, InputFieldRef[]>();
+
+  const addRef = (topLevelField: string, ref: InputFieldRef) => {
+    if (!fieldRefs.has(topLevelField)) {
+      fieldRefs.set(topLevelField, []);
+    }
+    fieldRefs.get(topLevelField)!.push(ref);
+  };
+
+  const scanTemplate = (text: string, stepId?: string, stepName?: string, field?: string) => {
+    let match;
+    INPUT_FIELD_REGEX.lastIndex = 0;
+    while ((match = INPUT_FIELD_REGEX.exec(text)) !== null) {
+      const fullPath = match[1].trim();
+      const topLevelField = fullPath.split('.')[0];
+      addRef(topLevelField, { stepId, stepName, field: field || '', fullPath });
+    }
+  };
+
+  // Scan rootTaskTitleTemplate
+  if (rootTaskTitleTemplate) {
+    scanTemplate(rootTaskTitleTemplate, undefined, undefined, 'rootTaskTitleTemplate');
+  }
+
+  // Scan all step templates
+  for (const step of steps) {
+    if (step.additionalInstructions) {
+      scanTemplate(step.additionalInstructions, step.id, step.name, 'additionalInstructions');
+    }
+    if (step.prompt) {
+      scanTemplate(step.prompt, step.id, step.name, 'prompt');
+    }
+    // externalConfig templates
+    if (step.externalConfig) {
+      const ext = step.externalConfig as Record<string, unknown>;
+      if (typeof ext.payloadTemplate === 'string') {
+        scanTemplate(ext.payloadTemplate, step.id, step.name, 'externalConfig.payloadTemplate');
+      }
+      if (typeof ext.endpoint === 'string') {
+        scanTemplate(ext.endpoint, step.id, step.name, 'externalConfig.endpoint');
+      }
+    }
+    // webhookConfig templates
+    if (step.webhookConfig) {
+      const wh = step.webhookConfig as Record<string, unknown>;
+      if (typeof wh.bodyTemplate === 'string') {
+        scanTemplate(wh.bodyTemplate, step.id, step.name, 'webhookConfig.bodyTemplate');
+      }
+      if (typeof wh.url === 'string') {
+        scanTemplate(wh.url, step.id, step.name, 'webhookConfig.url');
+      }
+    }
+    // inputConfig.mapping values
+    if (step.inputConfig?.mapping) {
+      for (const [key, val] of Object.entries(step.inputConfig.mapping)) {
+        scanTemplate(val, step.id, step.name, `inputConfig.mapping.${key}`);
+      }
+    }
+    // inputMapping (flow steps)
+    if (step.inputMapping) {
+      for (const [key, val] of Object.entries(step.inputMapping)) {
+        scanTemplate(val, step.id, step.name, `inputMapping.${key}`);
+      }
+    }
+    // findDocumentConfig.searchPrompt
+    const stepAny = step as unknown as Record<string, unknown>;
+    const findDocConfig = stepAny.findDocumentConfig as Record<string, unknown> | undefined;
+    if (findDocConfig && typeof findDocConfig.searchPrompt === 'string') {
+      scanTemplate(findDocConfig.searchPrompt, step.id, step.name, 'findDocumentConfig.searchPrompt');
+    }
+    // Decision field
+    if (step.decisionField) {
+      if (step.decisionField.startsWith('input.') || step.decisionField.startsWith('trigger.payload.')) {
+        scanTemplate(`{{${step.decisionField}}}`, step.id, step.name, 'decisionField');
+      }
+    }
+    // ForEach itemsPath
+    if (step.itemsPath) {
+      if (step.itemsPath.startsWith('input.') || step.itemsPath.startsWith('trigger.payload.')) {
+        scanTemplate(`{{${step.itemsPath}}}`, step.id, step.name, 'itemsPath');
+      }
+    }
+  }
+
+  return fieldRefs;
+}
+
+function validateInputSchemaCrossReferences(
+  steps: WorkflowStep[],
+  inputSchema?: Record<string, unknown>,
+  rootTaskTitleTemplate?: string
+): WorkflowDiagnostic[] {
+  const diags: WorkflowDiagnostic[] = [];
+
+  // Extract all input.* and trigger.payload.* references
+  const fieldRefs = extractInputFieldReferences(steps, rootTaskTitleTemplate);
+
+  if (!inputSchema) {
+    // No schema defined — if there are input references, suggest adding one
+    if (fieldRefs.size > 0) {
+      const fieldNames = [...fieldRefs.keys()].join(', ');
+      diags.push({
+        level: 'info',
+        code: 'NO_INPUT_SCHEMA',
+        message: `Workflow references input fields (${fieldNames}) but has no inputSchema defined. Consider adding one to validate inputs.`,
+        suggestion: 'Add an inputSchema in workflow settings to ensure callers provide the required data.',
+      });
+    }
+    return diags;
+  }
+
+  // Get schema property names
+  const schemaProperties = inputSchema.properties
+    ? new Set(Object.keys(inputSchema.properties as Record<string, unknown>))
+    : new Set<string>();
+  const requiredFields = new Set(
+    Array.isArray(inputSchema.required) ? (inputSchema.required as string[]) : []
+  );
+
+  // Fields referenced in templates but not in schema
+  for (const [fieldName, refs] of fieldRefs) {
+    if (!schemaProperties.has(fieldName)) {
+      const firstRef = refs[0];
+      diags.push({
+        level: 'warning',
+        code: 'INPUT_FIELD_NOT_IN_SCHEMA',
+        stepId: firstRef.stepId,
+        stepName: firstRef.stepName,
+        field: firstRef.field,
+        message: `Template references "input.${fieldName}" but "${fieldName}" is not defined in the inputSchema.`,
+        suggestion: `Add "${fieldName}" to the inputSchema properties, or remove the template reference if it's unused.`,
+      });
+    }
+  }
+
+  // Required schema fields that are never referenced
+  for (const requiredField of requiredFields) {
+    if (!fieldRefs.has(requiredField)) {
+      diags.push({
+        level: 'info',
+        code: 'REQUIRED_FIELD_UNREFERENCED',
+        message: `Schema requires "${requiredField}" but no template in the workflow references "input.${requiredField}".`,
+        suggestion: `Verify "${requiredField}" is needed. It may be consumed by agent instructions rather than templates.`,
+      });
+    }
+  }
+
+  return diags;
+}
+
+// ============================================================================
 // Main Validate Function
 // ============================================================================
 
 export interface ValidateOptions {
   /** Check references against the database (users, workflows, documents). Default: true */
   checkReferences?: boolean;
+  /** Include inputSchema cross-reference checks */
+  inputSchema?: Record<string, unknown>;
+  /** Root task title template for input field scanning */
+  rootTaskTitleTemplate?: string;
 }
 
 export async function validateWorkflow(
   steps: WorkflowStep[],
   options: ValidateOptions = {}
 ): Promise<ValidationResult> {
-  const { checkReferences = true } = options;
+  const { checkReferences = true, inputSchema, rootTaskTitleTemplate } = options;
 
   // Build context
   const stepIds = new Set(steps.map(s => s.id).filter(Boolean));
@@ -995,6 +1170,11 @@ export async function validateWorkflow(
   if (checkReferences) {
     allDiagnostics.push(...await validateCrossReferences(steps));
   }
+
+  // 6. Input schema cross-reference validation
+  allDiagnostics.push(
+    ...validateInputSchemaCrossReferences(steps, inputSchema, rootTaskTitleTemplate)
+  );
 
   const errors = allDiagnostics.filter(d => d.level === 'error').length;
   const warnings = allDiagnostics.filter(d => d.level === 'warning').length;
@@ -1076,6 +1256,9 @@ export function getValidationRulesReference(): {
       { code: 'TEMPLATE_EMPTY_VAR', level: 'error', description: 'Template contains empty variable {{}}' },
       { code: 'INVALID_ASSIGNEE', level: 'warning', description: 'defaultAssigneeId references unknown user' },
       { code: 'INVALID_PROMPT_DOCUMENT', level: 'warning', description: 'promptDocumentIds references unknown document' },
+      { code: 'NO_INPUT_SCHEMA', level: 'info', description: 'Workflow uses input fields but has no inputSchema defined' },
+      { code: 'INPUT_FIELD_NOT_IN_SCHEMA', level: 'warning', description: 'Template references an input field not defined in the schema' },
+      { code: 'REQUIRED_FIELD_UNREFERENCED', level: 'info', description: 'Required schema field is never used in any template' },
     ],
   };
 }
