@@ -80,31 +80,22 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
             )}
           </div>
 
-          {/* Tags */}
-          {displayTags.length > 0 && (
-            <div className="flex items-center gap-1 flex-wrap">
+          {/* Tags + project/workflow info row */}
+          {(displayTags.length > 0 || workflow || project) && (
+            <div className="flex items-center gap-1 overflow-hidden">
               {displayTags.map((tag) => (
-                <Badge key={tag} variant="secondary" className="h-4 px-1.5 text-[10px] font-normal">
+                <Badge key={tag} variant="secondary" className="h-4 px-1.5 text-[10px] font-normal truncate max-w-[80px] shrink-0">
                   {tag}
                 </Badge>
               ))}
-            </div>
-          )}
-
-          {/* Workflow + project info */}
-          {(workflow || project) && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
               {project && (
-                <span className="flex items-center gap-1 truncate">
+                <span className="flex items-center gap-1 text-[10px] text-muted-foreground truncate min-w-0">
                   <span
-                    className="inline-block w-2 h-2 rounded-full shrink-0"
+                    className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
                     style={{ backgroundColor: project.color || '#6B7280' }}
                   />
                   <span className="truncate">{project.displayName}</span>
                 </span>
-              )}
-              {workflow && (
-                <span className="truncate">{workflow.name}</span>
               )}
             </div>
           )}

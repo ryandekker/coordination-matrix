@@ -249,23 +249,16 @@ export function DetailsTab({
                   control={control}
                   render={({ field }) => (
                     <Select
-                      value={(field.value as string) || '_none'}
+                      value={(field.value as string) || groupProjects[0]?._id || ''}
                       onValueChange={(val) => {
-                        const newProjectId = val === '_none' ? null : val
-                        field.onChange(newProjectId)
-                        updateTask.mutate({ id: task._id, data: { projectId: newProjectId } })
+                        field.onChange(val)
+                        updateTask.mutate({ id: task._id, data: { projectId: val } })
                       }}
                     >
                       <SelectTrigger className="h-8 text-sm">
                         <SelectValue placeholder="Select project" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="_none">
-                          <div className="flex items-center gap-2 text-muted-foreground">
-                            <FolderKanban className="h-3.5 w-3.5" />
-                            <span>No project</span>
-                          </div>
-                        </SelectItem>
                         {groupProjects.map((project) => (
                           <SelectItem key={project._id} value={project._id}>
                             <div className="flex items-center gap-2">

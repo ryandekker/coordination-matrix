@@ -33,7 +33,6 @@ dashboardRouter.get('/kanban', async (req: Request, res: Response, next: NextFun
             needs_attention: { name: 'Needs Attention', tasks: [], count: 0 },
             questions: { name: 'Questions', tasks: [], count: 0 },
             pending: { name: 'Pending', tasks: [], count: 0 },
-            processing: { name: 'Processing', tasks: [], count: 0 },
             in_progress: { name: 'In Progress', tasks: [], count: 0 },
             review: { name: 'Review', tasks: [], count: 0 },
             done_recent: { name: 'Done', tasks: [], count: 0 },
@@ -62,7 +61,7 @@ dashboardRouter.get('/kanban', async (req: Request, res: Response, next: NextFun
 
     const humanUserIds = humanUsers.map(u => u._id);
 
-    // Get agent user IDs (for "processing" column)
+    // Get agent user IDs (for "in_progress" column - agent-assigned tasks)
     const agentUsers = await db.collection('users').find({
       isAgent: true,
       isActive: true,
@@ -72,12 +71,11 @@ dashboardRouter.get('/kanban', async (req: Request, res: Response, next: NextFun
     const sortAndLimit = { sort: { updatedAt: -1 } as const, limit: 50 };
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    // Run all 7 column queries in parallel
+    // Run all 6 column queries in parallel
     const [
       needsAttentionTasks,
       questionsTasks,
       pendingTasks,
-      processingTasks,
       inProgressTasks,
       reviewTasks,
       doneRecentTasks,
@@ -114,19 +112,15 @@ dashboardRouter.get('/kanban', async (req: Request, res: Response, next: NextFun
         ],
       }).sort(sortAndLimit.sort).limit(sortAndLimit.limit).toArray(),
 
-      // 4. processing: human-created tasks currently assigned to an agent
+      // 4. in_progress: tasks actively being worked on (by humans or agents)
       db.collection<Task>('tasks').find({
         ...baseFilter,
-        creatorType: 'human',
-        status: { $in: ['pending', 'in_progress', 'waiting'] as Task['status'][] },
-        assigneeId: { $in: agentUserIds },
-      }).sort(sortAndLimit.sort).limit(sortAndLimit.limit).toArray(),
-
-      // 5. in_progress: tasks in progress assigned to a human user
-      db.collection<Task>('tasks').find({
-        ...baseFilter,
-        status: 'in_progress' as Task['status'],
-        assigneeId: { $in: humanUserIds },
+        $or: [
+          // Human-created tasks assigned to an agent (any active status)
+          { creatorType: 'human', status: { $in: ['pending', 'in_progress', 'waiting'] as Task['status'][] }, assigneeId: { $in: agentUserIds } },
+          // Tasks in progress assigned to a human
+          { status: 'in_progress' as Task['status'], assigneeId: { $in: humanUserIds } },
+        ],
       }).sort(sortAndLimit.sort).limit(sortAndLimit.limit).toArray(),
 
       // 5. review: tasks with status waiting assigned to a human user
@@ -154,7 +148,6 @@ dashboardRouter.get('/kanban', async (req: Request, res: Response, next: NextFun
       ...needsAttentionTasks,
       ...questionsTasks,
       ...pendingTasks,
-      ...processingTasks,
       ...inProgressTasks,
       ...reviewTasks,
       ...doneRecentTasks,
@@ -194,11 +187,6 @@ dashboardRouter.get('/kanban', async (req: Request, res: Response, next: NextFun
           name: 'Pending',
           tasks: resolve(pendingTasks),
           count: pendingTasks.length,
-        },
-        processing: {
-          name: 'Processing',
-          tasks: resolve(processingTasks),
-          count: processingTasks.length,
         },
         in_progress: {
           name: 'In Progress',
