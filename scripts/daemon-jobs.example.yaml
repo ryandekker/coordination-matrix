@@ -59,14 +59,15 @@ defaults:
 jobs:
   # Task Router: Lightweight agent that examines new human-created tasks and
   # routes them to the appropriate agent or workflow. Uses Haiku for speed/cost.
-  # The router agent needs a saved view filtered for:
+  # The router view should filter for:
   #   - creatorType: human
   #   - status: pending
-  #   - assigneeId: <router-agent-id> (so only tasks assigned to the router get processed)
-  # When a human creates a task, assign it to the router agent to trigger routing.
+  #   - assigneeId: [<router-agent-id>, __unassigned__]
+  # agentId tells the daemon which agent persona to use for unassigned tasks.
   task-router:
     description: Route new human tasks to agents or workflows
     viewId: YOUR_ROUTER_VIEW_ID
+    agentId: YOUR_ROUTER_AGENT_ID
     exec: "claude --model claude-haiku-4-5-20251001"
     interval: 3000
 

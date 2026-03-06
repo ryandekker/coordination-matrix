@@ -843,6 +843,7 @@ ${COLORS.bold}EXAMPLES${COLORS.reset}
   let viewId, apiKey, apiUrl, interval, execCmd, maxPayloadSize, timeout;
   let mcpServers = null;
   let strictMcpConfig = false;
+  let agentId = null;
 
   if (configData && values.job) {
     // Load from config file with job name
@@ -891,6 +892,7 @@ ${COLORS.bold}EXAMPLES${COLORS.reset}
       mcpServers = merged;
     }
     strictMcpConfig = job.strictMcpConfig || false;
+    agentId = job.agentId || defaults.agentId || null;
   } else if (values.view) {
     // Use CLI args / env vars only (explicit --view provided)
     viewId = values.view;
@@ -935,6 +937,7 @@ ${COLORS.bold}EXAMPLES${COLORS.reset}
     timeout,
     mcpServers,
     strictMcpConfig,
+    agentId,
   };
 }
 
@@ -2610,8 +2613,8 @@ async function processTask(config, task) {
   log.info(`Processing: ${task.title}`);
   log.debug(`Task ID: ${task._id}`, { status: task.status, workflow: task.workflowId || 'none', stage: task.workflowStage || 'none' });
 
-  // Fetch agent (assignee) if exists
-  const agent = await fetchUser(config, task.assigneeId);
+  // Fetch agent (assignee) if exists, fall back to job's configured agentId
+  const agent = await fetchUser(config, task.assigneeId || config.agentId);
   const agentComplexity = agent?.agentComplexity || 2; // Default to intermediate
   if (agent?.isAgent) {
     log.debug(`Using agent: ${agent.displayName} (complexity: ${agentComplexity})`);
@@ -2783,10 +2786,12 @@ async function processTask(config, task) {
   // Fetch linked documents for context
   const linkedDocuments = await fetchLinkedDocuments(config, task._id);
 
-  // Fetch routing context if task-routing capability is loaded
+  // Fetch routing context if task-routing capability is loaded or agent is a router
   let routingContext = null;
   const hasRoutingCapability = loadedCapabilities.some(c => c.id === 'task-routing');
-  if (hasRoutingCapability) {
+  const agentPromptLower = (agent?.agentPrompt || '').toLowerCase();
+  const isRoutingAgent = agentPromptLower.includes('task router') || agentPromptLower.includes('routing');
+  if (hasRoutingCapability || isRoutingAgent) {
     log.info('Fetching routing context (agents + workflows)...');
     const [agents, workflows] = await Promise.all([
       fetchAgentUsers(config),
