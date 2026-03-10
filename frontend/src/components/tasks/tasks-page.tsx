@@ -579,6 +579,7 @@ export function TasksPage() {
         fieldConfigs={fieldConfigs}
         lookups={lookups}
         parentTask={parentTask}
+        filterContext={!selectedTask ? filters : undefined}
         onClose={handleCloseTaskModal}
       />
 

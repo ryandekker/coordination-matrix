@@ -50,7 +50,8 @@
       "Bash(npm --prefix backend run lint)",
       "Bash(git stash:*)",
       "Bash(npx vitest run)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(npx vitest:*)"
     ],
     "deny": [],
     "ask": []

@@ -127,7 +127,11 @@ router.post('/', requireAuth, async (req: Request, res: Response): Promise<void>
       error: message,
     });
 
-    res.status(400).json({ error: message });
+    const isSchemaError = message.startsWith('Input validation failed:');
+    res.status(isSchemaError ? 422 : 400).json({
+      error: message,
+      ...(isSchemaError && { code: 'INPUT_SCHEMA_VALIDATION_FAILED' }),
+    });
   }
 });
 

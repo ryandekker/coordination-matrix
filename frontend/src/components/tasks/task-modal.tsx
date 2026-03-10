@@ -67,6 +67,8 @@ interface TaskModalProps {
   fieldConfigs: FieldConfig[]
   lookups: Record<string, LookupValue[]>
   parentTask?: Task | null
+  /** Active filters from the current view/search to pre-fill new task defaults */
+  filterContext?: Record<string, unknown>
   onClose: () => void
 }
 
@@ -76,6 +78,7 @@ export function TaskModal({
   fieldConfigs,
   lookups,
   parentTask = null,
+  filterContext,
   onClose,
 }: TaskModalProps) {
   const router = useRouter()
@@ -213,6 +216,16 @@ export function TaskModal({
   const availableGroups = isAdmin ? allGroups : groups
   const showGroupSelector = isAdmin || groups.length > 1
 
+  // Resolve default group and project - always ensure a project is set
+  const defaultGroupId = currentGroup?._id || (groups.length > 0 ? groups[0]._id : null)
+  const defaultProjectId = currentProject?._id || (() => {
+    const groupId = defaultGroupId
+    if (!groupId) return null
+    const groupProjects = projects.filter(p => p.groupId === groupId)
+    // Prefer the 'default' project, then first available
+    return groupProjects.find(p => p.name === 'default')?._id || groupProjects[0]?._id || null
+  })()
+
   // Core default values
   const coreDefaultValues: Record<string, unknown> = {
     title: '',
@@ -228,8 +241,45 @@ export function TaskModal({
     tags: [] as string[],
     taskType: 'agent',
     parentId: null,
-    groupId: currentGroup?._id || null,
-    projectId: currentProject?._id || null,
+    groupId: defaultGroupId,
+    projectId: defaultProjectId,
+  }
+
+  // Apply filter context from the current view/search as defaults for new tasks
+  if (filterContext && !taskProp) {
+    // Map of filter keys to form fields with their handling
+    const filterFieldMap: Record<string, { field: string; type: 'single' | 'array' }> = {
+      status: { field: 'status', type: 'single' },
+      urgency: { field: 'urgency', type: 'single' },
+      assigneeId: { field: 'assigneeId', type: 'single' },
+      taskType: { field: 'taskType', type: 'single' },
+      tags: { field: 'tags', type: 'array' },
+      workflowId: { field: 'workflowId', type: 'single' },
+      workflowStage: { field: 'workflowStage', type: 'single' },
+      projectId: { field: 'projectId', type: 'single' },
+      groupId: { field: 'groupId', type: 'single' },
+    }
+
+    for (const [filterKey, mapping] of Object.entries(filterFieldMap)) {
+      const filterValue = filterContext[filterKey]
+      if (filterValue === undefined || filterValue === null) continue
+      // Skip special unassigned markers
+      if (filterValue === '__unassigned__') continue
+      if (Array.isArray(filterValue) && filterValue.includes('__unassigned__')) continue
+
+      if (mapping.type === 'array') {
+        // For array fields (tags), use the filter value directly
+        if (Array.isArray(filterValue)) {
+          coreDefaultValues[mapping.field] = filterValue
+        }
+      } else {
+        // For single-value fields, use first element if filter is an array
+        const value = Array.isArray(filterValue) ? filterValue[0] : filterValue
+        if (value && value !== '') {
+          coreDefaultValues[mapping.field] = value
+        }
+      }
+    }
   }
 
   const defaultValues = useMemo(() => {
@@ -826,6 +876,7 @@ export function TaskModal({
                 const selectedGroupId = watch('groupId') as string | null
                 if (!selectedGroupId) return null
                 const groupProjects = projects.filter(p => p.groupId === selectedGroupId)
+                if (groupProjects.length === 0) return null
                 return (
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-muted-foreground">Project</label>
@@ -834,19 +885,13 @@ export function TaskModal({
                       control={control}
                       render={({ field }) => (
                         <Select
-                          value={(field.value as string) || '_none'}
-                          onValueChange={(val) => field.onChange(val === '_none' ? null : val)}
+                          value={(field.value as string) || groupProjects[0]?._id || ''}
+                          onValueChange={(val) => field.onChange(val)}
                         >
                           <SelectTrigger className="h-8 text-sm">
-                            <SelectValue placeholder="Select project (optional)" />
+                            <SelectValue placeholder="Select project" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="_none">
-                              <div className="flex items-center gap-2 text-muted-foreground">
-                                <FolderKanban className="h-3.5 w-3.5" />
-                                <span>No project</span>
-                              </div>
-                            </SelectItem>
                             {groupProjects.map((project) => (
                               <SelectItem key={project._id} value={project._id}>
                                 <div className="flex items-center gap-2">

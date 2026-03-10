@@ -65,9 +65,31 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
-app.use(helmet());
+app.use(helmet({
+  // Allow iframe embedding — the app uses stateless JWT auth (not cookies),
+  // so embedding does not introduce CSRF risk.
+  contentSecurityPolicy: {
+    directives: {
+      ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      'frame-ancestors': ["'self'", ...(process.env.ALLOWED_FRAME_ANCESTORS?.split(',') || ['*'])],
+    },
+  },
+  // Disable X-Frame-Options so the CSP frame-ancestors directive takes precedence
+  frameguard: false,
+}));
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (server-to-server, curl, etc.)
+    if (!origin) return callback(null, true);
+    const allowed = (process.env.CORS_ORIGIN || 'http://localhost:3000').split(',').map(s => s.trim());
+    // Exact match against allowed origins
+    if (allowed.includes(origin)) return callback(null, true);
+    // In development, allow any localhost variant (port-prefixed subdomains from iframe hosts, etc.)
+    if (process.env.NODE_ENV !== 'production' && /^https?:\/\/(.*\.)?localhost(:\d+)?$/.test(origin)) {
+      return callback(null, true);
+    }
+    callback(null, false);
+  },
   credentials: true,
 }));
 // Use 'short' format in production for reduced I/O overhead, 'combined' in development

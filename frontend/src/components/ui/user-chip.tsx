@@ -19,19 +19,19 @@ export interface UserChipProps {
 
 const sizeStyles = {
   sm: {
-    chip: 'h-5 px-1.5 gap-1 text-xs max-w-[120px]',
+    chip: 'h-5 px-1.5 gap-1 text-xs max-w-[200px]',
     avatar: 'w-3.5 h-3.5',
     avatarText: 'text-[8px]',
     icon: 'h-2.5 w-2.5',
   },
   md: {
-    chip: 'h-6 px-2 gap-1.5 text-xs max-w-[140px]',
+    chip: 'h-6 px-2 gap-1.5 text-xs max-w-[220px]',
     avatar: 'w-4 h-4',
     avatarText: 'text-[10px]',
     icon: 'h-3 w-3',
   },
   lg: {
-    chip: 'h-7 px-2.5 gap-2 text-sm max-w-[160px]',
+    chip: 'h-7 px-2.5 gap-2 text-sm max-w-[240px]',
     avatar: 'w-5 h-5',
     avatarText: 'text-xs',
     icon: 'h-3.5 w-3.5',

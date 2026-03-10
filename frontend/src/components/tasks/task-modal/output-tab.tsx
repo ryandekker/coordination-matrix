@@ -13,6 +13,7 @@ import { DecisionOptionsPanel } from '../decision-options-panel'
 import { ManualReviewPanel } from './manual-review-panel'
 import { AgentQuestionsPanel } from './agent-questions-panel'
 import { DocumentOperationsPanel, type DocumentOperationResult } from './document-operations-panel'
+import { RoutingOperationsPanel, type RoutingOperationResult } from './routing-operations-panel'
 import { ExecutionSummarySection } from './execution-summary-section'
 import { useUpdateTask } from '@/hooks/use-tasks'
 import { toast } from 'sonner'
@@ -63,6 +64,15 @@ export function OutputTab({ task, onRollback }: OutputTabProps) {
     const ops = outputData.documentOperations as DocumentOperationResult[]
     return ops.length > 0 ? ops : null
   }, [metadata])
+
+  // Extract routing operation results from output
+  const routingOpsResults = useMemo(() => {
+    const outputData = metadata?.output as Record<string, unknown> | undefined
+    if (!outputData?.routingOperations) return null
+    const ops = outputData.routingOperations as RoutingOperationResult[]
+    return ops.length > 0 ? ops : null
+  }, [metadata])
+
 
   // Extract output based on task type - MUST be before any early returns (React hooks rule)
   const output = useMemo(() => {
@@ -323,6 +333,11 @@ export function OutputTab({ task, onRollback }: OutputTabProps) {
       {documentOpsResults && (
         <div className="p-4 pb-0">
           <DocumentOperationsPanel operations={documentOpsResults} />
+        </div>
+      )}
+      {routingOpsResults && (
+        <div className="p-4 pb-0">
+          <RoutingOperationsPanel operations={routingOpsResults} />
         </div>
       )}
       <div className="p-4 space-y-3">

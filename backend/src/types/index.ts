@@ -1351,6 +1351,11 @@ export interface Workflow {
   // Dynamic title template for the root task - supports {{input.field}} variables
   rootTaskTitleTemplate?: string;
 
+  // Sample payload template for triggering this workflow
+  samplePayload?: string;
+  // JSON Schema defining the expected structure of inputPayload when starting workflow runs
+  inputSchema?: Record<string, unknown>;
+
   // Group and Project access control - workflows belong to a group and optionally a project
   groupId?: ObjectId | null;     // Group this workflow belongs to (admin-only if null)
   projectId?: ObjectId | null;   // Project within the group (optional)

@@ -98,13 +98,15 @@ interface SimulationPanelProps {
   workflowId?: string
   workflowName?: string
   samplePayload?: string
+  inputSchema?: Record<string, unknown>
+  rootTaskTitleTemplate?: string
 }
 
 // ============================================================================
 // Component
 // ============================================================================
 
-export function SimulationPanel({ steps, workflowId, workflowName, samplePayload }: SimulationPanelProps) {
+export function SimulationPanel({ steps, workflowId, workflowName, samplePayload, inputSchema, rootTaskTitleTemplate }: SimulationPanelProps) {
   const [inputPayload, setInputPayload] = useState(() => {
     if (samplePayload) {
       try {
@@ -130,7 +132,7 @@ export function SimulationPanel({ steps, workflowId, workflowName, samplePayload
       const response = await authFetch(`${API_BASE}/workflows/validate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ steps, checkReferences: true }),
+        body: JSON.stringify({ steps, checkReferences: true, inputSchema, rootTaskTitleTemplate }),
       })
       if (!response.ok) throw new Error('Validation request failed')
       const data = await response.json()

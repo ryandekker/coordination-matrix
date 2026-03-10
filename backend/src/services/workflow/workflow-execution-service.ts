@@ -28,6 +28,7 @@ import {
 
 import { resolveTemplateWithPackages, getValueByPath, resolveTitleTemplateWithPackages, getBaseUrl, resolveTemplateValue } from './template-utils.js';
 import { stripUndefined } from './mongo-utils.js';
+import { validateAgainstSchema } from './schema-validator.js';
 import { searchDocuments } from '../embedding-service.js';
 import { SYSTEM_USER_ID, isSystemExecutedTaskType } from '../system-user.js';
 import { executeCode as executeCodeSandbox } from './code-executor.js';
@@ -345,6 +346,20 @@ class WorkflowExecutionService {
 
     if (!workflow.steps || workflow.steps.length === 0) {
       throw new Error(`Workflow ${workflow.name} has no steps`);
+    }
+
+    // Validate inputPayload against inputSchema if defined
+    if (workflow.inputSchema) {
+      const schemaResult = validateAgainstSchema(
+        input.inputPayload || {},
+        workflow.inputSchema
+      );
+      if (!schemaResult.valid) {
+        const errorMessages = schemaResult.errors
+          .map(e => `${e.path === '/' ? '' : e.path}: ${e.message}`)
+          .join('; ');
+        throw new Error(`Input validation failed: ${errorMessages}`);
+      }
     }
 
     const taskDefaults = input.taskDefaults ? {
@@ -3306,7 +3321,7 @@ class WorkflowExecutionService {
         if (!joinTask) {
           const childStep = workflow.steps.find(s => s.id === task.workflowStepId);
           if (childStep) {
-            let nextStepIds = childStep.connections?.map(c => c.targetStepId) || [];
+            const nextStepIds = childStep.connections?.map(c => c.targetStepId) || [];
             if (nextStepIds.length === 0) {
               const childIndex = workflow.steps.findIndex(s => s.id === childStep.id);
               const nextStep = workflow.steps[childIndex + 1];
@@ -4867,7 +4882,7 @@ class WorkflowExecutionService {
           'webhookConfig.requestBody': 0,
         };
 
-    let tasks = (await this.tasks
+    const tasks = (await this.tasks
       .find(filter)
       .sort({ createdAt: 1, _id: 1 })
       .limit(limit + 1)

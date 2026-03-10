@@ -8,7 +8,15 @@ summary: Create, update, and search documents in the document store.
 
 # Document Operations
 
-Include a `documentOperations` array in your response to interact with the document store.
+Include a `documentOperations` array in your response to create, update, or search documents.
+The system processes these operations after your response — you declare intent, the system executes.
+
+**When to use document operations:**
+- Your task produces written content (blog posts, reports, plans, SOPs) → **create** a document
+- You need to revise an existing document linked to the task → **update** it by ID
+- You need reference material before proceeding → **search** for relevant documents
+
+If your task is to produce content, the document IS the deliverable. Put the content in a document, not just in the output field.
 
 ## 1. Create Document
 
@@ -30,11 +38,11 @@ Include a `documentOperations` array in your response to interact with the docum
 }
 ```
 
-Created documents are automatically linked to the current task.
+Created documents are automatically linked to the current task and inherit its group/project.
 
 ## 2. Update Document
 
-Update an existing document by ID (from `foundDocuments` or previous search):
+Update an existing document by ID. Use this when the task has linked documents (shown in your context as `linkedDocuments`) or from a previous search result.
 
 ```json
 {
@@ -96,29 +104,30 @@ Search results are returned in the task output for reference.
 | approved | Finalized and approved |
 | archived | No longer active |
 
-## Accessing Documents in Context
+## Linked Documents in Context
 
-Documents provided to you appear in the task context as `foundDocuments`:
+Documents already linked to your task appear in your context as `linkedDocuments`:
 
 ```json
 {
-  "foundDocuments": [
+  "linkedDocuments": [
     {
       "id": "abc123",
       "title": "Onboarding SOP",
-      "content": "...",
-      "score": 0.92
+      "type": "sop",
+      "status": "draft"
     }
   ]
 }
 ```
 
-Use the `id` field when updating documents.
+Use the `id` field to update these documents. Documents from workflow `findDocument` steps appear as `foundDocuments` with content and similarity scores.
 
 ## Best Practices
 
-1. **Use meaningful titles** - Include dates or identifiers for uniqueness
-2. **Add relevant tags** - Enables future discovery
-3. **Write good summaries** - Powers semantic search matching
-4. **Set appropriate status** - draft → review → approved
-5. **Use markdown** - Content supports full GitHub-flavored markdown
+1. **Create documents for content deliverables** - If you wrote it, store it as a document
+2. **Use meaningful titles** - Include dates or identifiers for uniqueness
+3. **Add relevant tags** - Enables future discovery
+4. **Write good summaries** - Powers semantic search matching
+5. **Set appropriate status** - draft → review → approved
+6. **Use markdown** - Content supports full GitHub-flavored markdown

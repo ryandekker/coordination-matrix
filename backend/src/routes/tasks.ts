@@ -3,7 +3,7 @@ import { ObjectId, Filter, Sort, Document } from 'mongodb';
 import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
 import { ReferenceResolver } from '../services/reference-resolver.js';
-import { Task, TaskWithChildren, PaginatedResponse, Document as AppDocument, ChildStatusSummary } from '../types/index.js';
+import { Task, TaskWithChildren, PaginatedResponse, Document as AppDocument, ChildStatusSummary, Project } from '../types/index.js';
 import { publishTaskEvent, computeChanges, getSpecificEventTypes } from '../services/event-bus.js';
 import { activityLogService } from '../services/activity-log.js';
 import { workflowExecutionService } from '../services/workflow-execution-service.js';
@@ -718,6 +718,28 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
     }
     if (taskData.projectId) {
       projectId = toObjectId(taskData.projectId);
+    }
+
+    // Fallback: ensure groupId and projectId are always set
+    if (!groupId && req.userGroupIds && req.userGroupIds.length > 0) {
+      groupId = req.userGroupIds[0];
+    }
+    if (!projectId && groupId) {
+      const defaultProject = await db.collection<Project>('projects').findOne(
+        { groupId, status: 'active', name: 'default' }
+      );
+      if (defaultProject) {
+        projectId = defaultProject._id;
+      } else {
+        // No default project found, use the first active project in the group
+        const firstProject = await db.collection<Project>('projects').findOne(
+          { groupId, status: 'active' },
+          { sort: { createdAt: 1 } }
+        );
+        if (firstProject) {
+          projectId = firstProject._id;
+        }
+      }
     }
 
     // Capture triggerWorkflowId for flow tasks

@@ -79,6 +79,7 @@ import {
   Pause,
   FileJson,
   Beaker,
+  ShieldCheck,
 } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { TokenBrowser } from './token-browser'
@@ -91,6 +92,7 @@ import { STEP_TYPES, getStepTypeInfo } from './editor/constants'
 import { detectLoopScopes } from './editor/utils'
 import { StepConfigPanel } from './step-config-panel'
 import { SimulationPanel } from './simulation-panel'
+import { InputSchemaBuilder } from './input-schema-builder'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
@@ -183,6 +185,7 @@ const SETTINGS_SECTIONS = [
   { id: 'organization', label: 'Organization', icon: Folder },
   { id: 'color', label: 'Color', icon: Palette },
   { id: 'payload', label: 'Sample Payload', icon: FileJson },
+  { id: 'input-schema', label: 'Input Schema', icon: ShieldCheck },
   { id: 'ai-prompt', label: 'AI Generation', icon: Sparkles },
   { id: 'webhook', label: 'Webhook', icon: ArrowRightFromLine },
 ] as const
@@ -196,6 +199,7 @@ export function WorkflowEditor({
   const [steps, setSteps] = useState<WorkflowStep[]>([])
   const [rootTaskTitleTemplate, setRootTaskTitleTemplate] = useState('')
   const [samplePayload, setSamplePayload] = useState('')
+  const [inputSchemaText, setInputSchemaText] = useState('')
   const [selectedColor, setSelectedColor] = useState<string | undefined>(undefined)
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null)
@@ -298,6 +302,7 @@ export function WorkflowEditor({
       setSteps(normalizedSteps)
       setRootTaskTitleTemplate(workflow.rootTaskTitleTemplate || '')
       setSamplePayload(workflow.samplePayload || '')
+      setInputSchemaText(workflow.inputSchema ? JSON.stringify(workflow.inputSchema, null, 2) : '')
       setSelectedColor(workflow.color || undefined)
       setSelectedFolderId(workflow.folderId || null)
       setSelectedGroupId(workflow.groupId || null)
@@ -400,6 +405,7 @@ export function WorkflowEditor({
       description: data.description || '',
       rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
       samplePayload: samplePayload || undefined,
+      inputSchema: inputSchemaText ? (() => { try { return JSON.parse(inputSchemaText) } catch { return undefined } })() : undefined,
       color: selectedColor,
       folderId: selectedFolderId,
       groupId: selectedGroupId,
@@ -415,6 +421,7 @@ export function WorkflowEditor({
       isActive: watch('isActive'),
       rootTaskTitleTemplate: rootTaskTitleTemplate || undefined,
       samplePayload: samplePayload || undefined,
+      inputSchema: inputSchemaText ? (() => { try { return JSON.parse(inputSchemaText) } catch { return undefined } })() : undefined,
       steps,
       exportedAt: new Date().toISOString(),
       version: '1.0',
@@ -448,6 +455,7 @@ export function WorkflowEditor({
         if (data.isActive !== undefined) setValue('isActive', data.isActive)
         if (data.rootTaskTitleTemplate) setRootTaskTitleTemplate(data.rootTaskTitleTemplate)
         if (data.samplePayload) setSamplePayload(data.samplePayload)
+        if (data.inputSchema) setInputSchemaText(JSON.stringify(data.inputSchema, null, 2))
 
         // Apply steps if present
         if (data.steps && Array.isArray(data.steps)) {
@@ -958,6 +966,22 @@ export function WorkflowEditor({
                     </p>
                   </div>
 
+                  {/* Input Schema Section */}
+                  <div id="settings-input-schema" className="space-y-3 p-4 bg-muted/30 rounded-lg">
+                    <h3 className="text-sm font-medium flex items-center gap-2">
+                      <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                      Input Schema
+                      <span className="text-xs text-muted-foreground font-normal">(optional)</span>
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Define the expected input fields for this workflow. Required fields must be provided when triggering.
+                    </p>
+                    <InputSchemaBuilder
+                      value={inputSchemaText}
+                      onChange={setInputSchemaText}
+                    />
+                  </div>
+
                   {/* AI Prompt Helper Section */}
                   <div id="settings-ai-prompt" className="space-y-3 p-4 bg-muted/30 rounded-lg">
                     <h3 className="text-sm font-medium flex items-center gap-2">
@@ -1263,6 +1287,8 @@ export function WorkflowEditor({
                 workflowId={workflow?._id}
                 workflowName={watch('name')}
                 samplePayload={samplePayload}
+                inputSchema={inputSchemaText ? (() => { try { return JSON.parse(inputSchemaText) } catch { return undefined } })() : undefined}
+                rootTaskTitleTemplate={rootTaskTitleTemplate || undefined}
               />
             </TabsContent>
 
