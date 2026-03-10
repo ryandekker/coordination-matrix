@@ -249,16 +249,14 @@ describe('WebhookService', () => {
   describe('cleanup logic', () => {
     it('should calculate correct cleanup cutoff date', () => {
       const daysToKeep = 30;
-      const now = new Date();
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - daysToKeep);
+      // Use a fixed timestamp to avoid DST boundary issues with setDate()
+      const now = new Date('2026-01-15T12:00:00Z');
+      const cutoff = new Date(now.getTime() - daysToKeep * 24 * 60 * 60 * 1000);
 
       const expectedDiff = daysToKeep * 24 * 60 * 60 * 1000;
       const actualDiff = now.getTime() - cutoff.getTime();
 
-      // Allow for small time differences during test execution
-      expect(actualDiff).toBeGreaterThanOrEqual(expectedDiff - 1000);
-      expect(actualDiff).toBeLessThanOrEqual(expectedDiff + 1000);
+      expect(actualDiff).toBe(expectedDiff);
     });
   });
 });
