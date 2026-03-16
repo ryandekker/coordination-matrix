@@ -1069,7 +1069,19 @@ class WorkflowExecutionService {
     // 4. Otherwise leave null (unassigned - awaiting human assignment)
     let assigneeId: ObjectId | null = null;
     if (step.defaultAssigneeId) {
-      assigneeId = new ObjectId(step.defaultAssigneeId);
+      // Support template variables in assigneeId (e.g., {{model.modelId}} in foreach)
+      let resolvedAssigneeId = step.defaultAssigneeId;
+      if (resolvedAssigneeId.includes('{{')) {
+        const resolvedStr = await resolveTemplateWithPackages(resolvedAssigneeId, {
+          workflowRunId: run._id,
+          stepId: step.id,
+          inputPayload,
+        });
+        resolvedAssigneeId = resolvedStr?.trim() || '';
+      }
+      if (resolvedAssigneeId && ObjectId.isValid(resolvedAssigneeId)) {
+        assigneeId = new ObjectId(resolvedAssigneeId);
+      }
     } else if (runDefaults.assigneeId) {
       assigneeId = runDefaults.assigneeId;
     } else if (isSystemExecutedTaskType(taskType)) {
