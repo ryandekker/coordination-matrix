@@ -27,6 +27,7 @@ import {
 } from '../../types/index.js';
 
 import { resolveTemplateWithPackages, getValueByPath, resolveTitleTemplateWithPackages, getBaseUrl, resolveTemplateValue } from './template-utils.js';
+import { getSecretValues, sanitizeSecrets } from './variable-safety.js';
 import { stripUndefined } from './mongo-utils.js';
 import { validateAgainstSchema } from './schema-validator.js';
 import { searchDocuments } from '../embedding-service.js';
@@ -1062,6 +1063,21 @@ class WorkflowExecutionService {
     // Build stepConfig to preserve original workflow step configuration
     const stepConfig = this.buildStepConfig(step);
 
+    // Sanitize inputPayload for agent tasks to prevent secret leakage to LLMs.
+    // Webhook/code/external tasks need real values, so only sanitize agent-facing tasks.
+    let safeInputPayload = inputPayload;
+    if (step.stepType === 'agent' && inputPayload) {
+      try {
+        const secrets = await getSecretValues();
+        if (secrets.length > 0) {
+          const sanitized = sanitizeSecrets(JSON.stringify(inputPayload), secrets);
+          safeInputPayload = JSON.parse(sanitized);
+        }
+      } catch (err) {
+        console.warn(`[WorkflowExecutionService] Failed to sanitize inputPayload: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
     // Determine assignee:
     // 1. If step has explicit defaultAssigneeId, use that
     // 2. If run has taskDefaults.assigneeId, use that
@@ -1091,13 +1107,14 @@ class WorkflowExecutionService {
       createdAt: now,
       updatedAt: now,
       ...(run.humanInstruction && { humanInstruction: run.humanInstruction }),
-      // New unified step input field
-      stepInput: inputPayload,
+      // New unified step input field (sanitized for agent tasks)
+      stepInput: step.stepType === 'agent' ? safeInputPayload : inputPayload,
       metadata: {
         stepId: step.id,
         stepType: step.stepType,
         // Keep inputPayload in metadata for backward compatibility during transition
-        inputPayload,
+        // Agent tasks get sanitized payload to prevent secret leakage to LLMs
+        inputPayload: step.stepType === 'agent' ? safeInputPayload : inputPayload,
       },
     };
 

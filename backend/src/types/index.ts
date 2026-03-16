@@ -1832,6 +1832,11 @@ export interface VariablePackage {
   // If true, the entire value is encrypted at rest
   encrypted: boolean;
 
+  // LLM safety classification:
+  // 'secret' = never expose to LLMs, use opaque $VAR{name} references (default for encrypted)
+  // 'safe'   = can appear in LLM prompts (default for unencrypted)
+  sensitivity?: 'secret' | 'safe';
+
   // Ownership and audit
   createdById?: ObjectId | null;
   updatedById?: ObjectId | null;

@@ -17,6 +17,12 @@ import {
   isEncrypted,
   isEncryptionConfigured,
 } from '../services/encryption.js';
+import {
+  getVariableManifest,
+  resolveOpaqueReferences,
+  resolveOpaqueReferencesInObject,
+  getSecretValues,
+} from '../services/workflow/variable-safety.js';
 import YAML from 'yaml';
 
 export const variablePackagesRouter = Router();
@@ -141,6 +147,69 @@ variablePackagesRouter.get('/tokens/list', async (_req: Request, res: Response, 
 });
 
 // ============================================================================
+// Variable Safety endpoints (must be before /:id routes)
+// ============================================================================
+
+// GET /api/variable-packages/manifest - Get variable names + sensitivity (NO values)
+// Safe for daemon/agent consumption — tells agents what variables exist without revealing values
+variablePackagesRouter.get('/manifest', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const manifest = await getVariableManifest();
+    res.json({ data: manifest });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/variable-packages/resolve - Resolve $VAR{name} references server-side
+// Used by the daemon to resolve opaque variable references in agent responses
+variablePackagesRouter.post('/resolve', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { text, fields } = req.body;
+
+    if (!text && !fields) {
+      throw createError('Either "text" or "fields" is required', 400);
+    }
+
+    const result: Record<string, unknown> = {};
+
+    if (text && typeof text === 'string') {
+      result.text = await resolveOpaqueReferences(text);
+    }
+
+    if (fields && typeof fields === 'object') {
+      result.fields = await resolveOpaqueReferencesInObject(fields);
+    }
+
+    // Audit log
+    const varRefs = (JSON.stringify(req.body).match(/\$VAR\{([^}]+)\}/g) || []);
+    if (varRefs.length > 0) {
+      console.log(`[AUDIT] Variable resolve: refs=${varRefs.join(',')}, user=${req.user?.userId || 'api-key'}, time=${new Date().toISOString()}`);
+    }
+
+    res.json({ data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/variable-packages/secret-patterns - Get decrypted secret values for sanitization
+// Used by the daemon to scrub secrets from prompts and conversation logs
+// Returns actual decrypted values — ADMIN/API-KEY only
+variablePackagesRouter.get('/secret-patterns', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const secrets = await getSecretValues();
+
+    // Audit log
+    console.log(`[AUDIT] Secret patterns requested: count=${secrets.length}, user=${req.user?.userId || 'api-key'}, time=${new Date().toISOString()}`);
+
+    res.json({ data: { patterns: secrets, count: secrets.length } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================================
 // CRUD endpoints
 // ============================================================================
 
@@ -215,7 +284,7 @@ variablePackagesRouter.get('/:id', async (req: Request, res: Response, next: Nex
 variablePackagesRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { name, displayName, description, value, encrypted } = req.body;
+    const { name, displayName, description, value, encrypted, sensitivity } = req.body;
 
     if (!name) {
       throw createError('name is required', 400);
@@ -251,12 +320,19 @@ variablePackagesRouter.post('/', async (req: Request, res: Response, next: NextF
 
     const now = new Date();
 
+    // Validate sensitivity if provided
+    const validSensitivities = ['secret', 'safe'];
+    if (sensitivity && !validSensitivities.includes(sensitivity)) {
+      throw createError(`sensitivity must be one of: ${validSensitivities.join(', ')}`, 400);
+    }
+
     const newVariable: Omit<VariablePackage, '_id'> = {
       name: normalizedName,
       displayName: displayName || name,
       description: description || undefined,
       value: valueStr,
       encrypted: shouldEncrypt,
+      sensitivity: sensitivity || (shouldEncrypt ? 'secret' : 'safe'),
       isActive: true,
       createdById: req.user?.userId ? new ObjectId(req.user.userId) : null,
       updatedById: null,
@@ -320,6 +396,14 @@ variablePackagesRouter.patch('/:id', async (req: Request, res: Response, next: N
         .findOne({ name: updates.name, _id: { $ne: varId } });
       if (duplicate) {
         throw createError('Variable with this name already exists', 409);
+      }
+    }
+
+    // Validate sensitivity if provided
+    if (updates.sensitivity !== undefined) {
+      const validSensitivities = ['secret', 'safe'];
+      if (!validSensitivities.includes(updates.sensitivity)) {
+        throw createError(`sensitivity must be one of: ${validSensitivities.join(', ')}`, 400);
       }
     }
 
