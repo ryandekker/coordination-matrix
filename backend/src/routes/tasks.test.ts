@@ -115,6 +115,20 @@ describe('Tasks Route Helpers', () => {
       if (assigneeId) {
         if (assigneeId === '__unassigned__') {
           filter.assigneeId = { $eq: null };
+        } else if (Array.isArray(assigneeId) && assigneeId.includes('__unassigned__')) {
+          const realIds = (assigneeId as string[])
+            .filter((id) => id !== '__unassigned__')
+            .map((id) => new ObjectId(id));
+          if (realIds.length > 0) {
+            filter.$or = [
+              { assigneeId: { $eq: null } },
+              { assigneeId: { $in: realIds } },
+            ];
+          } else {
+            filter.assigneeId = { $eq: null };
+          }
+        } else if (Array.isArray(assigneeId)) {
+          filter.assigneeId = { $in: (assigneeId as string[]).map((id) => new ObjectId(id)) };
         } else if (ObjectId.isValid(assigneeId as string)) {
           filter.assigneeId = new ObjectId(assigneeId as string);
         }
@@ -181,6 +195,28 @@ describe('Tasks Route Helpers', () => {
     it('should handle unassigned assignee', () => {
       const filter = buildFilter({ assigneeId: '__unassigned__' });
       expect(filter.assigneeId).toEqual({ $eq: null });
+    });
+
+    it('should handle unassigned with array containing only __unassigned__', () => {
+      const filter = buildFilter({ assigneeId: ['__unassigned__'] });
+      expect(filter.assigneeId).toEqual({ $eq: null });
+    });
+
+    it('should handle mixed unassigned and real user IDs', () => {
+      const userId = '507f1f77bcf86cd799439011';
+      const filter = buildFilter({ assigneeId: ['__unassigned__', userId] });
+      expect(filter.$or).toEqual([
+        { assigneeId: { $eq: null } },
+        { assigneeId: { $in: [new ObjectId(userId)] } },
+      ]);
+      expect(filter.assigneeId).toBeUndefined();
+    });
+
+    it('should handle array of multiple real user IDs', () => {
+      const userId1 = '507f1f77bcf86cd799439011';
+      const userId2 = '507f1f77bcf86cd799439012';
+      const filter = buildFilter({ assigneeId: [userId1, userId2] });
+      expect(filter.assigneeId).toEqual({ $in: [new ObjectId(userId1), new ObjectId(userId2)] });
     });
 
     it('should add assignee filter for valid ObjectId', () => {
