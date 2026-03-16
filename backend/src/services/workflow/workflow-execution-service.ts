@@ -2652,6 +2652,8 @@ class WorkflowExecutionService {
       input: inputPayload || {},
       trigger: _run.inputPayload || {},
       steps: {}, // TODO: Could populate with previous step outputs if needed
+      _workflowRunId: _run._id.toString(),
+      _stepLog: _run.stepLog || [],
     };
 
     try {
