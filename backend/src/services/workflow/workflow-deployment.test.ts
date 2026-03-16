@@ -2,7 +2,7 @@
  * Integration tests for workflow deployment and variable resolution.
  *
  * These tests verify:
- * 1. Variable package template resolution in defaultAssigneeId
+ * 1. Dynamic agent resolution via {{agent.*}} templates
  * 2. Code step sandbox has _stepLog and _workflowRunId
  * 3. Workflow definitions match expected structure (no hardcoded IDs)
  * 4. Foreach/join connections are properly linked
@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { executeCode } from './code-executor.js';
-import { loadPackageContext, resolveTitleTemplate } from './template-utils.js';
+import { loadPackageContext, resolveTitleTemplate, resolveAgentTemplate } from './template-utils.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyRecord = Record<string, any>;
@@ -265,19 +265,60 @@ describe('Workflow Structure Validation', () => {
     expect(mcStepTypes).not.toContain('trigger');
   });
 
-  it('should verify no hardcoded agent IDs in variable reference pattern', () => {
-    const variablePattern = /\{\{variables\.workflow_agents\.\w+\}\}/;
+  it('should verify no hardcoded agent IDs in dynamic agent patterns', () => {
+    const agentPattern = /^\{\{agent\.(complexity\.\d|tag\.[\w-]+|name\..+)\}\}$/;
     const hardcodedIdPattern = /^[a-f0-9]{24}$/;
 
     const assigneeRefs = [
-      '{{variables.workflow_agents.opusId}}',
-      '{{variables.workflow_agents.haikuId}}',
-      '{{variables.workflow_agents.aceId}}',
+      '{{agent.complexity.3}}',
+      '{{agent.complexity.1}}',
+      '{{agent.tag.api-integration}}',
     ];
 
     for (const ref of assigneeRefs) {
-      expect(ref).toMatch(variablePattern);
+      expect(ref).toMatch(agentPattern);
       expect(ref).not.toMatch(hardcodedIdPattern);
     }
+  });
+});
+
+describe('Agent Template Resolution', () => {
+  it('should parse agent.complexity.3 pattern', () => {
+    const match = '{{agent.complexity.3}}'.match(/^\{\{agent\.(.+)\}\}$/);
+    expect(match).not.toBeNull();
+    expect(match![1]).toBe('complexity.3');
+  });
+
+  it('should parse agent.tag.api-integration pattern', () => {
+    const match = '{{agent.tag.api-integration}}'.match(/^\{\{agent\.(.+)\}\}$/);
+    expect(match).not.toBeNull();
+    expect(match![1]).toBe('tag.api-integration');
+  });
+
+  it('should parse agent.name.Claude Opus pattern', () => {
+    const match = '{{agent.name.Claude Opus}}'.match(/^\{\{agent\.(.+)\}\}$/);
+    expect(match).not.toBeNull();
+    expect(match![1]).toBe('name.Claude Opus');
+  });
+
+  it('should not match non-agent templates', () => {
+    const match = '{{variables.workflow_agents.opusId}}'.match(/^\{\{agent\.(.+)\}\}$/);
+    expect(match).toBeNull();
+  });
+
+  it('should return undefined for non-agent template strings', async () => {
+    const result = await resolveAgentTemplate('{{variables.something}}');
+    expect(result).toBeUndefined();
+  });
+
+  it('should return undefined for plain strings', async () => {
+    const result = await resolveAgentTemplate('not-a-template');
+    expect(result).toBeUndefined();
+  });
+
+  it('should return undefined when no matching agent exists (no DB)', async () => {
+    // In test env without DB, loadAgentCache returns empty map
+    const result = await resolveAgentTemplate('{{agent.complexity.3}}');
+    expect(result).toBeUndefined();
   });
 });

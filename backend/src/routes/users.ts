@@ -4,6 +4,7 @@ import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
 import { User } from '../types/index.js';
 import { requireRole, isAdmin } from '../middleware/authorize.js';
+import { clearAgentCache } from '../services/workflow/template-utils.js';
 
 export const usersRouter = Router();
 
@@ -65,12 +66,28 @@ usersRouter.get('/', async (req: Request, res: Response, next: NextFunction) => 
 });
 
 // GET /api/users/agents - Get all agent users
-usersRouter.get('/agents', async (_req: Request, res: Response, next: NextFunction) => {
+// Supports optional filtering: ?complexity=3, ?tag=api-integration
+usersRouter.get('/agents', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
+    const { complexity, tag } = req.query;
+
+    const filter: Record<string, unknown> = { isAgent: true, isActive: true };
+
+    if (complexity) {
+      const num = parseInt(complexity as string, 10);
+      if ([1, 2, 3].includes(num)) {
+        filter.agentComplexity = num;
+      }
+    }
+
+    if (tag && typeof tag === 'string') {
+      filter.agentTags = tag; // MongoDB matches array-contains
+    }
+
     const agents = await db
       .collection<User>('users')
-      .find({ isAgent: true, isActive: true })
+      .find(filter)
       .sort({ displayName: 1 })
       .toArray();
 
@@ -154,7 +171,7 @@ usersRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) 
 usersRouter.post('/', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { email, displayName, role, isAgent, isSystem, agentPrompt, agentComplexity, profilePicture, botColor } = req.body;
+    const { email, displayName, role, isAgent, isSystem, agentPrompt, agentComplexity, agentTags, profilePicture, botColor } = req.body;
 
     if (!displayName) {
       throw createError('displayName is required', 400);
@@ -205,6 +222,10 @@ usersRouter.post('/', requireRole('admin'), async (req: Request, res: Response, 
       } else {
         newUser.agentComplexity = 2; // Default to intermediate
       }
+      // Set agent tags for dynamic resolution (e.g., ['api-integration', 'code-review'])
+      if (agentTags && Array.isArray(agentTags)) {
+        newUser.agentTags = agentTags.filter((t: unknown) => typeof t === 'string');
+      }
       // Set bot color for agent users
       if (botColor) {
         newUser.botColor = botColor;
@@ -222,6 +243,8 @@ usersRouter.post('/', requireRole('admin'), async (req: Request, res: Response, 
 
     const result = await db.collection<User>('users').insertOne(newUser as User);
     const inserted = await db.collection<User>('users').findOne({ _id: result.insertedId });
+
+    if (isAgent) clearAgentCache();
 
     res.status(201).json({ data: inserted });
   } catch (error) {
@@ -265,6 +288,7 @@ usersRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     if (updates.isAgent === false) {
       updates.agentPrompt = null;
       updates.agentComplexity = null;
+      updates.agentTags = null;
       updates.botColor = null;
     }
     // If isAgent is being set to true, clear human-specific fields
@@ -281,6 +305,13 @@ usersRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
         throw createError('agentComplexity must be 1, 2, or 3', 400);
       }
     }
+    // Validate agentTags if provided
+    if (updates.agentTags !== undefined && updates.agentTags !== null) {
+      if (!Array.isArray(updates.agentTags)) {
+        throw createError('agentTags must be an array of strings', 400);
+      }
+      updates.agentTags = updates.agentTags.filter((t: unknown) => typeof t === 'string');
+    }
 
     const result = await db.collection<User>('users').findOneAndUpdate(
       { _id: userId },
@@ -290,6 +321,13 @@ usersRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
 
     if (!result) {
       throw createError('User not found', 404);
+    }
+
+    // Invalidate agent cache when agent-relevant fields change
+    if (updates.isAgent !== undefined || updates.agentTags !== undefined ||
+        updates.agentComplexity !== undefined || updates.isActive !== undefined ||
+        updates.displayName !== undefined) {
+      clearAgentCache();
     }
 
     res.json({ data: result });
@@ -320,6 +358,7 @@ usersRouter.delete('/:id', requireRole('admin'), async (req: Request, res: Respo
       throw createError('User not found', 404);
     }
 
+    clearAgentCache();
     res.json({ success: true, message: 'User deactivated' });
   } catch (error) {
     next(error);

@@ -31,6 +31,7 @@ import { migration as addCodeTaskType } from './2026-01-23-001-add-code-task-typ
 import { migration as addHumanInstructionField } from './2026-02-25-001-add-human-instruction-field.js';
 import { migration as addCreatorTypeAndProjectColumn } from './2026-02-25-002-add-creator-type-and-project-column.js';
 import { migration as addSystemSavedViews } from './2026-02-25-003-add-system-saved-views.js';
+import { migration as addAgentTagsIndex } from './2026-03-16-001-add-agent-tags-index.js';
 
 // Register all migrations in order
 export const migrations: Migration[] = [
@@ -57,4 +58,5 @@ export const migrations: Migration[] = [
   addHumanInstructionField,
   addCreatorTypeAndProjectColumn,
   addSystemSavedViews,
+  addAgentTagsIndex,
 ];

@@ -386,13 +386,22 @@ node scripts/workflows/test-workflow-e2e.mjs --workflow wc   # Workflow Creation
 node scripts/workflows/test-workflow-e2e.mjs --workflow mc   # Multi-Model Creation
 ```
 
-### Variable Packages
+### Dynamic Agent Assignment
 
-Agent IDs and model configs are stored in `variable_packages` collection, NOT hardcoded. Reference via `{{variables.packageName.key}}`:
-- `{{variables.workflow_agents.opusId}}` — Complex reasoning agent
-- `{{variables.workflow_agents.haikuId}}` — Fast triage agent
-- `{{variables.workflow_agents.aceId}}` — API/tool agent
-- `{{variables.workflow_models.models}}` — Model configurations for multi-model workflows
+Agent IDs are resolved dynamically at runtime — no hardcoded IDs or variable packages needed. Use `{{agent.*}}` templates in `defaultAssigneeId`:
+
+```
+{{agent.complexity.3}}          → first active agent with agentComplexity=3 (opus-class)
+{{agent.complexity.1}}          → first active agent with agentComplexity=1 (haiku-class)
+{{agent.tag.api-integration}}   → first active agent tagged "api-integration"
+{{agent.name.Claude Opus}}      → agent by display name (case-insensitive)
+```
+
+- Resolution is cached 60s, invalidated on user create/update/delete
+- No match → task left unassigned (warning logged)
+- Oldest-created matching agent wins (deterministic)
+- `agentTags` field on User model: `string[]` of capability tags
+- `GET /api/users/agents?complexity=3&tag=api-integration` for API filtering
 
 ### Step Input Data Flow
 

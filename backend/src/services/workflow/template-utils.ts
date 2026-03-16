@@ -1,6 +1,6 @@
 import { ObjectId } from 'mongodb';
 import { getDb } from '../../db/connection.js';
-import { VariablePackage } from '../../types/index.js';
+import { User, VariablePackage } from '../../types/index.js';
 import { isEncryptionConfigured } from '../encryption.js';
 import YAML from 'yaml';
 
@@ -616,6 +616,116 @@ export async function loadPackageContext(): Promise<PackageContext> {
 export function clearPackageCache(): void {
   packageCache = null;
   packageCacheTime = 0;
+}
+
+// ============================================================================
+// Agent Resolution Cache
+// ============================================================================
+
+/**
+ * Cache for active agent lookups.
+ * Maps criteria keys (e.g., "complexity.3", "tag.api-integration", "name.claude opus")
+ * to agent ObjectId strings. Cached for 60s, invalidated on user mutations.
+ */
+let agentCache: Map<string, string> | null = null;
+let agentCacheTime: number = 0;
+const AGENT_CACHE_TTL_MS = 60000; // 1 minute, same as package cache
+
+type AgentRecord = Pick<User, '_id' | 'displayName' | 'agentComplexity' | 'agentTags'>;
+
+/**
+ * Load all active agents from database into a lookup cache.
+ * Builds indexes by complexity, tag, and name for O(1) resolution.
+ */
+async function loadAgentCache(): Promise<Map<string, string>> {
+  const now = Date.now();
+  if (agentCache && (now - agentCacheTime) < AGENT_CACHE_TTL_MS) {
+    return agentCache;
+  }
+
+  let db;
+  try {
+    db = getDb();
+  } catch {
+    agentCache = new Map();
+    agentCacheTime = now;
+    return agentCache;
+  }
+
+  const agents = await db
+    .collection<AgentRecord>('users')
+    .find({ isAgent: true, isActive: true })
+    .sort({ createdAt: 1 }) // Deterministic: oldest first wins
+    .project<AgentRecord>({ _id: 1, displayName: 1, agentComplexity: 1, agentTags: 1 })
+    .toArray();
+
+  const cache = new Map<string, string>();
+
+  for (const agent of agents) {
+    const idStr = agent._id.toString();
+
+    // Index by complexity (first match wins due to sort order)
+    if (agent.agentComplexity) {
+      const key = `complexity.${agent.agentComplexity}`;
+      if (!cache.has(key)) {
+        cache.set(key, idStr);
+      }
+    }
+
+    // Index by each tag
+    if (agent.agentTags) {
+      for (const tag of agent.agentTags) {
+        const key = `tag.${tag.toLowerCase()}`;
+        if (!cache.has(key)) {
+          cache.set(key, idStr);
+        }
+      }
+    }
+
+    // Index by display name (case-insensitive)
+    const nameKey = `name.${agent.displayName.toLowerCase()}`;
+    if (!cache.has(nameKey)) {
+      cache.set(nameKey, idStr);
+    }
+  }
+
+  agentCache = cache;
+  agentCacheTime = now;
+  return cache;
+}
+
+/**
+ * Resolve a template string containing an {{agent.*}} reference to an ObjectId string.
+ *
+ * Supported syntax:
+ *   {{agent.complexity.3}}          → first active agent with agentComplexity=3
+ *   {{agent.complexity.1}}          → first active agent with agentComplexity=1
+ *   {{agent.tag.api-integration}}   → first active agent tagged "api-integration"
+ *   {{agent.name.Claude Opus}}      → agent by display name (case-insensitive)
+ *
+ * Returns the agent ObjectId string, or undefined if no match.
+ */
+export async function resolveAgentTemplate(template: string): Promise<string | undefined> {
+  const match = template.match(/^\{\{agent\.(.+)\}\}$/);
+  if (!match) return undefined;
+
+  const criteria = match[1].toLowerCase();
+  const cache = await loadAgentCache();
+  const resolved = cache.get(criteria);
+
+  if (!resolved) {
+    console.warn(`[TemplateUtils] Agent query "agent.${match[1]}" matched no active agents`);
+  }
+
+  return resolved;
+}
+
+/**
+ * Clear the agent cache (call when agent users are created/updated/deactivated)
+ */
+export function clearAgentCache(): void {
+  agentCache = null;
+  agentCacheTime = 0;
 }
 
 /**

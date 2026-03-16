@@ -97,8 +97,8 @@ async function deactivateWorkflow(id) {
 // Prompt Document Definitions
 // =============================================================================
 
-// NOTE: These prompts use {{variables.workflow_agents.XXX}} instead of hardcoded IDs.
-// The "Available Agent User IDs" section has been replaced with variable references.
+// NOTE: These prompts use {{agent.*}} dynamic resolution instead of hardcoded IDs.
+// Agents are resolved at runtime by querying active agents by complexity or tag.
 
 const WC_PROMPT_DOCS = [
   {
@@ -113,7 +113,7 @@ const WC_PROMPT_DOCS = [
 There are 11 step types you can use:
 
 1. **trigger** — Optional entry point. Workflows can start directly with any step type.
-2. **agent** — Executes a task assigned to an AI agent. Set defaultAssigneeId to a variable reference like {{variables.workflow_agents.opusId}}.
+2. **agent** — Executes a task assigned to an AI agent. Set defaultAssigneeId to a dynamic reference like {{agent.complexity.3}} or {{agent.tag.api-integration}}.
 3. **manual** — Creates a task for a human to complete. The workflow pauses until the human marks it done (Approve, Approve with Notes, or Request Changes).
 4. **external** — Calls an external HTTP API and waits for a callback response.
 5. **webhook** — Outbound HTTP call (fire-and-forget or await response, no callback required). Configure with webhookConfig: { url, method, headers, bodyTemplate }.
@@ -130,6 +130,9 @@ There are 11 step types you can use:
 - **{{steps.stepId.output.result.field}}** — Access output from a previous step
 - **{{trigger.payload.field}}** — Access original trigger payload
 - **{{variables.packageName.key}}** — Access stored variable packages
+- **{{agent.complexity.N}}** — Dynamically resolve agent by complexity level (1/2/3)
+- **{{agent.tag.TAG}}** — Dynamically resolve agent by capability tag
+- **{{agent.name.NAME}}** — Dynamically resolve agent by display name
 - **{{_apiUrl}}** — The API base URL (resolved at runtime)
 - **{{_apiKey}}** — The API key (resolved at runtime)
 - **{{_workflowRunId}}** — The current workflow run ID
@@ -139,12 +142,15 @@ There are 11 step types you can use:
 
 ## Agent Assignment
 
-Agent IDs are stored in variable packages for environment portability:
-- **{{variables.workflow_agents.opusId}}** — Complex reasoning, design, writing, analysis
-- **{{variables.workflow_agents.haikuId}}** — Fast triage, simple reviews, classification
-- **{{variables.workflow_agents.aceId}}** — API calls, code execution, tool use, external integrations
+Agent IDs are resolved dynamically at runtime — no hardcoded IDs or variable packages needed:
+- **{{agent.complexity.3}}** — Advanced agents (opus-class): complex reasoning, design, writing, analysis
+- **{{agent.complexity.2}}** — Intermediate agents (sonnet-class): balanced tasks
+- **{{agent.complexity.1}}** — Basic agents (haiku-class): fast triage, simple reviews, classification
+- **{{agent.tag.api-integration}}** — Agents tagged for API calls, code execution, tool use
+- **{{agent.tag.code-review}}** — Agents tagged for code review
+- **{{agent.name.Agent Name}}** — Specific agent by display name (case-insensitive)
 
-Never hardcode agent IDs directly in workflow definitions.
+When agents are added or removed, workflows automatically pick up the right agent. Never hardcode agent ObjectIds.
 
 ## Connection & Routing Rules
 
@@ -160,7 +166,7 @@ Never hardcode agent IDs directly in workflow definitions.
 3. Use decision steps for conditional routing
 4. Include review/validation before critical operations
 5. Use foreach/join for parallel processing
-6. Never hardcode agent IDs — always use {{variables.workflow_agents.*}}
+6. Never hardcode agent IDs — use {{agent.complexity.N}} or {{agent.tag.TAG}} for dynamic resolution
 
 ## Output Format
 
@@ -201,7 +207,7 @@ Use PROMPT:title placeholder references in promptDocumentIds.`,
 ### Template Variables
 - [ ] All {{...}} use correct syntax
 - [ ] Variable paths reference existing steps
-- [ ] Agent IDs use {{variables.workflow_agents.*}} not hardcoded values
+- [ ] Agent IDs use {{agent.*}} dynamic resolution, not hardcoded values
 
 ### Agent Steps
 - [ ] Every agent step has defaultAssigneeId using a variable reference
@@ -636,7 +642,7 @@ function buildWorkflowCreation(promptDocIds) {
         name: 'Design Workflow',
         stepType: 'agent',
         description: 'Opus designs the workflow JSON and prompt documents based on the idea.',
-        defaultAssigneeId: '{{variables.workflow_agents.opusId}}',
+        defaultAssigneeId: '{{agent.complexity.3}}',
         promptDocumentIds: [promptDocIds['WC: Workflow Design System Prompt']],
         additionalInstructions: 'Design a complete workflow for this idea: {{input.idea}}\n\nDesired name: {{input.workflowName}}\nConstraints: {{input.constraints}}',
         connections: [{ targetStepId: 'review-design' }],
@@ -646,7 +652,7 @@ function buildWorkflowCreation(promptDocIds) {
         name: 'Review Design',
         stepType: 'agent',
         description: 'Haiku validates the workflow structure against the review checklist.',
-        defaultAssigneeId: '{{variables.workflow_agents.haikuId}}',
+        defaultAssigneeId: '{{agent.complexity.1}}',
         promptDocumentIds: [promptDocIds['WC: Review Checklist']],
         connections: [{ targetStepId: 'review-loop-check' }],
       },
@@ -684,7 +690,7 @@ function buildWorkflowCreation(promptDocIds) {
         name: 'Edit Design',
         stepType: 'agent',
         description: 'Opus fixes issues found during review.',
-        defaultAssigneeId: '{{variables.workflow_agents.opusId}}',
+        defaultAssigneeId: '{{agent.complexity.3}}',
         promptDocumentIds: [promptDocIds['WC: Edit Instructions']],
         connections: [{ targetStepId: 'review-design' }],
       },
@@ -693,7 +699,7 @@ function buildWorkflowCreation(promptDocIds) {
         name: 'Create Prompt Documents',
         stepType: 'agent',
         description: 'Ace Agent creates prompt documents via API.',
-        defaultAssigneeId: '{{variables.workflow_agents.aceId}}',
+        defaultAssigneeId: '{{agent.tag.api-integration}}',
         promptDocumentIds: [promptDocIds['WC: Create Prompt Documents via API']],
         connections: [{ targetStepId: 'create-workflow-api' }],
       },
@@ -702,7 +708,7 @@ function buildWorkflowCreation(promptDocIds) {
         name: 'Create & Validate Workflow',
         stepType: 'agent',
         description: 'Ace Agent creates the workflow via API and verifies it.',
-        defaultAssigneeId: '{{variables.workflow_agents.aceId}}',
+        defaultAssigneeId: '{{agent.tag.api-integration}}',
         promptDocumentIds: [promptDocIds['WC: Create & Validate Workflow via API']],
         connections: [{ targetStepId: 'validation-loop-check' }],
       },
@@ -739,7 +745,7 @@ function buildWorkflowCreation(promptDocIds) {
         name: 'Fix Validation Issues',
         stepType: 'agent',
         description: 'Opus fixes API validation errors.',
-        defaultAssigneeId: '{{variables.workflow_agents.opusId}}',
+        defaultAssigneeId: '{{agent.complexity.3}}',
         promptDocumentIds: [promptDocIds['WC: Fix Validation Issues']],
         connections: [{ targetStepId: 'create-prompts' }],
       },
@@ -769,7 +775,7 @@ function buildWorkflowCreation(promptDocIds) {
         name: 'Apply Human Feedback',
         stepType: 'agent',
         description: 'Opus applies human feedback to the workflow.',
-        defaultAssigneeId: '{{variables.workflow_agents.opusId}}',
+        defaultAssigneeId: '{{agent.complexity.3}}',
         promptDocumentIds: [promptDocIds['WC: Apply Human Feedback']],
         connections: [{ targetStepId: 'create-prompts' }],
       },
@@ -875,7 +881,7 @@ function buildMultiModelCreation(promptDocIds) {
         name: 'Create Version',
         stepType: 'agent',
         description: 'Each model independently creates its version of the artifact.',
-        defaultAssigneeId: '{{variables.workflow_agents.opusId}}',
+        defaultAssigneeId: '{{agent.complexity.3}}',
         promptDocumentIds: [promptDocIds['MC: Model Creation Prompt']],
         connections: [{ targetStepId: 'join-initial' }],
       },
@@ -895,7 +901,7 @@ function buildMultiModelCreation(promptDocIds) {
         name: 'Judge: Evaluate Versions',
         stepType: 'agent',
         description: 'Judge evaluates and scores all initial versions.',
-        defaultAssigneeId: '{{variables.workflow_agents.opusId}}',
+        defaultAssigneeId: '{{agent.complexity.3}}',
         promptDocumentIds: [promptDocIds['MC: Judge Evaluation Criteria']],
         connections: [{ targetStepId: 'debate-count' }],
       },
@@ -946,7 +952,7 @@ function buildMultiModelCreation(promptDocIds) {
         name: 'Revise Version',
         stepType: 'agent',
         description: 'Each model revises its version based on judge feedback and other models\' work.',
-        defaultAssigneeId: '{{variables.workflow_agents.opusId}}',
+        defaultAssigneeId: '{{agent.complexity.3}}',
         promptDocumentIds: [promptDocIds['MC: Model Debate/Revision Prompt']],
         connections: [{ targetStepId: 'join-debate' }],
       },
@@ -966,7 +972,7 @@ function buildMultiModelCreation(promptDocIds) {
         name: 'Judge: Debate Round',
         stepType: 'agent',
         description: 'Judge evaluates the revised versions and tracks improvement.',
-        defaultAssigneeId: '{{variables.workflow_agents.opusId}}',
+        defaultAssigneeId: '{{agent.complexity.3}}',
         promptDocumentIds: [promptDocIds['MC: Debate Round Judge Prompt']],
         connections: [{ targetStepId: 'debate-loop-count' }],
       },
@@ -1005,7 +1011,7 @@ function buildMultiModelCreation(promptDocIds) {
         name: 'Synthesize Final',
         stepType: 'agent',
         description: 'Combine the best elements from all models into a final version.',
-        defaultAssigneeId: '{{variables.workflow_agents.opusId}}',
+        defaultAssigneeId: '{{agent.complexity.3}}',
         promptDocumentIds: [promptDocIds['MC: Synthesis Instructions']],
         connections: [{ targetStepId: 'save-draft' }],
       },
@@ -1061,7 +1067,7 @@ function buildMultiModelCreation(promptDocIds) {
         name: 'Targeted Edit',
         stepType: 'agent',
         description: 'Apply specific human feedback to the synthesized version.',
-        defaultAssigneeId: '{{variables.workflow_agents.opusId}}',
+        defaultAssigneeId: '{{agent.complexity.3}}',
         promptDocumentIds: [promptDocIds['MC: Targeted Edit Prompt']],
         connections: [{ targetStepId: 'edit-count' }],
       },

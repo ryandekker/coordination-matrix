@@ -26,7 +26,7 @@ import {
   ExecutionOutcome,
 } from '../../types/index.js';
 
-import { resolveTemplateWithPackages, getValueByPath, resolveTitleTemplateWithPackages, getBaseUrl, resolveTemplateValue } from './template-utils.js';
+import { resolveTemplateWithPackages, resolveAgentTemplate, getValueByPath, resolveTitleTemplateWithPackages, getBaseUrl, resolveTemplateValue } from './template-utils.js';
 import { stripUndefined } from './mongo-utils.js';
 import { validateAgainstSchema } from './schema-validator.js';
 import { searchDocuments } from '../embedding-service.js';
@@ -1072,12 +1072,22 @@ class WorkflowExecutionService {
       // Support template variables in assigneeId (e.g., {{model.modelId}} in foreach)
       let resolvedAssigneeId = step.defaultAssigneeId;
       if (resolvedAssigneeId.includes('{{')) {
-        const resolvedStr = await resolveTemplateWithPackages(resolvedAssigneeId, {
-          workflowRunId: run._id,
-          stepId: step.id,
-          inputPayload,
-        });
-        resolvedAssigneeId = resolvedStr?.trim() || '';
+        // Try {{agent.*}} dynamic resolution first (queries active agents by criteria)
+        const agentResolved = await resolveAgentTemplate(resolvedAssigneeId);
+        if (agentResolved) {
+          resolvedAssigneeId = agentResolved;
+        } else if (!resolvedAssigneeId.includes('{{agent.')) {
+          // Not an agent query — fall through to standard template resolution
+          const resolvedStr = await resolveTemplateWithPackages(resolvedAssigneeId, {
+            workflowRunId: run._id,
+            stepId: step.id,
+            inputPayload,
+          });
+          resolvedAssigneeId = resolvedStr?.trim() || '';
+        } else {
+          // Agent query returned no match — leave unassigned
+          resolvedAssigneeId = '';
+        }
       }
       if (resolvedAssigneeId && ObjectId.isValid(resolvedAssigneeId)) {
         assigneeId = new ObjectId(resolvedAssigneeId);
