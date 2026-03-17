@@ -2859,6 +2859,99 @@ function TestExecutionSection({
   )
 }
 
+// Assignee selector supporting both user selection and {{agent.*}} templates
+function AssigneeSelector({
+  value,
+  users,
+  workflowId,
+  previousSteps,
+  stepIndex,
+  loopVariable,
+  onChange,
+}: {
+  value?: string
+  users: { _id: string; displayName: string }[]
+  workflowId?: string
+  previousSteps: Array<{ id: string; name: string; stepType?: string; itemVariable?: string }>
+  stepIndex: number
+  loopVariable?: string
+  onChange: (val: string | undefined) => void
+}) {
+  const isTemplate = value?.startsWith('{{')
+  const selectedUser = !isTemplate ? users.find(u => u._id === value) : undefined
+  const displayValue = isTemplate ? value : selectedUser?.displayName || ''
+
+  return (
+    <div className="space-y-1">
+      <label className="text-sm font-medium flex items-center gap-2">
+        <User className="h-4 w-4 text-muted-foreground" />
+        Default Assignee
+      </label>
+      <div className="flex gap-1">
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              role="combobox"
+              className={cn(
+                'flex-1 justify-between font-normal h-9',
+                !value && 'text-muted-foreground'
+              )}
+            >
+              {isTemplate ? (
+                <code className="text-xs font-mono bg-blue-500/10 text-blue-700 dark:text-blue-300 px-1 py-0.5 rounded truncate">
+                  {value}
+                </code>
+              ) : displayValue || 'Select assignee...'}
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[300px] p-0" align="start">
+            <Command>
+              <CommandInput placeholder="Search users..." />
+              <CommandList>
+                <CommandEmpty>No users found.</CommandEmpty>
+                <CommandGroup heading="Users">
+                  <CommandItem
+                    value="_none"
+                    onSelect={() => onChange(undefined)}
+                  >
+                    <Check className={cn('mr-2 h-4 w-4', !value ? 'opacity-100' : 'opacity-0')} />
+                    No default assignee
+                  </CommandItem>
+                  {users.filter(u => u._id !== SYSTEM_USER_ID).map(user => (
+                    <CommandItem
+                      key={user._id}
+                      value={user.displayName}
+                      onSelect={() => onChange(user._id)}
+                    >
+                      <Check className={cn('mr-2 h-4 w-4', value === user._id ? 'opacity-100' : 'opacity-0')} />
+                      {user.displayName}
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+        <TokenBrowser
+          workflowId={workflowId}
+          previousSteps={previousSteps}
+          currentStepIndex={stepIndex}
+          loopVariable={loopVariable}
+          onSelectToken={(token) => onChange(token)}
+          wrapInBraces={true}
+        />
+      </div>
+      {isTemplate && (
+        <p className="text-[11px] text-muted-foreground">
+          Dynamic template — resolved at runtime
+        </p>
+      )}
+    </div>
+  )
+}
+
 export function StepConfigPanel({
   step,
   stepIndex,
@@ -3029,28 +3122,15 @@ export function StepConfigPanel({
               </div>
             </div>
 
-            <div className="space-y-1">
-              <label className="text-sm font-medium flex items-center gap-2">
-                <User className="h-4 w-4 text-muted-foreground" />
-                Default Assignee
-              </label>
-              <Select
-                value={step.defaultAssigneeId || '_none'}
-                onValueChange={(val) => handleUpdate({ defaultAssigneeId: val === '_none' ? undefined : val })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select default assignee" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="_none">No default assignee</SelectItem>
-                  {users.filter((user) => user._id !== SYSTEM_USER_ID).map((user) => (
-                    <SelectItem key={user._id} value={user._id}>
-                      {user.displayName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <AssigneeSelector
+              value={step.defaultAssigneeId}
+              users={users}
+              workflowId={workflowId}
+              previousSteps={previousSteps}
+              stepIndex={stepIndex}
+              loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
+              onChange={(val) => handleUpdate({ defaultAssigneeId: val })}
+            />
 
             {/* Prompt Library Selector */}
             <PromptSelector
@@ -3125,28 +3205,15 @@ The agent will receive task context automatically.`}
               </div>
             </div>
 
-            <div className="space-y-1">
-              <label className="text-sm font-medium flex items-center gap-2">
-                <User className="h-4 w-4 text-muted-foreground" />
-                Default Assignee
-              </label>
-              <Select
-                value={step.defaultAssigneeId || '_none'}
-                onValueChange={(val) => handleUpdate({ defaultAssigneeId: val === '_none' ? undefined : val })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select default assignee" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="_none">No default assignee</SelectItem>
-                  {users.filter((user) => user._id !== SYSTEM_USER_ID).map((user) => (
-                    <SelectItem key={user._id} value={user._id}>
-                      {user.displayName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <AssigneeSelector
+              value={step.defaultAssigneeId}
+              users={users}
+              workflowId={workflowId}
+              previousSteps={previousSteps}
+              stepIndex={stepIndex}
+              loopVariable={isInLoop && loopScope ? loopScope.foreachStep.itemVariable : undefined}
+              onChange={(val) => handleUpdate({ defaultAssigneeId: val })}
+            />
           </div>
         )}
 

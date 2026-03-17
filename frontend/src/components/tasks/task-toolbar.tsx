@@ -359,9 +359,13 @@ export function TaskToolbar({
 
     const assigneeFilters = toArray(filters.assigneeId)
     assigneeFilters.forEach((assigneeId) => {
-      const user = users.find((u) => u._id === assigneeId)
-      if (user) {
-        result.push({ key: `assignee-${assigneeId}`, label: 'Assignee', value: user.displayName })
+      if (assigneeId === '__unassigned__') {
+        result.push({ key: `assignee-${assigneeId}`, label: 'Assignee', value: 'Unassigned' })
+      } else {
+        const user = users.find((u) => u._id === assigneeId)
+        if (user) {
+          result.push({ key: `assignee-${assigneeId}`, label: 'Assignee', value: user.displayName })
+        }
       }
     })
 
@@ -557,7 +561,18 @@ export function TaskToolbar({
           </div>
           <DropdownMenuSeparator />
           <div className="max-h-48 overflow-y-auto">
-            {filteredUsers.length === 0 ? (
+            {(!assigneeSearchTerm.trim() || 'unassigned'.includes(assigneeSearchTerm.toLowerCase())) && (
+              <DropdownMenuCheckboxItem
+                checked={((filters.assigneeId as string[]) || []).includes('__unassigned__')}
+                onCheckedChange={(checked) => handleAssigneeFilter('__unassigned__', checked)}
+              >
+                <UserChip
+                  user={null}
+                  size="sm"
+                />
+              </DropdownMenuCheckboxItem>
+            )}
+            {filteredUsers.length === 0 && (assigneeSearchTerm.trim() && !'unassigned'.includes(assigneeSearchTerm.toLowerCase())) ? (
               <div className="px-2 py-1.5 text-sm text-muted-foreground">
                 No assignees found
               </div>

@@ -193,7 +193,8 @@ export function requireScope(...requiredScopes: string[]) {
     const keyScopes = req.apiKey.scopes || [];
 
     // Check if the API key has admin scope or wildcard (grants all access)
-    if (keyScopes.includes(SCOPES.ADMIN) || keyScopes.includes('*')) {
+    // Accept both 'admin:*' (canonical) and 'admin' (legacy) as admin bypass
+    if (keyScopes.includes(SCOPES.ADMIN) || keyScopes.includes('admin') || keyScopes.includes('*')) {
       next();
       return;
     }

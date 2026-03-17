@@ -26,7 +26,8 @@ import {
   ExecutionOutcome,
 } from '../../types/index.js';
 
-import { resolveTemplateWithPackages, getValueByPath, resolveTitleTemplateWithPackages, getBaseUrl, resolveTemplateValue } from './template-utils.js';
+import { resolveTemplateWithPackages, resolveAgentTemplate, resolveAllAgents, getValueByPath, resolveTitleTemplateWithPackages, getBaseUrl, resolveTemplateValue } from './template-utils.js';
+import { getSecretValues, sanitizeSecrets } from './variable-safety.js';
 import { stripUndefined } from './mongo-utils.js';
 import { validateAgainstSchema } from './schema-validator.js';
 import { searchDocuments } from '../embedding-service.js';
@@ -1037,7 +1038,8 @@ class WorkflowExecutionService {
     workflow: Workflow,
     step: WorkflowStep,
     parentTask: Task,
-    inputPayload?: Record<string, unknown>
+    inputPayload?: Record<string, unknown>,
+    overrideAssigneeId?: ObjectId
   ): Promise<Task> {
     const now = new Date();
 
@@ -1062,14 +1064,53 @@ class WorkflowExecutionService {
     // Build stepConfig to preserve original workflow step configuration
     const stepConfig = this.buildStepConfig(step);
 
+    // Sanitize inputPayload for agent tasks to prevent secret leakage to LLMs.
+    // Webhook/code/external tasks need real values, so only sanitize agent-facing tasks.
+    let safeInputPayload = inputPayload;
+    if (step.stepType === 'agent' && inputPayload) {
+      try {
+        const secrets = await getSecretValues();
+        if (secrets.length > 0) {
+          const sanitized = sanitizeSecrets(JSON.stringify(inputPayload), secrets);
+          safeInputPayload = JSON.parse(sanitized);
+        }
+      } catch (err) {
+        console.warn(`[WorkflowExecutionService] Failed to sanitize inputPayload: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
     // Determine assignee:
     // 1. If step has explicit defaultAssigneeId, use that
     // 2. If run has taskDefaults.assigneeId, use that
     // 3. If task type is system-executed (webhook, join, etc.), assign to system user
     // 4. Otherwise leave null (unassigned - awaiting human assignment)
     let assigneeId: ObjectId | null = null;
-    if (step.defaultAssigneeId) {
-      assigneeId = new ObjectId(step.defaultAssigneeId);
+    if (overrideAssigneeId) {
+      assigneeId = overrideAssigneeId;
+    } else if (step.defaultAssigneeId) {
+      // Support template variables in assigneeId (e.g., {{model.modelId}} in foreach)
+      let resolvedAssigneeId = step.defaultAssigneeId;
+      if (resolvedAssigneeId.includes('{{')) {
+        // Try {{agent.*}} dynamic resolution first (queries active agents by criteria)
+        const agentResolved = await resolveAgentTemplate(resolvedAssigneeId);
+        if (agentResolved) {
+          resolvedAssigneeId = agentResolved;
+        } else if (!resolvedAssigneeId.includes('{{agent.')) {
+          // Not an agent query — fall through to standard template resolution
+          const resolvedStr = await resolveTemplateWithPackages(resolvedAssigneeId, {
+            workflowRunId: run._id,
+            stepId: step.id,
+            inputPayload,
+          });
+          resolvedAssigneeId = resolvedStr?.trim() || '';
+        } else {
+          // Agent query returned no match — leave unassigned
+          resolvedAssigneeId = '';
+        }
+      }
+      if (resolvedAssigneeId && ObjectId.isValid(resolvedAssigneeId)) {
+        assigneeId = new ObjectId(resolvedAssigneeId);
+      }
     } else if (runDefaults.assigneeId) {
       assigneeId = runDefaults.assigneeId;
     } else if (isSystemExecutedTaskType(taskType)) {
@@ -1091,13 +1132,14 @@ class WorkflowExecutionService {
       createdAt: now,
       updatedAt: now,
       ...(run.humanInstruction && { humanInstruction: run.humanInstruction }),
-      // New unified step input field
-      stepInput: inputPayload,
+      // New unified step input field (sanitized for agent tasks)
+      stepInput: step.stepType === 'agent' ? safeInputPayload : inputPayload,
       metadata: {
         stepId: step.id,
         stepType: step.stepType,
         // Keep inputPayload in metadata for backward compatibility during transition
-        inputPayload,
+        // Agent tasks get sanitized payload to prevent secret leakage to LLMs
+        inputPayload: step.stepType === 'agent' ? safeInputPayload : inputPayload,
       },
     };
 
@@ -1814,7 +1856,30 @@ class WorkflowExecutionService {
       return;
     }
 
-    const items = getValueByPath(inputPayload, step.itemsPath);
+    // Resolve items: either from agent query (agents.*) or standard path lookup
+    let items: unknown;
+    const isAgentQuery = step.itemsPath.startsWith('agents.');
+    let agentAssignments: Map<number, ObjectId> | undefined;
+
+    if (isAgentQuery) {
+      // Smart agent query: "agents.complexity.3", "agents.tag.reasoning", "agents.complexity.3+tag.reasoning"
+      const query = step.itemsPath.slice('agents.'.length);
+      console.log(`[WorkflowExecutionService] Resolving agent query: "${query}"`);
+      const matchingAgents = await resolveAllAgents(query);
+      // Convert AgentRecords to serializable items with agentId for assignee override
+      agentAssignments = new Map();
+      items = matchingAgents.map((agent, i) => {
+        agentAssignments!.set(i, new ObjectId(agent._id.toString()));
+        return {
+          agentId: agent._id.toString(),
+          displayName: agent.displayName,
+          agentComplexity: agent.agentComplexity,
+          agentTags: agent.agentTags,
+        };
+      });
+    } else {
+      items = getValueByPath(inputPayload, step.itemsPath);
+    }
 
     if (!Array.isArray(items)) {
       console.warn(`[WorkflowExecutionService] Items at ${step.itemsPath} is not an array. Input payload keys: ${Object.keys(inputPayload || {}).join(', ')}`);
@@ -1835,7 +1900,8 @@ class WorkflowExecutionService {
     }
 
     if (items.length === 0) {
-      console.warn(`[WorkflowExecutionService] Items array at ${step.itemsPath} is empty`);
+      const label = isAgentQuery ? `Agent query "${step.itemsPath}"` : `Items array at path ${step.itemsPath}`;
+      console.warn(`[WorkflowExecutionService] ${label} is empty`);
       const expectedCount = getExpectedCountFromStepConfig();
       await this.tasks.updateOne(
         { _id: foreachTask._id },
@@ -1844,11 +1910,11 @@ class WorkflowExecutionService {
             status: 'waiting' as TaskStatus,
             expectedQuantity: expectedCount,
             'batchCounters.expectedCount': expectedCount,
-            'metadata.waitingReason': `Items array at path ${step.itemsPath} is empty. Waiting for external data.`,
+            'metadata.waitingReason': `${label} is empty. Waiting for external data.`,
           }
         }
       );
-      console.log(`[WorkflowExecutionService] Foreach task ${foreachTask._id} set to waiting - empty items array (expectedCount: ${expectedCount})`);
+      console.log(`[WorkflowExecutionService] Foreach task ${foreachTask._id} set to waiting - empty items (expectedCount: ${expectedCount})`);
       return;
     }
 
@@ -1885,6 +1951,7 @@ class WorkflowExecutionService {
           expectedQuantity: expectedCount,
           'batchCounters.expectedCount': expectedCount,
           'metadata.itemCount': itemsToProcess.length,
+          ...(isAgentQuery && { 'metadata.agentQuery': step.itemsPath }),
         },
       }
     );
@@ -1906,10 +1973,12 @@ class WorkflowExecutionService {
         _total: itemsToProcess.length,
       };
 
-      await this.createTaskForStep(run, workflow, nextStep, foreachTask, itemPayload);
+      // For agent queries, override child task assignee with the matching agent
+      const overrideAssignee = agentAssignments?.get(i);
+      await this.createTaskForStep(run, workflow, nextStep, foreachTask, itemPayload, overrideAssignee);
     }
 
-    console.log(`[WorkflowExecutionService] Created ${itemsToProcess.length} child tasks for foreach`);
+    console.log(`[WorkflowExecutionService] Created ${itemsToProcess.length} child tasks for foreach${isAgentQuery ? ` (agent query: ${step.itemsPath})` : ''}`);
   }
 
   // ============================================================================
@@ -2654,6 +2723,8 @@ class WorkflowExecutionService {
       input: inputPayload || {},
       trigger: _run.inputPayload || {},
       steps: {}, // TODO: Could populate with previous step outputs if needed
+      _workflowRunId: _run._id.toString(),
+      _stepLog: _run.stepLog || [],
     };
 
     try {

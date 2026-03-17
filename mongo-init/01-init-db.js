@@ -1382,59 +1382,60 @@ db.createCollection('variable_packages', {
   validator: {
     $jsonSchema: {
       bsonType: 'object',
-      required: ['name', 'branches', 'createdAt', 'isActive'],
+      required: ['name', 'createdAt', 'isActive'],
       properties: {
         name: {
           bsonType: 'string',
-          description: 'Package name (unique, used in templates) - required'
+          description: 'Variable name (unique, used in templates) - required'
         },
         displayName: {
-          bsonType: 'string',
+          bsonType: ['string', 'null'],
           description: 'Human-readable display name'
         },
         description: {
-          bsonType: 'string',
-          description: 'Package description'
+          bsonType: ['string', 'null'],
+          description: 'Variable description'
         },
-        // Branch definitions - each branch is a variant of the package
-        // Example: { "personal": { email: "...", password: "enc:..." }, "work": { ... } }
+        // Current model: single value with optional encryption
+        value: {
+          bsonType: 'string',
+          description: 'Variable value (may be encrypted with enc: prefix)'
+        },
+        encrypted: {
+          bsonType: 'bool',
+          description: 'Whether the value is encrypted at rest'
+        },
+        // Legacy model: branch-based storage (kept for backward compat)
         branches: {
           bsonType: 'object',
-          description: 'Map of branch name -> branch data'
+          description: 'Map of branch name -> branch data (legacy)'
         },
-        // Default branch to use when not specified
         defaultBranch: {
           bsonType: 'string',
-          description: 'Default branch name'
+          description: 'Default branch name (legacy)'
         },
-        // Schema definition for UI and validation
-        // Each field defines: key, displayName, type (string|secret|number|boolean), required, description
         schema: {
           bsonType: 'array',
-          items: {
-            bsonType: 'object',
-            properties: {
-              key: { bsonType: 'string' },
-              displayName: { bsonType: 'string' },
-              type: { bsonType: 'string' },
-              required: { bsonType: 'bool' },
-              description: { bsonType: 'string' }
-            }
-          },
-          description: 'Field schema for the package'
+          description: 'Field schema for the package (legacy)'
+        },
+        // LLM safety classification
+        sensitivity: {
+          bsonType: 'string',
+          enum: ['secret', 'safe'],
+          description: 'LLM safety: secret=never expose to LLMs, safe=can appear in prompts'
         },
         // Ownership and audit
         createdById: {
           bsonType: ['objectId', 'null'],
-          description: 'User who created this package'
+          description: 'User who created this variable'
         },
         updatedById: {
           bsonType: ['objectId', 'null'],
-          description: 'User who last updated this package'
+          description: 'User who last updated this variable'
         },
         isActive: {
           bsonType: 'bool',
-          description: 'Whether the package is active'
+          description: 'Whether the variable is active'
         },
         createdAt: {
           bsonType: 'date',

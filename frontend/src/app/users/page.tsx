@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Pencil, Trash2, MoreHorizontal, UserCheck, UserX, Bot } from 'lucide-react'
+import { Plus, Pencil, Trash2, MoreHorizontal, UserCheck, UserX, Bot, X } from 'lucide-react'
 import {
   Table,
   TableBody,
@@ -37,7 +37,7 @@ import {
 } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Textarea } from '@/components/ui/textarea'
-import { User, usersApi, authFetch } from '@/lib/api'
+import { User, AgentComplexity, usersApi, authFetch } from '@/lib/api'
 import { formatDateTime } from '@/lib/utils'
 import { getAuthHeader } from '@/lib/auth'
 
@@ -73,8 +73,11 @@ export default function UsersPage() {
     role: 'viewer' as string,
     isAgent: false,
     agentPrompt: '',
+    agentComplexity: undefined as AgentComplexity | undefined,
+    agentTags: [] as string[],
     botColor: '#3B82F6',
   })
+  const [tagInput, setTagInput] = useState('')
 
   const { data: usersData, isLoading } = useQuery({
     queryKey: ['users'],
@@ -108,7 +111,8 @@ export default function UsersPage() {
 
   const openCreateModal = () => {
     setEditingUser(null)
-    setFormData({ email: '', displayName: '', role: 'viewer', isAgent: false, agentPrompt: '', botColor: '#3B82F6' })
+    setFormData({ email: '', displayName: '', role: 'viewer', isAgent: false, agentPrompt: '', agentComplexity: undefined, agentTags: [], botColor: '#3B82F6' })
+    setTagInput('')
     setIsModalOpen(true)
   }
 
@@ -120,24 +124,45 @@ export default function UsersPage() {
       role: user.role,
       isAgent: user.isAgent || false,
       agentPrompt: user.agentPrompt || '',
+      agentComplexity: user.agentComplexity,
+      agentTags: user.agentTags || [],
       botColor: user.botColor || '#3B82F6',
     })
+    setTagInput('')
     setIsModalOpen(true)
   }
 
   const closeModal = () => {
     setIsModalOpen(false)
     setEditingUser(null)
-    setFormData({ email: '', displayName: '', role: 'viewer', isAgent: false, agentPrompt: '', botColor: '#3B82F6' })
+    setFormData({ email: '', displayName: '', role: 'viewer', isAgent: false, agentPrompt: '', agentComplexity: undefined, agentTags: [], botColor: '#3B82F6' })
+    setTagInput('')
   }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (editingUser) {
-      updateMutation.mutate({ id: editingUser._id, data: formData })
-    } else {
-      createMutation.mutate(formData)
+    const submitData: Partial<User> = {
+      ...formData,
+      agentComplexity: formData.isAgent ? formData.agentComplexity : undefined,
+      agentTags: formData.isAgent && formData.agentTags.length > 0 ? formData.agentTags : undefined,
     }
+    if (editingUser) {
+      updateMutation.mutate({ id: editingUser._id, data: submitData })
+    } else {
+      createMutation.mutate(submitData)
+    }
+  }
+
+  const addTag = (tag: string) => {
+    const trimmed = tag.trim().toLowerCase()
+    if (trimmed && !formData.agentTags.includes(trimmed)) {
+      setFormData({ ...formData, agentTags: [...formData.agentTags, trimmed] })
+    }
+    setTagInput('')
+  }
+
+  const removeTag = (tag: string) => {
+    setFormData({ ...formData, agentTags: formData.agentTags.filter(t => t !== tag) })
   }
 
   const handleDelete = (user: User) => {
@@ -198,7 +223,7 @@ export default function UsersPage() {
                   <TableCell className="font-medium">{user.displayName}</TableCell>
                   <TableCell>
                     {user.isAgent ? (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <div
                           className="h-3 w-3 rounded-full shrink-0"
                           style={{ backgroundColor: user.botColor || '#3B82F6' }}
@@ -207,6 +232,16 @@ export default function UsersPage() {
                           <Bot className="mr-1 h-3 w-3" />
                           Agent
                         </Badge>
+                        {user.agentComplexity && (
+                          <Badge variant="secondary" className="text-[10px]">
+                            L{user.agentComplexity}
+                          </Badge>
+                        )}
+                        {user.agentTags?.map(tag => (
+                          <Badge key={tag} variant="outline" className="text-[10px]">
+                            {tag}
+                          </Badge>
+                        ))}
                       </div>
                     ) : (
                       <Badge variant="outline" className="text-gray-500 border-gray-500">
@@ -334,6 +369,70 @@ export default function UsersPage() {
                   />
                   <p className="text-xs text-muted-foreground">
                     Define the agent&apos;s personality, capabilities, and constraints. Leave empty to use default daemon behavior.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Complexity Level</label>
+                  <Select
+                    value={formData.agentComplexity?.toString() || '_none'}
+                    onValueChange={(val) => setFormData({ ...formData, agentComplexity: val === '_none' ? undefined : Number(val) as AgentComplexity })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select complexity level" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_none">Not set</SelectItem>
+                      <SelectItem value="3">3 — Advanced (Opus-class)</SelectItem>
+                      <SelectItem value="2">2 — Intermediate (Sonnet-class)</SelectItem>
+                      <SelectItem value="1">1 — Basic (Haiku-class)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Used by <code className="bg-muted px-1 rounded">{'{{agent.complexity.N}}'}</code> templates for dynamic workflow assignment.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Capability Tags</label>
+                  <div className="flex flex-wrap gap-1.5 min-h-[32px]">
+                    {formData.agentTags.map(tag => (
+                      <Badge key={tag} variant="secondary" className="gap-1 pr-1">
+                        {tag}
+                        <button
+                          type="button"
+                          onClick={() => removeTag(tag)}
+                          className="ml-0.5 rounded-full hover:bg-muted-foreground/20 p-0.5"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      value={tagInput}
+                      onChange={(e) => setTagInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          addTag(tagInput)
+                        }
+                      }}
+                      placeholder="Type a tag and press Enter"
+                      className="flex-1"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9"
+                      onClick={() => addTag(tagInput)}
+                      disabled={!tagInput.trim()}
+                    >
+                      Add
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Used by <code className="bg-muted px-1 rounded">{'{{agent.tag.name}}'}</code> templates. E.g., <code className="bg-muted px-1 rounded">api-integration</code>, <code className="bg-muted px-1 rounded">code-review</code>
                   </p>
                 </div>
                 <div className="space-y-2">

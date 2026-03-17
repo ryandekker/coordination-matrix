@@ -332,6 +332,9 @@ async function buildSandbox(
     trigger: context.trigger,
     // Outputs from all previous steps (keyed by step ID)
     steps: context.steps || {},
+    // Workflow run metadata (injected by execution service)
+    _workflowRunId: context._workflowRunId || null,
+    _stepLog: context._stepLog || [],
     console: createSafeConsole(logs),
     // Built-in JS globals that are safe
     JSON,

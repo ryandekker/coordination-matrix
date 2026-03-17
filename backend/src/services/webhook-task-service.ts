@@ -3,6 +3,7 @@ import { getDb } from '../db/connection.js';
 import { Task, WebhookAttempt, TaskStatus } from '../types/index.js';
 import { eventBus, publishTaskEvent } from './event-bus.js';
 import { resolveTemplateWithPackages, TemplateContext } from './workflow/template-utils.js';
+import { getSecretValues, sanitizeSecrets } from './workflow/variable-safety.js';
 
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_DELAY_MS = 1000;
@@ -155,15 +156,31 @@ class WebhookTaskService {
       resolvedBody = await resolveTemplateWithPackages(config.body, templateContext);
     }
 
-    // Create new attempt record with resolved request details
+    // Sanitize resolved values for storage (don't store secrets in attempt records)
+    let secrets: string[] = [];
+    try {
+      secrets = await getSecretValues();
+    } catch {
+      // Continue without sanitization if secret loading fails
+    }
+    const sanitizedUrl = secrets.length > 0 ? sanitizeSecrets(resolvedUrl, secrets) : resolvedUrl;
+    const sanitizedHeaders: Record<string, string> = {};
+    for (const [key, value] of Object.entries(resolvedHeaders)) {
+      sanitizedHeaders[key] = secrets.length > 0 ? sanitizeSecrets(value, secrets) : value;
+    }
+    const sanitizedBody = resolvedBody && secrets.length > 0
+      ? sanitizeSecrets(resolvedBody, secrets)
+      : resolvedBody;
+
+    // Create attempt record with SANITIZED request details (no secrets in audit trail)
     const attempt: WebhookAttempt = {
       attemptNumber,
       startedAt: new Date(),
       status: 'pending',
-      requestUrl: resolvedUrl,
+      requestUrl: sanitizedUrl,
       requestMethod: config.method,
-      requestHeaders: resolvedHeaders,
-      requestBody: resolvedBody,
+      requestHeaders: sanitizedHeaders,
+      requestBody: sanitizedBody,
     };
 
     // Update task to in_progress
@@ -190,12 +207,13 @@ class WebhookTaskService {
       const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-      console.log(`[WebhookTaskService] Executing webhook ${id} attempt ${attemptNumber}: ${attempt.requestMethod} ${attempt.requestUrl}`);
+      console.log(`[WebhookTaskService] Executing webhook ${id} attempt ${attemptNumber}: ${config.method} ${sanitizedUrl}`);
 
-      const response = await fetch(attempt.requestUrl!, {
-        method: attempt.requestMethod,
-        headers: attempt.requestHeaders,
-        body: attempt.requestBody,
+      // Use REAL (unsanitized) values for the actual HTTP call
+      const response = await fetch(resolvedUrl, {
+        method: config.method,
+        headers: resolvedHeaders,
+        body: resolvedBody,
         signal: controller.signal,
       });
 

@@ -82,9 +82,24 @@ export function buildFilter(query: Record<string, unknown>, currentUserId?: stri
 
   // Assignee filter
   if (assigneeId) {
-    // Handle special __unassigned__ marker for null values
-    if (assigneeId === '__unassigned__' || (Array.isArray(assigneeId) && assigneeId.includes('__unassigned__'))) {
+    if (assigneeId === '__unassigned__') {
+      // Single unassigned marker - match null assigneeId
       filter.assigneeId = { $eq: null } as unknown as ObjectId;
+    } else if (Array.isArray(assigneeId) && assigneeId.includes('__unassigned__')) {
+      // Mix of unassigned + real user IDs - use $or to match null OR any of the user IDs
+      const realIds = (assigneeId as string[])
+        .filter((id) => id !== '__unassigned__')
+        .map((id) => resolveUserPlaceholder(id, currentUserId))
+        .filter((id) => id !== '{{currentUserId}}')
+        .map((id) => toObjectId(id));
+      if (realIds.length > 0) {
+        (filter as Record<string, unknown>).$or = [
+          { assigneeId: { $eq: null } },
+          { assigneeId: { $in: realIds } },
+        ];
+      } else {
+        filter.assigneeId = { $eq: null } as unknown as ObjectId;
+      }
     } else if (Array.isArray(assigneeId)) {
       const resolvedIds = assigneeId
         .map((id) => resolveUserPlaceholder(id as string, currentUserId))
@@ -148,7 +163,19 @@ export function buildFilter(query: Record<string, unknown>, currentUserId?: stri
       if (value !== undefined && value !== null && value !== '') {
         // Handle special __unassigned__ marker for null values (e.g., assigneeId: ['__unassigned__'])
         if (Array.isArray(value) && value.includes('__unassigned__')) {
-          (filter as Record<string, unknown>)[key] = { $eq: null };
+          const realValues = value.filter((v) => v !== '__unassigned__');
+          if (realValues.length > 0) {
+            // Mix of unassigned + real values - use $or to match null OR any of the values
+            const resolvedValues = key.endsWith('Id')
+              ? realValues.filter((v) => typeof v === 'string' && ObjectId.isValid(v)).map((v) => new ObjectId(v as string))
+              : realValues;
+            (filter as Record<string, unknown>).$or = [
+              { [key]: { $eq: null } },
+              { [key]: { $in: resolvedValues } },
+            ];
+          } else {
+            (filter as Record<string, unknown>)[key] = { $eq: null };
+          }
         // Handle arrays - convert to $in query for multi-value filters (e.g., status: ['pending', 'in_progress'])
         } else if (Array.isArray(value)) {
           (filter as Record<string, unknown>)[key] = { $in: value };

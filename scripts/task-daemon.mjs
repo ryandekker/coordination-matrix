@@ -1496,6 +1496,105 @@ async function processDocumentOperations(config, task, documentOperations) {
 // Routing Operations Processing
 // ============================================================================
 
+/**
+ * Resolve $VAR{name} references in an object by calling the server-side resolve endpoint.
+ * This ensures secret values are never exposed to the LLM — only resolved at execution time.
+ */
+async function resolveVarReferencesViaApi(config, obj) {
+  const text = JSON.stringify(obj);
+  if (!text.includes('$VAR{')) return obj;
+
+  try {
+    const response = await fetchWithTimeout(
+      `${config.apiUrl}/variable-packages/resolve`,
+      {
+        method: 'POST',
+        headers: getHeaders(config),
+        body: JSON.stringify({ text }),
+      }
+    );
+    if (response.ok) {
+      const result = await response.json();
+      return JSON.parse(result.data.text);
+    }
+    log.warn(`Failed to resolve $VAR references: HTTP ${response.status}`);
+  } catch (err) {
+    log.warn('Error resolving $VAR references:', err.message);
+  }
+  return obj; // Return original if resolution fails
+}
+
+// ============================================================================
+// Secret Pattern Cache - for sanitizing prompts and conversation logs
+// ============================================================================
+
+let secretPatternsCache = null;
+let secretPatternsCacheTime = 0;
+const SECRET_PATTERNS_CACHE_TTL_MS = 300000; // 5 minutes
+
+/**
+ * Fetch decrypted secret values from the API for sanitization scanning.
+ * Cached for 5 minutes to avoid excessive API calls.
+ */
+async function fetchSecretPatterns(config) {
+  const now = Date.now();
+  if (secretPatternsCache && (now - secretPatternsCacheTime) < SECRET_PATTERNS_CACHE_TTL_MS) {
+    return secretPatternsCache;
+  }
+
+  try {
+    const response = await fetchWithTimeout(
+      `${config.apiUrl}/variable-packages/secret-patterns`,
+      { headers: getHeaders(config) }
+    );
+    if (response.ok) {
+      const result = await response.json();
+      secretPatternsCache = result.data?.patterns || [];
+      secretPatternsCacheTime = now;
+      log.debug(`Loaded ${secretPatternsCache.length} secret patterns for sanitization`);
+      return secretPatternsCache;
+    }
+    log.warn(`Failed to fetch secret patterns: HTTP ${response.status}`);
+  } catch (err) {
+    log.warn('Error fetching secret patterns:', err.message);
+  }
+  return secretPatternsCache || [];
+}
+
+/**
+ * Fetch variable manifest from the API (names + sensitivity, no values).
+ */
+async function fetchVariableManifest(config) {
+  try {
+    const response = await fetchWithTimeout(
+      `${config.apiUrl}/variable-packages/manifest`,
+      { headers: getHeaders(config) }
+    );
+    if (response.ok) {
+      const result = await response.json();
+      return result.data || [];
+    }
+    log.warn(`Failed to fetch variable manifest: HTTP ${response.status}`);
+  } catch (err) {
+    log.warn('Error fetching variable manifest:', err.message);
+  }
+  return [];
+}
+
+/**
+ * Sanitize text by removing known secret values.
+ */
+function sanitizeText(text, secretPatterns) {
+  if (!text || !secretPatterns || secretPatterns.length === 0) return text;
+  let result = text;
+  for (const pattern of secretPatterns) {
+    if (pattern.length >= 8) {
+      result = result.split(pattern).join('[REDACTED]');
+    }
+  }
+  return result;
+}
+
 async function processRoutingOperations(config, task, routingOperations) {
   const results = [];
 
@@ -1523,6 +1622,12 @@ async function processRoutingOperations(config, task, routingOperations) {
         }
         console.log(`[Routing] Triggering workflow ${workflowId} for task ${task._id}`);
         try {
+          // Resolve $VAR{} references in op.input server-side
+          let resolvedOpInput = op.input || {};
+          if (JSON.stringify(resolvedOpInput).includes('$VAR{')) {
+            resolvedOpInput = await resolveVarReferencesViaApi(config, resolvedOpInput);
+          }
+
           const input = {
             workflowId,
             input: {
@@ -1530,7 +1635,7 @@ async function processRoutingOperations(config, task, routingOperations) {
               summary: task.summary || '',
               tags: task.tags || [],
               ...(task.metadata?.inputPayload || {}),
-              ...(op.input || {}),
+              ...resolvedOpInput,
             },
             source: 'routing-agent',
             externalId: task._id,
@@ -1592,7 +1697,7 @@ async function processRoutingOperations(config, task, routingOperations) {
  * @param {Array} options.loadedCapabilities - Full capability documents to include
  */
 function assemblePrompt(task, agent, workflowStep, options = {}) {
-  const { capabilityManifest, loadedCapabilities, linkedDocuments, routingContext } = options;
+  const { capabilityManifest, loadedCapabilities, linkedDocuments, routingContext, variableManifest, secretPatterns } = options;
   const sections = [];
 
   // 1. Base daemon prompt (ensures JSON output)
@@ -1644,6 +1749,55 @@ The human who initiated this work requested:
 "${task.humanInstruction}"
 
 Keep this goal in mind as you complete your assigned step. Your work should contribute toward fulfilling this request.`);
+  }
+
+  // 1.9. Variable manifest (tells agent what variables are available without revealing values)
+  if (variableManifest && variableManifest.length > 0) {
+    const secretVars = variableManifest.filter(v => v.sensitivity === 'secret');
+    const safeVars = variableManifest.filter(v => v.sensitivity === 'safe');
+
+    const lines = ['## Available Variables'];
+    lines.push('You have access to configuration variables. Secret variables are referenced by opaque tokens.');
+    lines.push('');
+
+    if (secretVars.length > 0) {
+      lines.push('### Secret Variables (use $VAR{name} references)');
+      lines.push('These variables contain sensitive values (API keys, tokens, credentials).');
+      lines.push('You MUST NOT attempt to read, print, decode, or extract their actual values.');
+      lines.push('Use $VAR{name} syntax when you need them in routingOperations or webhook configs.');
+      lines.push('The system resolves them server-side — the actual values never pass through you.');
+      lines.push('');
+      for (const v of secretVars) {
+        const desc = v.description ? ` — ${v.description}` : '';
+        if (v.keys && v.keys.length > 0) {
+          // Structured variable — show available key paths
+          lines.push(`- \`${v.name}\`${desc}`);
+          for (const key of v.keys) {
+            lines.push(`  - \`$VAR{${v.name}.${key}}\``);
+          }
+        } else {
+          lines.push(`- \`$VAR{${v.name}}\`${desc}`);
+        }
+      }
+    }
+
+    if (safeVars.length > 0) {
+      lines.push('');
+      lines.push('### Configuration Variables');
+      for (const v of safeVars) {
+        const desc = v.description ? ` — ${v.description}` : '';
+        if (v.keys && v.keys.length > 0) {
+          lines.push(`- \`${v.name}\`${desc}`);
+          for (const key of v.keys) {
+            lines.push(`  - \`{{variables.${v.name}.${key}}}\``);
+          }
+        } else {
+          lines.push(`- \`{{variables.${v.name}}}\`${desc}`);
+        }
+      }
+    }
+
+    sections.push(lines.join('\n'));
   }
 
   // 1.7. Workflow context awareness (injected for all tasks)
@@ -1706,13 +1860,30 @@ Only decompose when genuinely needed - keep individual tasks granular and focuse
 
   // 6. Task context as structured data
   // Note: inputPayload contains webhook/external input data (e.g., email content)
+  // Sanitize inputPayload to remove any accidentally-resolved secret values
+  let sanitizedInputPayload = task.metadata?.inputPayload || null;
+  if (sanitizedInputPayload && secretPatterns && secretPatterns.length > 0) {
+    let payloadStr = JSON.stringify(sanitizedInputPayload);
+    for (const pattern of secretPatterns) {
+      if (pattern.length >= 8) {
+        payloadStr = payloadStr.split(pattern).join('[REDACTED]');
+      }
+    }
+    try {
+      sanitizedInputPayload = JSON.parse(payloadStr);
+    } catch {
+      // If JSON breaks after sanitization, use null
+      sanitizedInputPayload = null;
+    }
+  }
+
   const context = {
     title: task.title,
     summary: task.summary || null,
     tags: task.tags || [],
     executionLog: task.metadata?.executionLog || null,
     workflowStage: task.workflowStage || null,
-    inputPayload: task.metadata?.inputPayload || null,
+    inputPayload: sanitizedInputPayload,
   };
   sections.push(`## Task Context\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\``);
 
@@ -2329,6 +2500,28 @@ function queueConversationUpload(config, taskId, jobName, execCommand, conversat
     conversationQueue.shift();
   }
 
+  // Sanitize conversation messages to remove any leaked secret values
+  let sanitizedMessages = conversationData.messages || [];
+  const cachedPatterns = secretPatternsCache;
+  if (cachedPatterns && cachedPatterns.length > 0) {
+    sanitizedMessages = sanitizedMessages.map(msg => {
+      const sanitized = { ...msg };
+      if (typeof sanitized.content === 'string') {
+        sanitized.content = sanitizeText(sanitized.content, cachedPatterns);
+      }
+      if (sanitized.toolInput && typeof sanitized.toolInput === 'object') {
+        try {
+          const str = JSON.stringify(sanitized.toolInput);
+          sanitized.toolInput = JSON.parse(sanitizeText(str, cachedPatterns));
+        } catch { /* keep original */ }
+      }
+      if (typeof sanitized.toolResult === 'string') {
+        sanitized.toolResult = sanitizeText(sanitized.toolResult, cachedPatterns);
+      }
+      return sanitized;
+    });
+  }
+
   const record = {
     taskId,
     sessionId: conversationData.sessionId || `daemon-${Date.now()}`,
@@ -2336,7 +2529,7 @@ function queueConversationUpload(config, taskId, jobName, execCommand, conversat
     model: conversationData.model,
     execCommand,
     status: conversationData.exitCode === 0 ? 'completed' : 'failed',
-    messages: conversationData.messages || [],
+    messages: sanitizedMessages,
     result: conversationData.result,
     usage: conversationData.usage,
     permissionDenials: conversationData.permissionDenials || [],
@@ -2808,6 +3001,16 @@ async function processTask(config, task) {
   // Fetch linked documents for context
   const linkedDocuments = await fetchLinkedDocuments(config, task._id);
 
+  // Fetch variable manifest and secret patterns for LLM safety
+  const [variableManifest, secretPatterns] = await Promise.all([
+    fetchVariableManifest(config),
+    fetchSecretPatterns(config),
+  ]);
+  if (variableManifest.length > 0) {
+    const secretCount = variableManifest.filter(v => v.sensitivity === 'secret').length;
+    log.debug(`Variable manifest: ${variableManifest.length} variables (${secretCount} secret)`);
+  }
+
   // Fetch routing context if task-routing capability is loaded or agent is a router
   let routingContext = null;
   const hasRoutingCapability = loadedCapabilities.some(c => c.id === 'task-routing');
@@ -2823,12 +3026,14 @@ async function processTask(config, task) {
     log.debug(`Routing context: ${agents.length} agents, ${workflows.length} workflows`);
   }
 
-  // Assemble the prompt with capability information
+  // Assemble the prompt with capability information and variable safety context
   const prompt = assemblePrompt(task, agent, workflowStep, {
     capabilityManifest,
     loadedCapabilities,
     linkedDocuments,
     routingContext,
+    variableManifest,
+    secretPatterns,
   });
 
   // Build exec command with MCP config if configured
