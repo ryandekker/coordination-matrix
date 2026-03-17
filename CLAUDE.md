@@ -368,6 +368,71 @@ The ecosystem config reads from `daemon-jobs.yaml` and creates a PM2 process for
 
 For production/remote deployments, always use `task-daemon.mjs`.
 
+## Workflow Authoring
+
+Workflows are JSON definitions deployed via `scripts/workflows/deploy-workflows.mjs`. Key patterns:
+
+### Deploy & Test Scripts
+
+```bash
+# Deploy workflows to local dev
+node scripts/workflows/deploy-workflows.mjs --env local
+
+# Deploy to production
+node scripts/workflows/deploy-workflows.mjs --env production
+
+# E2E progression test (simulates full workflow lifecycle via API)
+node scripts/workflows/test-workflow-e2e.mjs --workflow wc   # Workflow Creation
+node scripts/workflows/test-workflow-e2e.mjs --workflow mc   # Multi-Model Creation
+```
+
+### Dynamic Agent Assignment
+
+Agent IDs are resolved dynamically at runtime — no hardcoded IDs or variable packages needed. Use `{{agent.*}}` templates in `defaultAssigneeId`:
+
+```
+{{agent.complexity.3}}          → first active agent with agentComplexity=3 (opus-class)
+{{agent.complexity.1}}          → first active agent with agentComplexity=1 (haiku-class)
+{{agent.tag.api-integration}}   → first active agent tagged "api-integration"
+{{agent.name.Claude Opus}}      → agent by display name (case-insensitive)
+```
+
+- Resolution is cached 60s, invalidated on user create/update/delete
+- No match → task left unassigned (warning logged)
+- Oldest-created matching agent wins (deterministic)
+- `agentTags` field on User model: `string[]` of capability tags
+- `GET /api/users/agents?complexity=3&tag=api-integration` for API filtering
+
+### Step Input Data Flow
+
+When a step completes, the next step receives `inputPayload = { ...taskMetadata, output: stepOutputData }`. Key rules:
+
+- **Decision steps**: Use `decisionField: 'output.verdict'` (not `steps.X.output.result.verdict`)
+- **Code steps**: `input` = inputPayload from previous step. `trigger` = original workflow run inputPayload. `_stepLog` = array of step execution logs
+- **Foreach steps**: `itemsPath` resolves from inputPayload. Use `inputConfig: { source: 'stepId' }` to pull from a specific step's output instead of the previous step
+- **Manual steps**: Set `reviewDecision` on task. This propagates via `metadata` to the next step's inputPayload
+
+### Code Step Patterns
+
+```javascript
+// Loop counting — check _stepLog for previous executions of a step
+const count = (_stepLog || []).filter(e => e.stepId === 'some-step').length;
+
+// Access original workflow input via trigger
+const userConfig = (trigger && trigger.someField) || defaultValue;
+
+// Access previous step's output verdict
+const prevVerdict = (input.output && input.output.result && input.output.result.verdict) || '';
+```
+
+### No Trigger Steps
+
+Trigger steps are optional. The engine executes `workflow.steps[0]` directly. Don't add empty trigger steps.
+
+### Unit Tests
+
+Workflow code step tests in `backend/src/services/workflow/workflow-deployment.test.ts`. When testing code steps with `_stepLog`, pass context mode: `{ input: {}, _stepLog: [...] }`.
+
 ## Production Architecture (Quick Reference)
 
 | Component | Platform | URL |

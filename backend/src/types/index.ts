@@ -955,6 +955,7 @@ export interface User {
   isSystem?: boolean;             // Is this the system user? (for automated workflow tasks)
   agentPrompt?: string;           // Agent's base prompt/persona
   agentComplexity?: AgentComplexity; // Agent's capability level (1=basic, 2=intermediate, 3=advanced)
+  agentTags?: string[];           // Capability tags for dynamic agent matching (e.g., 'api-integration', 'code-review')
   profilePicture?: string;        // URL to profile picture (for humans)
   botColor?: string;              // Custom color for bot users (hex code)
   defaultGroupId?: ObjectId;      // User's preferred/default group

@@ -46,7 +46,7 @@ import {
   Variable,
   Lock,
 } from 'lucide-react'
-import { workflowRunsApi, variablePackagesApi, VariableToken, KeyValuePath } from '@/lib/api'
+import { workflowRunsApi, variablePackagesApi, usersApi, VariableToken, KeyValuePath, User as UserType } from '@/lib/api'
 import { TemplateEditor } from '@/components/ui/template-editor'
 
 // ============================================================================
@@ -481,6 +481,11 @@ export function TokenBrowserDialog({
   const [expandedVariables, setExpandedVariables] = useState<Set<string>>(new Set())
   const variablesFetchedRef = useRef(false)
 
+  // Agents state (for {{agent.*}} tokens)
+  const [agents, setAgents] = useState<UserType[]>([])
+  const [agentsLoading, setAgentsLoading] = useState(false)
+  const agentsFetchedRef = useRef(false)
+
   // Fetch available runs when dialog opens (skip in taskOnly mode)
   useEffect(() => {
     if (open && workflowId && !taskOnly && runs.length === 0) {
@@ -502,6 +507,27 @@ export function TokenBrowserDialog({
       fetchVariableTokens()
     }
   }, [open, variablesLoading])
+
+  // Fetch agents when dialog opens (only once per mount)
+  useEffect(() => {
+    if (open && !agentsFetchedRef.current && !agentsLoading) {
+      agentsFetchedRef.current = true
+      fetchAgents()
+    }
+  }, [open, agentsLoading])
+
+  const fetchAgents = async () => {
+    setAgentsLoading(true)
+    try {
+      const response = await usersApi.listAgents()
+      setAgents(response.data || [])
+    } catch {
+      // Non-critical — agents category will show static tokens only
+      agentsFetchedRef.current = false
+    } finally {
+      setAgentsLoading(false)
+    }
+  }
 
   const fetchVariableTokens = async () => {
     setVariablesLoading(true)
@@ -649,6 +675,9 @@ export function TokenBrowserDialog({
     // Variables are always available
     cats.push({ id: 'variables', name: 'Variables', icon: Variable, color: 'text-violet-500', hasData: variableTokens.length > 0 })
 
+    // Agents — dynamic agent assignment templates
+    cats.push({ id: 'agents', name: 'Agents', icon: Bot, color: 'text-blue-500', hasData: agents.length > 0 })
+
     // Loop variable only in workflow context
     if (!taskOnly && loopVariable) {
       cats.push({ id: 'loop', name: `Loop: {{${loopVariable}}}`, icon: Repeat, color: 'text-green-500' })
@@ -669,7 +698,7 @@ export function TokenBrowserDialog({
     }
 
     return cats
-  }, [previousSteps, loopVariable, taskData, runContext, variableTokens.length, taskOnly])
+  }, [previousSteps, loopVariable, taskData, runContext, variableTokens.length, agents.length, taskOnly])
 
   // Helper to format example value for display
   const formatExampleValue = (value: unknown): string | undefined => {
@@ -802,6 +831,12 @@ export function TokenBrowserDialog({
       return []
     }
 
+    if (categoryId === 'agents') {
+      // Agents are rendered specially in the UI
+      // Return empty array here as we handle rendering directly
+      return []
+    }
+
     if (categoryId === 'loop' && loopVariable) {
       return [
         { path: loopVariable, description: 'Current item being processed', type: 'any' },
@@ -875,7 +910,7 @@ export function TokenBrowserDialog({
 
   // Get run data for selected step
   const selectedStepData = useMemo(() => {
-    if (selectedCategory === 'system' || selectedCategory === 'trigger' || selectedCategory === 'loop' || selectedCategory === 'variables' || selectedCategory.startsWith('variable:')) {
+    if (selectedCategory === 'system' || selectedCategory === 'trigger' || selectedCategory === 'loop' || selectedCategory === 'variables' || selectedCategory === 'agents' || selectedCategory.startsWith('variable:')) {
       return null
     }
     return taskData.get(selectedCategory) || null
@@ -1226,13 +1261,225 @@ export function TokenBrowserDialog({
                         </>
                       )}
 
+                      {/* Agents category - dynamic agent assignment templates */}
+                      {selectedCategory === 'agents' && !loading && (
+                        <>
+                          {agentsLoading && (
+                            <div className="flex items-center justify-center py-8">
+                              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                            </div>
+                          )}
+                          {!agentsLoading && (
+                            <div className="space-y-3">
+                              {/* Explanation */}
+                              <div className="text-xs text-muted-foreground bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                                <p className="font-medium text-blue-800 dark:text-blue-200 mb-1">Dynamic Agent Assignment</p>
+                                <p>These templates resolve to agents at runtime based on their attributes. When agents are added or removed, workflows automatically pick up the right agent.</p>
+                              </div>
+
+                              {/* By Complexity */}
+                              <div>
+                                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">By Complexity Level</div>
+                                {[
+                                  { level: 3, label: 'Advanced (Opus-class)', desc: 'Complex reasoning, architecture, creative tasks' },
+                                  { level: 2, label: 'Intermediate (Sonnet-class)', desc: 'Standard tasks, reviews, summarization' },
+                                  { level: 1, label: 'Basic (Haiku-class)', desc: 'Fast triage, simple tasks, categorization' },
+                                ].map(({ level, label, desc }) => {
+                                  const matching = agents.filter(a => a.agentComplexity === level)
+                                  const tokenPath = `agent.complexity.${level}`
+                                  return (
+                                    <button
+                                      key={level}
+                                      onClick={() => handleSelectToken(tokenPath)}
+                                      className={cn(
+                                        'w-full text-left px-3 py-2.5 rounded transition-colors',
+                                        selectedPath === tokenPath ? 'bg-primary/10 ring-1 ring-primary' : 'hover:bg-muted'
+                                      )}
+                                    >
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <code className="text-xs font-mono bg-blue-500/10 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded">
+                                          {wrapInBraces ? `{{${tokenPath}}}` : tokenPath}
+                                        </code>
+                                        <Badge variant="outline" className="text-[10px] px-1">
+                                          Level {level}
+                                        </Badge>
+                                      </div>
+                                      <p className="text-xs text-muted-foreground mt-1">{label} — {desc}</p>
+                                      {matching.length > 0 && (
+                                        <div className="mt-1.5 flex items-center gap-1">
+                                          <span className="text-[10px] text-muted-foreground/70 font-medium uppercase tracking-wide">Resolves to:</span>
+                                          <code className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">
+                                            {matching[0].displayName}
+                                          </code>
+                                          {matching.length > 1 && (
+                                            <span className="text-[10px] text-muted-foreground">+{matching.length - 1} more</span>
+                                          )}
+                                        </div>
+                                      )}
+                                      {matching.length === 0 && (
+                                        <div className="mt-1.5">
+                                          <span className="text-[10px] text-amber-600 dark:text-amber-400">No matching agents configured</span>
+                                        </div>
+                                      )}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+
+                              {/* By Tag */}
+                              {(() => {
+                                const allTags = new Set<string>()
+                                agents.forEach(a => a.agentTags?.forEach((t: string) => allTags.add(t)))
+                                if (allTags.size === 0) return null
+
+                                return (
+                                  <div>
+                                    <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">By Capability Tag</div>
+                                    {Array.from(allTags).sort().map(tag => {
+                                      const matching = agents.filter(a => a.agentTags?.includes(tag))
+                                      const tokenPath = `agent.tag.${tag}`
+                                      return (
+                                        <button
+                                          key={tag}
+                                          onClick={() => handleSelectToken(tokenPath)}
+                                          className={cn(
+                                            'w-full text-left px-3 py-2.5 rounded transition-colors',
+                                            selectedPath === tokenPath ? 'bg-primary/10 ring-1 ring-primary' : 'hover:bg-muted'
+                                          )}
+                                        >
+                                          <div className="flex items-center gap-2">
+                                            <code className="text-xs font-mono bg-blue-500/10 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded">
+                                              {wrapInBraces ? `{{${tokenPath}}}` : tokenPath}
+                                            </code>
+                                          </div>
+                                          <p className="text-xs text-muted-foreground mt-1">Agent with &quot;{tag}&quot; capability</p>
+                                          {matching.length > 0 && (
+                                            <div className="mt-1.5 flex items-center gap-1">
+                                              <span className="text-[10px] text-muted-foreground/70 font-medium uppercase tracking-wide">Resolves to:</span>
+                                              <code className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">
+                                                {matching[0].displayName}
+                                              </code>
+                                              {matching.length > 1 && (
+                                                <span className="text-[10px] text-muted-foreground">+{matching.length - 1} more</span>
+                                              )}
+                                            </div>
+                                          )}
+                                        </button>
+                                      )
+                                    })}
+                                  </div>
+                                )
+                              })()}
+
+                              {/* By Name */}
+                              {agents.length > 0 && (
+                                <div>
+                                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">By Name</div>
+                                  {agents.map(agent => {
+                                    const tokenPath = `agent.name.${agent.displayName}`
+                                    return (
+                                      <button
+                                        key={agent._id}
+                                        onClick={() => handleSelectToken(tokenPath)}
+                                        className={cn(
+                                          'w-full text-left px-3 py-2.5 rounded transition-colors',
+                                          selectedPath === tokenPath ? 'bg-primary/10 ring-1 ring-primary' : 'hover:bg-muted'
+                                        )}
+                                      >
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <code className="text-xs font-mono bg-blue-500/10 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded">
+                                            {wrapInBraces ? `{{${tokenPath}}}` : tokenPath}
+                                          </code>
+                                          {agent.agentComplexity && (
+                                            <Badge variant="outline" className="text-[10px] px-1">
+                                              Level {agent.agentComplexity}
+                                            </Badge>
+                                          )}
+                                          {agent.agentTags?.map((tag: string) => (
+                                            <Badge key={tag} variant="secondary" className="text-[10px] px-1">
+                                              {tag}
+                                            </Badge>
+                                          ))}
+                                        </div>
+                                        <p className="text-xs text-muted-foreground mt-1">Resolves to {agent.displayName} by exact name</p>
+                                      </button>
+                                    )
+                                  })}
+                                </div>
+                              )}
+
+                              {/* Multi-Agent Queries (for ForEach fan-out) */}
+                              {agents.length > 1 && (
+                                <div className="border-t pt-3 mt-3">
+                                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Multi-Agent Queries</div>
+                                  <div className="text-xs text-muted-foreground bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-2.5 mb-2">
+                                    <p className="font-medium text-amber-800 dark:text-amber-200 mb-0.5">ForEach Fan-Out</p>
+                                    <p>Use in a ForEach step&apos;s <code className="bg-amber-100 dark:bg-amber-900/50 px-1 rounded">Items Path</code> to iterate over all matching agents. Combine criteria with <code className="bg-amber-100 dark:bg-amber-900/50 px-1 rounded">+</code> for AND filtering.</p>
+                                  </div>
+                                  {/* By Complexity — show levels with 2+ agents */}
+                                  {[3, 2, 1].map(level => {
+                                    const matching = agents.filter(a => a.agentComplexity === level)
+                                    if (matching.length < 2) return null
+                                    const tokenPath = `agents.complexity.${level}`
+                                    return (
+                                      <button
+                                        key={`multi-${level}`}
+                                        onClick={() => handleSelectToken(tokenPath)}
+                                        className={cn(
+                                          'w-full text-left px-3 py-2 rounded transition-colors',
+                                          selectedPath === tokenPath ? 'bg-primary/10 ring-1 ring-primary' : 'hover:bg-muted'
+                                        )}
+                                      >
+                                        <code className="text-xs font-mono bg-purple-500/10 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 rounded">
+                                          {tokenPath}
+                                        </code>
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                          {matching.length} agents: {matching.map(a => a.displayName).join(', ')}
+                                        </p>
+                                      </button>
+                                    )
+                                  })}
+                                  {/* By Tag — show tags with 2+ agents */}
+                                  {(() => {
+                                    const allTags = new Set<string>()
+                                    agents.forEach(a => a.agentTags?.forEach((t: string) => allTags.add(t)))
+                                    return Array.from(allTags).sort().map(tag => {
+                                      const matching = agents.filter(a => a.agentTags?.includes(tag))
+                                      if (matching.length < 2) return null
+                                      const tokenPath = `agents.tag.${tag}`
+                                      return (
+                                        <button
+                                          key={`multi-tag-${tag}`}
+                                          onClick={() => handleSelectToken(tokenPath)}
+                                          className={cn(
+                                            'w-full text-left px-3 py-2 rounded transition-colors',
+                                            selectedPath === tokenPath ? 'bg-primary/10 ring-1 ring-primary' : 'hover:bg-muted'
+                                          )}
+                                        >
+                                          <code className="text-xs font-mono bg-purple-500/10 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 rounded">
+                                            {tokenPath}
+                                          </code>
+                                          <p className="text-xs text-muted-foreground mt-1">
+                                            {matching.length} agents: {matching.map(a => a.displayName).join(', ')}
+                                          </p>
+                                        </button>
+                                      )
+                                    })
+                                  })()}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
+
                       {/* Standard token rendering for other categories */}
-                      {selectedCategory !== 'variables' && !loading && filteredTokens.length === 0 && (
+                      {selectedCategory !== 'variables' && selectedCategory !== 'agents' && !loading && filteredTokens.length === 0 && (
                         <div className="text-center py-8 text-sm text-muted-foreground">
                           No tokens available
                         </div>
                       )}
-                      {selectedCategory !== 'variables' && !loading && filteredTokens.map(token => (
+                      {selectedCategory !== 'variables' && selectedCategory !== 'agents' && !loading && filteredTokens.map(token => (
                         <button
                           key={token.path}
                           onClick={() => handleSelectToken(token.path)}

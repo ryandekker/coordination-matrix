@@ -831,7 +831,8 @@ async function validateCrossReferences(steps: WorkflowStep[]): Promise<WorkflowD
     const documentIds = new Set<string>();
 
     for (const step of steps) {
-      if (step.defaultAssigneeId) {
+      // Skip template patterns — resolved at runtime (e.g., {{agent.*}}, {{variables.*}})
+      if (step.defaultAssigneeId && !step.defaultAssigneeId.includes('{{')) {
         userIds.add(step.defaultAssigneeId);
       }
       if (step.flowId) {
@@ -855,7 +856,7 @@ async function validateCrossReferences(steps: WorkflowStep[]): Promise<WorkflowD
         : new Set<string>();
 
       for (const step of steps) {
-        if (step.defaultAssigneeId && !validUserIds.has(step.defaultAssigneeId)) {
+        if (step.defaultAssigneeId && !step.defaultAssigneeId.includes('{{') && !validUserIds.has(step.defaultAssigneeId)) {
           diags.push({
             level: 'warning',
             code: 'INVALID_ASSIGNEE',

@@ -26,7 +26,7 @@ import {
   ExecutionOutcome,
 } from '../../types/index.js';
 
-import { resolveTemplateWithPackages, getValueByPath, resolveTitleTemplateWithPackages, getBaseUrl, resolveTemplateValue } from './template-utils.js';
+import { resolveTemplateWithPackages, resolveAgentTemplate, resolveAllAgents, getValueByPath, resolveTitleTemplateWithPackages, getBaseUrl, resolveTemplateValue } from './template-utils.js';
 import { getSecretValues, sanitizeSecrets } from './variable-safety.js';
 import { stripUndefined } from './mongo-utils.js';
 import { validateAgainstSchema } from './schema-validator.js';
@@ -1038,7 +1038,8 @@ class WorkflowExecutionService {
     workflow: Workflow,
     step: WorkflowStep,
     parentTask: Task,
-    inputPayload?: Record<string, unknown>
+    inputPayload?: Record<string, unknown>,
+    overrideAssigneeId?: ObjectId
   ): Promise<Task> {
     const now = new Date();
 
@@ -1084,8 +1085,32 @@ class WorkflowExecutionService {
     // 3. If task type is system-executed (webhook, join, etc.), assign to system user
     // 4. Otherwise leave null (unassigned - awaiting human assignment)
     let assigneeId: ObjectId | null = null;
-    if (step.defaultAssigneeId) {
-      assigneeId = new ObjectId(step.defaultAssigneeId);
+    if (overrideAssigneeId) {
+      assigneeId = overrideAssigneeId;
+    } else if (step.defaultAssigneeId) {
+      // Support template variables in assigneeId (e.g., {{model.modelId}} in foreach)
+      let resolvedAssigneeId = step.defaultAssigneeId;
+      if (resolvedAssigneeId.includes('{{')) {
+        // Try {{agent.*}} dynamic resolution first (queries active agents by criteria)
+        const agentResolved = await resolveAgentTemplate(resolvedAssigneeId);
+        if (agentResolved) {
+          resolvedAssigneeId = agentResolved;
+        } else if (!resolvedAssigneeId.includes('{{agent.')) {
+          // Not an agent query — fall through to standard template resolution
+          const resolvedStr = await resolveTemplateWithPackages(resolvedAssigneeId, {
+            workflowRunId: run._id,
+            stepId: step.id,
+            inputPayload,
+          });
+          resolvedAssigneeId = resolvedStr?.trim() || '';
+        } else {
+          // Agent query returned no match — leave unassigned
+          resolvedAssigneeId = '';
+        }
+      }
+      if (resolvedAssigneeId && ObjectId.isValid(resolvedAssigneeId)) {
+        assigneeId = new ObjectId(resolvedAssigneeId);
+      }
     } else if (runDefaults.assigneeId) {
       assigneeId = runDefaults.assigneeId;
     } else if (isSystemExecutedTaskType(taskType)) {
@@ -1829,7 +1854,30 @@ class WorkflowExecutionService {
       return;
     }
 
-    const items = getValueByPath(inputPayload, step.itemsPath);
+    // Resolve items: either from agent query (agents.*) or standard path lookup
+    let items: unknown;
+    const isAgentQuery = step.itemsPath.startsWith('agents.');
+    let agentAssignments: Map<number, ObjectId> | undefined;
+
+    if (isAgentQuery) {
+      // Smart agent query: "agents.complexity.3", "agents.tag.reasoning", "agents.complexity.3+tag.reasoning"
+      const query = step.itemsPath.slice('agents.'.length);
+      console.log(`[WorkflowExecutionService] Resolving agent query: "${query}"`);
+      const matchingAgents = await resolveAllAgents(query);
+      // Convert AgentRecords to serializable items with agentId for assignee override
+      agentAssignments = new Map();
+      items = matchingAgents.map((agent, i) => {
+        agentAssignments!.set(i, new ObjectId(agent._id.toString()));
+        return {
+          agentId: agent._id.toString(),
+          displayName: agent.displayName,
+          agentComplexity: agent.agentComplexity,
+          agentTags: agent.agentTags,
+        };
+      });
+    } else {
+      items = getValueByPath(inputPayload, step.itemsPath);
+    }
 
     if (!Array.isArray(items)) {
       console.warn(`[WorkflowExecutionService] Items at ${step.itemsPath} is not an array. Input payload keys: ${Object.keys(inputPayload || {}).join(', ')}`);
@@ -1850,7 +1898,8 @@ class WorkflowExecutionService {
     }
 
     if (items.length === 0) {
-      console.warn(`[WorkflowExecutionService] Items array at ${step.itemsPath} is empty`);
+      const label = isAgentQuery ? `Agent query "${step.itemsPath}"` : `Items array at path ${step.itemsPath}`;
+      console.warn(`[WorkflowExecutionService] ${label} is empty`);
       const expectedCount = getExpectedCountFromStepConfig();
       await this.tasks.updateOne(
         { _id: foreachTask._id },
@@ -1859,11 +1908,11 @@ class WorkflowExecutionService {
             status: 'waiting' as TaskStatus,
             expectedQuantity: expectedCount,
             'batchCounters.expectedCount': expectedCount,
-            'metadata.waitingReason': `Items array at path ${step.itemsPath} is empty. Waiting for external data.`,
+            'metadata.waitingReason': `${label} is empty. Waiting for external data.`,
           }
         }
       );
-      console.log(`[WorkflowExecutionService] Foreach task ${foreachTask._id} set to waiting - empty items array (expectedCount: ${expectedCount})`);
+      console.log(`[WorkflowExecutionService] Foreach task ${foreachTask._id} set to waiting - empty items (expectedCount: ${expectedCount})`);
       return;
     }
 
@@ -1900,6 +1949,7 @@ class WorkflowExecutionService {
           expectedQuantity: expectedCount,
           'batchCounters.expectedCount': expectedCount,
           'metadata.itemCount': itemsToProcess.length,
+          ...(isAgentQuery && { 'metadata.agentQuery': step.itemsPath }),
         },
       }
     );
@@ -1921,10 +1971,12 @@ class WorkflowExecutionService {
         _total: itemsToProcess.length,
       };
 
-      await this.createTaskForStep(run, workflow, nextStep, foreachTask, itemPayload);
+      // For agent queries, override child task assignee with the matching agent
+      const overrideAssignee = agentAssignments?.get(i);
+      await this.createTaskForStep(run, workflow, nextStep, foreachTask, itemPayload, overrideAssignee);
     }
 
-    console.log(`[WorkflowExecutionService] Created ${itemsToProcess.length} child tasks for foreach`);
+    console.log(`[WorkflowExecutionService] Created ${itemsToProcess.length} child tasks for foreach${isAgentQuery ? ` (agent query: ${step.itemsPath})` : ''}`);
   }
 
   // ============================================================================
