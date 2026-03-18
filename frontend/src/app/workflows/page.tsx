@@ -1151,27 +1151,28 @@ export default function WorkflowsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Workflows</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-xl md:text-2xl font-bold">Workflows</h1>
+          <p className="text-sm text-muted-foreground hidden sm:block">
             Define and manage AI workflow pipelines with automated and manual steps
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Link href="/workflows/multi-edit">
-            <Button variant="outline">
-              <FileText className="mr-2 h-4 w-4" />
-              Multi-Edit
+            <Button variant="outline" size="sm">
+              <FileText className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Multi-Edit</span>
             </Button>
           </Link>
-          <Button variant="outline" onClick={() => setIsApiDocsOpen(true)}>
-            <Book className="mr-2 h-4 w-4" />
-            API Docs
+          <Button variant="outline" size="sm" onClick={() => setIsApiDocsOpen(true)}>
+            <Book className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">API Docs</span>
           </Button>
-          <Button onClick={openCreateEditor}>
+          <Button size="sm" onClick={openCreateEditor}>
             <Plus className="mr-2 h-4 w-4" />
-            Create Workflow
+            <span className="hidden sm:inline">Create Workflow</span>
+            <span className="sm:hidden">New</span>
           </Button>
         </div>
       </div>
@@ -1407,8 +1408,8 @@ export default function WorkflowsPage() {
           </Button>
         </div>
       ) : (
-        <div className="rounded-lg border">
-          <Table>
+        <div className="rounded-lg border overflow-x-auto">
+          <Table className="min-w-[700px]">
             <TableHeader>
               {table.getHeaderGroups().map(headerGroup => (
                 <TableRow key={headerGroup.id}>

@@ -34,45 +34,47 @@ export function KanbanBoard({ columns, onTaskClick }: KanbanBoardProps) {
   const orderedKeys = [...COLUMN_ORDER, ...extraKeys].filter((k) => k in columns)
 
   return (
-    <div className="grid grid-cols-6 border border-border rounded-lg overflow-hidden">
-      {orderedKeys.map((key, index) => {
-        const column = columns[key]
-        const config = COLUMN_CONFIG[key] || {
-          label: column.name,
-          indicatorColor: 'bg-gray-400',
-        }
+    <div className="overflow-x-auto -mx-3 px-3 md:mx-0 md:px-0">
+      <div className="grid grid-cols-6 min-w-[900px] border border-border rounded-lg overflow-hidden">
+        {orderedKeys.map((key, index) => {
+          const column = columns[key]
+          const config = COLUMN_CONFIG[key] || {
+            label: column.name,
+            indicatorColor: 'bg-gray-400',
+          }
 
-        return (
-          <div
-            key={key}
-            className={`flex flex-col min-w-0 px-3 py-3 ${index > 0 ? 'border-l border-border' : ''}`}
-          >
-            {/* Column header */}
-            <div className="flex items-center gap-2 pb-2 mb-2">
-              <span className={`w-2 h-2 rounded-full shrink-0 ${config.indicatorColor}`} />
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground truncate">{config.label}</h3>
-              <Badge variant="secondary" className="h-5 px-1.5 text-xs font-normal ml-auto">
-                {column.count}
-              </Badge>
-            </div>
-
-            {/* Task list */}
-            <ScrollArea className="flex-1" style={{ maxHeight: 'calc(100vh - 260px)' }}>
-              <div className="space-y-2">
-                {column.tasks.length === 0 ? (
-                  <p className="text-xs text-muted-foreground text-center py-8">
-                    No tasks
-                  </p>
-                ) : (
-                  column.tasks.map((task) => (
-                    <TaskCard key={task._id} task={task} onClick={onTaskClick} />
-                  ))
-                )}
+          return (
+            <div
+              key={key}
+              className={`flex flex-col min-w-0 px-3 py-3 ${index > 0 ? 'border-l border-border' : ''}`}
+            >
+              {/* Column header */}
+              <div className="flex items-center gap-2 pb-2 mb-2">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${config.indicatorColor}`} />
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground truncate">{config.label}</h3>
+                <Badge variant="secondary" className="h-5 px-1.5 text-xs font-normal ml-auto">
+                  {column.count}
+                </Badge>
               </div>
-            </ScrollArea>
-          </div>
-        )
-      })}
+
+              {/* Task list */}
+              <ScrollArea className="flex-1" style={{ maxHeight: 'calc(100vh - 300px)' }}>
+                <div className="space-y-2">
+                  {column.tasks.length === 0 ? (
+                    <p className="text-xs text-muted-foreground text-center py-8">
+                      No tasks
+                    </p>
+                  ) : (
+                    column.tasks.map((task) => (
+                      <TaskCard key={task._id} task={task} onClick={onTaskClick} />
+                    ))
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

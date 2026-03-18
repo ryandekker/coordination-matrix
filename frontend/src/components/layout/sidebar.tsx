@@ -34,12 +34,15 @@ import {
   Pencil,
   Variable,
   Bot,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react'
 import { Logo } from '@/components/ui/logo'
 import { Badge } from '@/components/ui/badge'
 import { View, ViewFolder, authFetch } from '@/lib/api'
 import { useViews, useDeleteView, useViewFolders, useCreateViewFolder, useUpdateViewFolder, useDeleteViewFolder, useUpdateView } from '@/hooks/use-tasks'
 import { useAuth } from '@/lib/auth'
+import { useSidebar } from '@/lib/sidebar-context'
 import { useGroupContext } from '@/lib/group-context'
 import { Building2, Check } from 'lucide-react'
 import {
@@ -72,6 +75,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 interface NavItem {
   name: string
@@ -241,7 +250,13 @@ function FolderItem({
   )
 }
 
-export function Sidebar() {
+interface SidebarProps {
+  collapsed?: boolean
+  onNavigate?: () => void
+}
+
+export function Sidebar({ collapsed = false, onNavigate }: SidebarProps = {}) {
+  const { toggleCollapsed } = useSidebar()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const currentViewId = searchParams.get('viewId')
@@ -394,179 +409,281 @@ export function Sidebar() {
   const hasContent = allViews.length > 0 || folders.length > 0
 
   return (
-    <div className="flex h-full w-64 flex-col border-r bg-card">
+    <TooltipProvider delayDuration={0}>
+    <div data-testid="sidebar" className={cn(
+      'flex h-full flex-col border-r bg-card transition-[width] duration-200',
+      collapsed ? 'w-16' : 'w-64'
+    )}>
       <div className="flex h-14 items-center border-b px-4">
-        <Link href="/" className="flex items-center gap-2">
-          <Logo size={32} />
-          <span className="font-semibold">Coordination Matrix</span>
+        <Link href="/" className="flex items-center gap-2" onClick={onNavigate}>
+          <Logo size={collapsed ? 24 : 32} />
+          {!collapsed && <span className="font-semibold">Coordination Matrix</span>}
         </Link>
       </div>
-      <nav className="flex-1 overflow-y-auto p-4">
+      <nav className={cn('flex-1 overflow-y-auto', collapsed ? 'p-2' : 'p-4')}>
         <div className="space-y-1">
           {staticNavigation.map((item) => {
             const isActive = isStaticItemActive(item)
-            return (
+            const linkContent = (
               <Link
                 key={item.name}
                 href={item.href}
+                onClick={onNavigate}
                 className={cn(
-                  'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                  'flex items-center gap-3 rounded-lg py-2 text-sm font-medium transition-colors',
+                  collapsed ? 'justify-center px-2' : 'px-3',
                   isActive
                     ? 'bg-primary/10 text-primary border-l-2 border-primary'
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 )}
               >
-                <item.icon className="h-4 w-4" />
-                <span className="flex-1">{item.name}</span>
-                {item.name === 'Dashboard' && escalationCount > 0 && (
+                <item.icon className="h-4 w-4 flex-shrink-0" />
+                {!collapsed && <span className="flex-1">{item.name}</span>}
+                {!collapsed && item.name === 'Dashboard' && escalationCount > 0 && (
                   <Badge variant="destructive" className="h-5 min-w-[20px] px-1 text-[10px] font-semibold">
                     {escalationCount}
                   </Badge>
                 )}
               </Link>
             )
+            if (collapsed) {
+              return (
+                <Tooltip key={item.name} delayDuration={0}>
+                  <TooltipTrigger asChild>{linkContent}</TooltipTrigger>
+                  <TooltipContent side="right">{item.name}</TooltipContent>
+                </Tooltip>
+              )
+            }
+            return linkContent
           })}
         </div>
 
         {/* Saved Searches Section */}
-        <div className="mt-4">
-          <div className="flex items-center justify-between">
-            <button
-              onClick={() => setSavedSearchesExpanded(!savedSearchesExpanded)}
-              className="flex items-center gap-2 px-3 py-2 text-xs font-semibold uppercase text-muted-foreground hover:text-foreground"
-            >
-              {savedSearchesExpanded ? (
-                <ChevronDown className="h-3 w-3" />
-              ) : (
-                <ChevronRight className="h-3 w-3" />
-              )}
-              Saved Searches
-            </button>
-            {savedSearchesExpanded && (
-              <button
-                onClick={() => setCreateFolderOpen(true)}
-                className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                title="Create folder"
-              >
-                <FolderPlus className="h-4 w-4" />
-              </button>
-            )}
+        {collapsed ? (
+          <div className="mt-4 pt-4 border-t">
+            <Tooltip delayDuration={0}>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={toggleCollapsed}
+                  className="flex w-full items-center justify-center rounded-lg px-2 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  aria-label="Saved Searches"
+                >
+                  <Bookmark className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">Saved Searches</TooltipContent>
+            </Tooltip>
           </div>
-          {savedSearchesExpanded && (
-            <div className="mt-1 space-y-0.5">
-              {/* Folders */}
-              {folders.map((folder) => (
-                <FolderItem
-                  key={folder._id}
-                  folder={folder}
-                  views={allViews}
-                  isViewActive={isViewActive}
-                  onEditView={openEditViewDialog}
-                  onRenameFolder={openRenameDialog}
-                  onDeleteFolder={openDeleteDialog}
-                />
-              ))}
-
-              {/* Root-level views (not in any folder) */}
-              {rootViews.map((view) => (
-                <ViewItem
-                  key={view._id}
-                  view={view}
-                  isActive={isViewActive(view)}
-                  onEdit={openEditViewDialog}
-                />
-              ))}
-
-              {/* Empty state */}
-              {!hasContent && (
-                <p className="px-3 py-2 text-xs text-muted-foreground">
-                  No saved searches yet
-                </p>
+        ) : (
+          <div className="mt-4">
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => setSavedSearchesExpanded(!savedSearchesExpanded)}
+                className="flex items-center gap-2 px-3 py-2 text-xs font-semibold uppercase text-muted-foreground hover:text-foreground"
+              >
+                {savedSearchesExpanded ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )}
+                Saved Searches
+              </button>
+              {savedSearchesExpanded && (
+                <button
+                  onClick={() => setCreateFolderOpen(true)}
+                  className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  title="Create folder"
+                >
+                  <FolderPlus className="h-4 w-4" />
+                </button>
               )}
             </div>
-          )}
-        </div>
+            {savedSearchesExpanded && (
+              <div className="mt-1 space-y-0.5">
+                {/* Folders */}
+                {folders.map((folder) => (
+                  <FolderItem
+                    key={folder._id}
+                    folder={folder}
+                    views={allViews}
+                    isViewActive={isViewActive}
+                    onEditView={openEditViewDialog}
+                    onRenameFolder={openRenameDialog}
+                    onDeleteFolder={openDeleteDialog}
+                  />
+                ))}
+
+                {/* Root-level views (not in any folder) */}
+                {rootViews.map((view) => (
+                  <ViewItem
+                    key={view._id}
+                    view={view}
+                    isActive={isViewActive(view)}
+                    onEdit={openEditViewDialog}
+                  />
+                ))}
+
+                {/* Empty state */}
+                {!hasContent && (
+                  <p className="px-3 py-2 text-xs text-muted-foreground">
+                    No saved searches yet
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Bottom Navigation */}
         <div className="mt-4 space-y-1 border-t pt-4">
           {bottomNavigation.map((item) => {
             const isActive = isStaticItemActive(item)
-            return (
+            const linkEl = (
               <Link
                 key={item.name}
                 href={item.href}
+                onClick={onNavigate}
                 className={cn(
-                  'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                  'flex items-center gap-3 rounded-lg py-2 text-sm font-medium transition-colors',
+                  collapsed ? 'justify-center px-2' : 'px-3',
                   isActive
                     ? 'bg-primary/10 text-primary border-l-2 border-primary'
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 )}
               >
-                <item.icon className="h-4 w-4" />
-                {item.name}
+                <item.icon className="h-4 w-4 flex-shrink-0" />
+                {!collapsed && item.name}
               </Link>
             )
+            if (collapsed) {
+              return (
+                <Tooltip key={item.name} delayDuration={0}>
+                  <TooltipTrigger asChild>{linkEl}</TooltipTrigger>
+                  <TooltipContent side="right">{item.name}</TooltipContent>
+                </Tooltip>
+              )
+            }
+            return linkEl
           })}
 
           {/* Settings Section */}
           <div className="mt-2">
-            <button
-              onClick={() => setSettingsExpanded(!settingsExpanded)}
-              className={cn(
-                'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                pathname.startsWith('/settings')
-                  ? 'bg-primary/10 text-primary border-l-2 border-primary'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-              )}
-            >
-              <Settings className="h-4 w-4" />
-              <span className="flex-1 text-left">Settings</span>
-              {settingsExpanded ? (
-                <ChevronDown className="h-4 w-4" />
-              ) : (
-                <ChevronRight className="h-4 w-4" />
-              )}
-            </button>
-            {settingsExpanded && (
-              <div className="mt-1 ml-4 space-y-1">
-                {settingsNavigation.map((item) => {
-                  const isActive = isStaticItemActive(item)
-                  return (
-                    <Link
-                      key={item.name}
-                      href={item.href}
-                      className={cn(
-                        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                        isActive
-                          ? 'bg-primary/10 text-primary border-l-2 border-primary'
-                          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                      )}
-                    >
-                      <item.icon className="h-4 w-4" />
-                      {item.name}
-                    </Link>
-                  )
-                })}
-              </div>
+            {collapsed ? (
+              <Tooltip delayDuration={0}>
+                <TooltipTrigger asChild>
+                  <Link
+                    href="/settings"
+                    onClick={onNavigate}
+                    className={cn(
+                      'flex w-full items-center justify-center rounded-lg px-2 py-2 text-sm font-medium transition-colors',
+                      pathname.startsWith('/settings')
+                        ? 'bg-primary/10 text-primary border-l-2 border-primary'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    )}
+                  >
+                    <Settings className="h-4 w-4" />
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent side="right">Settings</TooltipContent>
+              </Tooltip>
+            ) : (
+              <>
+                <button
+                  onClick={() => setSettingsExpanded(!settingsExpanded)}
+                  className={cn(
+                    'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                    pathname.startsWith('/settings')
+                      ? 'bg-primary/10 text-primary border-l-2 border-primary'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                  )}
+                >
+                  <Settings className="h-4 w-4" />
+                  <span className="flex-1 text-left">Settings</span>
+                  {settingsExpanded ? (
+                    <ChevronDown className="h-4 w-4" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4" />
+                  )}
+                </button>
+                {settingsExpanded && (
+                  <div className="mt-1 ml-4 space-y-1">
+                    {settingsNavigation.map((item) => {
+                      const isActive = isStaticItemActive(item)
+                      return (
+                        <Link
+                          key={item.name}
+                          href={item.href}
+                          onClick={onNavigate}
+                          className={cn(
+                            'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                            isActive
+                              ? 'bg-primary/10 text-primary border-l-2 border-primary'
+                              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                          )}
+                        >
+                          <item.icon className="h-4 w-4" />
+                          {item.name}
+                        </Link>
+                      )
+                    })}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
       </nav>
-      <div className="border-t p-4">
+      {/* Collapse/Expand toggle - only on desktop/tablet (not in mobile drawer) */}
+      {!onNavigate && (
+        <div className="border-t px-2 py-2">
+          <Tooltip delayDuration={0}>
+            <TooltipTrigger asChild>
+              <button
+                onClick={toggleCollapsed}
+                className={cn(
+                  'flex w-full items-center rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors',
+                  collapsed ? 'justify-center' : 'gap-3 px-3'
+                )}
+                aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              >
+                {collapsed ? (
+                  <PanelLeftOpen className="h-4 w-4" />
+                ) : (
+                  <>
+                    <PanelLeftClose className="h-4 w-4" />
+                    <span className="text-sm">Collapse</span>
+                  </>
+                )}
+              </button>
+            </TooltipTrigger>
+            {collapsed && (
+              <TooltipContent side="right">Expand sidebar</TooltipContent>
+            )}
+          </Tooltip>
+        </div>
+      )}
+      <div className={cn('border-t', collapsed ? 'p-2' : 'p-4')}>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex w-full items-center gap-3 rounded-lg p-2 hover:bg-muted transition-colors">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            <button className={cn(
+              'flex w-full items-center rounded-lg hover:bg-muted transition-colors',
+              collapsed ? 'justify-center p-2' : 'gap-3 p-2'
+            )}>
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground flex-shrink-0">
                 <User className="h-4 w-4" />
               </div>
-              <div className="flex-1 text-left text-sm min-w-0">
-                <p className="font-medium truncate">{user?.displayName || 'User'}</p>
-                <div className="flex items-center gap-1 text-muted-foreground text-xs">
-                  <Building2 className="h-3 w-3 flex-shrink-0" />
-                  <span className="truncate">{currentGroup?.displayName || 'No group'}</span>
-                </div>
-              </div>
-              <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+              {!collapsed && (
+                <>
+                  <div className="flex-1 text-left text-sm min-w-0">
+                    <p className="font-medium truncate">{user?.displayName || 'User'}</p>
+                    <div className="flex items-center gap-1 text-muted-foreground text-xs">
+                      <Building2 className="h-3 w-3 flex-shrink-0" />
+                      <span className="truncate">{currentGroup?.displayName || 'No group'}</span>
+                    </div>
+                  </div>
+                  <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                </>
+              )}
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
@@ -766,5 +883,6 @@ export function Sidebar() {
         </DialogContent>
       </Dialog>
     </div>
+    </TooltipProvider>
   )
 }

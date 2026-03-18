@@ -510,17 +510,17 @@ export function TasksPage() {
         </div>
       )}
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Tasks</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-xl md:text-2xl font-bold">Tasks</h1>
+          <p className="text-sm text-muted-foreground hidden sm:block">
             {parentIdFromUrl && flowParentTask?.data
               ? `Viewing tasks within flow: ${flowParentTask.data.title}`
               : 'Manage AI workflow tasks and human-in-the-loop reviews'
             }
           </p>
         </div>
-        <Button onClick={handleCreateTask}>
+        <Button className="w-full sm:w-auto" onClick={handleCreateTask}>
           <Plus className="mr-2 h-4 w-4" />
           New Task
         </Button>

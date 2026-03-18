@@ -10,6 +10,8 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "deploy": "[ -f .env.local ] && mv .env.local .env.local.bak; npx @cloudflare/next-on-pages; deploy_status=$?; [ -f .env.local.bak ] && mv .env.local.bak .env.local; [ $deploy_status -eq 0 ] && wrangler pages deploy .vercel/output/static; exit $deploy_status",
     "deploy:build": "[ -f .env.local ] && mv .env.local .env.local.bak; npx @cloudflare/next-on-pages; deploy_status=$?; [ -f .env.local.bak ] && mv .env.local.bak .env.local; exit $deploy_status",
     "deploy:push": "wrangler pages deploy .vercel/output/static"
@@ -63,6 +65,7 @@
   },
   "devDependencies": {
     "@opennextjs/cloudflare": "^1.14.6",
+    "@playwright/test": "^1.58.2",
     "@testing-library/jest-dom": "^6.4.2",
     "@testing-library/react": "^14.2.1",
     "@testing-library/user-event": "^14.5.2",

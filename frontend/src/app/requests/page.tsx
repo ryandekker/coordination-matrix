@@ -1644,10 +1644,10 @@ function RequestsList() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Requests</h1>
-          <p className="text-muted-foreground">Track external jobs, batch callbacks, and webhooks</p>
+          <h1 className="text-xl md:text-2xl font-bold">Requests</h1>
+          <p className="text-sm text-muted-foreground hidden sm:block">Track external jobs, batch callbacks, and webhooks</p>
         </div>
         <div className="flex items-center gap-2">
           {activeCount > 0 && (
@@ -1656,8 +1656,8 @@ function RequestsList() {
             </Badge>
           )}
           <Button variant="outline" size="sm" onClick={handleRefresh}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
+            <RefreshCw className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Refresh</span>
           </Button>
         </div>
       </div>

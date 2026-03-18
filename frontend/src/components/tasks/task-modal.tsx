@@ -671,7 +671,7 @@ export function TaskModal({
   if (!task) {
     return (
       <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="max-w-lg max-h-[85vh] flex flex-col overflow-hidden" aria-describedby={undefined}>
+        <DialogContent className="max-w-lg w-[95vw] md:w-full max-h-[90vh] md:max-h-[85vh] flex flex-col overflow-hidden" aria-describedby={undefined}>
           <DialogHeader className="pb-2 flex-shrink-0">
             <DialogTitle className="text-base">
               {parentTask ? `New Subtask` : 'New Task'}
@@ -942,14 +942,14 @@ export function TaskModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl h-[90vh] p-0 gap-0 flex flex-col overflow-hidden" aria-describedby={undefined}>
+      <DialogContent className="max-w-4xl w-[95vw] md:w-full h-[95vh] md:h-[90vh] p-0 gap-0 flex flex-col overflow-hidden" aria-describedby={undefined}>
         {/* Accessibility: visually hidden title and description for screen readers */}
         <VisuallyHidden.Root asChild>
           <DialogTitle>Edit Task: {task?.title || 'Task'}</DialogTitle>
         </VisuallyHidden.Root>
 
         {/* Header */}
-        <div className="px-5 pt-5 pb-4 flex-shrink-0 border-b border-border">
+        <div className="px-3 pt-3 pb-3 md:px-5 md:pt-5 md:pb-4 flex-shrink-0 border-b border-border">
           {/* Editable title */}
           <input
             {...register('title', {
@@ -1166,7 +1166,7 @@ export function TaskModal({
             )}
 
             {/* Timestamps */}
-            <div className="ml-auto text-[10px] text-muted-foreground">
+            <div className="w-full md:w-auto md:ml-auto mt-1 md:mt-0 text-[10px] text-muted-foreground">
               Created {formatDistanceToNow(new Date(task.createdAt), { addSuffix: true })}
               {task.updatedAt !== task.createdAt && (
                 <span className="ml-2">
@@ -1182,63 +1182,63 @@ export function TaskModal({
         <Tabs value={activeTab} onValueChange={handleTabChange} className="flex-1 min-h-0 flex flex-col">
           {/* Tab List (fixed) */}
           <div className="flex-shrink-0">
-            <TabsList className="w-full justify-start px-5 pt-2 pb-0 rounded-none border-b border-border bg-transparent h-auto">
+            <TabsList className="w-full justify-start px-3 md:px-5 pt-2 pb-0 rounded-none border-b border-border bg-transparent h-auto overflow-x-auto">
               <TabsTrigger
                 value={TASK_MODAL_TABS.OUTPUT}
-                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-4 py-2 flex-shrink-0"
               >
                 <FileOutput className="h-3.5 w-3.5" />
-                <span className="text-xs">Output</span>
+                <span className="text-xs hidden sm:inline">Output</span>
               </TabsTrigger>
               <TabsTrigger
                 value={TASK_MODAL_TABS.SUBTASKS}
-                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-4 py-2 flex-shrink-0"
               >
                 <ListTree className="h-3.5 w-3.5" />
-                <span className="text-xs">Subtasks</span>
+                <span className="text-xs hidden sm:inline">Subtasks</span>
                 {subtasks.length > 0 && (
                   <span className="ml-0.5 text-[10px] bg-muted px-1 rounded">{subtasks.length}</span>
                 )}
               </TabsTrigger>
               <TabsTrigger
                 value={TASK_MODAL_TABS.DOCUMENTS}
-                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-4 py-2 flex-shrink-0"
               >
                 <FileText className="h-3.5 w-3.5" />
-                <span className="text-xs">Documents</span>
+                <span className="text-xs hidden sm:inline">Documents</span>
                 {attachedDocuments.length > 0 && (
                   <span className="ml-0.5 text-[10px] bg-muted px-1 rounded">{attachedDocuments.length}</span>
                 )}
               </TabsTrigger>
               <TabsTrigger
                 value={TASK_MODAL_TABS.ACTIVITY}
-                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-4 py-2 flex-shrink-0"
               >
                 <Activity className="h-3.5 w-3.5" />
-                <span className="text-xs">Activity</span>
+                <span className="text-xs hidden sm:inline">Activity</span>
               </TabsTrigger>
               <TabsTrigger
                 value={TASK_MODAL_TABS.METADATA}
-                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-4 py-2 flex-shrink-0"
               >
                 <Braces className="h-3.5 w-3.5" />
-                <span className="text-xs">Metadata</span>
+                <span className="text-xs hidden sm:inline">Metadata</span>
               </TabsTrigger>
               {task.stepConfig && (
                 <TabsTrigger
                   value={TASK_MODAL_TABS.STEP_CONFIG}
-                  className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+                  className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-4 py-2 flex-shrink-0"
                 >
                   <Settings2 className="h-3.5 w-3.5" />
-                  <span className="text-xs">Step Config</span>
+                  <span className="text-xs hidden sm:inline">Step Config</span>
                 </TabsTrigger>
               )}
               <TabsTrigger
                 value={TASK_MODAL_TABS.DETAILS}
-                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-4 py-2 flex-shrink-0"
               >
                 <Settings className="h-3.5 w-3.5" />
-                <span className="text-xs">Details</span>
+                <span className="text-xs hidden sm:inline">Details</span>
               </TabsTrigger>
             </TabsList>
           </div>

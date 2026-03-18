@@ -1018,15 +1018,15 @@ function WorkflowRunsList() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Workflow Runs</h1>
-          <p className="text-muted-foreground">Monitor and manage workflow executions</p>
+          <h1 className="text-xl md:text-2xl font-bold">Workflow Runs</h1>
+          <p className="text-sm text-muted-foreground hidden sm:block">Monitor and manage workflow executions</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => refetch()}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
+            <RefreshCw className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Refresh</span>
           </Button>
           <Select
             value={startDialog.workflow?._id || ''}
@@ -1037,7 +1037,7 @@ function WorkflowRunsList() {
               }
             }}
           >
-            <SelectTrigger className="w-[200px]">
+            <SelectTrigger className="w-[160px] sm:w-[200px]">
               <Play className="h-4 w-4 mr-2" />
               <SelectValue placeholder="Start Workflow..." />
             </SelectTrigger>

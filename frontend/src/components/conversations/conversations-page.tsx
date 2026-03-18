@@ -195,13 +195,14 @@ export function ConversationsPage() {
   return (
     <div className="flex flex-col gap-3">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <div>
-          <h1 className="text-xl font-bold flex items-center gap-2">
+          <h1 className="text-lg md:text-xl font-bold flex items-center gap-2">
             <Bot className="h-5 w-5" />
-            Agent Conversations
+            <span className="hidden sm:inline">Agent Conversations</span>
+            <span className="sm:hidden">Conversations</span>
           </h1>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground hidden sm:block">
             Conversation logs from daemon task execution
           </p>
         </div>
