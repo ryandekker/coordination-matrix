@@ -64,7 +64,6 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Textarea } from '@/components/ui/textarea'
 import { JsonViewer } from '@/components/ui/json-viewer'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -73,6 +72,7 @@ import { workflowRunsApi, workflowsApi, WorkflowRun, WorkflowRunStatus, Task, Wo
 import { useFieldConfigs, useLookups } from '@/hooks/use-tasks'
 import { useGroupContext } from '@/lib/group-context'
 import { TaskModal } from '@/components/tasks/task-modal'
+import { WorkflowInputForm, useWorkflowInputForm } from '@/components/workflows/workflow-input-form'
 
 const STATUS_CONFIG: Record<WorkflowRunStatus, { icon: React.ElementType; color: string; bgColor: string; label: string; filterable: boolean }> = {
   pending: { icon: Clock, color: 'text-gray-500', bgColor: 'bg-gray-50 dark:bg-gray-800/50', label: 'Pending', filterable: true },
@@ -902,7 +902,7 @@ function WorkflowRunsList() {
     open: false,
     workflow: null,
   })
-  const [startPayload, setStartPayload] = useState('')
+  const startInput = useWorkflowInputForm(startDialog.workflow?.inputSchema)
   const [page, setPage] = useState(1)
 
   // Real-time updates - invalidate workflow runs when tasks change
@@ -948,7 +948,7 @@ function WorkflowRunsList() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workflow-runs'] })
       setStartDialog({ open: false, workflow: null })
-      setStartPayload('')
+      startInput.reset()
     },
   })
 
@@ -998,15 +998,12 @@ function WorkflowRunsList() {
   const handleStartWorkflow = () => {
     if (!startDialog.workflow) return
 
-    let payload: Record<string, unknown> | undefined
-    if (startPayload.trim()) {
-      try {
-        payload = JSON.parse(startPayload)
-      } catch {
-        alert('Invalid JSON payload')
-        return
-      }
+    // Validate input if schema exists
+    if (startDialog.workflow.inputSchema && !startInput.validate()) {
+      return
     }
+
+    const payload = Object.keys(startInput.values).length > 0 ? startInput.values : undefined
 
     startMutation.mutate({
       workflowId: startDialog.workflow._id,
@@ -1327,7 +1324,7 @@ function WorkflowRunsList() {
       <Dialog open={startDialog.open} onOpenChange={(open) => {
         if (!open) {
           setStartDialog({ open: false, workflow: null })
-          setStartPayload('')
+          startInput.reset()
         }
       }}>
         <DialogContent>
@@ -1335,22 +1332,19 @@ function WorkflowRunsList() {
             <DialogTitle>Start Workflow: {startDialog.workflow?.name}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium">Input Payload (JSON)</label>
-              <Textarea
-                value={startPayload}
-                onChange={(e) => setStartPayload(e.target.value)}
-                placeholder='{"key": "value"}'
-                className="mt-1 font-mono text-sm"
-                rows={6}
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                Optional. Provide initial data for the workflow.
-              </p>
-            </div>
+            <WorkflowInputForm
+              inputSchema={startDialog.workflow?.inputSchema}
+              samplePayload={startDialog.workflow?.samplePayload}
+              value={startInput.values}
+              onChange={startInput.setValues}
+              errors={startInput.errors}
+            />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setStartDialog({ open: false, workflow: null })}>
+            <Button variant="outline" onClick={() => {
+              setStartDialog({ open: false, workflow: null })
+              startInput.reset()
+            }}>
               Cancel
             </Button>
             <Button onClick={handleStartWorkflow} disabled={startMutation.isPending}>

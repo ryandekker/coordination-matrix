@@ -70,7 +70,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import {
   Select,
@@ -89,6 +88,7 @@ import { authFetch, Group, SYSTEM_USER_ID } from '@/lib/api'
 import { Checkbox } from '@/components/ui/checkbox'
 import { useGroupContext } from '@/lib/group-context'
 import { useAuth } from '@/lib/auth'
+import { WorkflowInputForm, useWorkflowInputForm } from '@/components/workflows/workflow-input-form'
 
 // Lazy-load WorkflowEditor to reduce initial bundle size (includes heavy mermaid dependency)
 const WorkflowEditor = dynamic(
@@ -188,6 +188,8 @@ interface WorkflowData {
   folderId?: string | null
   groupId?: string | null
   color?: string
+  inputSchema?: Record<string, unknown>
+  samplePayload?: string
   createdAt: string
   updatedAt?: string
 }
@@ -203,6 +205,8 @@ interface BriefWorkflowData {
   folderId?: string | null
   groupId?: string | null
   color?: string
+  inputSchema?: Record<string, unknown>
+  samplePayload?: string
   createdAt: string
   updatedAt?: string
 }
@@ -439,7 +443,7 @@ export default function WorkflowsPage() {
     open: false,
     workflow: null,
   })
-  const [runPayload, setRunPayload] = useState('')
+  const runInput = useWorkflowInputForm(runDialog.workflow?.inputSchema)
   const [runAssignee, setRunAssignee] = useState('')
   const [runUrgency, setRunUrgency] = useState('')
   const [runTags, setRunTags] = useState('')
@@ -637,7 +641,7 @@ export default function WorkflowsPage() {
   })
 
   const resetRunForm = () => {
-    setRunPayload('')
+    runInput.reset()
     setRunAssignee('')
     setRunUrgency('')
     setRunTags('')
@@ -648,15 +652,12 @@ export default function WorkflowsPage() {
   const handleRunWorkflow = () => {
     if (!runDialog.workflow) return
 
-    let payload: Record<string, unknown> | undefined
-    if (runPayload.trim()) {
-      try {
-        payload = JSON.parse(runPayload)
-      } catch {
-        alert('Invalid JSON payload')
-        return
-      }
+    // Validate input if schema exists
+    if (runDialog.workflow.inputSchema && !runInput.validate()) {
+      return
     }
+
+    const payload = Object.keys(runInput.values).length > 0 ? runInput.values : undefined
 
     // Build task defaults
     const taskDefaults: WorkflowTaskDefaults = {}
@@ -1739,6 +1740,15 @@ export default function WorkflowsPage() {
               </div>
             </div>
 
+            {/* Input Data Form - shown prominently when workflow has an inputSchema */}
+            <WorkflowInputForm
+              inputSchema={runDialog.workflow?.inputSchema}
+              samplePayload={runDialog.workflow?.samplePayload}
+              value={runInput.values}
+              onChange={runInput.setValues}
+              errors={runInput.errors}
+            />
+
             {/* Collapsible Advanced Options */}
             <Collapsible>
               <CollapsibleTrigger className="flex items-center gap-2 text-sm font-medium hover:underline">
@@ -1772,20 +1782,6 @@ export default function WorkflowsPage() {
                       Where this run was triggered from.
                     </p>
                   </div>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium">Input Payload (JSON)</label>
-                  <Textarea
-                    value={runPayload}
-                    onChange={(e) => setRunPayload(e.target.value)}
-                    placeholder='{"key": "value"}'
-                    className="mt-1 font-mono text-sm"
-                    rows={4}
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Custom data that flows through the workflow steps.
-                  </p>
                 </div>
               </CollapsibleContent>
             </Collapsible>

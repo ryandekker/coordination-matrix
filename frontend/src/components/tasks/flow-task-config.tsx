@@ -16,7 +16,6 @@ import {
   ChevronUp,
   Clock,
   AlertCircle,
-  ShieldCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -37,6 +36,8 @@ function normalizeSamplePayload(payload: unknown): string {
 }
 import { cn } from '@/lib/utils'
 import { TemplateTextarea } from '@/components/ui/template-textarea'
+import { WorkflowInputDisplay } from '@/components/workflows/workflow-input-display'
+import { WorkflowInputForm, useWorkflowInputForm } from '@/components/workflows/workflow-input-form'
 import Link from 'next/link'
 
 export interface FlowConfig {
@@ -76,7 +77,14 @@ export function FlowTaskConfig({
   const [isExecuting, setIsExecuting] = useState(false)
   const [isRetrying, setIsRetrying] = useState(false)
 
-  // Input payload as string template
+  // Get the selected workflow
+  const selectedWorkflow = workflows.find((w: Workflow) => w._id === flowConfig?.workflowId)
+  const hasSchema = !!(selectedWorkflow?.inputSchema && (selectedWorkflow.inputSchema as Record<string, unknown>).properties)
+
+  // Schema-driven input form state
+  const inputForm = useWorkflowInputForm(selectedWorkflow?.inputSchema)
+
+  // Input payload as string template (used when no schema)
   const [inputPayloadText, setInputPayloadText] = useState(() => {
     if (flowConfig?.inputPayload) {
       return flowConfig.inputPayload
@@ -88,28 +96,58 @@ export function FlowTaskConfig({
   // Sync when flowConfig changes externally
   useEffect(() => {
     if (flowConfig?.inputPayload) {
-      setInputPayloadText(flowConfig.inputPayload)
+      if (hasSchema) {
+        // Parse the JSON and populate the form
+        try {
+          const parsed = JSON.parse(flowConfig.inputPayload)
+          if (typeof parsed === 'object' && parsed !== null) {
+            inputForm.setValues(parsed)
+          }
+        } catch {
+          // Not valid JSON (template vars?), fall through to text
+          setInputPayloadText(flowConfig.inputPayload)
+        }
+      } else {
+        setInputPayloadText(flowConfig.inputPayload)
+      }
     }
-  }, [flowConfig?.inputPayload])
-
-  // Get the selected workflow
-  const selectedWorkflow = workflows.find((w: Workflow) => w._id === flowConfig?.workflowId)
+  }, [flowConfig?.inputPayload, hasSchema])
 
   // Auto-load sample payload when workflow is first selected (if available)
   useEffect(() => {
     if (
       selectedWorkflow?.samplePayload &&
-      selectedWorkflow._id !== lastAutoLoadedWorkflowId.current &&
-      // Only auto-load if current payload is empty or is the default template
-      (inputPayloadText === '{\n  "title": "{{title}}",\n  "summary": "{{summary}}"\n}' || !inputPayloadText.trim())
+      selectedWorkflow._id !== lastAutoLoadedWorkflowId.current
     ) {
       const normalized = normalizeSamplePayload(selectedWorkflow.samplePayload)
-      setInputPayloadText(normalized)
-      onConfigChange({
-        ...flowConfig!,
-        inputPayload: normalized,
-      })
-      lastAutoLoadedWorkflowId.current = selectedWorkflow._id
+      if (hasSchema) {
+        // Only auto-load if form values are empty
+        if (Object.keys(inputForm.values).length === 0) {
+          try {
+            const parsed = JSON.parse(normalized)
+            if (typeof parsed === 'object' && parsed !== null) {
+              inputForm.setValues(parsed)
+              onConfigChange({
+                ...flowConfig!,
+                inputPayload: normalized,
+              })
+            }
+          } catch {
+            // Invalid sample, ignore
+          }
+          lastAutoLoadedWorkflowId.current = selectedWorkflow._id
+        }
+      } else {
+        // Only auto-load if current payload is empty or is the default template
+        if (inputPayloadText === '{\n  "title": "{{title}}",\n  "summary": "{{summary}}"\n}' || !inputPayloadText.trim()) {
+          setInputPayloadText(normalized)
+          onConfigChange({
+            ...flowConfig!,
+            inputPayload: normalized,
+          })
+          lastAutoLoadedWorkflowId.current = selectedWorkflow._id
+        }
+      }
     }
   }, [selectedWorkflow])
 
@@ -129,17 +167,35 @@ export function FlowTaskConfig({
   const handleWorkflowChange = (workflowId: string) => {
     const actualId = workflowId === '_none' ? '' : workflowId
     const newWorkflow = workflows.find((w: Workflow) => w._id === actualId)
+    const newHasSchema = !!(newWorkflow?.inputSchema && (newWorkflow.inputSchema as Record<string, unknown>).properties)
+
+    // Reset form state
+    inputForm.reset()
 
     // If the new workflow has a sample payload, auto-load it
     if (newWorkflow?.samplePayload) {
       const normalized = normalizeSamplePayload(newWorkflow.samplePayload)
-      setInputPayloadText(normalized)
       lastAutoLoadedWorkflowId.current = actualId
+      if (newHasSchema) {
+        try {
+          const parsed = JSON.parse(normalized)
+          if (typeof parsed === 'object' && parsed !== null) {
+            inputForm.setValues(parsed)
+          }
+        } catch {
+          // Invalid sample, ignore
+        }
+      } else {
+        setInputPayloadText(normalized)
+      }
       onConfigChange({
         workflowId: actualId,
         inputPayload: normalized,
       })
     } else {
+      if (!newHasSchema) {
+        setInputPayloadText('{\n  "title": "{{title}}",\n  "summary": "{{summary}}"\n}')
+      }
       onConfigChange({
         ...flowConfig!,
         workflowId: actualId,
@@ -152,6 +208,15 @@ export function FlowTaskConfig({
     onConfigChange({
       ...flowConfig!,
       inputPayload: value,
+    })
+  }
+
+  const handleInputFormChange = (values: Record<string, unknown>) => {
+    inputForm.setValues(values)
+    const jsonStr = Object.keys(values).length > 0 ? JSON.stringify(values, null, 2) : ''
+    onConfigChange({
+      ...flowConfig!,
+      inputPayload: jsonStr,
     })
   }
 
@@ -170,11 +235,16 @@ export function FlowTaskConfig({
   // Execute the flow task
   const handleExecute = async () => {
     if (!task?._id) return
+
+    // Validate schema form if applicable
+    if (hasSchema && !inputForm.validate()) return
+
     setIsExecuting(true)
     try {
-      // Parse input payload if provided
       let inputPayload: Record<string, unknown> | undefined
-      if (inputPayloadText.trim()) {
+      if (hasSchema && Object.keys(inputForm.values).length > 0) {
+        inputPayload = inputForm.values
+      } else if (inputPayloadText.trim()) {
         try {
           inputPayload = JSON.parse(inputPayloadText)
         } catch {
@@ -196,11 +266,16 @@ export function FlowTaskConfig({
   // Retry the flow task
   const handleRetry = async () => {
     if (!task?._id) return
+
+    // Validate schema form if applicable
+    if (hasSchema && !inputForm.validate()) return
+
     setIsRetrying(true)
     try {
-      // Parse input payload if provided
       let inputPayload: Record<string, unknown> | undefined
-      if (inputPayloadText.trim()) {
+      if (hasSchema && Object.keys(inputForm.values).length > 0) {
+        inputPayload = inputForm.values
+      } else if (inputPayloadText.trim()) {
         try {
           inputPayload = JSON.parse(inputPayloadText)
         } catch {
@@ -300,15 +375,11 @@ export function FlowTaskConfig({
     if (!resolvedPayload) return null
 
     return (
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-          <Play className="h-3 w-3" />
-          Resolved Input Payload (sent to subflow)
-        </label>
-        <pre className="text-[10px] bg-muted/50 rounded border p-2 overflow-auto max-h-40 font-mono">
-          {JSON.stringify(resolvedPayload, null, 2)}
-        </pre>
-      </div>
+      <WorkflowInputDisplay
+        inputPayload={resolvedPayload}
+        inputSchema={selectedWorkflow?.inputSchema}
+        className="border-muted"
+      />
     )
   }
 
@@ -391,72 +462,55 @@ export function FlowTaskConfig({
         </Select>
       </div>
 
-      {/* Input Payload Template */}
+      {/* Input Payload - Schema-driven form or template textarea */}
       {flowConfig?.workflowId && (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium text-muted-foreground">Input Payload (JSON)</label>
-            {selectedWorkflow?.samplePayload && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-6 px-2 text-xs text-pink-600 dark:text-pink-400 hover:text-pink-700 dark:hover:text-pink-300"
-                onClick={handleLoadSamplePayload}
-              >
-                <FileDown className="h-3 w-3 mr-1" />
-                Load Sample
-              </Button>
-            )}
-          </div>
-          <TemplateTextarea
-            description="Define the data to pass to the workflow. Use {{variable}} for dynamic values from this task."
-            value={inputPayloadText}
-            onChange={handleInputPayloadChange}
-            placeholder={'{\n  "title": "{{title}}",\n  "summary": "{{summary}}",\n  "customField": "value"\n}'}
-            minHeight="100px"
-            maxHeight="200px"
-            showTokenBrowser={true}
-            taskOnly={true}
+        hasSchema ? (
+          <WorkflowInputForm
+            inputSchema={selectedWorkflow?.inputSchema}
+            samplePayload={selectedWorkflow?.samplePayload}
+            value={inputForm.values}
+            onChange={handleInputFormChange}
+            errors={inputForm.errors}
+            disabled={isExecuting || isRetrying}
           />
-        </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-muted-foreground">Input Payload (JSON)</label>
+              {selectedWorkflow?.samplePayload && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs text-pink-600 dark:text-pink-400 hover:text-pink-700 dark:hover:text-pink-300"
+                  onClick={handleLoadSamplePayload}
+                >
+                  <FileDown className="h-3 w-3 mr-1" />
+                  Load Sample
+                </Button>
+              )}
+            </div>
+            <TemplateTextarea
+              description="Define the data to pass to the workflow. Use {{variable}} for dynamic values from this task."
+              value={inputPayloadText}
+              onChange={handleInputPayloadChange}
+              placeholder={'{\n  "title": "{{title}}",\n  "summary": "{{summary}}",\n  "customField": "value"\n}'}
+              minHeight="100px"
+              maxHeight="200px"
+              showTokenBrowser={true}
+              taskOnly={true}
+            />
+          </div>
+        )
       )}
 
-      {/* Workflow info hint */}
-      {selectedWorkflow && (
+      {/* Workflow info hint (only when no schema - schema info is in the form) */}
+      {selectedWorkflow && !hasSchema && (
         <div className="text-[10px] bg-pink-50 dark:bg-pink-950/30 border border-pink-200 dark:border-pink-800 rounded px-2 py-1.5 text-pink-800 dark:text-pink-200">
           <p className="font-medium">Selected: {selectedWorkflow.name}</p>
           {selectedWorkflow.description && (
             <p className="opacity-80 mt-0.5">{selectedWorkflow.description}</p>
           )}
-          {selectedWorkflow.inputSchema && (() => {
-            const schema = selectedWorkflow.inputSchema as Record<string, unknown>
-            const properties = (schema.properties || {}) as Record<string, Record<string, unknown>>
-            const required = new Set((schema.required || []) as string[])
-            const entries = Object.entries(properties)
-            if (entries.length === 0) return null
-            return (
-              <div className="mt-1 pt-1 border-t border-pink-200/50 dark:border-pink-700/50">
-                <p className="font-medium flex items-center gap-1">
-                  <ShieldCheck className="h-2.5 w-2.5" />
-                  Input Schema
-                </p>
-                <ul className="mt-0.5 space-y-0.5">
-                  {entries.map(([name, rawProp]) => {
-                    const prop = rawProp as Record<string, unknown>
-                    return (
-                      <li key={name}>
-                        <code className="bg-pink-100 dark:bg-pink-900/30 px-0.5 rounded">{name}</code>
-                        <span className="opacity-70"> ({String(prop.type || 'any')})</span>
-                        {required.has(name) && <span className="text-red-600 dark:text-red-400 ml-0.5">*</span>}
-                        {typeof prop.description === 'string' && <span className="opacity-60"> — {prop.description}</span>}
-                      </li>
-                    )
-                  })}
-                </ul>
-              </div>
-            )
-          })()}
           {selectedWorkflow.samplePayload && (
             <p className="opacity-70 mt-0.5 flex items-center gap-1">
               <FileDown className="h-2.5 w-2.5" />

@@ -685,14 +685,12 @@ export function DetailsTab({
         </div>
       )}
 
-      {/* Workflow Trigger */}
-      <div className="space-y-2 pt-4 border-t">
-        <label className="text-sm font-medium">Trigger Workflow</label>
-        <p className="text-xs text-muted-foreground">
-          Start a new workflow run from this task
-        </p>
-        <WorkflowTrigger task={task} />
-      </div>
+      {/* Workflow Trigger (for non-flow tasks - flow tasks use FlowTaskConfig above) */}
+      {currentTaskType !== 'flow' && !task.flowConfig && (
+        <div className="space-y-2 pt-4 border-t">
+          <WorkflowTrigger task={task} />
+        </div>
+      )}
     </div>
   )
 }
