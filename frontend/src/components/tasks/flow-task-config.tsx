@@ -28,6 +28,13 @@ import {
 } from '@/components/ui/select'
 import { Task, Workflow, FlowAttempt, tasksApi } from '@/lib/api'
 import { useWorkflows } from '@/hooks/use-tasks'
+
+/** Normalize samplePayload which may arrive as an object from the API */
+function normalizeSamplePayload(payload: unknown): string {
+  if (!payload) return ''
+  if (typeof payload === 'string') return payload
+  return JSON.stringify(payload, null, 2)
+}
 import { cn } from '@/lib/utils'
 import { TemplateTextarea } from '@/components/ui/template-textarea'
 import Link from 'next/link'
@@ -96,10 +103,11 @@ export function FlowTaskConfig({
       // Only auto-load if current payload is empty or is the default template
       (inputPayloadText === '{\n  "title": "{{title}}",\n  "summary": "{{summary}}"\n}' || !inputPayloadText.trim())
     ) {
-      setInputPayloadText(selectedWorkflow.samplePayload)
+      const normalized = normalizeSamplePayload(selectedWorkflow.samplePayload)
+      setInputPayloadText(normalized)
       onConfigChange({
         ...flowConfig!,
-        inputPayload: selectedWorkflow.samplePayload,
+        inputPayload: normalized,
       })
       lastAutoLoadedWorkflowId.current = selectedWorkflow._id
     }
@@ -124,11 +132,12 @@ export function FlowTaskConfig({
 
     // If the new workflow has a sample payload, auto-load it
     if (newWorkflow?.samplePayload) {
-      setInputPayloadText(newWorkflow.samplePayload)
+      const normalized = normalizeSamplePayload(newWorkflow.samplePayload)
+      setInputPayloadText(normalized)
       lastAutoLoadedWorkflowId.current = actualId
       onConfigChange({
         workflowId: actualId,
-        inputPayload: newWorkflow.samplePayload,
+        inputPayload: normalized,
       })
     } else {
       onConfigChange({
@@ -149,10 +158,11 @@ export function FlowTaskConfig({
   // Load sample payload from workflow
   const handleLoadSamplePayload = () => {
     if (selectedWorkflow?.samplePayload) {
-      setInputPayloadText(selectedWorkflow.samplePayload)
+      const normalized = normalizeSamplePayload(selectedWorkflow.samplePayload)
+      setInputPayloadText(normalized)
       onConfigChange({
         ...flowConfig!,
-        inputPayload: selectedWorkflow.samplePayload,
+        inputPayload: normalized,
       })
     }
   }

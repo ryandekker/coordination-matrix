@@ -1,26 +1,27 @@
 {
   "name": "Text Generation Competition",
-  "description": "Generate 3 different versions of text with different styles, audit each for quality, then select the best one.",
+  "description": "Fan out to all intermediate-class agents, each independently generates text on the same topic, audits are collected, and a judge selects the best version.",
   "isActive": true,
   "rootTaskTitleTemplate": "Text Competition: {{input.topic}}",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "topic": { "type": "string", "description": "The topic or prompt to write about" },
+      "targetLength": { "type": "string", "description": "Target word count (e.g., '500 words')" },
+      "constraints": { "type": "string", "description": "Any style or content constraints" }
+    },
+    "required": ["topic"]
+  },
+  "samplePayload": "{\"topic\":\"The future of remote work in the AI era\",\"targetLength\":\"500 words\",\"constraints\":\"Engaging and opinionated, with concrete examples\"}",
   "steps": [
     {
-      "id": "start",
-      "name": "Start",
-      "description": "Workflow entry point - receives the prompt/topic",
-      "stepType": "trigger",
-      "connections": [
-        { "targetStepId": "fan-out-versions" }
-      ]
-    },
-    {
-      "id": "fan-out-versions",
-      "name": "Create Version Tasks",
-      "description": "Fan out to 3 parallel version generation tasks",
+      "id": "fan-out-agents",
+      "name": "Fan Out to Agents",
+      "description": "Fan out to all complexity-2 agents — each will independently generate a version.",
       "stepType": "foreach",
-      "itemsPath": "versions",
-      "itemVariable": "version",
-      "maxItems": 3,
+      "itemsPath": "agents.complexity.2",
+      "itemVariable": "agent",
+      "maxItems": 10,
       "connections": [
         { "targetStepId": "generate-text" }
       ]
@@ -28,26 +29,20 @@
     {
       "id": "generate-text",
       "name": "Generate Text Version",
-      "description": "Generate text in a specific style",
+      "description": "Each agent independently generates text on the given topic.",
       "stepType": "agent",
-      "additionalInstructions": "You are generating text for a competition between different writing styles.\n\nYour assigned style: {{version.style}}\nStyle description: {{version.description}}\n\nTopic/Prompt: {{input.prompt}}\n\nGuidelines:\n1. Write in the specified style consistently\n2. Be creative and engaging\n3. Keep the content focused on the topic\n4. Aim for approximately {{input.targetLength}} words (or reasonable length if not specified)\n\nReturn your generated text along with a brief note about your stylistic choices.",
+      "defaultAssigneeId": "{{agent.complexity.2}}",
+      "additionalInstructions": "You are competing against other agents to write the best text on this topic.\n\nTopic: {{input.topic}}\nTarget Length: {{input.targetLength}}\nConstraints: {{input.constraints}}\n\nGuidelines:\n1. Write in your own unique voice and style\n2. Be creative, engaging, and substantive\n3. Keep the content focused on the topic\n4. Aim for the target length if specified\n\nReturn your generated text along with a brief note about your approach and stylistic choices.",
       "connections": [
-        { "targetStepId": "audit-text" }
+        { "targetStepId": "collect-results" }
       ]
-    },
-    {
-      "id": "audit-text",
-      "name": "Audit Text Quality",
-      "description": "Evaluate the generated text for quality",
-      "stepType": "agent",
-      "additionalInstructions": "You are auditing a generated text for quality.\n\nEvaluate the text on these criteria (score 1-10 for each):\n1. **Clarity**: Is the writing clear and easy to understand?\n2. **Engagement**: Does it capture and hold attention?\n3. **Style Consistency**: Does it maintain its stated style throughout?\n4. **Creativity**: Is it original and interesting?\n5. **Relevance**: Does it address the topic effectively?\n6. **Grammar & Flow**: Is it well-written technically?\n\nProvide:\n- Individual scores for each criterion\n- Overall score (average)\n- Brief strengths (2-3 bullet points)\n- Brief weaknesses (2-3 bullet points)\n- One-sentence summary\n\nReturn a structured audit report."
     },
     {
       "id": "collect-results",
       "name": "Collect All Versions",
-      "description": "Wait for all versions to be generated and audited",
+      "description": "Wait for all agents to complete their versions.",
       "stepType": "join",
-      "awaitStepId": "fan-out-versions",
+      "awaitStepId": "fan-out-agents",
       "joinBoundary": {
         "minPercent": 100,
         "maxWaitMs": 600000,
@@ -59,11 +54,11 @@
     },
     {
       "id": "select-best",
-      "name": "Select Best Version",
-      "description": "Compare all versions and select the winner",
+      "name": "Judge: Select Best",
+      "description": "An advanced agent evaluates all versions and selects the winner.",
       "stepType": "agent",
-      "additionalInstructions": "You are the final judge in a text generation competition.\n\nYou have received 3 versions of text, each with its own audit report.\n\nYour task:\n1. Review all 3 versions and their audit scores\n2. Consider the original prompt/topic requirements\n3. Weigh the audit criteria appropriately for this use case\n4. Select the best overall version\n\nProvide:\n- **Winner**: Which version (1, 2, or 3) is best\n- **Reasoning**: Why this version won (3-5 sentences)\n- **Runner-up**: Second place and brief note on why\n- **Comparison Summary**: Key differentiators between versions\n- **Recommended Improvements**: If the winner could be even better, how?\n\nReturn a structured selection report with the winning text included."
+      "defaultAssigneeId": "{{agent.complexity.3}}",
+      "additionalInstructions": "You are the judge in a text generation competition.\n\nMultiple agents each independently wrote text on the same topic. Evaluate each version on these criteria (score 1-10):\n1. **Clarity** — Is the writing clear and easy to understand?\n2. **Engagement** — Does it capture and hold attention?\n3. **Creativity** — Is it original and interesting?\n4. **Completeness** — Does it adequately cover the topic?\n5. **Grammar & Flow** — Is it well-written technically?\n\nFor each version, provide:\n- Scores for each criterion\n- Overall score (weighted average)\n- Key strengths (2-3 bullet points)\n- Key weaknesses (1-2 bullet points)\n\nThen provide:\n- **Winner** — Which version is best and why\n- **Runner-up** — Second place and brief note\n- **Recommended improvements** — How the winner could be even better\n\nReturn a structured evaluation report with the winning text included."
     }
-  ],
-  "mermaidDiagram": "graph TD\n    A[trigger: Start] --> B[[foreach: Create Version Tasks]]\n    B --> C[agent: Generate Text Version]\n    C --> D[agent: Audit Text Quality]\n    D --> E[[join: Collect All Versions]]\n    E --> F[agent: Select Best Version]"
+  ]
 }

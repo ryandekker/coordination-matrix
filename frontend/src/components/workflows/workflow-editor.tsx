@@ -301,7 +301,7 @@ export function WorkflowEditor({
           })) || [])
       setSteps(normalizedSteps)
       setRootTaskTitleTemplate(workflow.rootTaskTitleTemplate || '')
-      setSamplePayload(workflow.samplePayload || '')
+      setSamplePayload(typeof workflow.samplePayload === 'string' ? workflow.samplePayload : workflow.samplePayload ? JSON.stringify(workflow.samplePayload, null, 2) : '')
       setInputSchemaText(workflow.inputSchema ? JSON.stringify(workflow.inputSchema, null, 2) : '')
       setSelectedColor(workflow.color || undefined)
       setSelectedFolderId(workflow.folderId || null)
@@ -454,7 +454,7 @@ export function WorkflowEditor({
         if (data.description !== undefined) setValue('description', data.description)
         if (data.isActive !== undefined) setValue('isActive', data.isActive)
         if (data.rootTaskTitleTemplate) setRootTaskTitleTemplate(data.rootTaskTitleTemplate)
-        if (data.samplePayload) setSamplePayload(data.samplePayload)
+        if (data.samplePayload) setSamplePayload(typeof data.samplePayload === 'string' ? data.samplePayload : JSON.stringify(data.samplePayload, null, 2))
         if (data.inputSchema) setInputSchemaText(JSON.stringify(data.inputSchema, null, 2))
 
         // Apply steps if present

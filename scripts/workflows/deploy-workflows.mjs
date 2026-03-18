@@ -11,6 +11,9 @@
  *   node scripts/workflows/deploy-workflows.mjs --env local --dry-run
  *   node scripts/workflows/deploy-workflows.mjs --env local --workflow wc  # Only Workflow Creation
  *   node scripts/workflows/deploy-workflows.mjs --env local --workflow mc  # Only Multi-Model Creation
+ *   node scripts/workflows/deploy-workflows.mjs --env local --workflow dc  # Only Document Creation
+ *   node scripts/workflows/deploy-workflows.mjs --env local --workflow tc  # Only Text Competition
+ *   node scripts/workflows/deploy-workflows.mjs --env local --workflow mr  # Only Message Refinement
  */
 
 const args = process.argv.slice(2);
@@ -1131,6 +1134,22 @@ function buildMultiModelCreation(promptDocIds) {
 }
 
 // =============================================================================
+// JSON-based Workflow Definitions (loaded from files)
+// =============================================================================
+
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+function loadJsonWorkflow(filename) {
+  const filePath = join(__dirname, filename);
+  return JSON.parse(readFileSync(filePath, 'utf-8'));
+}
+
+// =============================================================================
 // Main Deployment
 // =============================================================================
 
@@ -1146,6 +1165,9 @@ async function main() {
 
   const shouldDeployWC = !workflowFilter || workflowFilter === 'wc';
   const shouldDeployMC = !workflowFilter || workflowFilter === 'mc';
+  const shouldDeployDC = !workflowFilter || workflowFilter === 'dc';
+  const shouldDeployTC = !workflowFilter || workflowFilter === 'tc';
+  const shouldDeployMR = !workflowFilter || workflowFilter === 'mr';
 
   // ==========================================================================
   // Workflow 1: Workflow Creation
@@ -1189,6 +1211,36 @@ async function main() {
     const wf2 = buildMultiModelCreation(mcDocIds);
     const created2 = await createWorkflow(wf2);
     console.log(`  MC Workflow ID: ${created2._id}\n`);
+  }
+
+  // ==========================================================================
+  // Workflow 3: Document Creation (JSON-based)
+  // ==========================================================================
+  if (shouldDeployDC) {
+    console.log('=== Deploying Workflow 3: Document Creation ===\n');
+    const dc = loadJsonWorkflow('document-creation.json');
+    const createdDC = await createWorkflow(dc);
+    console.log(`  DC Workflow ID: ${createdDC._id}\n`);
+  }
+
+  // ==========================================================================
+  // Workflow 4: Text Generation Competition (JSON-based)
+  // ==========================================================================
+  if (shouldDeployTC) {
+    console.log('=== Deploying Workflow 4: Text Generation Competition ===\n');
+    const tc = loadJsonWorkflow('text-competition.json');
+    const createdTC = await createWorkflow(tc);
+    console.log(`  TC Workflow ID: ${createdTC._id}\n`);
+  }
+
+  // ==========================================================================
+  // Workflow 5: Iterative Message Refinement (JSON-based)
+  // ==========================================================================
+  if (shouldDeployMR) {
+    console.log('=== Deploying Workflow 5: Iterative Message Refinement ===\n');
+    const mr = loadJsonWorkflow('message-refinement.json');
+    const createdMR = await createWorkflow(mr);
+    console.log(`  MR Workflow ID: ${createdMR._id}\n`);
   }
 
   console.log('=== Deployment Complete ===\n');
