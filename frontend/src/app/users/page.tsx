@@ -180,19 +180,19 @@ export default function UsersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Users</h1>
-          <p className="text-muted-foreground">Manage system users and their roles</p>
+          <h1 className="text-xl md:text-2xl font-bold">Users</h1>
+          <p className="text-sm text-muted-foreground hidden sm:block">Manage system users and their roles</p>
         </div>
-        <Button onClick={openCreateModal}>
+        <Button className="w-full sm:w-auto" onClick={openCreateModal}>
           <Plus className="mr-2 h-4 w-4" />
           Add User
         </Button>
       </div>
 
-      <div className="rounded-md border">
-        <Table>
+      <div className="rounded-md border overflow-x-auto">
+        <Table className="min-w-[600px]">
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>

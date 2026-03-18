@@ -5,7 +5,11 @@ import { useAuth } from '@/lib/auth';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { Sidebar } from './sidebar';
+import { MobileSidebar } from './mobile-sidebar';
+import { MobileHeader } from './mobile-header';
+import { SidebarProvider, useSidebar } from '@/lib/sidebar-context';
 import { useGroupContext } from '@/lib/group-context';
+import { cn } from '@/lib/utils';
 import { AlertCircle, Users } from 'lucide-react';
 
 export function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -36,13 +40,36 @@ export function AuthenticatedLayout({ children }: { children: React.ReactNode })
   }
 
   return (
+    <SidebarProvider>
+      <AuthenticatedLayoutInner>{children}</AuthenticatedLayoutInner>
+    </SidebarProvider>
+  );
+}
+
+function AuthenticatedLayoutInner({ children }: { children: React.ReactNode }) {
+  const { collapsed } = useSidebar();
+
+  return (
     <div className="flex h-screen overflow-hidden">
-      <Suspense fallback={<div className="w-64 border-r bg-card" />}>
-        <Sidebar />
-      </Suspense>
-      <main className="flex-1 overflow-auto flex flex-col">
+      {/* Desktop/Tablet sidebar (hidden on mobile) */}
+      <div className="hidden md:block">
+        <Suspense fallback={<div className={cn('border-r bg-card h-full', collapsed ? 'w-16' : 'w-64')} />}>
+          <Sidebar collapsed={collapsed} />
+        </Suspense>
+      </div>
+
+      {/* Mobile sidebar drawer */}
+      <div className="md:hidden">
+        <MobileSidebar />
+      </div>
+
+      <main className="flex-1 overflow-auto flex flex-col min-w-0">
+        {/* Mobile header with hamburger */}
+        <div className="md:hidden">
+          <MobileHeader />
+        </div>
         <NoGroupBanner />
-        <div className="flex-1 p-6">
+        <div className="flex-1 p-3 md:p-4 lg:p-6">
           {children}
         </div>
       </main>
@@ -64,7 +91,7 @@ function NoGroupBanner() {
   const isAdmin = user?.role === 'admin';
 
   return (
-    <div className="bg-amber-500/10 border-b border-amber-500/30 px-6 py-3">
+    <div className="bg-amber-500/10 border-b border-amber-500/30 px-3 md:px-6 py-3">
       <div className="flex items-center gap-3">
         <AlertCircle className="h-5 w-5 text-amber-500 flex-shrink-0" />
         <div className="flex-1">
@@ -84,7 +111,7 @@ function NoGroupBanner() {
             </p>
           )}
         </div>
-        <Users className="h-5 w-5 text-amber-500 flex-shrink-0" />
+        <Users className="h-5 w-5 text-amber-500 flex-shrink-0 hidden sm:block" />
       </div>
     </div>
   );

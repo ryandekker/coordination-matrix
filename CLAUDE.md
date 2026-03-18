@@ -372,6 +372,14 @@ For production/remote deployments, always use `task-daemon.mjs`.
 
 Workflows are JSON definitions deployed via `scripts/workflows/deploy-workflows.mjs`. Key patterns:
 
+### Group Visibility (Critical)
+
+**Always set `groupId` when creating workflows via API.** The frontend filters workflows by the user's selected group, so workflows with `groupId: null` are invisible in the UI — even to admins. The backend applies the group filter whenever the frontend passes a `groupId` query parameter, which it always does.
+
+- Production group (ryans-workspace): `6976de9a24f7f6625819aca0`
+- Include `groupId` in the workflow JSON when calling `POST /api/workflows`
+- If a workflow is missing from the UI, check its `groupId` field first
+
 ### Deploy & Test Scripts
 
 ```bash

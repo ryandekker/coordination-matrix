@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useMemo, memo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { useIsMobile } from '@/hooks/use-media-query'
 import {
   ChevronDown,
   ChevronRight,
@@ -124,15 +125,15 @@ const BulkActionsBar = memo(function BulkActionsBar({
   const urgencyOptions = lookups['urgency'] || []
 
   return (
-    <div className="flex items-center gap-3 p-3 bg-muted/50 border rounded-md mb-4">
+    <div className="flex flex-wrap items-center gap-2 md:gap-3 p-2 md:p-3 bg-muted/50 border rounded-md mb-4">
       <div className="flex items-center gap-2">
         <CheckCircle className="h-4 w-4 text-primary" />
         <span className="text-sm font-medium">{selectedCount} selected</span>
       </div>
-      <div className="h-4 w-px bg-border" />
-      <div className="flex items-center gap-2">
+      <div className="h-4 w-px bg-border hidden sm:block" />
+      <div className="flex flex-wrap items-center gap-2">
         <Select onValueChange={onStatusChange} disabled={isUpdating}>
-          <SelectTrigger className="h-8 w-[140px]">
+          <SelectTrigger className="h-8 w-[120px] sm:w-[140px]">
             <SelectValue placeholder="Set status" />
           </SelectTrigger>
           <SelectContent>
@@ -144,7 +145,7 @@ const BulkActionsBar = memo(function BulkActionsBar({
           </SelectContent>
         </Select>
         <Select onValueChange={onPriorityChange} disabled={isUpdating}>
-          <SelectTrigger className="h-8 w-[140px]">
+          <SelectTrigger className="h-8 w-[120px] sm:w-[140px]">
             <SelectValue placeholder="Set urgency" />
           </SelectTrigger>
           <SelectContent>
@@ -156,7 +157,7 @@ const BulkActionsBar = memo(function BulkActionsBar({
           </SelectContent>
         </Select>
         <Select onValueChange={(val) => onAssigneeChange(val === '__unassign__' ? null : val)} disabled={isUpdating}>
-          <SelectTrigger className="h-8 w-[160px]">
+          <SelectTrigger className="h-8 w-[120px] sm:w-[160px]">
             <SelectValue placeholder="Set assignee" />
           </SelectTrigger>
           <SelectContent>
@@ -194,7 +195,7 @@ const BulkActionsBar = memo(function BulkActionsBar({
           </Select>
         )}
       </div>
-      <div className="h-4 w-px bg-border" />
+      <div className="h-4 w-px bg-border hidden sm:block" />
       <Button
         variant="outline"
         size="sm"
@@ -202,8 +203,8 @@ const BulkActionsBar = memo(function BulkActionsBar({
         disabled={isUpdating}
         className="h-8"
       >
-        <Archive className="h-4 w-4 mr-1" />
-        Archive
+        <Archive className="h-4 w-4 sm:mr-1" />
+        <span className="hidden sm:inline">Archive</span>
       </Button>
       <Button
         variant="destructive"
@@ -212,8 +213,8 @@ const BulkActionsBar = memo(function BulkActionsBar({
         disabled={isUpdating}
         className="h-8"
       >
-        <Trash2 className="h-4 w-4 mr-1" />
-        Delete
+        <Trash2 className="h-4 w-4 sm:mr-1" />
+        <span className="hidden sm:inline">Delete</span>
       </Button>
       <div className="flex-1" />
       <Button
@@ -222,8 +223,8 @@ const BulkActionsBar = memo(function BulkActionsBar({
         onClick={onClearSelection}
         className="h-8"
       >
-        <X className="h-4 w-4 mr-1" />
-        Clear
+        <X className="h-4 w-4 sm:mr-1" />
+        <span className="hidden sm:inline">Clear</span>
       </Button>
     </div>
   )
@@ -1292,13 +1293,22 @@ export function TaskDataTable({
     [fieldConfigs]
   )
 
+  const isMobile = useIsMobile()
+
   // Memoized visible field configs in order
-  const visibleFieldConfigs = useMemo(
+  const allVisibleFieldConfigs = useMemo(
     () => visibleColumns
       .map((col) => fieldConfigMap.get(col))
       .filter(Boolean) as FieldConfig[],
     [visibleColumns, fieldConfigMap]
   )
+
+  // On mobile, only show essential columns
+  const visibleFieldConfigs = useMemo(() => {
+    if (!isMobile) return allVisibleFieldConfigs
+    const mobileFields = ['title', 'status', 'urgency']
+    return allVisibleFieldConfigs.filter(fc => mobileFields.includes(fc.fieldPath))
+  }, [isMobile, allVisibleFieldConfigs])
 
   const toggleRowExpansion = useCallback((taskId: string) => {
     setExpandedRows((prev) => {
@@ -1697,8 +1707,8 @@ export function TaskDataTable({
           isUpdating={isUpdating}
         />
       )}
-      <div className="rounded-md border">
-        <Table>
+      <div className="rounded-md border overflow-x-auto">
+        <Table className="min-w-[600px]">
           <TableHeader>
             <TableRow>
               <TableHead className="w-12 pl-3 pr-0">

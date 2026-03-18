@@ -1948,15 +1948,22 @@ Respond with ONLY this JSON object, no markdown code blocks, no explanation.`);
 // ============================================================================
 
 function parseResponse(responseText) {
-  // Try to parse as JSON
+  // Try to parse as JSON, with multiple extraction strategies
   try {
-    // Sometimes the response might have markdown code blocks, try to extract JSON
     let jsonStr = responseText.trim();
 
-    // Remove markdown code blocks if present
-    const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) {
-      jsonStr = jsonMatch[1];
+    // Strategy 1: Extract from markdown code blocks (```json ... ``` or ``` ... ```)
+    const codeBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (codeBlockMatch) {
+      jsonStr = codeBlockMatch[1].trim();
+    }
+
+    // Strategy 2: Find the outermost JSON object by matching first { to last }
+    // This handles preamble text, escaped newlines, trailing text, etc.
+    const firstBrace = jsonStr.indexOf('{');
+    const lastBrace = jsonStr.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
     }
 
     const parsed = JSON.parse(jsonStr);

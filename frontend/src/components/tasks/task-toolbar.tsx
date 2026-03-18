@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/dialog'
 import { View, ViewFolder, LookupValue, User, Task, Tag, Workflow, Project, isSystemUser } from '@/lib/api'
 import { UserChip } from '@/components/ui/user-chip'
+import { TouchTooltip } from '@/components/ui/touch-tooltip'
 
 interface TaskToolbarProps {
   currentView?: View
@@ -461,9 +462,9 @@ export function TaskToolbar({
   return (
     <div className="space-y-2">
       {/* Single row toolbar */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
         {/* Search */}
-        <div className={`relative transition-all duration-200 ${isSearchFocused || search ? 'w-64' : 'w-40'}`}>
+        <div className={`relative transition-all duration-200 ${isSearchFocused || search ? 'w-full sm:w-64' : 'w-full sm:w-40'}`}>
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search tasks..."
@@ -479,9 +480,9 @@ export function TaskToolbar({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="outline" size="sm">
-            <Filter className="mr-2 h-4 w-4" />
-            Status
-            <ChevronDown className="ml-2 h-4 w-4" />
+            <Filter className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Status</span>
+            <ChevronDown className="ml-1 sm:ml-2 h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-56">
@@ -515,9 +516,9 @@ export function TaskToolbar({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="outline" size="sm">
-            <Filter className="mr-2 h-4 w-4" />
-            Urgency
-            <ChevronDown className="ml-2 h-4 w-4" />
+            <Filter className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Urgency</span>
+            <ChevronDown className="ml-1 sm:ml-2 h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-48">
@@ -543,9 +544,9 @@ export function TaskToolbar({
       <DropdownMenu onOpenChange={(open) => { if (!open) setAssigneeSearchTerm('') }}>
         <DropdownMenuTrigger asChild>
           <Button variant="outline" size="sm">
-            <Filter className="mr-2 h-4 w-4" />
-            Assignee
-            <ChevronDown className="ml-2 h-4 w-4" />
+            <Filter className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Assignee</span>
+            <ChevronDown className="ml-1 sm:ml-2 h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-56">
@@ -600,9 +601,9 @@ export function TaskToolbar({
         <DropdownMenu onOpenChange={(open) => { if (!open) setTagSearchTerm('') }}>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm">
-              <TagIcon className="mr-2 h-4 w-4" />
-              Tags
-              <ChevronDown className="ml-2 h-4 w-4" />
+              <TagIcon className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Tags</span>
+              <ChevronDown className="ml-1 sm:ml-2 h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-56">
@@ -647,9 +648,9 @@ export function TaskToolbar({
         <DropdownMenu onOpenChange={(open) => { if (!open) setProjectSearchTerm('') }}>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm">
-              <FolderKanban className="mr-2 h-4 w-4" />
-              Project
-              <ChevronDown className="ml-2 h-4 w-4" />
+              <FolderKanban className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Project</span>
+              <ChevronDown className="ml-1 sm:ml-2 h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-56">
@@ -694,9 +695,9 @@ export function TaskToolbar({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm">
-              <Users className="mr-2 h-4 w-4" />
-              Creator
-              <ChevronDown className="ml-2 h-4 w-4" />
+              <Users className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Creator</span>
+              <ChevronDown className="ml-1 sm:ml-2 h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-48">
@@ -724,9 +725,9 @@ export function TaskToolbar({
         <DropdownMenu onOpenChange={(open) => { if (!open) setWorkflowSearchTerm('') }}>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm">
-              <WorkflowIcon className="mr-2 h-4 w-4" />
-              Workflow
-              <ChevronDown className="ml-2 h-4 w-4" />
+              <WorkflowIcon className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Workflow</span>
+              <ChevronDown className="ml-1 sm:ml-2 h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-72">
@@ -803,43 +804,49 @@ export function TaskToolbar({
       {/* Save Search */}
       {(onSaveSearch || onUpdateSearch) && hasActiveFilters && (
         <Button variant="outline" size="sm" onClick={openSaveModal}>
-          <Bookmark className="mr-2 h-4 w-4" />
-          Save
+          <Bookmark className="h-4 w-4 sm:mr-2" />
+          <span className="hidden sm:inline">Save</span>
         </Button>
       )}
 
       {/* Nest Workflows Toggle */}
       {onNestWorkflowsChange && (
-        <Button
-          variant={nestWorkflowsEnabled ? "default" : "outline"}
-          size="sm"
-          onClick={() => onNestWorkflowsChange(!nestWorkflowsEnabled)}
-          title={nestWorkflowsEnabled ? 'Show workflows as references' : 'Nest workflows inline'}
-        >
-          <GitBranch className="h-4 w-4" />
-        </Button>
+        <TouchTooltip label={nestWorkflowsEnabled ? 'Show workflows as references' : 'Nest workflows inline'}>
+          <Button
+            variant={nestWorkflowsEnabled ? "default" : "outline"}
+            size="sm"
+            onClick={() => onNestWorkflowsChange(!nestWorkflowsEnabled)}
+            title={nestWorkflowsEnabled ? 'Show workflows as references' : 'Nest workflows inline'}
+          >
+            <GitBranch className="h-4 w-4" />
+          </Button>
+        </TouchTooltip>
       )}
 
       {/* Expand/Collapse All */}
       {hasAnyChildren && onExpandAllChange && (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => onExpandAllChange(!expandAllEnabled)}
-          title={expandAllEnabled ? 'Collapse all' : 'Expand all'}
-        >
-          {expandAllEnabled ? (
-            <ChevronsDownUp className="h-4 w-4" />
-          ) : (
-            <ChevronsUpDown className="h-4 w-4" />
-          )}
-        </Button>
+        <TouchTooltip label={expandAllEnabled ? 'Collapse all' : 'Expand all'}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onExpandAllChange(!expandAllEnabled)}
+            title={expandAllEnabled ? 'Collapse all' : 'Expand all'}
+          >
+            {expandAllEnabled ? (
+              <ChevronsDownUp className="h-4 w-4" />
+            ) : (
+              <ChevronsUpDown className="h-4 w-4" />
+            )}
+          </Button>
+        </TouchTooltip>
       )}
 
       {/* Column Config */}
-      <Button variant="outline" size="sm" onClick={onOpenColumnConfig}>
-        <Columns className="h-4 w-4" />
-      </Button>
+      <TouchTooltip label="Configure columns">
+        <Button variant="outline" size="sm" onClick={onOpenColumnConfig} title="Configure columns">
+          <Columns className="h-4 w-4" />
+        </Button>
+      </TouchTooltip>
       </div>
 
       {/* Active Filters */}

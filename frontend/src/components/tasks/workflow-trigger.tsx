@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Play, Loader2, CheckCircle2, XCircle, ExternalLink } from 'lucide-react'
+import { Play, Loader2, CheckCircle2, XCircle, ExternalLink, Network } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -10,10 +10,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Task, Workflow } from '@/lib/api'
-import { useUpdateTask, useWorkflows } from '@/hooks/use-tasks'
+import { Task, Workflow, workflowRunsApi, tasksApi } from '@/lib/api'
+import { useWorkflows } from '@/hooks/use-tasks'
 import { cn } from '@/lib/utils'
 import Link from 'next/link'
+import { useQueryClient } from '@tanstack/react-query'
+import { WorkflowInputForm, useWorkflowInputForm } from '@/components/workflows/workflow-input-form'
 
 interface WorkflowTriggerProps {
   task: Task
@@ -22,28 +24,68 @@ interface WorkflowTriggerProps {
 export function WorkflowTrigger({ task }: WorkflowTriggerProps) {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>('')
   const [isTriggering, setIsTriggering] = useState(false)
-  const updateTask = useUpdateTask()
+  const [error, setError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
 
   // Fetch active workflows
   const { data: workflowsData, isLoading: isLoadingWorkflows } = useWorkflows()
   const workflows = workflowsData?.data?.filter((w: Workflow) => w.isActive) || []
 
+  // Get selected workflow for schema
+  const selectedWorkflow = workflows.find((w: Workflow) => w._id === selectedWorkflowId)
+
+  // Input form state driven by selected workflow's schema
+  const inputForm = useWorkflowInputForm(selectedWorkflow?.inputSchema)
+
   // Check if task already has a spawned workflow
   const spawnedWorkflowRunId = task.spawnedWorkflowRunId
   const workflowResult = task.workflowResult
 
+  const handleWorkflowChange = (value: string) => {
+    setSelectedWorkflowId(value)
+    setError(null)
+    inputForm.reset()
+  }
+
   const handleTriggerWorkflow = async () => {
     if (!selectedWorkflowId) return
 
+    // Validate input if schema exists
+    if (selectedWorkflow?.inputSchema && !inputForm.validate()) {
+      return
+    }
+
     setIsTriggering(true)
+    setError(null)
     try {
-      await updateTask.mutateAsync({
-        id: task._id,
-        data: { triggerWorkflowId: selectedWorkflowId },
+      // Start workflow directly via the workflow-runs API
+      const inputPayload = Object.keys(inputForm.values).length > 0
+        ? inputForm.values
+        : {
+            // Fallback: pass task context when no explicit input
+            title: task.title,
+            summary: task.summary || '',
+          }
+
+      const result = await workflowRunsApi.start({
+        workflowId: selectedWorkflowId,
+        inputPayload,
+        source: 'task-trigger',
       })
+
+      // Link the spawned run to this task
+      if (result.data?.run?._id) {
+        await tasksApi.update(task._id, {
+          spawnedWorkflowRunId: result.data.run._id,
+        })
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task', task._id] })
       setSelectedWorkflowId('')
-    } catch (error) {
-      console.error('Failed to trigger workflow:', error)
+      inputForm.reset()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to trigger workflow')
     } finally {
       setIsTriggering(false)
     }
@@ -98,28 +140,28 @@ export function WorkflowTrigger({ task }: WorkflowTriggerProps) {
 
   return (
     <div className="space-y-3 p-3 bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-lg">
-      <label className="text-xs font-medium text-purple-800 dark:text-purple-200">
+      <label className="text-xs font-medium text-purple-800 dark:text-purple-200 flex items-center gap-2">
+        <Network className="h-3.5 w-3.5" />
         Trigger Workflow
       </label>
-
-      <p className="text-xs text-muted-foreground">
-        Start a workflow with this task as the trigger. The workflow will receive the task&apos;s metadata as input.
-      </p>
 
       {/* Show spawned workflow status if exists */}
       {renderWorkflowStatus()}
 
-      {/* Workflow selection and trigger */}
-      <div className="flex gap-2">
+      {/* Workflow selection */}
+      <div className="space-y-1">
         <Select
-          value={selectedWorkflowId}
-          onValueChange={setSelectedWorkflowId}
+          value={selectedWorkflowId || '_none'}
+          onValueChange={(v) => handleWorkflowChange(v === '_none' ? '' : v)}
           disabled={isLoadingWorkflows || isTriggering}
         >
-          <SelectTrigger className="flex-1 h-8 text-sm">
+          <SelectTrigger className="h-8 text-sm">
             <SelectValue placeholder={isLoadingWorkflows ? "Loading..." : "Select workflow..."} />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="_none">
+              <span className="text-muted-foreground">Select workflow...</span>
+            </SelectItem>
             {workflows.map((workflow: Workflow) => (
               <SelectItem key={workflow._id} value={workflow._id}>
                 {workflow.name}
@@ -132,25 +174,48 @@ export function WorkflowTrigger({ task }: WorkflowTriggerProps) {
             )}
           </SelectContent>
         </Select>
+      </div>
 
+      {/* Input form - shown when a workflow is selected */}
+      {selectedWorkflowId && (
+        <WorkflowInputForm
+          inputSchema={selectedWorkflow?.inputSchema}
+          samplePayload={selectedWorkflow?.samplePayload}
+          value={inputForm.values}
+          onChange={inputForm.setValues}
+          errors={inputForm.errors}
+          disabled={isTriggering}
+        />
+      )}
+
+      {/* Error display */}
+      {error && (
+        <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
+      )}
+
+      {/* Run button */}
+      {selectedWorkflowId && (
         <Button
           type="button"
           size="sm"
           variant="default"
-          className="h-8 px-3 bg-purple-600 hover:bg-purple-700 text-white"
+          className="h-8 px-3 w-full bg-purple-600 hover:bg-purple-700 text-white"
           disabled={!selectedWorkflowId || isTriggering}
           onClick={handleTriggerWorkflow}
         >
           {isTriggering ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              Starting...
+            </>
           ) : (
             <>
-              <Play className="h-3.5 w-3.5 mr-1" />
-              Run
+              <Play className="h-3.5 w-3.5 mr-2" />
+              Run Workflow
             </>
           )}
         </Button>
-      </div>
+      )}
     </div>
   )
 }

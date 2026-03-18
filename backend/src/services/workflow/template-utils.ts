@@ -440,13 +440,19 @@ export function resolveTitleTemplate(
   const context: PathResolutionContext = { inputPayload };
 
   // Replace all {{...}} patterns using core resolution
-  const result = template.replace(/\{\{([^}]+)\}\}/g, (match, path) => {
+  let result = template.replace(/\{\{([^}]+)\}\}/g, (match, path) => {
     return resolveAndFormat(path, context, { extractIdentifier: true }, match);
   });
 
   // If the result is empty after substitution, use fallback
   if (!result.trim()) {
     return fallbackTitle || template;
+  }
+
+  // Truncate to max length to prevent excessively long titles
+  const MAX_TITLE_LENGTH = 200;
+  if (result.length > MAX_TITLE_LENGTH) {
+    result = result.substring(0, MAX_TITLE_LENGTH - 1) + '…';
   }
 
   return result;
@@ -507,6 +513,12 @@ export async function resolveTitleTemplateWithPackages(
   // If the result is empty after substitution, use fallback
   if (!result.trim()) {
     return fallbackTitle || template;
+  }
+
+  // Truncate to max length to prevent excessively long titles
+  const MAX_TITLE_LENGTH = 200;
+  if (result.length > MAX_TITLE_LENGTH) {
+    result = result.substring(0, MAX_TITLE_LENGTH - 1) + '…';
   }
 
   return result;

@@ -96,13 +96,13 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className="flex flex-col gap-3 md:gap-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-            <p className="text-sm text-muted-foreground">Tasks needing your attention</p>
+            <h1 className="text-xl md:text-2xl font-semibold tracking-tight">Dashboard</h1>
+            <p className="text-sm text-muted-foreground hidden sm:block">Tasks needing your attention</p>
           </div>
 
           {/* Project Filter */}
@@ -111,7 +111,7 @@ export function DashboardPage() {
               value={selectedProjectId || '__all__'}
               onValueChange={(val) => setSelectedProjectId(val === '__all__' ? null : val)}
             >
-              <SelectTrigger className="w-[200px] h-9">
+              <SelectTrigger className="w-full sm:w-[200px] h-9">
                 <FolderKanban className="mr-2 h-4 w-4 text-muted-foreground" />
                 <SelectValue placeholder="All Projects" />
               </SelectTrigger>
@@ -133,39 +133,39 @@ export function DashboardPage() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" onClick={handleCreateTask}>
+          <Button size="sm" className="flex-1 sm:flex-none" onClick={handleCreateTask}>
             <Plus className="mr-2 h-4 w-4" />
             New Task
           </Button>
           <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isLoading}>
             <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-            Refresh
+            <span className="hidden sm:inline">Refresh</span>
           </Button>
         </div>
       </div>
 
       {/* Stats Bar */}
       {data?.stats && (
-        <div className="flex gap-4">
-          <div className="flex items-center gap-2 rounded-lg border bg-card px-4 py-2">
-            <AlertCircle className="h-4 w-4 text-amber-500" />
-            <div>
-              <p className="text-xs text-muted-foreground">Needs Attention</p>
-              <p className="text-lg font-semibold">{data.stats.totalNeedingAttention}</p>
+        <div className="grid grid-cols-3 gap-2 md:gap-4">
+          <div className="flex items-center gap-2 rounded-lg border bg-card px-2 py-1.5 md:px-4 md:py-2">
+            <AlertCircle className="h-4 w-4 text-amber-500 flex-shrink-0" />
+            <div className="min-w-0">
+              <p className="text-[10px] md:text-xs text-muted-foreground truncate">Needs Attention</p>
+              <p className="text-base md:text-lg font-semibold">{data.stats.totalNeedingAttention}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 rounded-lg border bg-card px-4 py-2">
-            <MessageSquareWarning className="h-4 w-4 text-purple-500" />
-            <div>
-              <p className="text-xs text-muted-foreground">Questions Waiting</p>
-              <p className="text-lg font-semibold">{data.stats.questionsWaiting}</p>
+          <div className="flex items-center gap-2 rounded-lg border bg-card px-2 py-1.5 md:px-4 md:py-2">
+            <MessageSquareWarning className="h-4 w-4 text-purple-500 flex-shrink-0" />
+            <div className="min-w-0">
+              <p className="text-[10px] md:text-xs text-muted-foreground truncate">Questions</p>
+              <p className="text-base md:text-lg font-semibold">{data.stats.questionsWaiting}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 rounded-lg border bg-card px-4 py-2">
-            <Activity className="h-4 w-4 text-orange-500" />
-            <div>
-              <p className="text-xs text-muted-foreground">Escalated</p>
-              <p className="text-lg font-semibold">{data.stats.escalatedCount}</p>
+          <div className="flex items-center gap-2 rounded-lg border bg-card px-2 py-1.5 md:px-4 md:py-2">
+            <Activity className="h-4 w-4 text-orange-500 flex-shrink-0" />
+            <div className="min-w-0">
+              <p className="text-[10px] md:text-xs text-muted-foreground truncate">Escalated</p>
+              <p className="text-base md:text-lg font-semibold">{data.stats.escalatedCount}</p>
             </div>
           </div>
         </div>

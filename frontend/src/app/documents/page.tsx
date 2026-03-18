@@ -295,9 +295,9 @@ export default function DocumentsPage() {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between border-b px-6 py-4">
-        <h1 className="text-2xl font-semibold">Documents</h1>
-        <Button onClick={handleCreateDocument}>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b px-3 md:px-6 py-3 md:py-4">
+        <h1 className="text-xl md:text-2xl font-semibold">Documents</h1>
+        <Button className="w-full sm:w-auto" onClick={handleCreateDocument}>
           <Plus className="mr-2 h-4 w-4" />
           New Document
         </Button>

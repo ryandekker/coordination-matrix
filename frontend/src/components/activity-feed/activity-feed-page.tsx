@@ -299,10 +299,10 @@ export function ActivityFeedPage() {
   return (
     <div className="flex flex-col gap-3">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <div>
-          <h1 className="text-xl font-bold">Activity Feed</h1>
-          <p className="text-xs text-muted-foreground">
+          <h1 className="text-lg md:text-xl font-bold">Activity Feed</h1>
+          <p className="text-xs text-muted-foreground hidden sm:block">
             All activity across tasks
           </p>
         </div>

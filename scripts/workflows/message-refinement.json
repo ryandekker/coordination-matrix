@@ -1,0 +1,320 @@
+{
+  "name": "Iterative Message Refinement",
+  "description": "Fan out to multiple agents, each drafts a message independently. A judge evaluates and a human can review or auto-approve for N rounds. Agents revise, loop continues, then a final synthesis produces the best message and saves it as a document.",
+  "isActive": true,
+  "color": "#10b981",
+  "rootTaskTitleTemplate": "Refine: {{input.topic}}",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "topic": { "type": "string", "description": "What the message should communicate" },
+      "audience": { "type": "string", "description": "Who the message is for" },
+      "tone": { "type": "string", "description": "Desired tone (e.g., professional, casual, persuasive)" },
+      "constraints": { "type": "string", "description": "Length limits, must-include points, etc." },
+      "rounds": { "type": "number", "description": "Number of refinement rounds (default: 2)" },
+      "autoApproveRounds": { "type": "number", "description": "Skip human review for this many rounds (0 = always review, default: 0)" }
+    },
+    "required": ["topic"]
+  },
+  "samplePayload": "{\"topic\":\"Announce a new AI-powered feature to our enterprise customers\",\"audience\":\"Enterprise CTOs and engineering leads\",\"tone\":\"Professional but forward-looking, confident without hype\",\"constraints\":\"Under 300 words, must mention ROI and integration ease\",\"rounds\":2,\"autoApproveRounds\":1}",
+  "steps": [
+    {
+      "id": "fanout-draft",
+      "name": "Fan Out: Draft Messages",
+      "description": "Each intermediate-class agent independently drafts a message.",
+      "stepType": "foreach",
+      "itemsPath": "agents.complexity.2",
+      "itemVariable": "agent",
+      "maxItems": 10,
+      "connections": [
+        { "targetStepId": "draft-message" }
+      ]
+    },
+    {
+      "id": "draft-message",
+      "name": "Draft Message",
+      "description": "Each agent writes their version of the message.",
+      "stepType": "agent",
+      "defaultAssigneeId": "{{agent.complexity.2}}",
+      "additionalInstructions": "You are one of several agents drafting a message. Write your best version independently.\n\nTopic: {{input.topic}}\nAudience: {{input.audience}}\nTone: {{input.tone}}\nConstraints: {{input.constraints}}\n\nProduce a complete, polished message. Also include a brief note on your approach.\n\nReturn JSON:\n```json\n{\n  \"message\": \"your complete message text\",\n  \"approach\": \"brief note on your strategy and choices\",\n  \"confidence\": 0.0-1.0\n}\n```",
+      "connections": [
+        { "targetStepId": "join-drafts" }
+      ]
+    },
+    {
+      "id": "join-drafts",
+      "name": "Collect Drafts",
+      "description": "Wait for all agents to submit their drafts.",
+      "stepType": "join",
+      "awaitStepId": "fanout-draft",
+      "joinBoundary": {
+        "minPercent": 100,
+        "maxWaitMs": 600000,
+        "failOnTimeout": false
+      },
+      "connections": [
+        { "targetStepId": "judge-evaluate" }
+      ]
+    },
+    {
+      "id": "judge-evaluate",
+      "name": "Judge: Evaluate Drafts",
+      "description": "An advanced agent scores all drafts and provides feedback for the next round.",
+      "stepType": "agent",
+      "defaultAssigneeId": "{{agent.complexity.3}}",
+      "additionalInstructions": "You are the judge evaluating multiple independently-drafted messages.\n\nOriginal brief:\n- Topic: {{input.topic}}\n- Audience: {{input.audience}}\n- Tone: {{input.tone}}\n- Constraints: {{input.constraints}}\n\nScore each draft on these criteria (1-10):\n1. **Clarity** — Clear and unambiguous\n2. **Persuasiveness** — Compelling and motivating\n3. **Tone Match** — Matches the requested tone\n4. **Audience Fit** — Appropriate for the target audience\n5. **Constraint Adherence** — Meets stated constraints\n6. **Originality** — Fresh angle or phrasing\n\nFor each draft, identify:\n- Specific strengths to preserve\n- Specific weaknesses to fix\n- Elements other drafts could borrow\n\nProvide synthesis guidance and a recommendation on whether more rounds would help.\n\nReturn JSON:\n```json\n{\n  \"evaluations\": [\n    {\n      \"agentName\": \"...\",\n      \"scores\": { \"clarity\": 8, ... },\n      \"overallScore\": 7.5,\n      \"strengths\": [\"...\"],\n      \"weaknesses\": [\"...\"],\n      \"elementsToKeep\": [\"...\"]\n    }\n  ],\n  \"ranking\": [\"best-agent\", \"second\", ...],\n  \"synthesisGuidance\": \"How to combine the best elements...\",\n  \"topScore\": 8.5,\n  \"recommendation\": \"Another round would help because... / Ready to synthesize because...\"\n}\n```",
+      "connections": [
+        { "targetStepId": "review-check" }
+      ]
+    },
+    {
+      "id": "review-check",
+      "name": "Auto-Approve Check",
+      "description": "Decide whether this round needs human review or can be auto-approved.",
+      "stepType": "code",
+      "codeConfig": {
+        "code": "const roundsDone = (_stepLog || []).filter(e => e.stepId === 'judge-evaluate' || e.stepId === 'judge-revisions').length;\nconst autoApproveRounds = (trigger && trigger.autoApproveRounds) || 0;\nconst needsHumanReview = roundsDone > autoApproveRounds;\nreturn { verdict: needsHumanReview ? 'review' : 'auto', roundsDone, autoApproveRounds };"
+      },
+      "connections": [
+        { "targetStepId": "review-gate" }
+      ]
+    },
+    {
+      "id": "review-gate",
+      "name": "Human Review Needed?",
+      "description": "Route to human review or skip to round check.",
+      "stepType": "decision",
+      "decisionField": "output.verdict",
+      "connections": [
+        { "targetStepId": "human-review-round", "condition": "review", "label": "Human Review" },
+        { "targetStepId": "round-check", "condition": "auto", "label": "Auto-Approve" }
+      ],
+      "defaultConnection": "round-check"
+    },
+    {
+      "id": "human-review-round",
+      "name": "Human: Review Round",
+      "description": "Human reviews the judge's evaluation and decides whether to continue refining, synthesize now, or provide direction.",
+      "stepType": "manual",
+      "additionalInstructions": "The judge has evaluated this round of message drafts.\n\nOriginal brief:\n- Topic: {{input.topic}}\n- Audience: {{input.audience}}\n- Tone: {{input.tone}}\n\nReview the judge's evaluation and rankings.\n\n- **Approve**: Accept the judge's recommendation and continue the workflow\n- **Approve with Notes**: Add specific guidance for the next round (e.g., 'focus more on ROI messaging', 'tone is too casual')\n- **Request Changes**: Override — provide detailed direction for agents to follow",
+      "connections": [
+        { "targetStepId": "round-check" }
+      ]
+    },
+    {
+      "id": "round-check",
+      "name": "Check Refinement Rounds",
+      "description": "Count completed rounds and decide whether to loop again or synthesize.",
+      "stepType": "code",
+      "codeConfig": {
+        "code": "const roundsDone = (_stepLog || []).filter(e => e.stepId === 'judge-evaluate' || e.stepId === 'judge-revisions').length;\nconst maxRounds = (trigger && trigger.rounds) || 2;\nconst verdict = roundsDone < maxRounds ? 'revise' : 'synthesize';\nreturn { verdict, roundsDone, maxRounds };"
+      },
+      "connections": [
+        { "targetStepId": "round-decision" }
+      ]
+    },
+    {
+      "id": "round-decision",
+      "name": "More Rounds?",
+      "description": "Route to another refinement round or proceed to synthesis.",
+      "stepType": "decision",
+      "decisionField": "output.verdict",
+      "connections": [
+        { "targetStepId": "fanout-revise", "condition": "revise", "label": "Another Round" },
+        { "targetStepId": "synthesize", "condition": "synthesize", "label": "Synthesize" }
+      ],
+      "defaultConnection": "synthesize"
+    },
+    {
+      "id": "fanout-revise",
+      "name": "Fan Out: Revise Messages",
+      "description": "Each agent revises their message based on judge feedback.",
+      "stepType": "foreach",
+      "itemsPath": "agents.complexity.2",
+      "itemVariable": "agent",
+      "maxItems": 10,
+      "connections": [
+        { "targetStepId": "revise-message" }
+      ]
+    },
+    {
+      "id": "revise-message",
+      "name": "Revise Message",
+      "description": "Each agent improves their message using judge feedback.",
+      "stepType": "agent",
+      "defaultAssigneeId": "{{agent.complexity.2}}",
+      "additionalInstructions": "You are revising your message based on the judge's feedback.\n\nOriginal brief:\n- Topic: {{input.topic}}\n- Audience: {{input.audience}}\n- Tone: {{input.tone}}\n- Constraints: {{input.constraints}}\n\nReview the judge's evaluation of all drafts. Address your specific weaknesses while preserving your strengths. You may borrow good ideas from other agents' work, but maintain your own voice.\n\nReturn JSON:\n```json\n{\n  \"message\": \"your revised message text\",\n  \"changesFromPrevious\": [\"Changed X because...\", \"Incorporated Y from...\"],\n  \"confidence\": 0.0-1.0\n}\n```",
+      "connections": [
+        { "targetStepId": "join-revisions" }
+      ]
+    },
+    {
+      "id": "join-revisions",
+      "name": "Collect Revisions",
+      "description": "Wait for all revised messages.",
+      "stepType": "join",
+      "awaitStepId": "fanout-revise",
+      "joinBoundary": {
+        "minPercent": 100,
+        "maxWaitMs": 600000,
+        "failOnTimeout": false
+      },
+      "connections": [
+        { "targetStepId": "judge-revisions" }
+      ]
+    },
+    {
+      "id": "judge-revisions",
+      "name": "Judge: Evaluate Revisions",
+      "description": "Judge re-evaluates revised messages and tracks improvement.",
+      "stepType": "agent",
+      "defaultAssigneeId": "{{agent.complexity.3}}",
+      "additionalInstructions": "You are re-evaluating the revised messages. Each agent has improved their draft based on your previous feedback.\n\nOriginal brief:\n- Topic: {{input.topic}}\n- Audience: {{input.audience}}\n- Tone: {{input.tone}}\n- Constraints: {{input.constraints}}\n\nUse the same 6 criteria (clarity, persuasiveness, tone match, audience fit, constraint adherence, originality). Track improvement from the previous round.\n\nAssess convergence — are the messages becoming similar or maintaining useful diversity?\n\nReturn JSON:\n```json\n{\n  \"evaluations\": [\n    {\n      \"agentName\": \"...\",\n      \"scores\": { \"clarity\": 9, ... },\n      \"overallScore\": 8.5,\n      \"improvementFromPrevious\": \"+1.0\",\n      \"strengths\": [\"...\"],\n      \"remainingWeaknesses\": [\"...\"]\n    }\n  ],\n  \"ranking\": [\"best-agent\", ...],\n  \"synthesisGuidance\": \"Updated guidance for combining the best elements...\",\n  \"topScore\": 9.0,\n  \"recommendation\": \"Another round would help because... / Ready to synthesize because...\"\n}\n```",
+      "connections": [
+        { "targetStepId": "loop-review-check" }
+      ]
+    },
+    {
+      "id": "loop-review-check",
+      "name": "Loop Auto-Approve Check",
+      "description": "Decide whether this round needs human review or can be auto-approved.",
+      "stepType": "code",
+      "codeConfig": {
+        "code": "const roundsDone = (_stepLog || []).filter(e => e.stepId === 'judge-evaluate' || e.stepId === 'judge-revisions').length;\nconst autoApproveRounds = (trigger && trigger.autoApproveRounds) || 0;\nconst needsHumanReview = roundsDone > autoApproveRounds;\nreturn { verdict: needsHumanReview ? 'review' : 'auto', roundsDone, autoApproveRounds };"
+      },
+      "connections": [
+        { "targetStepId": "loop-review-gate" }
+      ]
+    },
+    {
+      "id": "loop-review-gate",
+      "name": "Human Review Needed?",
+      "description": "Route to human review or skip to loop check.",
+      "stepType": "decision",
+      "decisionField": "output.verdict",
+      "connections": [
+        { "targetStepId": "human-review-loop", "condition": "review", "label": "Human Review" },
+        { "targetStepId": "loop-check", "condition": "auto", "label": "Auto-Approve" }
+      ],
+      "defaultConnection": "loop-check"
+    },
+    {
+      "id": "human-review-loop",
+      "name": "Human: Review Revision",
+      "description": "Human reviews the revision round results and decides next steps.",
+      "stepType": "manual",
+      "additionalInstructions": "The judge has re-evaluated the revised messages.\n\nOriginal brief:\n- Topic: {{input.topic}}\n- Audience: {{input.audience}}\n- Tone: {{input.tone}}\n\nReview the judge's updated evaluation, improvement tracking, and recommendation.\n\n- **Approve**: Continue with the workflow's planned next step\n- **Approve with Notes**: Add guidance for the next round or synthesis\n- **Request Changes**: Provide specific direction to agents",
+      "connections": [
+        { "targetStepId": "loop-check" }
+      ]
+    },
+    {
+      "id": "loop-check",
+      "name": "Check Loop Count",
+      "description": "Count total judge rounds and decide whether to loop or synthesize.",
+      "stepType": "code",
+      "codeConfig": {
+        "code": "const roundsDone = (_stepLog || []).filter(e => e.stepId === 'judge-evaluate' || e.stepId === 'judge-revisions').length;\nconst maxRounds = (trigger && trigger.rounds) || 2;\nconst verdict = roundsDone < maxRounds ? 'revise' : 'synthesize';\nreturn { verdict, roundsDone, maxRounds };"
+      },
+      "connections": [
+        { "targetStepId": "loop-decision" }
+      ]
+    },
+    {
+      "id": "loop-decision",
+      "name": "Continue Refining?",
+      "description": "Route to another revision round or proceed to synthesis.",
+      "stepType": "decision",
+      "decisionField": "output.verdict",
+      "connections": [
+        { "targetStepId": "fanout-revise", "condition": "revise", "label": "Another Round" },
+        { "targetStepId": "synthesize", "condition": "synthesize", "label": "Synthesize" }
+      ],
+      "defaultConnection": "synthesize"
+    },
+    {
+      "id": "synthesize",
+      "name": "Synthesize Best Message",
+      "description": "Combine the best elements from all agents into one definitive message.",
+      "stepType": "agent",
+      "defaultAssigneeId": "{{agent.complexity.3}}",
+      "additionalInstructions": "You are creating the definitive final message by combining the best elements from all agents across all rounds.\n\nOriginal brief:\n- Topic: {{input.topic}}\n- Audience: {{input.audience}}\n- Tone: {{input.tone}}\n- Constraints: {{input.constraints}}\n\nYou have access to:\n- All agent drafts and revisions\n- All judge evaluations and synthesis guidance\n\nInstructions:\n1. Select the strongest version as a base\n2. Merge in the best elements from other versions (phrasing, structure, arguments)\n3. Polish for consistency, flow, and impact\n4. Verify all constraints are met\n5. The final message should be noticeably better than any individual version\n\nReturn JSON:\n```json\n{\n  \"finalMessage\": \"The complete synthesized message\",\n  \"baseAgent\": \"which agent's version was used as the base\",\n  \"incorporatedElements\": [\n    { \"from\": \"agent-name\", \"element\": \"what was taken\", \"why\": \"why it improves the message\" }\n  ],\n  \"qualityAssessment\": \"Brief self-assessment vs the original drafts\",\n  \"confidence\": 0.0-1.0\n}\n```",
+      "connections": [
+        { "targetStepId": "human-final-review" }
+      ]
+    },
+    {
+      "id": "human-final-review",
+      "name": "Human: Final Review",
+      "description": "Human reviews the synthesized message before it is saved as a document.",
+      "stepType": "manual",
+      "additionalInstructions": "Review the final synthesized message.\n\nOriginal Brief:\n- Topic: {{input.topic}}\n- Audience: {{input.audience}}\n- Tone: {{input.tone}}\n- Constraints: {{input.constraints}}\n\nThis is the result of multiple rounds of drafting, judging, and revision across several agents.\n\n- **Approve**: Save the message as an approved document\n- **Approve with Notes**: Save with minor adjustments noted\n- **Request Changes**: Send back for a targeted edit before saving",
+      "connections": [
+        { "targetStepId": "final-review-gate" }
+      ]
+    },
+    {
+      "id": "final-review-gate",
+      "name": "Final Approved?",
+      "description": "Route based on human final review decision.",
+      "stepType": "decision",
+      "decisionField": "reviewDecision",
+      "connections": [
+        { "targetStepId": "save-document", "condition": "approved", "label": "Approved" },
+        { "targetStepId": "save-document", "condition": "approved_with_notes", "label": "Approved" },
+        { "targetStepId": "targeted-edit", "condition": "request_changes", "label": "Changes" }
+      ],
+      "defaultConnection": "save-document"
+    },
+    {
+      "id": "targeted-edit",
+      "name": "Targeted Edit",
+      "description": "Apply specific human feedback to the synthesized message.",
+      "stepType": "agent",
+      "defaultAssigneeId": "{{agent.complexity.3}}",
+      "additionalInstructions": "You are applying specific human feedback to the synthesized message.\n\nRead the human's change requests carefully. Apply ONLY the requested changes — do not restructure or rewrite unrelated sections. Maintain overall quality and consistency.\n\nReturn JSON:\n```json\n{\n  \"finalMessage\": \"The updated message with changes applied\",\n  \"changesApplied\": [\"Changed X as requested\", \"Updated Y per feedback\"],\n  \"confidence\": 0.0-1.0\n}\n```",
+      "connections": [
+        { "targetStepId": "edit-loop-check" }
+      ]
+    },
+    {
+      "id": "edit-loop-check",
+      "name": "Check Edit Loops",
+      "description": "Prevent infinite edit loops.",
+      "stepType": "code",
+      "codeConfig": {
+        "code": "const editCount = (_stepLog || []).filter(e => e.stepId === 'targeted-edit').length;\nconst maxEdits = 3;\nreturn { verdict: editCount >= maxEdits ? 'save' : 'review', editCount, maxEdits };"
+      },
+      "connections": [
+        { "targetStepId": "edit-loop-gate" }
+      ]
+    },
+    {
+      "id": "edit-loop-gate",
+      "name": "More Edits?",
+      "description": "Route back to human review or force save.",
+      "stepType": "decision",
+      "decisionField": "output.verdict",
+      "connections": [
+        { "targetStepId": "human-final-review", "condition": "review", "label": "Re-review" },
+        { "targetStepId": "save-document", "condition": "save", "label": "Max Edits" }
+      ],
+      "defaultConnection": "save-document"
+    },
+    {
+      "id": "save-document",
+      "name": "Save as Document",
+      "description": "Save the final message as an approved document via API.",
+      "stepType": "webhook",
+      "webhookConfig": {
+        "url": "{{_apiUrl}}/api/documents",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json",
+          "X-API-Key": "{{_apiKey}}"
+        },
+        "bodyTemplate": "{\"title\": \"{{input.topic}}\", \"content\": \"{{steps.synthesize.output.result.finalMessage}}\", \"type\": \"output\", \"status\": \"approved\", \"tags\": [\"message-refinement\", \"synthesized\"]}"
+      }
+    }
+  ]
+}

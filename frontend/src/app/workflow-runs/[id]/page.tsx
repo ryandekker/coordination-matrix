@@ -50,6 +50,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
 import { workflowRunsApi, WorkflowRun, WorkflowRunStatus, Task, Workflow, authFetch } from '@/lib/api'
+import { WorkflowInputDisplay } from '@/components/workflows/workflow-input-display'
 
 const STATUS_CONFIG: Record<WorkflowRunStatus, { icon: React.ElementType; color: string; bgColor: string; label: string }> = {
   pending: { icon: Clock, color: 'text-gray-500', bgColor: 'bg-gray-50', label: 'Pending' },
@@ -534,6 +535,14 @@ export default function WorkflowRunDetailPage() {
         </div>
       </div>
 
+      {/* Input Data - Prominent position at top */}
+      {run.inputPayload && Object.keys(run.inputPayload).length > 0 && (
+        <WorkflowInputDisplay
+          inputPayload={run.inputPayload}
+          inputSchema={workflow?.inputSchema}
+        />
+      )}
+
       {/* Error Display */}
       {run.error && (
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
@@ -619,51 +628,26 @@ export default function WorkflowRunDetailPage() {
       {/* Execution Trace */}
       <ExecutionTrace runId={runId} />
 
-      {/* Input/Output Payloads */}
-      {(run.inputPayload || run.outputPayload) && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {run.inputPayload && Object.keys(run.inputPayload).length > 0 && (
-            <div className="rounded-lg border bg-card p-4">
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="font-semibold">Input Payload</h2>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(JSON.stringify(run.inputPayload, null, 2))
-                  }}
-                >
-                  <Copy className="h-3 w-3 mr-1" />
-                  Copy
-                </Button>
-              </div>
-              <pre className="text-sm bg-muted rounded p-3 overflow-auto max-h-48">
-                {JSON.stringify(run.inputPayload, null, 2)}
-              </pre>
-            </div>
-          )}
-          {run.outputPayload && Object.keys(run.outputPayload).length > 0 && (
-            <div className="rounded-lg border bg-card p-4">
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="font-semibold">Output Payload</h2>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(JSON.stringify(run.outputPayload, null, 2))
-                  }}
-                >
-                  <Copy className="h-3 w-3 mr-1" />
-                  Copy
-                </Button>
-              </div>
-              <pre className="text-sm bg-muted rounded p-3 overflow-auto max-h-48">
-                {JSON.stringify(run.outputPayload, null, 2)}
-              </pre>
-            </div>
-          )}
+      {/* Output Payload */}
+      {run.outputPayload && Object.keys(run.outputPayload).length > 0 && (
+        <div className="rounded-lg border bg-card p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="font-semibold">Output Payload</h2>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={async () => {
+                await navigator.clipboard.writeText(JSON.stringify(run.outputPayload, null, 2))
+              }}
+            >
+              <Copy className="h-3 w-3 mr-1" />
+              Copy
+            </Button>
+          </div>
+          <pre className="text-sm bg-muted rounded p-3 overflow-auto max-h-48">
+            {JSON.stringify(run.outputPayload, null, 2)}
+          </pre>
         </div>
       )}
 

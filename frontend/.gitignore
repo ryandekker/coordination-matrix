@@ -1,1 +1,8 @@
 .open-next
+
+# Playwright
+e2e/test-results/
+e2e/screenshots/
+playwright-report/
+blob-report/
+e2e/.auth/
