@@ -10,6 +10,7 @@ import { validateWorkflow } from '../../services/workflow/workflow-validator.js'
 import { simulateWorkflow } from '../../services/workflow/workflow-simulator.js';
 import { loadUserGroups, hasResourceAccess } from '../../middleware/group-access.js';
 import { isAdmin } from '../../middleware/authorize.js';
+import { groupService } from '../../services/group-service.js';
 
 export const workflowsRouter = Router();
 
@@ -340,17 +341,29 @@ workflowsRouter.post('/', async (req: Request, res: Response, next: NextFunction
       throw createError('name is required', 400);
     }
 
-    // Workflows must belong to a group (unless admin creating admin-only workflow)
-    let workflowGroupId: ObjectId | null = null;
-    if (groupId) {
-      workflowGroupId = new ObjectId(groupId);
-      // Check that user has access to this group
+    // Resolve groupId: explicit body > API key scope > user's single group > error
+    // For admins, userGroupIds is undefined (meaning "all"), so we look up their actual memberships
+    let resolvedGroupId = groupId || req.apiKey?.groupId?.toString() || null;
+    if (!resolvedGroupId) {
+      const userGroups = req.userGroupIds
+        || (req.user ? await groupService.getUserGroupIds(req.user.userId) : []);
+      if (userGroups.length === 1) {
+        resolvedGroupId = userGroups[0].toString();
+      }
+    }
+
+    let workflowGroupId: ObjectId;
+    if (resolvedGroupId) {
+      workflowGroupId = new ObjectId(resolvedGroupId);
       const hasAccess = await hasResourceAccess(req, workflowGroupId);
       if (!hasAccess) {
         throw createError('You do not have access to this group', 403);
       }
-    } else if (!isAdmin(req)) {
-      throw createError('groupId is required for creating workflows', 400);
+    } else {
+      throw createError(
+        'groupId is required. Provide it in the request body, scope your API key to a group, or ensure the user belongs to exactly one group.',
+        400
+      );
     }
 
     const now = new Date();
