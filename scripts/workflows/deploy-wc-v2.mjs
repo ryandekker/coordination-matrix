@@ -717,10 +717,10 @@ function buildWorkflow(promptDocIds) {
         description: 'Route based on E2E test result.',
         decisionField: 'output.verdict',
         connections: [
-          { targetStepId: 'human-approval', condition: 'pass', label: 'Passed' },
+          { targetStepId: 'prepare-review', condition: 'pass', label: 'Passed' },
           { targetStepId: 'fix-e2e-issues', condition: 'fail', label: 'Failed' },
         ],
-        defaultConnection: 'human-approval',
+        defaultConnection: 'prepare-review',
       },
       {
         id: 'fix-e2e-issues',
@@ -733,11 +733,55 @@ function buildWorkflow(promptDocIds) {
       },
       // --- Phase 5: Human Approval ---
       {
+        id: 'prepare-review',
+        name: 'Prepare Review Summary',
+        stepType: 'code',
+        description: 'Assemble a clean summary of the entire workflow creation process for human review.',
+        codeConfig: {
+          code: `
+            // Walk the step log to build a review summary
+            const log = _stepLog || [];
+            const summary = { phases: [], createdArtifacts: {}, testResults: {} };
+
+            // Extract key data from each phase
+            for (const entry of log) {
+              const out = entry.outputSummary || {};
+              if (entry.stepId === 'design-workflow') {
+                summary.phases.push({ step: 'Design', status: out.status || 'unknown', summary: out.summary || out.rawOutput?.substring(0, 500) || 'No summary' });
+              }
+              if (entry.stepId === 'review-design') {
+                summary.phases.push({ step: 'Review', status: out.status || 'unknown', summary: out.summary || 'No summary', confidence: out.confidence });
+              }
+              if (entry.stepId === 'create-prompts') {
+                summary.phases.push({ step: 'Create Prompts', status: out.status || 'unknown', summary: out.summary || 'No summary' });
+              }
+              if (entry.stepId === 'create-workflow-api') {
+                summary.phases.push({ step: 'Create Workflow', status: out.status || 'unknown', summary: out.summary || 'No summary' });
+                // Try to extract the created workflow ID
+                const result = out.result || {};
+                if (result.workflowId) summary.createdArtifacts.workflowId = result.workflowId;
+                if (result.workflowName) summary.createdArtifacts.workflowName = result.workflowName;
+              }
+              if (entry.stepId === 'e2e-test') {
+                summary.testResults = { status: out.status || 'unknown', summary: out.summary || 'No summary', confidence: out.confidence };
+              }
+            }
+
+            // Include original idea from trigger
+            summary.originalIdea = (trigger && trigger.idea) || 'Unknown';
+            summary.workflowName = (trigger && trigger.workflowName) || 'Unknown';
+
+            return summary;
+          `,
+        },
+        connections: [{ targetStepId: 'human-approval' }],
+      },
+      {
         id: 'human-approval',
         name: 'Human Approval',
         stepType: 'manual',
         description: 'Human reviews the designed and tested workflow before activation.',
-        additionalInstructions: 'Review the workflow that was designed, created, and tested.\n\nCheck:\n- Step structure and flow logic\n- Prompt content quality\n- E2E test results\n- Overall workflow design\n\nApprove to activate, add notes for minor adjustments, or request changes for substantial revisions.',
+        additionalInstructions: 'Review the workflow creation summary below.\n\nThe output section shows:\n- Original idea and workflow name\n- Results from each phase (design, review, prompt creation, workflow creation, E2E testing)\n- Created artifact IDs\n\nApprove to activate the workflow, add notes for minor adjustments, or request changes for substantial revisions.',
         connections: [{ targetStepId: 'approval-gate' }],
       },
       {
