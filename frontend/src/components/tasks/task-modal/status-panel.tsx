@@ -299,16 +299,29 @@ export function StatusPanel({
           </div>
         )
 
-      case 'on_hold':
+      case 'on_hold': {
+        const isEscalated = !!(task.tags?.includes('escalated') ||
+          (metadata?.escalationReason && typeof metadata.escalationReason === 'string'))
+        const escalationReason = metadata?.escalationReason as string | undefined
+
         return (
           <div className="space-y-3">
             <div className="flex items-start gap-3">
-              <Pause className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />
+              {isEscalated ? (
+                <AlertTriangle className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />
+              ) : (
+                <Pause className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />
+              )}
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
-                  Task on hold
+                  {isEscalated ? 'Escalated — Needs Human Intervention' : 'Task on hold'}
                 </p>
-                {waitingReason && (
+                {isEscalated && escalationReason && (
+                  <p className="mt-1 text-sm text-muted-foreground line-clamp-2">
+                    {escalationReason}
+                  </p>
+                )}
+                {!isEscalated && waitingReason && (
                   <p className="mt-1 text-sm text-muted-foreground">
                     {waitingReason}
                   </p>
@@ -326,12 +339,13 @@ export function StatusPanel({
                   className="gap-2"
                 >
                   <Play className="h-3.5 w-3.5" />
-                  Resume
+                  {isEscalated ? 'Retry' : 'Resume'}
                 </Button>
               </div>
             )}
           </div>
         )
+      }
 
       case 'cancelled':
         return (

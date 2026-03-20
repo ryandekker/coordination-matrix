@@ -15,7 +15,7 @@ dashboardRouter.use(loadUserGroups());
 dashboardRouter.get('/kanban', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { groupId, projectId } = req.query;
+    const { groupId, projectId, workflowId, tags, assigneeId } = req.query;
 
     // Build base filter: exclude archived tasks
     const baseFilter: Filter<Task> = {
@@ -50,6 +50,28 @@ dashboardRouter.get('/kanban', async (req: Request, res: Response, next: NextFun
 
     if (projectId) {
       baseFilter.projectId = new ObjectId(projectId as string);
+    }
+
+    // Optional workflow filter
+    if (workflowId) {
+      baseFilter.workflowId = new ObjectId(workflowId as string);
+    }
+
+    // Optional tag filter (comma-separated)
+    if (tags) {
+      const tagList = (tags as string).split(',').map(t => t.trim()).filter(Boolean);
+      if (tagList.length > 0) {
+        baseFilter.tags = { $all: tagList };
+      }
+    }
+
+    // Optional assignee filter
+    if (assigneeId) {
+      if (assigneeId === '__unassigned__') {
+        baseFilter.assigneeId = null;
+      } else {
+        baseFilter.assigneeId = new ObjectId(assigneeId as string);
+      }
     }
 
     // Get human user IDs (not agent, not system, active)
