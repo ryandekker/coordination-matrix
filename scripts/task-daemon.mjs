@@ -1624,9 +1624,9 @@ async function processRoutingOperations(config, task, routingOperations) {
             resolvedOpInput = await resolveVarReferencesViaApi(config, resolvedOpInput);
           }
 
-          const input = {
+          const payload = {
             workflowId,
-            input: {
+            inputPayload: {
               title: task.title,
               summary: task.summary || '',
               tags: task.tags || [],
@@ -1635,20 +1635,29 @@ async function processRoutingOperations(config, task, routingOperations) {
             },
             source: 'routing-agent',
             externalId: task._id,
+            triggerTaskId: task._id,
+            ...(task.humanInstruction && { humanInstruction: task.humanInstruction }),
           };
           const response = await fetchWithTimeout(`${config.apiUrl}/workflow-runs`, {
             method: 'POST',
             headers: getHeaders(config),
-            body: JSON.stringify(input),
+            body: JSON.stringify(payload),
           });
           if (response.ok) {
             const result = await response.json();
             const runId = result.data?.workflowRunId || result.data?._id;
             results.push({ action: 'triggerWorkflow', success: true, workflowId, workflowRunId: runId });
           } else {
-            const error = await response.text();
-            console.error(`[Routing] Failed to trigger workflow (${response.status}): ${error}`);
-            results.push({ action: 'triggerWorkflow', success: false, workflowId, error: `HTTP ${response.status}` });
+            const errorBody = await response.text();
+            let errorDetail = `HTTP ${response.status}`;
+            try {
+              const parsed = JSON.parse(errorBody);
+              errorDetail += `: ${parsed.error || parsed.message || errorBody}`;
+            } catch {
+              if (errorBody) errorDetail += `: ${errorBody.substring(0, 200)}`;
+            }
+            console.error(`[Routing] Failed to trigger workflow (${response.status}): ${errorBody}`);
+            results.push({ action: 'triggerWorkflow', success: false, workflowId, error: errorDetail });
           }
         } catch (err) {
           console.error(`[Routing] Error triggering workflow: ${err.message}`);
@@ -3367,6 +3376,20 @@ async function processTask(config, task) {
     const routingResults = await processRoutingOperations(config, task, parsedResponse.data.routingOperations);
     output.routingOperations = routingResults;
     log.info('Routing operations completed', { results: routingResults.length });
+
+    // Check for critical routing failures (triggerWorkflow) that should prevent task completion
+    const criticalFailures = routingResults.filter(
+      r => r.action === 'triggerWorkflow' && !r.success
+    );
+    if (criticalFailures.length > 0 && newStatus === 'completed') {
+      const failureDetails = criticalFailures.map(f => f.error).join('; ');
+      log.warn(`Critical routing operation failed — downgrading task status from completed to on_hold: ${failureDetails}`);
+      newStatus = 'on_hold';
+      output.routingFailure = {
+        reason: 'Workflow trigger failed — task held for investigation',
+        failures: criticalFailures,
+      };
+    }
   }
 
   // Merge with existing metadata, clearing temporary fields
