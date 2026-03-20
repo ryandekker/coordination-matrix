@@ -671,7 +671,7 @@ export function TaskModal({
   if (!task) {
     return (
       <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="max-w-lg w-[95vw] md:w-full max-h-[90vh] md:max-h-[85vh] flex flex-col overflow-hidden" aria-describedby={undefined}>
+        <DialogContent className="max-w-lg w-[97vw] md:w-full max-h-[92vh] md:max-h-[88vh] flex flex-col overflow-hidden" aria-describedby={undefined}>
           <DialogHeader className="pb-2 flex-shrink-0">
             <DialogTitle className="text-base">
               {parentTask ? `New Subtask` : 'New Task'}
@@ -942,32 +942,34 @@ export function TaskModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl w-[95vw] md:w-full h-[95vh] md:h-[90vh] p-0 gap-0 flex flex-col overflow-hidden" aria-describedby={undefined}>
+      <DialogContent className="max-w-4xl w-[97vw] md:w-full h-[96vh] md:h-[92vh] !p-0 gap-0 flex flex-col overflow-hidden" aria-describedby={undefined}>
         {/* Accessibility: visually hidden title and description for screen readers */}
         <VisuallyHidden.Root asChild>
           <DialogTitle>Edit Task: {task?.title || 'Task'}</DialogTitle>
         </VisuallyHidden.Root>
 
         {/* Header */}
-        <div className="px-3 pt-3 pb-3 md:px-5 md:pt-5 md:pb-4 flex-shrink-0 border-b border-border">
-          {/* Editable title */}
-          <input
-            {...register('title', {
-              onBlur: handleTitleBlur,
-            })}
-            placeholder="Task title..."
-            className={cn(
-              'w-full text-lg font-semibold bg-transparent',
-              'border-0 border-b-2 border-transparent rounded-none',
-              'hover:border-muted-foreground/30 focus:border-primary',
-              'focus:outline-none focus:ring-0',
-              'transition-colors duration-150',
-              'placeholder:text-muted-foreground/50'
-            )}
-          />
+        <div className="flex-shrink-0 border-b border-border">
+          {/* Editable title - aligned with close button */}
+          <div className="px-3 pt-3 md:px-4 pr-10">
+            <input
+              {...register('title', {
+                onBlur: handleTitleBlur,
+              })}
+              placeholder="Task title..."
+              className={cn(
+                'w-full text-lg font-semibold bg-transparent',
+                'border-0 border-b-2 border-transparent rounded-none',
+                'hover:border-muted-foreground/30 focus:border-primary',
+                'focus:outline-none focus:ring-0',
+                'transition-colors duration-150',
+                'placeholder:text-muted-foreground/50'
+              )}
+            />
+          </div>
 
           {/* Inline controls */}
-          <div className="flex flex-wrap items-center gap-2 mt-3">
+          <div className="flex flex-wrap items-center gap-2 mt-2 px-3 pb-2 md:px-4 md:pb-3">
             {/* Task Type */}
             <Controller
               name="taskType"
@@ -1180,19 +1182,19 @@ export function TaskModal({
 
         {/* Main content - single scrollable area */}
         <Tabs value={activeTab} onValueChange={handleTabChange} className="flex-1 min-h-0 flex flex-col">
-          {/* Tab List (fixed) */}
-          <div className="flex-shrink-0">
-            <TabsList className="w-full justify-start px-3 md:px-5 pt-2 pb-0 rounded-none border-b border-border bg-transparent h-auto overflow-x-auto">
+          {/* Tab List (fixed) - border spans full width */}
+          <div className="flex-shrink-0 border-b border-border">
+            <TabsList className="w-full justify-start px-3 md:px-4 pt-1 pb-0 rounded-none bg-transparent h-auto overflow-x-auto">
               <TabsTrigger
                 value={TASK_MODAL_TABS.OUTPUT}
-                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-4 py-2 flex-shrink-0"
+                className="gap-1 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-3 py-1.5 flex-shrink-0"
               >
                 <FileOutput className="h-3.5 w-3.5" />
                 <span className="text-xs hidden sm:inline">Output</span>
               </TabsTrigger>
               <TabsTrigger
                 value={TASK_MODAL_TABS.SUBTASKS}
-                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-4 py-2 flex-shrink-0"
+                className="gap-1 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-3 py-1.5 flex-shrink-0"
               >
                 <ListTree className="h-3.5 w-3.5" />
                 <span className="text-xs hidden sm:inline">Subtasks</span>
@@ -1202,7 +1204,7 @@ export function TaskModal({
               </TabsTrigger>
               <TabsTrigger
                 value={TASK_MODAL_TABS.DOCUMENTS}
-                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-4 py-2 flex-shrink-0"
+                className="gap-1 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-3 py-1.5 flex-shrink-0"
               >
                 <FileText className="h-3.5 w-3.5" />
                 <span className="text-xs hidden sm:inline">Documents</span>
@@ -1212,14 +1214,14 @@ export function TaskModal({
               </TabsTrigger>
               <TabsTrigger
                 value={TASK_MODAL_TABS.ACTIVITY}
-                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-4 py-2 flex-shrink-0"
+                className="gap-1 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-3 py-1.5 flex-shrink-0"
               >
                 <Activity className="h-3.5 w-3.5" />
                 <span className="text-xs hidden sm:inline">Activity</span>
               </TabsTrigger>
               <TabsTrigger
                 value={TASK_MODAL_TABS.METADATA}
-                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-4 py-2 flex-shrink-0"
+                className="gap-1 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-3 py-1.5 flex-shrink-0"
               >
                 <Braces className="h-3.5 w-3.5" />
                 <span className="text-xs hidden sm:inline">Metadata</span>
@@ -1227,7 +1229,7 @@ export function TaskModal({
               {task.stepConfig && (
                 <TabsTrigger
                   value={TASK_MODAL_TABS.STEP_CONFIG}
-                  className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-4 py-2 flex-shrink-0"
+                  className="gap-1 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-3 py-1.5 flex-shrink-0"
                 >
                   <Settings2 className="h-3.5 w-3.5" />
                   <span className="text-xs hidden sm:inline">Step Config</span>
@@ -1235,7 +1237,7 @@ export function TaskModal({
               )}
               <TabsTrigger
                 value={TASK_MODAL_TABS.DETAILS}
-                className="gap-1.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-4 py-2 flex-shrink-0"
+                className="gap-1 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-2 md:px-3 py-1.5 flex-shrink-0"
               >
                 <Settings className="h-3.5 w-3.5" />
                 <span className="text-xs hidden sm:inline">Details</span>

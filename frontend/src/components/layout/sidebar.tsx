@@ -440,7 +440,7 @@ export function Sidebar({ collapsed = false, onNavigate }: SidebarProps = {}) {
                 <item.icon className="h-4 w-4 flex-shrink-0" />
                 {!collapsed && <span className="flex-1">{item.name}</span>}
                 {!collapsed && item.name === 'Dashboard' && escalationCount > 0 && (
-                  <Badge variant="destructive" className="h-5 min-w-[20px] px-1 text-[10px] font-semibold">
+                  <Badge variant="destructive" className="h-5 min-w-[20px] px-1 text-[10px] font-semibold leading-none">
                     {escalationCount}
                   </Badge>
                 )}
