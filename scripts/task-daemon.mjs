@@ -1944,58 +1944,90 @@ Respond with ONLY this JSON object, no markdown code blocks, no explanation.`);
 // ============================================================================
 
 function parseResponse(responseText) {
-  // Try to parse as JSON, with multiple extraction strategies
-  try {
-    let jsonStr = responseText.trim();
+  // Try multiple strategies to extract valid JSON from agent output
+  const strategies = [];
 
-    // Strategy 1: Extract from markdown code blocks (```json ... ``` or ``` ... ```)
-    const codeBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (codeBlockMatch) {
-      jsonStr = codeBlockMatch[1].trim();
-    }
+  const trimmed = responseText.trim();
 
-    // Strategy 2: Find the outermost JSON object by matching first { to last }
-    // This handles preamble text, escaped newlines, trailing text, etc.
-    const firstBrace = jsonStr.indexOf('{');
-    const lastBrace = jsonStr.lastIndexOf('}');
-    if (firstBrace !== -1 && lastBrace > firstBrace) {
-      jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
-    }
+  // Strategy 1: Direct parse after trim
+  strategies.push({ name: 'direct', text: trimmed });
 
-    const parsed = JSON.parse(jsonStr);
-
-    // Validate required fields
-    if (!parsed.status || !parsed.nextAction) {
-      return {
-        success: false,
-        error: 'Missing required fields (status, nextAction)',
-        raw: responseText,
-      };
-    }
-
-    return {
-      success: true,
-      data: {
-        status: parsed.status,
-        summary: parsed.summary || '',
-        output: parsed.output || '',
-        nextAction: parsed.nextAction,
-        nextActionReason: parsed.nextActionReason || '',
-        metadata: parsed.metadata || {},
-        documentOperations: parsed.documentOperations || [],
-        routingOperations: parsed.routingOperations || [],
-        questions: parsed.questions || null,
-        questionsContext: parsed.context || null,
-        requestedCapabilities: parsed.requestedCapabilities || null,
-      },
-    };
-  } catch (e) {
-    return {
-      success: false,
-      error: `Failed to parse JSON: ${e.message}`,
-      raw: responseText,
-    };
+  // Strategy 2: Extract from markdown code blocks
+  const codeBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (codeBlockMatch) {
+    strategies.push({ name: 'codeblock', text: codeBlockMatch[1].trim() });
   }
+
+  // Strategy 3: Find outermost { to } (handles preamble/trailing text)
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    strategies.push({ name: 'braces', text: trimmed.substring(firstBrace, lastBrace + 1) });
+  }
+
+  // Strategy 4: Balanced brace matching from first { (handles cases where
+  // last } belongs to a different context than first {)
+  if (firstBrace !== -1) {
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    let end = -1;
+    for (let i = firstBrace; i < trimmed.length; i++) {
+      const ch = trimmed[i];
+      if (escape) { escape = false; continue; }
+      if (ch === '\\') { escape = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (ch === '{') depth++;
+      else if (ch === '}') { depth--; if (depth === 0) { end = i; break; } }
+    }
+    if (end !== -1) {
+      strategies.push({ name: 'balanced', text: trimmed.substring(firstBrace, end + 1) });
+    }
+  }
+
+  let lastError = null;
+  for (const { name, text } of strategies) {
+    try {
+      const parsed = JSON.parse(text);
+
+      // Validate required fields
+      if (!parsed.status || !parsed.nextAction) {
+        continue; // Try next strategy — this JSON doesn't have the right shape
+      }
+
+      console.log(`[DEBUG] parseResponse: strategy '${name}' succeeded`);
+      return {
+        success: true,
+        data: {
+          status: parsed.status,
+          summary: parsed.summary || '',
+          output: parsed.output || '',
+          nextAction: parsed.nextAction,
+          nextActionReason: parsed.nextActionReason || '',
+          metadata: parsed.metadata || {},
+          documentOperations: parsed.documentOperations || [],
+          routingOperations: parsed.routingOperations || [],
+          questions: parsed.questions || null,
+          questionsContext: parsed.context || null,
+          requestedCapabilities: parsed.requestedCapabilities || null,
+        },
+      };
+    } catch (e) {
+      lastError = e;
+    }
+  }
+
+  // All strategies failed — log diagnostic info
+  console.log(`[WARN] parseResponse: all ${strategies.length} strategies failed`);
+  console.log(`[WARN] Input length: ${responseText.length}, first 100 chars: ${JSON.stringify(trimmed.substring(0, 100))}`);
+  console.log(`[WARN] Last 100 chars: ${JSON.stringify(trimmed.substring(trimmed.length - 100))}`);
+
+  return {
+    success: false,
+    error: `Failed to parse JSON: ${lastError?.message || 'unknown'}`,
+    raw: responseText,
+  };
 }
 
 // ============================================================================
