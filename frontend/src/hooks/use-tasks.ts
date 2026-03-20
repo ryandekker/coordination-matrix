@@ -245,6 +245,22 @@ export function useRerunTask() {
   })
 }
 
+export function useRetryTask() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, options }: { id: string; options?: { clearError?: boolean } }) =>
+      tasksApi.retry(id, options),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task', variables.id] })
+      queryClient.invalidateQueries({ queryKey: ['task-tree'] })
+      queryClient.invalidateQueries({ queryKey: ['task-children'] })
+      queryClient.invalidateQueries({ queryKey: ['activity-logs'] })
+    },
+  })
+}
+
 export function useBulkUpdateTasks() {
   const queryClient = useQueryClient()
 

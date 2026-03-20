@@ -12,6 +12,7 @@ import { TaskResultDisplay } from '../task-result-display'
 import { DecisionOptionsPanel } from '../decision-options-panel'
 import { ManualReviewPanel } from './manual-review-panel'
 import { AgentQuestionsPanel } from './agent-questions-panel'
+import { EscalationPanel } from './escalation-panel'
 import { DocumentOperationsPanel, type DocumentOperationResult } from './document-operations-panel'
 import { RoutingOperationsPanel, type RoutingOperationResult } from './routing-operations-panel'
 import { ExecutionSummarySection } from './execution-summary-section'
@@ -22,9 +23,11 @@ import { useQueryClient } from '@tanstack/react-query'
 interface OutputTabProps {
   task: Task
   onRollback?: () => Promise<void>
+  onRetry?: (humanInstruction?: string) => Promise<void>
+  isRetrying?: boolean
 }
 
-export function OutputTab({ task, onRollback }: OutputTabProps) {
+export function OutputTab({ task, onRollback, onRetry, isRetrying }: OutputTabProps) {
   const [copied, setCopied] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const updateTask = useUpdateTask()
@@ -72,6 +75,17 @@ export function OutputTab({ task, onRollback }: OutputTabProps) {
     const ops = outputData.routingOperations as RoutingOperationResult[]
     return ops.length > 0 ? ops : null
   }, [metadata])
+
+  // Detect escalated tasks (on_hold with escalation markers)
+  const isEscalated = useMemo(() => {
+    if (task.status !== 'on_hold') return false
+    const md = task.metadata as Record<string, unknown> | undefined
+    if (md?.escalationReason) return true
+    if (task.tags?.includes('escalated')) return true
+    const outputData = md?.output as Record<string, unknown> | undefined
+    if (outputData?.action === 'ESCALATE') return true
+    return false
+  }, [task])
 
   // Extract output based on task type - MUST be before any early returns (React hooks rule)
   const output = useMemo(() => {
@@ -255,6 +269,21 @@ export function OutputTab({ task, onRollback }: OutputTabProps) {
           questionsData={agentQuestionsData}
           onSubmitAnswers={handleSubmitAnswers}
           isSubmitting={isSubmitting}
+        />
+      </>
+    )
+  }
+
+  // For escalated tasks, show the escalation panel with human-friendly display and recovery actions
+  if (isEscalated && onRetry) {
+    return (
+      <>
+        {executionSummaryBanner}
+        <EscalationPanel
+          task={task}
+          onRetry={onRetry}
+          onRollback={onRollback}
+          isRetrying={isRetrying}
         />
       </>
     )

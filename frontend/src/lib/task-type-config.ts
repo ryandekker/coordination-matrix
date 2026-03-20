@@ -286,6 +286,10 @@ export function getSmartDefaultTab(task: { status: string; taskType?: string; me
   if (task.taskType === 'manual') {
     return TASK_MODAL_TABS.OUTPUT
   }
+  // For escalated tasks, show the Output tab where the EscalationPanel is rendered
+  if (task.status === 'on_hold' && task.metadata?.escalationReason) {
+    return TASK_MODAL_TABS.OUTPUT
+  }
   // For other statuses, check localStorage or use activity
   if (typeof window !== 'undefined') {
     const stored = localStorage.getItem(TASK_MODAL_TAB_KEY)

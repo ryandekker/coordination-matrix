@@ -31,7 +31,7 @@ import {
 import { Task, FieldConfig, LookupValue, TaskType, WebhookConfig, isSystemUser, Group, authFetch } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { toast } from 'sonner'
-import { useCreateTask, useUpdateTask, useRerunTask, useUsers, useWorkflows, useTasks, useTask, useTaskChildren, useTaskDocuments, useDetachDocument } from '@/hooks/use-tasks'
+import { useCreateTask, useUpdateTask, useRerunTask, useRetryTask, useUsers, useWorkflows, useTasks, useTask, useTaskChildren, useTaskDocuments, useDetachDocument } from '@/hooks/use-tasks'
 import { useGroupContext } from '@/lib/group-context'
 import { cn } from '@/lib/utils'
 import { TaskActivity } from './task-activity'
@@ -105,6 +105,7 @@ export function TaskModal({
   const createTask = useCreateTask()
   const updateTask = useUpdateTask()
   const rerunTask = useRerunTask()
+  const retryTask = useRetryTask()
 
   // Metadata save handler
   const handleMetadataSave = useCallback(async (parsed: Record<string, unknown>) => {
@@ -600,6 +601,25 @@ export function TaskModal({
       toast.error('Failed to rerun task')
     }
   }, [task, rerunTask])
+
+  // Retry handler for escalated tasks — saves humanInstruction then retries
+  const handleRetryEscalated = useCallback(async (humanInstruction?: string) => {
+    if (!task) return
+    try {
+      // If human instruction provided, save it to the task first
+      if (humanInstruction && humanInstruction.trim()) {
+        await updateTask.mutateAsync({
+          id: task._id,
+          data: { humanInstruction: humanInstruction.trim() } as Partial<Task>,
+        })
+      }
+      // Then retry (resets to pending and resumes paused workflow)
+      await retryTask.mutateAsync({ id: task._id })
+      toast.success(task.workflowRunId ? 'Task retry started and workflow resumed' : 'Task retry started')
+    } catch {
+      toast.error('Failed to retry task')
+    }
+  }, [task, updateTask, retryTask])
 
   // Webhook execution handlers
   const handleExecuteWebhook = useCallback(async () => {
@@ -1248,7 +1268,12 @@ export function TaskModal({
           {/* Tab Content - scrollable */}
           <div className="flex-1 min-h-0 overflow-y-auto pr-4 -mr-4">
             <TabsContent value={TASK_MODAL_TABS.OUTPUT} className="mt-0">
-              <OutputTab task={task} onRollback={task.workflowRunId ? handleRollback : undefined} />
+              <OutputTab
+                task={task}
+                onRollback={task.workflowRunId ? handleRollback : undefined}
+                onRetry={handleRetryEscalated}
+                isRetrying={retryTask.isPending}
+              />
             </TabsContent>
 
             <TabsContent value={TASK_MODAL_TABS.SUBTASKS} className="mt-0">

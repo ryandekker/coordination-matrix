@@ -6212,7 +6212,7 @@ class WorkflowExecutionService {
 
     let workflowResumed = false;
 
-    // If this is a workflow task, also reset the workflow run if it failed
+    // If this is a workflow task, also reset the workflow run if it failed or paused
     if (task.workflowRunId) {
       const run = await this.workflowRuns.findOne({ _id: task.workflowRunId });
       if (run && run.status === 'failed' && run.failedStepId === task.workflowStepId) {
@@ -6240,6 +6240,37 @@ class WorkflowExecutionService {
           await this.tasks.updateOne(
             { _id: run.rootTaskId, status: 'failed' },
             { $set: { status: 'in_progress' as TaskStatus, updatedAt: now } }
+          );
+        }
+      } else if (run && run.status === 'paused' && run.pausedStepId === task.workflowStepId) {
+        // Resume paused workflow (from escalation)
+        await this.workflowRuns.updateOne(
+          { _id: task.workflowRunId },
+          {
+            $set: {
+              status: 'running' as WorkflowRunStatus,
+              updatedAt: now,
+            },
+            $unset: {
+              error: '',
+              pausedStepId: '',
+              pausedAt: '',
+            },
+            $addToSet: {
+              currentStepIds: task.workflowStepId,
+            }
+          }
+        );
+        workflowResumed = true;
+
+        // Also reset root task if on_hold
+        if (run.rootTaskId) {
+          await this.tasks.updateOne(
+            { _id: run.rootTaskId, status: 'on_hold' },
+            {
+              $set: { status: 'in_progress' as TaskStatus, updatedAt: now },
+              $unset: { 'metadata.pausedReason': '' }
+            }
           );
         }
       }

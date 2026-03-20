@@ -162,6 +162,16 @@ export const tasksApi = {
     return handleResponse(response)
   },
 
+  // Retry a failed or on_hold task (simpler than rerun, also resumes paused workflows)
+  retry: async (id: string, options?: { clearError?: boolean }): Promise<ApiResponse<Task>> => {
+    const response = await authFetch(`${API_BASE}/tasks/${id}/retry`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(options || {}),
+    })
+    return handleResponse(response)
+  },
+
   // Webhook task operations
   executeWebhook: async (id: string): Promise<ApiResponse<WebhookAttempt>> => {
     const response = await authFetch(`${API_BASE}/tasks/${id}/webhook/execute`, {
