@@ -3097,9 +3097,15 @@ async function processTask(config, task) {
     return;
   }
 
-  // Claim the task (set to in_progress)
-  console.log(`Setting task status to 'in_progress'...`);
-  const claimed = await updateTask(config, task._id, { status: 'in_progress' });
+  // Claim the task (set to in_progress and self-assign if not already assigned)
+  const claimPayload = { status: 'in_progress' };
+  if (config.agentId && !task.assigneeId) {
+    claimPayload.assignee = config.agentId;
+    console.log(`Claiming task (in_progress + assigning to ${config.agentId})...`);
+  } else {
+    console.log(`Setting task status to 'in_progress'...`);
+  }
+  const claimed = await updateTask(config, task._id, claimPayload);
   if (!claimed) {
     console.error('Failed to claim task, skipping...');
     if (mcpTempFile) { try { unlinkSync(mcpTempFile); } catch {} }
@@ -3389,6 +3395,16 @@ async function processTask(config, task) {
         reason: 'Workflow trigger failed — task held for investigation',
         failures: criticalFailures,
       };
+    }
+
+    // When a successful assign operation re-routed the task (set it to pending for another agent),
+    // don't overwrite that with the daemon's final status update
+    const successfulAssign = routingResults.find(
+      r => r.action === 'assign' && r.success && r.statusReset
+    );
+    if (successfulAssign && newStatus === 'completed') {
+      log.info(`Task was re-assigned to ${successfulAssign.assigneeId} — skipping status override to preserve pending state`);
+      newStatus = 'pending';
     }
   }
 
