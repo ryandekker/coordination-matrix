@@ -16,18 +16,20 @@ import { EscalationPanel } from './escalation-panel'
 import { DocumentOperationsPanel, type DocumentOperationResult } from './document-operations-panel'
 import { RoutingOperationsPanel, type RoutingOperationResult } from './routing-operations-panel'
 import { ExecutionSummarySection } from './execution-summary-section'
+import { ProducedAssetsPanel } from './produced-assets-panel'
 import { useUpdateTask } from '@/hooks/use-tasks'
 import { toast } from 'sonner'
 import { useQueryClient } from '@tanstack/react-query'
 
 interface OutputTabProps {
   task: Task
+  childTasks?: Task[]
   onRollback?: () => Promise<void>
   onRetry?: (humanInstruction?: string) => Promise<void>
   isRetrying?: boolean
 }
 
-export function OutputTab({ task, onRollback, onRetry, isRetrying }: OutputTabProps) {
+export function OutputTab({ task, childTasks, onRollback, onRetry, isRetrying }: OutputTabProps) {
   const [copied, setCopied] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const updateTask = useUpdateTask()
@@ -213,6 +215,13 @@ export function OutputTab({ task, onRollback, onRetry, isRetrying }: OutputTabPr
     return outputData?.conversationSessionId as string | undefined
   }, [metadata])
 
+  // Produced assets banner — rolls up assets from this task and its children
+  const producedAssetsBanner = (
+    <div className="p-4 pb-0">
+      <ProducedAssetsPanel task={task} childTasks={childTasks} />
+    </div>
+  )
+
   // Execution summary banner — shown at the top of the Output tab when present
   const executionSummaryBanner = task.executionSummary ? (
     <div className="p-4 pb-0">
@@ -226,6 +235,7 @@ export function OutputTab({ task, onRollback, onRetry, isRetrying }: OutputTabPr
   if (taskType === 'decision') {
     return (
       <>
+        {producedAssetsBanner}
         {executionSummaryBanner}
         <div className="p-4 space-y-4">
           <DecisionOptionsPanel task={task} />
@@ -247,6 +257,7 @@ export function OutputTab({ task, onRollback, onRetry, isRetrying }: OutputTabPr
   if (needsReview || hasBeenReviewed) {
     return (
       <>
+        {producedAssetsBanner}
         {executionSummaryBanner}
         <ManualReviewPanel
           task={task}
@@ -263,6 +274,7 @@ export function OutputTab({ task, onRollback, onRetry, isRetrying }: OutputTabPr
   if (hasAgentQuestions && agentQuestionsData) {
     return (
       <>
+        {producedAssetsBanner}
         {executionSummaryBanner}
         <AgentQuestionsPanel
           task={task}
@@ -278,6 +290,7 @@ export function OutputTab({ task, onRollback, onRetry, isRetrying }: OutputTabPr
   if (isEscalated && onRetry) {
     return (
       <>
+        {producedAssetsBanner}
         {executionSummaryBanner}
         <EscalationPanel
           task={task}
@@ -293,6 +306,7 @@ export function OutputTab({ task, onRollback, onRetry, isRetrying }: OutputTabPr
   if (task.taskResult?.current) {
     return (
       <>
+        {producedAssetsBanner}
         {executionSummaryBanner}
         <div className="p-4">
           <TaskResultDisplay
@@ -308,6 +322,7 @@ export function OutputTab({ task, onRollback, onRetry, isRetrying }: OutputTabPr
   if (taskType === 'external' && attempts.length > 0) {
     return (
       <>
+        {producedAssetsBanner}
         {executionSummaryBanner}
         <div className="p-4 space-y-4">
           <div className="flex items-center justify-between">
@@ -338,25 +353,34 @@ export function OutputTab({ task, onRollback, onRetry, isRetrying }: OutputTabPr
   if (!hasOutput) {
     if (executionSummaryBanner) {
       // If there's an execution summary but no other output, show just the summary
-      return executionSummaryBanner
+      return (
+        <>
+          {producedAssetsBanner}
+          {executionSummaryBanner}
+        </>
+      )
     }
     return (
-      <div className="p-4 flex flex-col items-center justify-center h-full min-h-[200px] text-center">
-        <p className="text-sm text-muted-foreground">
-          {task.status === 'pending' && 'Output will appear here after the task completes'}
-          {task.status === 'waiting' && 'Task is still processing...'}
-          {task.status === 'completed' && 'No output data available'}
-          {task.status === 'failed' && 'Task failed without producing output'}
-          {task.status === 'cancelled' && 'Task was cancelled'}
-          {task.status === 'on_hold' && 'Task is on hold'}
-        </p>
-      </div>
+      <>
+        {producedAssetsBanner}
+        <div className="p-4 flex flex-col items-center justify-center h-full min-h-[200px] text-center">
+          <p className="text-sm text-muted-foreground">
+            {task.status === 'pending' && 'Output will appear here after the task completes'}
+            {task.status === 'waiting' && 'Task is still processing...'}
+            {task.status === 'completed' && 'No output data available'}
+            {task.status === 'failed' && 'Task failed without producing output'}
+            {task.status === 'cancelled' && 'Task was cancelled'}
+            {task.status === 'on_hold' && 'Task is on hold'}
+          </p>
+        </div>
+      </>
     )
   }
 
   // Show output
   return (
     <>
+      {producedAssetsBanner}
       {executionSummaryBanner}
       {documentOpsResults && (
         <div className="p-4 pb-0">

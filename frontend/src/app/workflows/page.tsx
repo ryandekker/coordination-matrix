@@ -1,7 +1,7 @@
 'use client'
 
-import React, { useState, useMemo, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import React, { useState, useMemo, useCallback, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -415,6 +415,8 @@ async function fetchAllGroups(): Promise<Group[]> {
 
 export default function WorkflowsPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const workflowIdFromUrl = searchParams.get('workflowId')
   const queryClient = useQueryClient()
   const { currentGroupId, groups } = useGroupContext()
   const { user } = useAuth()
@@ -472,6 +474,28 @@ export default function WorkflowsPage() {
   const [editingFolder, setEditingFolder] = useState<WorkflowFolder | null>(null)
   const [newFolderName, setNewFolderName] = useState('')
   const [deleteFolderConfirm, setDeleteFolderConfirm] = useState<WorkflowFolder | null>(null)
+
+  // Auto-open editor when workflowId is in URL (deep link support)
+  useEffect(() => {
+    if (workflowIdFromUrl && !isEditorOpen) {
+      if (editingWorkflow?._id === workflowIdFromUrl) {
+        setIsEditorOpen(true)
+        return
+      }
+      fetchWorkflowById(workflowIdFromUrl)
+        .then(({ data }) => {
+          setEditingWorkflow(data)
+          setIsEditorOpen(true)
+        })
+        .catch(() => {
+          // Invalid workflowId — remove from URL
+          const params = new URLSearchParams(searchParams.toString())
+          params.delete('workflowId')
+          const qs = params.toString()
+          router.replace(qs ? `/workflows?${qs}` : '/workflows', { scroll: false })
+        })
+    }
+  }, [workflowIdFromUrl]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: workflowsData, isLoading, error } = useQuery({
     queryKey: ['workflows', currentGroupId],
@@ -830,12 +854,21 @@ export default function WorkflowsPage() {
       setEditingWorkflow(workflow as WorkflowData)
       setIsEditorOpen(true)
     }
-  }, [])
+    // Update URL with workflowId for deep linking
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('workflowId', workflow._id)
+    router.push(`/workflows?${params.toString()}`, { scroll: false })
+  }, [router, searchParams])
 
   const closeEditor = useCallback(() => {
     setIsEditorOpen(false)
     setEditingWorkflow(null)
-  }, [])
+    // Remove workflowId from URL
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete('workflowId')
+    const qs = params.toString()
+    router.push(qs ? `/workflows?${qs}` : '/workflows', { scroll: false })
+  }, [router, searchParams])
 
   const handleSave = useCallback((workflow: {
     _id?: string

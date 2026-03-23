@@ -1270,6 +1270,7 @@ export function TaskModal({
             <TabsContent value={TASK_MODAL_TABS.OUTPUT} className="mt-0">
               <OutputTab
                 task={task}
+                childTasks={subtasks}
                 onRollback={task.workflowRunId ? handleRollback : undefined}
                 onRetry={handleRetryEscalated}
                 isRetrying={retryTask.isPending}
