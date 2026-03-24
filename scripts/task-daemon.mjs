@@ -2258,6 +2258,131 @@ function parseConversationOutput(stdout, conversation, inputPrompt = null) {
 }
 
 /**
+ * Parse Codex CLI --json JSONL output into conversation object.
+ * Codex event types: thread.started, turn.started, turn.completed, turn.failed,
+ * item.started, item.completed (with item.type: agent_message, command_execution,
+ * reasoning, file_change, mcp_tool_call, web_search, plan_update)
+ */
+function parseCodexConversationOutput(stdout, conversation, inputPrompt = null) {
+  const lines = stdout.split('\n').filter(line => line.trim());
+  let lastAgentMessage = null;
+
+  for (const line of lines) {
+    try {
+      const event = JSON.parse(line);
+
+      if (event.type === 'thread.started') {
+        conversation.sessionId = event.thread_id;
+        // Add the initial user prompt
+        if (inputPrompt && conversation.messages.length === 0) {
+          conversation.messages.push({
+            type: 'user',
+            timestamp: new Date(),
+            content: inputPrompt,
+          });
+        }
+      } else if (event.type === 'item.completed' || event.type === 'item.started') {
+        const item = event.item;
+        if (!item) continue;
+
+        if (item.type === 'agent_message') {
+          // Model text response
+          const text = item.text || '';
+          conversation.messages.push({
+            type: 'assistant',
+            timestamp: new Date(),
+            content: text,
+          });
+          lastAgentMessage = text;
+        } else if (item.type === 'command_execution') {
+          // Shell command tool use
+          conversation.messages.push({
+            type: 'tool_use',
+            timestamp: new Date(),
+            toolName: 'Bash',
+            toolInput: { command: item.command || '' },
+            toolUseId: item.id,
+          });
+          // If completed, also add the result
+          if (event.type === 'item.completed' && item.output != null) {
+            conversation.messages.push({
+              type: 'tool_result',
+              timestamp: new Date(),
+              toolUseId: item.id,
+              toolResult: typeof item.output === 'string' ? item.output : JSON.stringify(item.output),
+              isError: item.exit_code !== 0,
+            });
+          }
+        } else if (item.type === 'file_change') {
+          // File modification
+          conversation.messages.push({
+            type: 'tool_use',
+            timestamp: new Date(),
+            toolName: item.action === 'create' ? 'Write' : 'Edit',
+            toolInput: { file: item.file || item.path || '', action: item.action },
+            toolUseId: item.id,
+          });
+        } else if (item.type === 'mcp_tool_call') {
+          // MCP tool invocation
+          conversation.messages.push({
+            type: 'tool_use',
+            timestamp: new Date(),
+            toolName: item.tool_name || item.name || 'mcp_tool',
+            toolInput: item.arguments || item.input || {},
+            toolUseId: item.id,
+          });
+          if (event.type === 'item.completed' && item.output != null) {
+            conversation.messages.push({
+              type: 'tool_result',
+              timestamp: new Date(),
+              toolUseId: item.id,
+              toolResult: typeof item.output === 'string' ? item.output : JSON.stringify(item.output),
+              isError: false,
+            });
+          }
+        } else if (item.type === 'reasoning') {
+          // Internal reasoning (log but don't add to messages as it's not user-facing)
+          // Skip - reasoning traces are internal
+        }
+        // web_search, plan_update - treated as informational, skipped
+      } else if (event.type === 'turn.completed') {
+        conversation.numTurns = (conversation.numTurns || 0) + 1;
+        if (event.usage) {
+          conversation.usage = {
+            inputTokens: event.usage.input_tokens || 0,
+            outputTokens: event.usage.output_tokens || 0,
+            cacheCreationInputTokens: 0,
+            cacheReadInputTokens: event.usage.cached_input_tokens || 0,
+            totalCostUsd: event.usage.total_cost_usd || 0,
+          };
+        }
+      } else if (event.type === 'turn.failed') {
+        const errMsg = event.error?.message || 'Turn failed';
+        conversation.messages.push({
+          type: 'assistant',
+          timestamp: new Date(),
+          content: `[ERROR] ${errMsg}`,
+        });
+      } else if (event.type === 'error') {
+        conversation.messages.push({
+          type: 'assistant',
+          timestamp: new Date(),
+          content: `[ERROR] ${event.message || 'Unknown error'}`,
+        });
+      }
+    } catch (parseErr) {
+      // Skip lines that aren't valid JSON
+      console.log(`[DEBUG] Skipping non-JSON codex line: ${line.substring(0, 100)}`);
+    }
+  }
+
+  // Set conversation.result to the last agent message text (used as stdout for parseResponse)
+  if (lastAgentMessage) {
+    conversation.result = lastAgentMessage;
+  }
+}
+
+/**
  * Execute command with stream-json output to capture full conversation thread
  * Returns conversation data including tool calls and results
  * @param {string} cmd - Command to execute
@@ -2269,22 +2394,38 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
   console.log(`[DEBUG] Prompt preview: ${prompt.substring(0, 300)}${prompt.length > 300 ? '...' : ''}`);
   console.log(`[DEBUG] Command timeout: ${Math.round(timeout / 1000)}s`);
 
-  // For claude, insert --print --output-format stream-json --verbose
-  // Note: --verbose is REQUIRED when using --output-format stream-json with --print
+  // Detect CLI type to determine streaming format and prompt delivery
   const claudeMatch = cmd.match(/^(.*\/)?claude(\s|$)/);
+  const codexMatch = cmd.match(/^(.*\/)?codex(\s|$)/);
   let fullCmd;
   let tmpFile = null;
   let useStdinPipe = false;
+  let outputFormat = 'claude'; // 'claude' or 'codex' - determines JSONL parser
 
   if (claudeMatch) {
+    // For claude, insert --print --output-format stream-json --verbose
+    // Note: --verbose is REQUIRED when using --output-format stream-json with --print
     const claudeEndIdx = claudeMatch[0].length;
     const beforeArgs = cmd.substring(0, claudeEndIdx).trimEnd();
     const afterArgs = cmd.substring(claudeEndIdx);
     // Use stdin piping for claude - more reliable than $(cat ...) for large prompts
     fullCmd = `${beforeArgs} --print --output-format stream-json --verbose ${afterArgs}`.trim();
     useStdinPipe = true;
+  } else if (codexMatch) {
+    // For codex, insert --json for JSONL event stream on stdout
+    // Codex exec takes the prompt as a positional argument; use temp file for shell safety
+    outputFormat = 'codex';
+    tmpFile = join(tmpdir(), `task-daemon-${Date.now()}.txt`);
+    writeFileSync(tmpFile, prompt);
+    // Insert --json right after "codex exec" (or "codex" if exec is already there)
+    const codexEndIdx = codexMatch[0].length;
+    const beforeArgs = cmd.substring(0, codexEndIdx).trimEnd();
+    const afterArgs = cmd.substring(codexEndIdx);
+    // Ensure --json is present for structured output capture
+    const jsonFlag = afterArgs.includes('--json') ? '' : '--json ';
+    fullCmd = `${beforeArgs} ${jsonFlag}${afterArgs}`.trim() + ` "$(cat '${tmpFile}')"`;
   } else {
-    // Non-claude command, use temp file approach
+    // Non-claude/codex command, use temp file approach
     tmpFile = join(tmpdir(), `task-daemon-${Date.now()}.txt`);
     writeFileSync(tmpFile, prompt);
     fullCmd = `${cmd} "$(cat '${tmpFile}')"`;
@@ -2391,7 +2532,8 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
       stderr += `\nCommand timed out after ${elapsed} seconds`;
 
       // Try to parse any conversation data we have so far
-      parseConversationOutput(stdout, conversation, prompt);
+      const parseConv = outputFormat === 'codex' ? parseCodexConversationOutput : parseConversationOutput;
+      parseConv(stdout, conversation, prompt);
 
       // Kill the child process
       try {
@@ -2448,8 +2590,9 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
       console.log(`[DEBUG] Process closed after ${elapsed}s - exitCode: ${exitCode}, signal: ${signal}`);
       console.log(`[DEBUG] Final stats: ${eventCount} events, ${stdout.length} bytes stdout, ${stderr.length} bytes stderr`);
 
-      // Parse conversation data from stdout
-      parseConversationOutput(stdout, conversation, prompt);
+      // Parse conversation data from stdout (format-aware)
+      const parseConv = outputFormat === 'codex' ? parseCodexConversationOutput : parseConversationOutput;
+      parseConv(stdout, conversation, prompt);
 
       if (signal === 'SIGTERM' || signal === 'SIGKILL') {
         resolveOnce({
@@ -2473,7 +2616,8 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
       console.log(`[ERROR] Child process error: ${error.message}`);
 
       // Try to parse any conversation data from stdout even on failure
-      parseConversationOutput(stdout, conversation, prompt);
+      const parseConv = outputFormat === 'codex' ? parseCodexConversationOutput : parseConversationOutput;
+      parseConv(stdout, conversation, prompt);
 
       resolveOnce({
         exitCode: 1,
@@ -2499,14 +2643,15 @@ function buildExecCommand(config) {
   let cmd = config.exec;
   let mcpTempFile = null;
 
-  // Only inject MCP config for Claude commands that have mcpServers configured
+  // Only inject MCP config for Claude/Codex commands that have mcpServers configured
   if (!config.mcpServers || Object.keys(config.mcpServers).length === 0) {
     return { cmd, mcpTempFile };
   }
 
   const isClaudeCommand = /^(.*\/)?claude(\s|$)/.test(cmd);
-  if (!isClaudeCommand) {
-    log.warn('mcpServers configured but exec command is not Claude CLI - MCP config ignored');
+  const isCodexCommand = /^(.*\/)?codex(\s|$)/.test(cmd);
+  if (!isClaudeCommand && !isCodexCommand) {
+    log.warn('mcpServers configured but exec command is not Claude/Codex CLI - MCP config ignored');
     return { cmd, mcpTempFile };
   }
 
@@ -2515,11 +2660,11 @@ function buildExecCommand(config) {
   mcpTempFile = join(tmpdir(), `daemon-mcp-${Date.now()}.json`);
   writeFileSync(mcpTempFile, JSON.stringify(mcpConfig, null, 2));
 
-  // Append --mcp-config flag to the command
+  // Append --mcp-config flag to the command (both CLIs support this flag)
   cmd += ` --mcp-config ${mcpTempFile}`;
 
-  // Optionally add --strict-mcp-config
-  if (config.strictMcpConfig) {
+  // Optionally add --strict-mcp-config (Claude-specific, codex may ignore)
+  if (config.strictMcpConfig && isClaudeCommand) {
     cmd += ' --strict-mcp-config';
   }
 
@@ -3123,11 +3268,12 @@ async function processTask(config, task) {
 
   const startTime = new Date();
   const isClaudeCommand = /^(.*\/)?claude(\s|$)/.test(execCmd);
+  const isCodexCommand = /^(.*\/)?codex(\s|$)/.test(execCmd);
 
-  // Use conversation capture for claude commands to get full tool call traces
+  // Use conversation capture for claude/codex commands to get full tool call traces
   let result;
   try {
-    result = isClaudeCommand
+    result = (isClaudeCommand || isCodexCommand)
       ? await executeCommandWithConversation(execCmd, prompt, commandTimeout)
       : await executeCommand(execCmd, prompt, commandTimeout);
   } finally {
