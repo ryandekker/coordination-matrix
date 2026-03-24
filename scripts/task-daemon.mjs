@@ -3741,6 +3741,17 @@ async function processTask(config, task) {
       log.info(`Task was re-assigned to ${successfulAssign.assigneeId} — skipping status override to preserve pending state`);
       newStatus = 'pending';
     }
+
+    // When a workflow was triggered, set the task to 'waiting' instead of 'completed'.
+    // The workflow engine will set workflowResult and complete the task when the spawned
+    // workflow finishes. This keeps the task visible as the parent of the workflow tree.
+    const successfulTrigger = routingResults.find(
+      r => r.action === 'triggerWorkflow' && r.success
+    );
+    if (successfulTrigger && newStatus === 'completed') {
+      log.info(`Workflow triggered (run ${successfulTrigger.workflowRunId}) — setting task to waiting until workflow completes`);
+      newStatus = 'waiting';
+    }
   }
 
   // Extract produced assets from agent output at the system level.

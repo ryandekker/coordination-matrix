@@ -4183,17 +4183,21 @@ class WorkflowExecutionService {
           console.log(`[WorkflowExecutionService] Published task.status.changed for failed flow task ${run.triggerTaskId}`);
         }
       } else {
-        // Regular task trigger - just set workflowResult
+        // Regular task trigger (e.g., routing agent) — set workflowResult and mark failed
+        // if the task is in a waiting state (set by daemon after triggerWorkflow)
+        const triggerTask = await this.tasks.findOne({ _id: run.triggerTaskId });
+        const shouldFail = triggerTask?.status === 'waiting' || triggerTask?.status === 'in_progress';
         await this.tasks.updateOne(
           { _id: run.triggerTaskId },
           {
             $set: {
               workflowResult,
+              ...(shouldFail ? { status: 'failed' as TaskStatus } : {}),
               updatedAt: now,
             }
           }
         );
-        console.log(`[WorkflowExecutionService] Propagated failure result to trigger task ${run.triggerTaskId}`);
+        console.log(`[WorkflowExecutionService] Propagated failure result to trigger task ${run.triggerTaskId}${shouldFail ? ' (failed)' : ''}`);
       }
     }
 
@@ -4390,17 +4394,21 @@ class WorkflowExecutionService {
           console.log(`[WorkflowExecutionService] Published task.status.changed for flow task ${run.triggerTaskId}`);
         }
       } else {
-        // Regular task trigger - just set workflowResult
+        // Regular task trigger (e.g., routing agent) — set workflowResult and complete
+        // the task if it's in a waiting state (set by daemon after triggerWorkflow)
+        const triggerTask = await this.tasks.findOne({ _id: run.triggerTaskId });
+        const shouldComplete = triggerTask?.status === 'waiting' || triggerTask?.status === 'in_progress';
         await this.tasks.updateOne(
           { _id: run.triggerTaskId },
           {
             $set: {
               workflowResult,
+              ...(shouldComplete ? { status: 'completed' as TaskStatus } : {}),
               updatedAt: now,
             }
           }
         );
-        console.log(`[WorkflowExecutionService] Propagated success result to trigger task ${run.triggerTaskId}`);
+        console.log(`[WorkflowExecutionService] Propagated success result to trigger task ${run.triggerTaskId}${shouldComplete ? ' (completed)' : ''}`);
       }
     }
 
