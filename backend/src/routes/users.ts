@@ -11,6 +11,7 @@ export const usersRouter = Router();
 /**
  * Helper to check if user can modify another user.
  * - Admins can modify anyone
+ * - API key users can modify agent users (for automation/daemon management)
  * - Users can only modify themselves
  * - Users cannot change their own role
  */
@@ -23,6 +24,11 @@ function canModifyUser(req: Request, targetUserId: string): { allowed: boolean; 
 
   // Admins can modify anyone
   if (isAdmin(req)) {
+    return { allowed: true, selfUpdate };
+  }
+
+  // API key users can modify agents (checked at the caller — target must be an agent)
+  if (req.user.role === 'api') {
     return { allowed: true, selfUpdate };
   }
 
@@ -99,6 +105,7 @@ usersRouter.get('/agents', async (req: Request, res: Response, next: NextFunctio
 
 // POST /api/users/agents/ensure/:agentId - Get or create a default agent by ID
 // Used by workflows to reference agents that may not exist yet
+// Accepts optional body fields: agentPrompt, agentComplexity, agentTags, botColor
 usersRouter.post('/agents/ensure/:agentId', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
@@ -118,10 +125,13 @@ usersRouter.post('/agents/ensure/:agentId', async (req: Request, res: Response, 
     if (!agent) {
       // Create default agent
       // Convert agentId to display name: "code-reviewer" -> "Code Reviewer"
-      const displayName = agentId
+      const displayName = (req.body?.displayName as string) || agentId
         .split(/[-_]/)
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
         .join(' ');
+
+      // Accept optional agent fields from request body
+      const { agentPrompt, agentComplexity, agentTags, botColor } = req.body || {};
 
       const now = new Date();
       const newAgent: Omit<User, '_id'> = {
@@ -129,11 +139,22 @@ usersRouter.post('/agents/ensure/:agentId', async (req: Request, res: Response, 
         role: 'operator',
         isActive: true,
         isAgent: true,
-        agentPrompt: '', // Empty - uses base daemon prompt only
+        agentPrompt: (typeof agentPrompt === 'string') ? agentPrompt : '',
         preferences: {},
         createdAt: now,
         updatedAt: now,
       };
+
+      // Set optional fields if provided
+      if (agentComplexity !== undefined && [1, 2, 3].includes(agentComplexity)) {
+        (newAgent as Record<string, unknown>).agentComplexity = agentComplexity;
+      }
+      if (Array.isArray(agentTags)) {
+        (newAgent as Record<string, unknown>).agentTags = agentTags.filter((t: unknown) => typeof t === 'string');
+      }
+      if (typeof botColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(botColor)) {
+        (newAgent as Record<string, unknown>).botColor = botColor;
+      }
 
       const result = await db.collection<User>('users').insertOne(newAgent as User);
       agent = await db.collection<User>('users').findOne({ _id: result.insertedId });
@@ -167,11 +188,22 @@ usersRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) 
 });
 
 // POST /api/users - Create a new user
-// Only admins can create users.
-usersRouter.post('/', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
+// Admins can create any user. API key users can create agent users only.
+usersRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
     const { email, displayName, role, isAgent, isSystem, agentPrompt, agentComplexity, agentTags, profilePicture, botColor } = req.body;
+
+    // Authorization: admins can create any user, API keys can only create agents
+    if (!isAdmin(req)) {
+      if (req.user?.role === 'api') {
+        if (!isAgent) {
+          throw createError('API key users can only create agent users (isAgent must be true)', 403);
+        }
+      } else {
+        throw createError('This action requires one of these roles: admin', 403);
+      }
+    }
 
     if (!displayName) {
       throw createError('displayName is required', 400);
@@ -254,12 +286,21 @@ usersRouter.post('/', requireRole('admin'), async (req: Request, res: Response, 
 
 // PATCH /api/users/:id - Update a user
 // Users can update themselves. Admins can update anyone.
+// API key users can update agent users (for daemon/automation management).
 // Only admins can change user roles.
 usersRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
     const userId = new ObjectId(req.params.id);
     const updates = req.body;
+
+    // API key users can only modify agent users, not human users
+    if (req.user?.role === 'api' && !isAdmin(req)) {
+      const targetUser = await db.collection<User>('users').findOne({ _id: userId });
+      if (!targetUser?.isAgent) {
+        throw createError('API key users can only modify agent users', 403);
+      }
+    }
 
     // Check authorization
     const { allowed } = canModifyUser(req, req.params.id);
