@@ -307,6 +307,11 @@ export function DetailsTab({
                 Inherited
               </span>
             )}
+            {!task.parentId && task.humanInstruction && task.humanInstruction === task.summary && (
+              <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                Auto-derived from summary
+              </span>
+            )}
           </div>
           <p className="text-xs text-muted-foreground">
             The original human request that this work should fulfill

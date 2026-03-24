@@ -735,17 +735,11 @@ export function TaskModal({
                   />
                 )}
               />
-
-              {/* Human Instruction */}
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Human Instruction</label>
-                <textarea
-                  {...register('humanInstruction')}
-                  placeholder="What should be accomplished? This carries through to all follow-up tasks and agents..."
-                  rows={2}
-                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground resize-y overflow-auto focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                />
-              </div>
+              {!parentTask && (
+                <p className="text-[10px] text-muted-foreground -mt-1">
+                  This summary will be used as the human instruction for agents and workflow steps.
+                </p>
+              )}
 
               {/* Task Type */}
               <div className="space-y-1">
@@ -1270,6 +1264,7 @@ export function TaskModal({
             <TabsContent value={TASK_MODAL_TABS.OUTPUT} className="mt-0">
               <OutputTab
                 task={task}
+                childTasks={subtasks}
                 onRollback={task.workflowRunId ? handleRollback : undefined}
                 onRetry={handleRetryEscalated}
                 isRetrying={retryTask.isPending}

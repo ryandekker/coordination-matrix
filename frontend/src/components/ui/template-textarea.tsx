@@ -223,7 +223,7 @@ export function TemplateInput({
       <div className="relative flex-1">
         {/* Highlighted background layer */}
         <div
-          className="absolute inset-0 px-3 py-2 text-sm font-mono pointer-events-none overflow-hidden whitespace-nowrap"
+          className="absolute inset-0 px-3 py-2 text-sm pointer-events-none overflow-hidden whitespace-nowrap"
           style={{ clipPath: 'inset(0 0 0 0 round 6px)' }}
           aria-hidden="true"
         >
@@ -238,10 +238,10 @@ export function TemplateInput({
           placeholder={placeholder}
           disabled={disabled}
           className={cn(
-            'w-full h-8 px-3 py-2 text-sm font-mono rounded-md border border-input bg-transparent',
+            'w-full h-8 px-3 py-2 text-sm rounded-md border border-input bg-transparent',
             'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
             'text-transparent caret-foreground selection:bg-primary/30',
-            'placeholder:text-muted-foreground placeholder:font-sans',
+            'placeholder:text-muted-foreground',
             disabled && 'opacity-50 cursor-not-allowed'
           )}
         />

@@ -345,6 +345,94 @@ describe('Tasks Route Helpers', () => {
   });
 });
 
+describe('humanInstruction auto-derivation', () => {
+  // Mirrors the logic in POST /api/tasks that auto-derives humanInstruction
+  // for human-created root tasks when not explicitly provided.
+  function deriveHumanInstruction(
+    taskData: { humanInstruction?: string; summary?: string; title: string },
+    parentId: string | null,
+    creatorType: 'human' | 'agent' | 'system'
+  ): string | undefined {
+    if (!taskData.humanInstruction && !parentId && creatorType === 'human') {
+      const derived = (taskData.summary && taskData.summary.trim()) || taskData.title;
+      return derived || undefined;
+    }
+    return taskData.humanInstruction || undefined;
+  }
+
+  it('should derive from summary for human-created root tasks', () => {
+    const result = deriveHumanInstruction(
+      { title: 'Fix bug', summary: 'Fix the login validation bug' },
+      null,
+      'human'
+    );
+    expect(result).toBe('Fix the login validation bug');
+  });
+
+  it('should derive from title when summary is empty', () => {
+    const result = deriveHumanInstruction(
+      { title: 'Fix bug', summary: '' },
+      null,
+      'human'
+    );
+    expect(result).toBe('Fix bug');
+  });
+
+  it('should derive from title when summary is undefined', () => {
+    const result = deriveHumanInstruction(
+      { title: 'Fix bug' },
+      null,
+      'human'
+    );
+    expect(result).toBe('Fix bug');
+  });
+
+  it('should not override explicit humanInstruction', () => {
+    const result = deriveHumanInstruction(
+      { title: 'Fix bug', summary: 'summary text', humanInstruction: 'Custom instruction' },
+      null,
+      'human'
+    );
+    expect(result).toBe('Custom instruction');
+  });
+
+  it('should not derive for subtasks (has parentId)', () => {
+    const result = deriveHumanInstruction(
+      { title: 'Subtask', summary: 'Subtask summary' },
+      '507f1f77bcf86cd799439011',
+      'human'
+    );
+    expect(result).toBeUndefined();
+  });
+
+  it('should not derive for agent-created tasks', () => {
+    const result = deriveHumanInstruction(
+      { title: 'Agent task', summary: 'Agent summary' },
+      null,
+      'agent'
+    );
+    expect(result).toBeUndefined();
+  });
+
+  it('should not derive for system-created tasks', () => {
+    const result = deriveHumanInstruction(
+      { title: 'System task', summary: 'System summary' },
+      null,
+      'system'
+    );
+    expect(result).toBeUndefined();
+  });
+
+  it('should handle whitespace-only summary by falling back to title', () => {
+    const result = deriveHumanInstruction(
+      { title: 'My task', summary: '   ' },
+      null,
+      'human'
+    );
+    expect(result).toBe('My task');
+  });
+});
+
 describe('Task Type Configuration', () => {
   const taskTypes = [
     'flow',

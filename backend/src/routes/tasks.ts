@@ -769,6 +769,17 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       }
     }
 
+    // Auto-derive humanInstruction for human-created root tasks.
+    // If a human creates a root task (no parent) without explicit humanInstruction,
+    // use summary (or title if no summary) so the human's goal propagates through
+    // all workflow steps and follow-up tasks.
+    if (!taskData.humanInstruction && !parentId && creatorType === 'human') {
+      const derived = (taskData.summary && taskData.summary.trim()) || taskData.title;
+      if (derived) {
+        taskData.humanInstruction = derived;
+      }
+    }
+
     const newTask: Document = {
       title: taskData.title,
       summary: taskData.summary || '',

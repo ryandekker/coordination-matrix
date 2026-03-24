@@ -148,7 +148,7 @@ export const TemplateEditor = forwardRef<TemplateEditorRef, TemplateEditorProps>
       {/* Hidden sizer div to measure content height */}
       <div
         ref={sizerRef}
-        className="invisible absolute left-0 right-0 p-2 font-mono text-sm whitespace-pre-wrap break-words border border-transparent"
+        className="invisible absolute left-0 right-0 p-2 text-sm whitespace-pre-wrap break-words border border-transparent"
         style={{ minHeight }}
         aria-hidden="true"
       >
@@ -161,7 +161,7 @@ export const TemplateEditor = forwardRef<TemplateEditorRef, TemplateEditorProps>
       <div
         ref={highlightRef}
         className={cn(
-          'absolute inset-0 p-2 font-mono text-sm whitespace-pre-wrap break-words overflow-hidden pointer-events-none',
+          'absolute inset-0 p-2 text-sm whitespace-pre-wrap break-words overflow-hidden pointer-events-none',
           'border border-transparent rounded-md bg-background'
         )}
         style={{
@@ -185,7 +185,7 @@ export const TemplateEditor = forwardRef<TemplateEditorRef, TemplateEditorProps>
         placeholder=""
         disabled={disabled}
         className={cn(
-          'relative w-full p-2 font-mono text-sm whitespace-pre-wrap resize-none overflow-auto',
+          'relative w-full p-2 text-sm whitespace-pre-wrap resize-none overflow-auto',
           'border border-input rounded-md bg-transparent',
           'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
           'placeholder:text-muted-foreground',
