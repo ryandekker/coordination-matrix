@@ -113,6 +113,66 @@ This workflow can reference itself to create new workflows:
 - Steps with no connections and no next step in array are terminal
 - Use 'END' as targetStepId to explicitly terminate a path
 
+## Decision Step Pattern (CRITICAL)
+
+Decision steps route the workflow based on a field value using **exact value matching** (NOT JavaScript expressions).
+
+**Required fields:**
+- \`stepType: "decision"\` — MUST be "decision", NOT "code"
+- \`decisionField\` — Path to the field to match (e.g., \`"output.verdict"\`, \`"reviewDecision"\`)
+- \`connections\` — Array with \`condition\` set to the **exact value** to match
+- \`defaultConnection\` — Fallback targetStepId if no condition matches
+
+**Example:**
+\`\`\`json
+{
+  "id": "review-gate",
+  "stepType": "decision",
+  "decisionField": "output.verdict",
+  "connections": [
+    { "targetStepId": "next-step", "condition": "pass" },
+    { "targetStepId": "retry-step", "condition": "fail" }
+  ],
+  "defaultConnection": "next-step"
+}
+\`\`\`
+
+**WRONG — do NOT do this:**
+- \`"condition": "output.result.verdict === 'approved'"\` — this is a JS expression, NOT a value match
+- \`"stepType": "code"\` with conditional connections — code steps execute ALL connections simultaneously
+- \`"condition": "verdict == pass"\` — conditions are plain values, not comparison expressions
+
+**Condition values are case-insensitive** and can match multiple values with commas: \`"condition": "pass,approved"\`
+
+For manual steps, the engine sets \`reviewDecision\` on task metadata when the human submits. Use \`"decisionField": "reviewDecision"\` with conditions \`"approved"\`, \`"approved_with_notes"\`, \`"request_changes"\`.
+
+## Manual Review Step Pattern (CRITICAL)
+
+When a workflow includes a human review/approval step (\`stepType: "manual"\`), you MUST place a **code step before it** that produces a **review document**. Without this, the human sees raw JSON instead of formatted content.
+
+**The code step MUST return this shape:**
+\`\`\`javascript
+return {
+  result: {
+    title: 'Review: My Workflow',     // Document title
+    content: '# Markdown content...',  // Full markdown body (supports mermaid)
+    summary: 'Brief summary text',     // Shown on task card and header
+  },
+  // Optional: linkable assets that surface in the UI
+  workflowId: 'abc123',     // Links to workflow definition
+  workflowName: 'My Flow',  // Display name for the link
+};
+\`\`\`
+
+The system automatically creates a review document from \`result.content\` and renders it as formatted markdown (including mermaid diagrams via \\\`\\\`\\\`mermaid code blocks). The \`result.summary\` becomes the manual task's description.
+
+**Required pattern: code step → manual step → decision step**
+1. **Code step**: assembles review content (markdown with tables, mermaid diagrams, links, summaries)
+2. **Manual step**: human reviews the formatted document and submits a decision
+3. **Decision step**: routes based on \`reviewDecision\` (\`"approved"\`, \`"approved_with_notes"\`, \`"request_changes"\`)
+
+This pattern is mandatory. Never send agent output directly to a manual step.
+
 ## Best Practices
 
 1. Use descriptive step IDs (e.g., "design-workflow", not "step1")
@@ -122,6 +182,8 @@ This workflow can reference itself to create new workflows:
 5. Include human checkpoints for important decisions
 6. Use foreach/join for parallel processing
 7. Never hardcode agent IDs
+8. Always precede manual steps with a code step that formats a review document
+9. Only use \`stepType: "decision"\` for routing — never use code steps with conditional connections
 
 ## Loop Prevention Pattern
 
@@ -160,6 +222,9 @@ Every step MUST use these exact field names:
 - Code steps: use \`codeConfig: { code: "..." }\` NOT top-level \`code\`
 - Webhook steps: use \`webhookConfig: { url, method, headers, bodyTemplate }\`
 - Decision steps: use \`decisionField\` and \`defaultConnection\`
+- NEVER use JavaScript expressions in connection conditions — conditions are plain values to match
+- NEVER use \`stepType: "code"\` for routing — code steps execute ALL connections, use \`stepType: "decision"\` instead
+- ALWAYS put a code step before manual steps to generate a review document with \`result: { title, content, summary }\`
 
 ## Output Format
 
@@ -216,6 +281,18 @@ Before reviewing the workflow, check if the previous step's output was parsed co
 - [ ] No orphaned/unreachable steps
 - [ ] Decision steps have conditions and defaultConnection
 - [ ] No infinite loops without a code step loop counter
+
+### Decision Steps (CRITICAL — automatic fail if wrong)
+- [ ] Every step that routes conditionally uses \`stepType: "decision"\` (NOT "code")
+- [ ] Connection \`condition\` values are plain values (e.g., \`"pass"\`, \`"approved"\`), NOT JavaScript expressions
+- [ ] NO conditions like \`"output.result.verdict === 'approved'"\` — these MUST be just \`"approved"\`
+- [ ] If a code step has multiple connections with conditions, it is WRONG — code steps execute ALL connections
+
+### Manual Review Steps (CRITICAL)
+- [ ] Every manual step is preceded by a code step that generates a review document
+- [ ] The code step returns \`{ result: { title: "...", content: "# markdown...", summary: "..." } }\`
+- [ ] No agent step output goes directly to a manual step without a formatting code step in between
+- [ ] Manual steps are followed by a decision step using \`decisionField: "reviewDecision"\`
 
 ### Foreach / Join
 - [ ] Every foreach has itemsPath

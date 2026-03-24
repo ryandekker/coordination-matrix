@@ -3057,6 +3057,77 @@ async function handleStageTransition(config, task, workflow, parsedResponse) {
 }
 
 // ============================================================================
+// Produced Asset Extraction
+// ============================================================================
+
+/**
+ * Extract produced assets from agent output at the system level.
+ * Scans multiple locations in the parsed response for linkable fields
+ * (workflowId, documentId, externalUrl, etc.) and returns a normalized array.
+ * This runs in the daemon so downstream steps and the frontend get pre-extracted assets.
+ */
+function extractProducedAssets(parsedData, processedOutput) {
+  const assets = [];
+  const seen = new Set();
+
+  function addAsset(type, id, title, action) {
+    if (!id || typeof id !== 'string') return;
+    const key = `${type}:${id}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    assets.push({ type, id, title: title || id, action });
+  }
+
+  // 1. Scan output.result for linkable fields
+  const result = typeof parsedData.output === 'object' && parsedData.output !== null
+    ? parsedData.output.result || parsedData.output
+    : {};
+  const resultObj = typeof result === 'object' && result !== null ? result : {};
+
+  if (resultObj.workflowId) {
+    addAsset('workflow', resultObj.workflowId, resultObj.workflowName || null, 'Created');
+  }
+  if (resultObj.workflowRunId) {
+    addAsset('workflow-run', resultObj.workflowRunId, null, 'Triggered');
+  }
+  if (resultObj.documentId) {
+    addAsset('document', resultObj.documentId, resultObj.documentTitle || null, 'Created');
+  }
+  if (resultObj.externalUrl) {
+    addAsset('external', resultObj.externalUrl, resultObj.externalTitle || resultObj.externalUrl, 'Created');
+  }
+
+  // 2. Check output top-level (alternate location for fields not nested under result)
+  const outputObj = typeof parsedData.output === 'object' && parsedData.output !== null ? parsedData.output : {};
+  if (outputObj.workflowId && outputObj.workflowId !== resultObj.workflowId) {
+    addAsset('workflow', outputObj.workflowId, outputObj.workflowName || null, 'Created');
+  }
+  if (outputObj.workflowRunId && outputObj.workflowRunId !== resultObj.workflowRunId) {
+    addAsset('workflow-run', outputObj.workflowRunId, null, 'Triggered');
+  }
+
+  // 3. Extract from already-processed documentOperations
+  if (Array.isArray(processedOutput.documentOperations)) {
+    for (const op of processedOutput.documentOperations) {
+      if (op.success && op.documentId) {
+        addAsset('document', op.documentId, op.title || null, op.action === 'create' ? 'Created' : 'Updated');
+      }
+    }
+  }
+
+  // 4. Extract from already-processed routingOperations
+  if (Array.isArray(processedOutput.routingOperations)) {
+    for (const op of processedOutput.routingOperations) {
+      if (op.action === 'triggerWorkflow' && op.success && op.workflowRunId) {
+        addAsset('workflow-run', op.workflowRunId, null, 'Triggered');
+      }
+    }
+  }
+
+  return assets;
+}
+
+// ============================================================================
 // Task Processing
 // ============================================================================
 
@@ -3595,12 +3666,21 @@ async function processTask(config, task) {
     parsedResponse.data.metadata?.suggestedTags ||
     [];
 
+  // Normalize summary: promote from nested locations if top-level is empty
+  let normalizedSummary = parsedResponse.data.summary;
+  if (!normalizedSummary) {
+    const resultObj = typeof resultData === 'object' && resultData !== null ? resultData : {};
+    normalizedSummary = resultObj.summary
+      || parsedResponse.data.output?.summary
+      || '';
+  }
+
   const output = {
     timestamp,
     status: parsedResponse.data.status,
     action: parsedResponse.data.nextAction,
     reason: parsedResponse.data.nextActionReason || null,
-    summary: parsedResponse.data.summary,
+    summary: normalizedSummary,
     result: resultData,
     confidence: parsedResponse.data.metadata?.confidence || null,
     suggestedTags,
@@ -3662,6 +3742,11 @@ async function processTask(config, task) {
       newStatus = 'pending';
     }
   }
+
+  // Extract produced assets from agent output at the system level.
+  // This normalizes linkable fields so downstream steps and the frontend
+  // don't need to scan multiple nested paths.
+  output.producedAssets = extractProducedAssets(parsedResponse.data, output);
 
   // Merge with existing metadata, clearing temporary fields
   const updatedMetadata = {

@@ -22,10 +22,60 @@ interface ProducedAssetsPanelProps {
   childTasks?: Task[]
 }
 
+function resolveAssetUrl(type: string, id: string): string | undefined {
+  switch (type) {
+    case 'document': return `/documents/${id}`
+    case 'workflow': return `/workflows?workflowId=${id}`
+    case 'workflow-run': return `/workflow-runs?id=${id}`
+    case 'external': return id.startsWith('http') ? id : undefined
+    default: return undefined
+  }
+}
+
 function extractAssetsFromTask(task: Task): ProducedAsset[] {
   const assets: ProducedAsset[] = []
   const md = task.metadata as Record<string, unknown> | undefined
   const output = md?.output as Record<string, unknown> | undefined
+
+  // 0. Pre-extracted producedAssets from daemon or workflow engine (preferred path).
+  // These are normalized at the system level so we don't need to scan multiple nested paths.
+  const preExtracted =
+    (task.stepOutput as Record<string, unknown> | undefined)?.producedAssets as Array<Record<string, unknown>> | undefined
+    || output?.producedAssets as Array<Record<string, unknown>> | undefined
+  if (Array.isArray(preExtracted) && preExtracted.length > 0) {
+    for (const a of preExtracted) {
+      if (a.type && a.id) {
+        assets.push({
+          type: a.type as ProducedAsset['type'],
+          id: a.id as string,
+          title: (a.title as string) || (a.id as string),
+          url: resolveAssetUrl(a.type as string, a.id as string),
+          action: (a.action as string) || 'Produced',
+          sourceTaskId: task._id,
+          sourceTaskTitle: task.title,
+        })
+      }
+    }
+  }
+
+  // 0b. Pre-extracted assets from inputPayload (manual tasks receiving previous step's assets)
+  const inputPayload = md?.inputPayload as Record<string, unknown> | undefined
+  const upstreamAssets = inputPayload?.producedAssets as Array<Record<string, unknown>> | undefined
+  if (Array.isArray(upstreamAssets) && upstreamAssets.length > 0) {
+    for (const a of upstreamAssets) {
+      if (a.type && a.id) {
+        assets.push({
+          type: a.type as ProducedAsset['type'],
+          id: a.id as string,
+          title: (a.title as string) || (a.id as string),
+          url: resolveAssetUrl(a.type as string, a.id as string),
+          action: (a.action as string) || 'Produced',
+          sourceTaskId: task._id,
+          sourceTaskTitle: task.title,
+        })
+      }
+    }
+  }
 
   // 1. Document operations (create/update) from daemon output
   if (output?.documentOperations) {
@@ -195,8 +245,9 @@ function extractAssetsFromTask(task: Task): ProducedAsset[] {
   }
 
   // 11. For manual tasks: extract assets from inputPayload (previous step's output)
-  const inputPayload = md?.inputPayload as Record<string, unknown> | undefined
-  const inputOutput = inputPayload?.output as Record<string, unknown> | undefined
+  // Fallback for historical tasks that don't have pre-extracted producedAssets
+  const legacyInputPayload = md?.inputPayload as Record<string, unknown> | undefined
+  const inputOutput = legacyInputPayload?.output as Record<string, unknown> | undefined
   if (inputOutput) {
     // Workflow definition created by a previous step
     if (inputOutput.workflowId && typeof inputOutput.workflowId === 'string') {

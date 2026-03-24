@@ -440,6 +440,18 @@ export interface StepOutput {
     type: string;
     score?: number;
   }>;
+
+  /**
+   * System-extracted linkable assets from step output.
+   * Normalized by the workflow engine from output.result fields
+   * (workflowId, documentId, externalUrl, etc.).
+   */
+  producedAssets?: Array<{
+    type: string;
+    id: string;
+    title: string;
+    action: string;
+  }>;
 }
 
 // Complete workflow step configuration stored on task for rerun/visibility
