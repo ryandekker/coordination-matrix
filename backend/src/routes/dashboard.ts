@@ -124,6 +124,7 @@ dashboardRouter.get('/kanban', async (req: Request, res: Response, next: NextFun
       }).sort(sortAndLimit.sort).limit(sortAndLimit.limit).toArray(),
 
       // 3. pending: tasks with status pending, assigned to human or unassigned with creatorType human
+      //    Also includes manual tasks (human approval steps) regardless of creatorType
       db.collection<Task>('tasks').find({
         ...baseFilter,
         status: 'pending' as Task['status'],
@@ -131,6 +132,7 @@ dashboardRouter.get('/kanban', async (req: Request, res: Response, next: NextFun
           { assigneeId: { $in: humanUserIds } },
           { assigneeId: null, creatorType: 'human' },
           { assigneeId: { $exists: false }, creatorType: 'human' },
+          { taskType: 'manual' },
         ],
       }).sort(sortAndLimit.sort).limit(sortAndLimit.limit).toArray(),
 
