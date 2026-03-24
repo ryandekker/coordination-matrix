@@ -1265,6 +1265,7 @@ export function TaskModal({
               <OutputTab
                 task={task}
                 childTasks={subtasks}
+                attachedDocuments={attachedDocuments}
                 onRollback={task.workflowRunId ? handleRollback : undefined}
                 onRetry={handleRetryEscalated}
                 isRetrying={retryTask.isPending}

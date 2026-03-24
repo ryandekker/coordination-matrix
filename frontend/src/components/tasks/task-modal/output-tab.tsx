@@ -4,7 +4,7 @@ import { useMemo, useState, useCallback } from 'react'
 import { Copy, Check, ChevronDown, ChevronRight, ExternalLink, MessageSquare } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { JsonViewer } from '@/components/ui/json-viewer'
-import { Task, WebhookAttempt, ManualReviewDecision, AgentQuestionAnswer, AgentQuestionsOutput, tasksApi } from '@/lib/api'
+import { Task, WebhookAttempt, ManualReviewDecision, AgentQuestionAnswer, AgentQuestionsOutput, Document, tasksApi } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { format, formatDistanceToNow } from 'date-fns'
 import Link from 'next/link'
@@ -24,12 +24,13 @@ import { useQueryClient } from '@tanstack/react-query'
 interface OutputTabProps {
   task: Task
   childTasks?: Task[]
+  attachedDocuments?: Document[]
   onRollback?: () => Promise<void>
   onRetry?: (humanInstruction?: string) => Promise<void>
   isRetrying?: boolean
 }
 
-export function OutputTab({ task, childTasks, onRollback, onRetry, isRetrying }: OutputTabProps) {
+export function OutputTab({ task, childTasks, attachedDocuments, onRollback, onRetry, isRetrying }: OutputTabProps) {
   const [copied, setCopied] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const updateTask = useUpdateTask()
@@ -262,6 +263,7 @@ export function OutputTab({ task, childTasks, onRollback, onRetry, isRetrying }:
         <ManualReviewPanel
           task={task}
           previousStepOutput={metadata as Record<string, unknown> | null}
+          attachedDocuments={attachedDocuments}
           onReview={handleReview}
           onRollback={onRollback}
           isSubmitting={isSubmitting}

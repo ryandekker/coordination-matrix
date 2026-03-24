@@ -1153,6 +1153,15 @@ class WorkflowExecutionService {
     if (step.description) {
       task.summary = step.description;
     }
+    // For manual steps, prefer dynamic summary from previous step output
+    if (step.stepType === 'manual' && inputPayload) {
+      const outputResult = (inputPayload as Record<string, unknown>).output as Record<string, unknown> | undefined;
+      const result = outputResult?.result as Record<string, unknown> | undefined;
+      const dynamicSummary = result?.summary as string | undefined;
+      if (dynamicSummary) {
+        task.summary = dynamicSummary;
+      }
+    }
 
     // Expand prompt library documents + additional instructions
     const expandedPrompt = await this.getExpandedPrompt(step);
