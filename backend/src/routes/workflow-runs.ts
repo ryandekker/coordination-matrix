@@ -61,7 +61,7 @@ router.post('/', requireAuth, async (req: Request, res: Response): Promise<void>
         workflowName: options.workflowName,
         workflowRunId: options.workflowRunId,
         rootTaskId: options.rootTaskId,
-        actorId: req.user?.userId ? new ObjectId(req.user.userId) : null,
+        actorId: req.user?.userId && ObjectId.isValid(req.user.userId) ? new ObjectId(req.user.userId) : null,
         actorType: getActorType(req),
         source: input.source,
         externalId: input.externalId,
@@ -98,7 +98,7 @@ router.post('/', requireAuth, async (req: Request, res: Response): Promise<void>
     }
 
     // Get actor ID from authenticated user (via JWT token)
-    const actorId = req.user?.userId
+    const actorId = req.user?.userId && ObjectId.isValid(req.user.userId)
       ? new ObjectId(req.user.userId)
       : null;
 
@@ -510,7 +510,7 @@ router.post('/:id/cancel', requireAuth, async (req: Request, res: Response): Pro
     }
 
     // Get actor ID from authenticated user (via JWT token)
-    const actorId = req.user?.userId
+    const actorId = req.user?.userId && ObjectId.isValid(req.user.userId)
       ? new ObjectId(req.user.userId)
       : undefined;
 
@@ -834,7 +834,7 @@ router.post('/:id/rerun', requireAuth, async (req: Request, res: Response): Prom
       return;
     }
 
-    const actorId = req.user?.userId ? new ObjectId(req.user.userId) : undefined;
+    const actorId = req.user?.userId && ObjectId.isValid(req.user.userId) ? new ObjectId(req.user.userId) : undefined;
 
     const result = await workflowExecutionService.rerunWorkflowRun(id, {
       fromStart,
