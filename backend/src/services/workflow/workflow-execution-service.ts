@@ -364,7 +364,7 @@ class WorkflowExecutionService {
     }
 
     const taskDefaults = input.taskDefaults ? {
-      assigneeId: input.taskDefaults.assigneeId
+      assigneeId: input.taskDefaults.assigneeId && ObjectId.isValid(input.taskDefaults.assigneeId)
         ? new ObjectId(input.taskDefaults.assigneeId)
         : undefined,
       urgency: input.taskDefaults.urgency,
@@ -372,7 +372,7 @@ class WorkflowExecutionService {
       dueOffsetHours: input.taskDefaults.dueOffsetHours,
     } : undefined;
 
-    const triggerTaskId = input.triggerTaskId ? new ObjectId(input.triggerTaskId) : null;
+    const triggerTaskId = input.triggerTaskId && ObjectId.isValid(input.triggerTaskId) ? new ObjectId(input.triggerTaskId) : null;
 
     // Resolve humanInstruction: use explicit value, or inherit from trigger task
     let humanInstruction = input.humanInstruction;
