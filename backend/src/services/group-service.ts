@@ -314,6 +314,9 @@ class GroupService {
    * Get all group IDs a user is a member of
    */
   async getUserGroupIds(userId: string): Promise<ObjectId[]> {
+    if (!ObjectId.isValid(userId)) {
+      return [];
+    }
     const groups = await this.collection
       .find(
         { 'members.userId': new ObjectId(userId) },

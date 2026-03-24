@@ -317,7 +317,7 @@ documentsRouter.post('/', loadUserGroups(), async (req: Request, res: Response, 
     }
 
     const now = new Date();
-    const userId = req.user?.userId ? new ObjectId(req.user.userId) : null;
+    const userId = req.user?.userId && ObjectId.isValid(req.user.userId) ? new ObjectId(req.user.userId) : null;
 
     // Determine groupId - use provided, or fall back to user's primary group
     let resolvedGroupId: ObjectId | null = null;
@@ -502,7 +502,7 @@ documentsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
     // Add update metadata
     const now = new Date();
     updates.updatedAt = now;
-    updates.lastModifiedById = req.user?.userId ? new ObjectId(req.user.userId) : existing.lastModifiedById;
+    updates.lastModifiedById = req.user?.userId && ObjectId.isValid(req.user.userId) ? new ObjectId(req.user.userId) : existing.lastModifiedById;
 
     // If content changed, increment version and create version record
     let unsetFields: Record<string, 1> = {};
@@ -632,7 +632,7 @@ documentsRouter.post('/bulk-move', async (req: Request, res: Response, next: Nex
 
     const objectIds = validDocIds.map((id: string) => new ObjectId(id));
     const now = new Date();
-    const actorId = req.user?.userId ? new ObjectId(req.user.userId) : null;
+    const actorId = req.user?.userId && ObjectId.isValid(req.user.userId) ? new ObjectId(req.user.userId) : null;
 
     // Update all documents
     const result = await db.collection<Document>('documents').updateMany(
@@ -686,7 +686,7 @@ documentsRouter.post('/bulk-archive', async (req: Request, res: Response, next: 
 
     const objectIds = validDocIds.map((id: string) => new ObjectId(id));
     const now = new Date();
-    const actorId = req.user?.userId ? new ObjectId(req.user.userId) : null;
+    const actorId = req.user?.userId && ObjectId.isValid(req.user.userId) ? new ObjectId(req.user.userId) : null;
 
     // Update all documents to archived status
     const result = await db.collection<Document>('documents').updateMany(
@@ -730,7 +730,7 @@ documentsRouter.delete('/:id', async (req: Request, res: Response, next: NextFun
 
     const documentId = new ObjectId(req.params.id);
 
-    const userId = req.user?.userId ? new ObjectId(req.user.userId) : null;
+    const userId = req.user?.userId && ObjectId.isValid(req.user.userId) ? new ObjectId(req.user.userId) : null;
 
     if (permanent === 'true') {
       // Hard delete - remove document and all versions
@@ -897,7 +897,7 @@ documentsRouter.post('/:id/restore/:version', async (req: Request, res: Response
     }
 
     const now = new Date();
-    const userId = req.user?.userId ? new ObjectId(req.user.userId) : null;
+    const userId = req.user?.userId && ObjectId.isValid(req.user.userId) ? new ObjectId(req.user.userId) : null;
     const newVersion = currentDoc.version + 1;
 
     // Update document with restored content
@@ -1057,7 +1057,7 @@ documentsRouter.post('/:id/link-task', async (req: Request, res: Response, next:
     );
 
     // Log link activity
-    const userId = req.user?.userId ? new ObjectId(req.user.userId) : null;
+    const userId = req.user?.userId && ObjectId.isValid(req.user.userId) ? new ObjectId(req.user.userId) : null;
     logDocumentActivity(documentId, 'document.linked', userId, 'user', undefined, {
       taskId: taskId,
       taskTitle: task.title,
@@ -1097,7 +1097,7 @@ documentsRouter.delete('/:id/link-task/:taskId', async (req: Request, res: Respo
     }
 
     // Log unlink activity
-    const userId = req.user?.userId ? new ObjectId(req.user.userId) : null;
+    const userId = req.user?.userId && ObjectId.isValid(req.user.userId) ? new ObjectId(req.user.userId) : null;
     logDocumentActivity(documentId, 'document.unlinked', userId, 'user', undefined, {
       taskId: req.params.taskId,
     });
