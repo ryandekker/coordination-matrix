@@ -32,8 +32,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { formatDistanceToNow } from 'date-fns'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { MarkdownContent } from '@/components/ui/markdown-content'
 import type { Document, DocumentStatus, DocumentType } from '@/lib/api'
 import Link from 'next/link'
 
@@ -220,11 +219,7 @@ export function AttachedDocuments({
 
                     {/* Markdown Content */}
                     <div className="border rounded-lg p-4 bg-background max-h-[400px] overflow-auto">
-                      <article className="prose prose-sm dark:prose-invert max-w-none">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {doc.content}
-                        </ReactMarkdown>
-                      </article>
+                      <MarkdownContent content={doc.content} />
                     </div>
 
                     {/* Actions */}

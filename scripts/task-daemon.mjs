@@ -2057,131 +2057,32 @@ function parseResponse(responseText) {
  * @param {string} prompt - Prompt to pass to the command
  * @param {number} [timeout=600000] - Timeout in ms (default 10 minutes)
  */
-async function executeCommand(cmd, prompt, timeout = 600000) {
-  console.log(`[DEBUG] Executing command: ${cmd}`);
-  console.log(`[DEBUG] Prompt preview: ${prompt.substring(0, 300)}${prompt.length > 300 ? '...' : ''}`);
-  console.log(`[DEBUG] Command timeout: ${Math.round(timeout / 1000)}s`);
-
-  // Write prompt to a temp file to avoid shell escaping issues
-  const tmpFile = join(tmpdir(), `task-daemon-${Date.now()}.txt`);
-  writeFileSync(tmpFile, prompt);
-
-  // For claude, insert --print after the claude binary (handles paths like /path/to/claude --model haiku)
-  // Match "claude" at start or after a path separator, followed by space or end
-  const claudeMatch = cmd.match(/^(.*\/)?claude(\s|$)/);
-  let fullCmd;
-  if (claudeMatch) {
-    // Insert --print right after "claude"
-    const claudeEndIdx = claudeMatch[0].length;
-    const beforeArgs = cmd.substring(0, claudeEndIdx).trimEnd();
-    const afterArgs = cmd.substring(claudeEndIdx);
-    fullCmd = `${beforeArgs} --print ${afterArgs}`.trim() + ` "$(cat '${tmpFile}')"`;
-  } else {
-    fullCmd = `${cmd} "$(cat '${tmpFile}')"`;
-  }
-
-  console.log(`[DEBUG] Running (this may take a while)...`);
-
-  return new Promise((resolve) => {
-    const child = spawn('sh', ['-c', fullCmd], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    // Track the child process for graceful shutdown
-    activeChildProcess = child;
-
-    let stdout = '';
-    let stderr = '';
-    let resolved = false;
-    let timeoutId = null;
-
-    const cleanup = () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-      activeChildProcess = null;
-      try { unlinkSync(tmpFile); } catch {}
-    };
-
-    const resolveOnce = (result) => {
-      if (resolved) return;
-      resolved = true;
-      cleanup();
-      resolve(result);
-    };
-
-    // Set up timeout
-    timeoutId = setTimeout(() => {
-      if (resolved) return;
-      console.log(`[WARN] Command timed out after ${Math.round(timeout / 1000)}s, terminating...`);
-      stderr += `\nCommand timed out after ${Math.round(timeout / 1000)} seconds`;
-
-      // Kill the child process
-      try {
-        child.kill('SIGTERM');
-        // Give it 5 seconds to terminate gracefully, then SIGKILL
-        setTimeout(() => {
-          try { child.kill('SIGKILL'); } catch {}
-        }, 5000);
-      } catch {}
-
-      resolveOnce({
-        exitCode: 124, // Standard timeout exit code
-        stdout,
-        stderr,
-        timedOut: true,
-      });
-    }, timeout);
-
-    child.stdout.on('data', (data) => {
-      stdout += data.toString();
-      // Prevent memory exhaustion from very large outputs
-      if (stdout.length > 50 * 1024 * 1024) { // 50MB limit
-        console.log(`[WARN] stdout exceeded 50MB, truncating...`);
-        stdout = stdout.slice(-10 * 1024 * 1024); // Keep last 10MB
-      }
-    });
-
-    child.stderr.on('data', (data) => {
-      stderr += data.toString();
-      // Limit stderr size too
-      if (stderr.length > 5 * 1024 * 1024) { // 5MB limit
-        stderr = stderr.slice(-1 * 1024 * 1024); // Keep last 1MB
-      }
-    });
-
-    child.on('close', (exitCode, signal) => {
-      if (signal === 'SIGTERM' || signal === 'SIGKILL') {
-        resolveOnce({
-          exitCode: 143, // Standard exit code for SIGTERM
-          stdout,
-          stderr: stderr || `Process terminated by ${signal}`,
-          terminated: true,
-        });
-      } else {
-        resolveOnce({
-          exitCode: exitCode || 0,
-          stdout,
-          stderr,
-        });
-      }
-    });
-
-    child.on('error', (error) => {
-      resolveOnce({
-        exitCode: 1,
-        stdout: '',
-        stderr: error.message,
-      });
-    });
-  });
-}
-
 /**
  * Parse NDJSON stream output into conversation object
  */
 function parseConversationOutput(stdout, conversation, inputPrompt = null) {
+  // Try to detect Gemini JSON output format (single JSON object with session_id + stats)
+  // Gemini outputs text lines (e.g. "Loaded cached credentials.") followed by a JSON blob.
+  // Find the JSON by looking for the last top-level '{' that pairs with the final '}'.
+  const trimmedEnd = stdout.trimEnd();
+  if (trimmedEnd.endsWith('}')) {
+    // Search backwards for a line that starts with '{'
+    const lastBrace = trimmedEnd.lastIndexOf('\n{');
+    const jsonStart = lastBrace !== -1 ? lastBrace + 1 : (trimmedEnd.startsWith('{') ? 0 : -1);
+    if (jsonStart !== -1) {
+      try {
+        const geminiOutput = JSON.parse(trimmedEnd.substring(jsonStart));
+        if (geminiOutput.session_id && geminiOutput.stats) {
+          parseGeminiConversationOutput(geminiOutput, conversation, inputPrompt);
+          return;
+        }
+      } catch {
+        // Not valid Gemini JSON, fall through to line-by-line parsing
+      }
+    }
+  }
+
+  // Claude stream-json format: line-by-line JSON events
   const lines = stdout.split('\n').filter(line => line.trim());
 
   for (const line of lines) {
@@ -2258,6 +2159,27 @@ function parseConversationOutput(stdout, conversation, inputPrompt = null) {
       // Skip lines that aren't valid JSON
       console.log(`[DEBUG] Skipping non-JSON line: ${line.substring(0, 100)}`);
     }
+  }
+
+  // Fallback: if no structured events were parsed (generic/unknown command),
+  // ensure we still log the prompt and raw output for debugging
+  if (conversation.messages.length === 0) {
+    if (inputPrompt) {
+      conversation.messages.push({
+        type: 'user',
+        timestamp: new Date(),
+        content: inputPrompt,
+      });
+    }
+    if (stdout.trim()) {
+      conversation.result = stdout.trim();
+      conversation.messages.push({
+        type: 'assistant',
+        timestamp: new Date(),
+        content: stdout.trim(),
+      });
+    }
+    conversation.numTurns = 1;
   }
 }
 
@@ -2387,6 +2309,116 @@ function parseCodexConversationOutput(stdout, conversation, inputPrompt = null) 
 }
 
 /**
+ * Parse Gemini CLI JSON output into conversation record format.
+ * Gemini outputs: { session_id, response, stats: { models, tools, files } }
+ */
+function parseGeminiConversationOutput(output, conversation, inputPrompt = null) {
+  conversation.sessionId = output.session_id;
+
+  // Determine primary model from stats (first model listed, or the one with most tokens)
+  const modelNames = Object.keys(output.stats?.models || {});
+  conversation.model = modelNames[0] || 'gemini';
+
+  // Add user prompt as first message
+  if (inputPrompt) {
+    conversation.messages.push({
+      type: 'user',
+      timestamp: new Date(),
+      content: inputPrompt,
+    });
+  }
+
+  // Add assistant response
+  if (output.response) {
+    conversation.messages.push({
+      type: 'assistant',
+      timestamp: new Date(),
+      content: output.response,
+    });
+  }
+
+  // Store the final response text as the result
+  conversation.result = output.response || '';
+
+  // Aggregate token usage across all models
+  let totalInput = 0;
+  let totalOutput = 0;
+  let totalCached = 0;
+  let totalLatencyMs = 0;
+  const modelUsage = {};
+
+  for (const [modelName, modelStats] of Object.entries(output.stats?.models || {})) {
+    const tokens = modelStats.tokens || {};
+    const api = modelStats.api || {};
+
+    totalInput += tokens.input || tokens.prompt || 0;
+    totalOutput += tokens.candidates || 0;
+    totalCached += tokens.cached || 0;
+    totalLatencyMs += api.totalLatencyMs || 0;
+
+    modelUsage[modelName] = {
+      inputTokens: tokens.input || tokens.prompt || 0,
+      outputTokens: tokens.candidates || 0,
+      cachedTokens: tokens.cached || 0,
+      thoughtTokens: tokens.thoughts || 0,
+      toolTokens: tokens.tool || 0,
+      totalTokens: tokens.total || 0,
+      apiRequests: api.totalRequests || 0,
+      apiErrors: api.totalErrors || 0,
+      latencyMs: api.totalLatencyMs || 0,
+    };
+  }
+
+  conversation.usage = {
+    inputTokens: totalInput,
+    outputTokens: totalOutput,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: totalCached,
+    totalCostUsd: 0, // Gemini CLI doesn't report cost
+  };
+
+  conversation.modelUsage = modelUsage;
+  conversation.durationMs = totalLatencyMs;
+  conversation.durationApiMs = totalLatencyMs;
+
+  // Map tool call stats (Gemini provides aggregate stats, not per-call details)
+  const toolStats = output.stats?.tools || {};
+  if (toolStats.totalCalls > 0) {
+    // Add summary tool call entries from byName stats
+    for (const [toolName, stats] of Object.entries(toolStats.byName || {})) {
+      for (let i = 0; i < (stats.count || 0); i++) {
+        conversation.messages.push({
+          type: 'tool_use',
+          timestamp: new Date(),
+          toolName,
+          toolInput: { _summary: true, callIndex: i + 1, totalCalls: stats.count },
+          toolUseId: `gemini-${toolName}-${i}`,
+        });
+        conversation.messages.push({
+          type: 'tool_result',
+          timestamp: new Date(),
+          toolUseId: `gemini-${toolName}-${i}`,
+          toolResult: stats.success > i ? 'success' : 'failed',
+          isError: stats.fail > i,
+        });
+      }
+    }
+    conversation.numTurns = toolStats.totalCalls + 1; // tool calls + final response
+  } else {
+    conversation.numTurns = 1;
+  }
+
+  // File change stats
+  const fileStats = output.stats?.files || {};
+  if (fileStats.totalLinesAdded > 0 || fileStats.totalLinesRemoved > 0) {
+    conversation.fileChanges = {
+      linesAdded: fileStats.totalLinesAdded || 0,
+      linesRemoved: fileStats.totalLinesRemoved || 0,
+    };
+  }
+}
+
+/**
  * Execute command with stream-json output to capture full conversation thread
  * Returns conversation data including tool calls and results
  * @param {string} cmd - Command to execute
@@ -2400,11 +2432,12 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
 
   // Detect CLI type to determine streaming format and prompt delivery
   const claudeMatch = cmd.match(/^(.*\/)?claude(\s|$)/);
-  const codexMatch = cmd.match(/^(.*\/)?codex(\s|$)/);
+  const codexMatch = !claudeMatch && cmd.match(/^(.*\/)?codex(\s|$)/);
+  const geminiMatch = !claudeMatch && !codexMatch && cmd.match(/^(.*\/)?gemini(\s|$)/);
   let fullCmd;
   let tmpFile = null;
   let useStdinPipe = false;
-  let outputFormat = 'claude'; // 'claude' or 'codex' - determines JSONL parser
+  let outputFormat = 'claude'; // 'claude', 'codex', or 'generic' - determines JSONL parser
 
   if (claudeMatch) {
     // For claude, insert --print --output-format stream-json --verbose
@@ -2428,8 +2461,16 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
     // Ensure --json is present for structured output capture
     const jsonFlag = afterArgs.includes('--json') ? '' : '--json ';
     fullCmd = `${beforeArgs} ${jsonFlag}${afterArgs}`.trim() + ` "$(cat '${tmpFile}')"`;
+  } else if (geminiMatch) {
+    // Gemini CLI: use -p for headless, --yolo for auto-approve, -o json for structured output
+    const geminiEndIdx = geminiMatch[0].length;
+    const beforeArgs = cmd.substring(0, geminiEndIdx).trimEnd();
+    const afterArgs = cmd.substring(geminiEndIdx);
+    tmpFile = join(tmpdir(), `task-daemon-${Date.now()}.txt`);
+    writeFileSync(tmpFile, prompt);
+    fullCmd = `${beforeArgs} -p "$(cat '${tmpFile}')" --yolo -o json ${afterArgs}`.trim();
   } else {
-    // Non-claude/codex command, use temp file approach
+    // Generic command, use temp file approach
     tmpFile = join(tmpdir(), `task-daemon-${Date.now()}.txt`);
     writeFileSync(tmpFile, prompt);
     fullCmd = `${cmd} "$(cat '${tmpFile}')"`;
@@ -2647,15 +2688,17 @@ function buildExecCommand(config) {
   let cmd = config.exec;
   let mcpTempFile = null;
 
-  // Only inject MCP config for Claude/Codex commands that have mcpServers configured
+  // Only inject MCP config for supported CLI commands that have mcpServers configured
   if (!config.mcpServers || Object.keys(config.mcpServers).length === 0) {
     return { cmd, mcpTempFile };
   }
 
   const isClaudeCommand = /^(.*\/)?claude(\s|$)/.test(cmd);
   const isCodexCommand = /^(.*\/)?codex(\s|$)/.test(cmd);
-  if (!isClaudeCommand && !isCodexCommand) {
-    log.warn('mcpServers configured but exec command is not Claude/Codex CLI - MCP config ignored');
+  const isGeminiCommand = /^(.*\/)?gemini(\s|$)/.test(cmd);
+
+  if (!isClaudeCommand && !isCodexCommand && !isGeminiCommand) {
+    log.warn('mcpServers configured but exec command is not Claude/Codex/Gemini CLI - MCP config ignored');
     return { cmd, mcpTempFile };
   }
 
@@ -2664,12 +2707,19 @@ function buildExecCommand(config) {
   mcpTempFile = join(tmpdir(), `daemon-mcp-${Date.now()}.json`);
   writeFileSync(mcpTempFile, JSON.stringify(mcpConfig, null, 2));
 
-  // Append --mcp-config flag to the command (both CLIs support this flag)
+  // Append --mcp-config flag to the command (all supported CLIs use this flag)
   cmd += ` --mcp-config ${mcpTempFile}`;
 
-  // Optionally add --strict-mcp-config (Claude-specific, codex may ignore)
-  if (config.strictMcpConfig && isClaudeCommand) {
-    cmd += ' --strict-mcp-config';
+  // Optionally add strict MCP config
+  if (config.strictMcpConfig) {
+    if (isClaudeCommand) {
+      cmd += ' --strict-mcp-config';
+    }
+    // Gemini CLI: --allowed-mcp-server-names restricts to named servers
+    if (isGeminiCommand) {
+      const serverNames = Object.keys(config.mcpServers).join(' ');
+      cmd += ` --allowed-mcp-server-names ${serverNames}`;
+    }
   }
 
   log.debug(`MCP config written to ${mcpTempFile}`, Object.keys(config.mcpServers));
@@ -3011,6 +3061,77 @@ async function handleStageTransition(config, task, workflow, parsedResponse) {
 }
 
 // ============================================================================
+// Produced Asset Extraction
+// ============================================================================
+
+/**
+ * Extract produced assets from agent output at the system level.
+ * Scans multiple locations in the parsed response for linkable fields
+ * (workflowId, documentId, externalUrl, etc.) and returns a normalized array.
+ * This runs in the daemon so downstream steps and the frontend get pre-extracted assets.
+ */
+function extractProducedAssets(parsedData, processedOutput) {
+  const assets = [];
+  const seen = new Set();
+
+  function addAsset(type, id, title, action) {
+    if (!id || typeof id !== 'string') return;
+    const key = `${type}:${id}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    assets.push({ type, id, title: title || id, action });
+  }
+
+  // 1. Scan output.result for linkable fields
+  const result = typeof parsedData.output === 'object' && parsedData.output !== null
+    ? parsedData.output.result || parsedData.output
+    : {};
+  const resultObj = typeof result === 'object' && result !== null ? result : {};
+
+  if (resultObj.workflowId) {
+    addAsset('workflow', resultObj.workflowId, resultObj.workflowName || null, 'Created');
+  }
+  if (resultObj.workflowRunId) {
+    addAsset('workflow-run', resultObj.workflowRunId, null, 'Triggered');
+  }
+  if (resultObj.documentId) {
+    addAsset('document', resultObj.documentId, resultObj.documentTitle || null, 'Created');
+  }
+  if (resultObj.externalUrl) {
+    addAsset('external', resultObj.externalUrl, resultObj.externalTitle || resultObj.externalUrl, 'Created');
+  }
+
+  // 2. Check output top-level (alternate location for fields not nested under result)
+  const outputObj = typeof parsedData.output === 'object' && parsedData.output !== null ? parsedData.output : {};
+  if (outputObj.workflowId && outputObj.workflowId !== resultObj.workflowId) {
+    addAsset('workflow', outputObj.workflowId, outputObj.workflowName || null, 'Created');
+  }
+  if (outputObj.workflowRunId && outputObj.workflowRunId !== resultObj.workflowRunId) {
+    addAsset('workflow-run', outputObj.workflowRunId, null, 'Triggered');
+  }
+
+  // 3. Extract from already-processed documentOperations
+  if (Array.isArray(processedOutput.documentOperations)) {
+    for (const op of processedOutput.documentOperations) {
+      if (op.success && op.documentId) {
+        addAsset('document', op.documentId, op.title || null, op.action === 'create' ? 'Created' : 'Updated');
+      }
+    }
+  }
+
+  // 4. Extract from already-processed routingOperations
+  if (Array.isArray(processedOutput.routingOperations)) {
+    for (const op of processedOutput.routingOperations) {
+      if (op.action === 'triggerWorkflow' && op.success && op.workflowRunId) {
+        addAsset('workflow-run', op.workflowRunId, null, 'Triggered');
+      }
+    }
+  }
+
+  return assets;
+}
+
+// ============================================================================
 // Task Processing
 // ============================================================================
 
@@ -3271,15 +3392,11 @@ async function processTask(config, task) {
   console.log('-'.repeat(40));
 
   const startTime = new Date();
-  const isClaudeCommand = /^(.*\/)?claude(\s|$)/.test(execCmd);
-  const isCodexCommand = /^(.*\/)?codex(\s|$)/.test(execCmd);
 
-  // Use conversation capture for claude/codex commands to get full tool call traces
+  // All commands go through conversation capture for full logging
   let result;
   try {
-    result = (isClaudeCommand || isCodexCommand)
-      ? await executeCommandWithConversation(execCmd, prompt, commandTimeout)
-      : await executeCommand(execCmd, prompt, commandTimeout);
+    result = await executeCommandWithConversation(execCmd, prompt, commandTimeout);
   } finally {
     // Clean up MCP temp file
     if (mcpTempFile) { try { unlinkSync(mcpTempFile); } catch {} }
@@ -3553,12 +3670,21 @@ async function processTask(config, task) {
     parsedResponse.data.metadata?.suggestedTags ||
     [];
 
+  // Normalize summary: promote from nested locations if top-level is empty
+  let normalizedSummary = parsedResponse.data.summary;
+  if (!normalizedSummary) {
+    const resultObj = typeof resultData === 'object' && resultData !== null ? resultData : {};
+    normalizedSummary = resultObj.summary
+      || parsedResponse.data.output?.summary
+      || '';
+  }
+
   const output = {
     timestamp,
     status: parsedResponse.data.status,
     action: parsedResponse.data.nextAction,
     reason: parsedResponse.data.nextActionReason || null,
-    summary: parsedResponse.data.summary,
+    summary: normalizedSummary,
     result: resultData,
     confidence: parsedResponse.data.metadata?.confidence || null,
     suggestedTags,
@@ -3619,7 +3745,23 @@ async function processTask(config, task) {
       log.info(`Task was re-assigned to ${successfulAssign.assigneeId} — skipping status override to preserve pending state`);
       newStatus = 'pending';
     }
+
+    // When a workflow was triggered, set the task to 'waiting' instead of 'completed'.
+    // The workflow engine will set workflowResult and complete the task when the spawned
+    // workflow finishes. This keeps the task visible as the parent of the workflow tree.
+    const successfulTrigger = routingResults.find(
+      r => r.action === 'triggerWorkflow' && r.success
+    );
+    if (successfulTrigger && newStatus === 'completed') {
+      log.info(`Workflow triggered (run ${successfulTrigger.workflowRunId}) — setting task to waiting until workflow completes`);
+      newStatus = 'waiting';
+    }
   }
+
+  // Extract produced assets from agent output at the system level.
+  // This normalizes linkable fields so downstream steps and the frontend
+  // don't need to scan multiple nested paths.
+  output.producedAssets = extractProducedAssets(parsedResponse.data, output);
 
   // Merge with existing metadata, clearing temporary fields
   const updatedMetadata = {

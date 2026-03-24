@@ -8,7 +8,7 @@ import { Task } from '@/lib/api'
 import { useState, useCallback } from 'react'
 
 interface ProducedAsset {
-  type: 'document' | 'workflow-run' | 'conversation' | 'external'
+  type: 'document' | 'workflow' | 'workflow-run' | 'conversation' | 'external'
   id: string
   title: string
   url?: string
@@ -22,10 +22,60 @@ interface ProducedAssetsPanelProps {
   childTasks?: Task[]
 }
 
+function resolveAssetUrl(type: string, id: string): string | undefined {
+  switch (type) {
+    case 'document': return `/documents/${id}`
+    case 'workflow': return `/workflows?workflowId=${id}`
+    case 'workflow-run': return `/workflow-runs?id=${id}`
+    case 'external': return id.startsWith('http') ? id : undefined
+    default: return undefined
+  }
+}
+
 function extractAssetsFromTask(task: Task): ProducedAsset[] {
   const assets: ProducedAsset[] = []
   const md = task.metadata as Record<string, unknown> | undefined
   const output = md?.output as Record<string, unknown> | undefined
+
+  // 0. Pre-extracted producedAssets from daemon or workflow engine (preferred path).
+  // These are normalized at the system level so we don't need to scan multiple nested paths.
+  const preExtracted =
+    (task.stepOutput as Record<string, unknown> | undefined)?.producedAssets as Array<Record<string, unknown>> | undefined
+    || output?.producedAssets as Array<Record<string, unknown>> | undefined
+  if (Array.isArray(preExtracted) && preExtracted.length > 0) {
+    for (const a of preExtracted) {
+      if (a.type && a.id) {
+        assets.push({
+          type: a.type as ProducedAsset['type'],
+          id: a.id as string,
+          title: (a.title as string) || (a.id as string),
+          url: resolveAssetUrl(a.type as string, a.id as string),
+          action: (a.action as string) || 'Produced',
+          sourceTaskId: task._id,
+          sourceTaskTitle: task.title,
+        })
+      }
+    }
+  }
+
+  // 0b. Pre-extracted assets from inputPayload (manual tasks receiving previous step's assets)
+  const inputPayload = md?.inputPayload as Record<string, unknown> | undefined
+  const upstreamAssets = inputPayload?.producedAssets as Array<Record<string, unknown>> | undefined
+  if (Array.isArray(upstreamAssets) && upstreamAssets.length > 0) {
+    for (const a of upstreamAssets) {
+      if (a.type && a.id) {
+        assets.push({
+          type: a.type as ProducedAsset['type'],
+          id: a.id as string,
+          title: (a.title as string) || (a.id as string),
+          url: resolveAssetUrl(a.type as string, a.id as string),
+          action: (a.action as string) || 'Produced',
+          sourceTaskId: task._id,
+          sourceTaskTitle: task.title,
+        })
+      }
+    }
+  }
 
   // 1. Document operations (create/update) from daemon output
   if (output?.documentOperations) {
@@ -171,7 +221,7 @@ function extractAssetsFromTask(task: Task): ProducedAsset[] {
     // Look for workflow creation results
     if (result.workflowId && typeof result.workflowId === 'string') {
       assets.push({
-        type: 'workflow-run',
+        type: 'workflow',
         id: result.workflowId,
         title: (result.workflowName as string) || `Workflow ${(result.workflowId as string).slice(-8)}`,
         url: `/workflows?workflowId=${result.workflowId}`,
@@ -194,6 +244,51 @@ function extractAssetsFromTask(task: Task): ProducedAsset[] {
     }
   }
 
+  // 11. For manual tasks: extract assets from inputPayload (previous step's output)
+  // Fallback for historical tasks that don't have pre-extracted producedAssets
+  const legacyInputPayload = md?.inputPayload as Record<string, unknown> | undefined
+  const inputOutput = legacyInputPayload?.output as Record<string, unknown> | undefined
+  if (inputOutput) {
+    // Workflow definition created by a previous step
+    if (inputOutput.workflowId && typeof inputOutput.workflowId === 'string') {
+      assets.push({
+        type: 'workflow',
+        id: inputOutput.workflowId,
+        title: (inputOutput.workflowName as string) || `Workflow ${(inputOutput.workflowId as string).slice(-8)}`,
+        url: `/workflows?workflowId=${inputOutput.workflowId}`,
+        action: 'Created',
+        sourceTaskId: task._id,
+        sourceTaskTitle: task.title,
+      })
+    }
+    // Also check inputPayload.output.result for assets (code step pattern)
+    const inputResult = inputOutput.result as Record<string, unknown> | undefined
+    if (inputResult?.workflowId && typeof inputResult.workflowId === 'string') {
+      assets.push({
+        type: 'workflow',
+        id: inputResult.workflowId,
+        title: (inputResult.workflowName as string) || `Workflow ${(inputResult.workflowId as string).slice(-8)}`,
+        url: `/workflows?workflowId=${inputResult.workflowId}`,
+        action: 'Created',
+        sourceTaskId: task._id,
+        sourceTaskTitle: task.title,
+      })
+    }
+  }
+
+  // 12. Link to the task's own workflow run (contextual link for workflow tasks)
+  if (task.workflowRunId && task.taskType === 'manual') {
+    assets.push({
+      type: 'workflow-run',
+      id: task.workflowRunId,
+      title: `Workflow Run ${task.workflowRunId.slice(-8)}`,
+      url: `/workflow-runs?id=${task.workflowRunId}`,
+      action: 'Part of',
+      sourceTaskId: task._id,
+      sourceTaskTitle: task.title,
+    })
+  }
+
   return assets
 }
 
@@ -209,6 +304,7 @@ function deduplicateAssets(assets: ProducedAsset[]): ProducedAsset[] {
 
 const typeIcons = {
   'document': FileText,
+  'workflow': GitBranch,
   'workflow-run': GitBranch,
   'conversation': MessageSquare,
   'external': Globe,
@@ -216,6 +312,7 @@ const typeIcons = {
 
 const typeLabels = {
   'document': 'Document',
+  'workflow': 'Workflow',
   'workflow-run': 'Workflow Run',
   'conversation': 'Conversation',
   'external': 'External Resource',

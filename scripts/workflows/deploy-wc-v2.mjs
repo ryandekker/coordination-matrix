@@ -113,6 +113,66 @@ This workflow can reference itself to create new workflows:
 - Steps with no connections and no next step in array are terminal
 - Use 'END' as targetStepId to explicitly terminate a path
 
+## Decision Step Pattern (CRITICAL)
+
+Decision steps route the workflow based on a field value using **exact value matching** (NOT JavaScript expressions).
+
+**Required fields:**
+- \`stepType: "decision"\` — MUST be "decision", NOT "code"
+- \`decisionField\` — Path to the field to match (e.g., \`"output.verdict"\`, \`"reviewDecision"\`)
+- \`connections\` — Array with \`condition\` set to the **exact value** to match
+- \`defaultConnection\` — Fallback targetStepId if no condition matches
+
+**Example:**
+\`\`\`json
+{
+  "id": "review-gate",
+  "stepType": "decision",
+  "decisionField": "output.verdict",
+  "connections": [
+    { "targetStepId": "next-step", "condition": "pass" },
+    { "targetStepId": "retry-step", "condition": "fail" }
+  ],
+  "defaultConnection": "next-step"
+}
+\`\`\`
+
+**WRONG — do NOT do this:**
+- \`"condition": "output.result.verdict === 'approved'"\` — this is a JS expression, NOT a value match
+- \`"stepType": "code"\` with conditional connections — code steps execute ALL connections simultaneously
+- \`"condition": "verdict == pass"\` — conditions are plain values, not comparison expressions
+
+**Condition values are case-insensitive** and can match multiple values with commas: \`"condition": "pass,approved"\`
+
+For manual steps, the engine sets \`reviewDecision\` on task metadata when the human submits. Use \`"decisionField": "reviewDecision"\` with conditions \`"approved"\`, \`"approved_with_notes"\`, \`"request_changes"\`.
+
+## Manual Review Step Pattern (CRITICAL)
+
+When a workflow includes a human review/approval step (\`stepType: "manual"\`), you MUST place a **code step before it** that produces a **review document**. Without this, the human sees raw JSON instead of formatted content.
+
+**The code step MUST return this shape:**
+\`\`\`javascript
+return {
+  result: {
+    title: 'Review: My Workflow',     // Document title
+    content: '# Markdown content...',  // Full markdown body (supports mermaid)
+    summary: 'Brief summary text',     // Shown on task card and header
+  },
+  // Optional: linkable assets that surface in the UI
+  workflowId: 'abc123',     // Links to workflow definition
+  workflowName: 'My Flow',  // Display name for the link
+};
+\`\`\`
+
+The system automatically creates a review document from \`result.content\` and renders it as formatted markdown (including mermaid diagrams via \\\`\\\`\\\`mermaid code blocks). The \`result.summary\` becomes the manual task's description.
+
+**Required pattern: code step → manual step → decision step**
+1. **Code step**: assembles review content (markdown with tables, mermaid diagrams, links, summaries)
+2. **Manual step**: human reviews the formatted document and submits a decision
+3. **Decision step**: routes based on \`reviewDecision\` (\`"approved"\`, \`"approved_with_notes"\`, \`"request_changes"\`)
+
+This pattern is mandatory. Never send agent output directly to a manual step.
+
 ## Best Practices
 
 1. Use descriptive step IDs (e.g., "design-workflow", not "step1")
@@ -122,6 +182,8 @@ This workflow can reference itself to create new workflows:
 5. Include human checkpoints for important decisions
 6. Use foreach/join for parallel processing
 7. Never hardcode agent IDs
+8. Always precede manual steps with a code step that formats a review document
+9. Only use \`stepType: "decision"\` for routing — never use code steps with conditional connections
 
 ## Loop Prevention Pattern
 
@@ -160,6 +222,9 @@ Every step MUST use these exact field names:
 - Code steps: use \`codeConfig: { code: "..." }\` NOT top-level \`code\`
 - Webhook steps: use \`webhookConfig: { url, method, headers, bodyTemplate }\`
 - Decision steps: use \`decisionField\` and \`defaultConnection\`
+- NEVER use JavaScript expressions in connection conditions — conditions are plain values to match
+- NEVER use \`stepType: "code"\` for routing — code steps execute ALL connections, use \`stepType: "decision"\` instead
+- ALWAYS put a code step before manual steps to generate a review document with \`result: { title, content, summary }\`
 
 ## Output Format
 
@@ -216,6 +281,18 @@ Before reviewing the workflow, check if the previous step's output was parsed co
 - [ ] No orphaned/unreachable steps
 - [ ] Decision steps have conditions and defaultConnection
 - [ ] No infinite loops without a code step loop counter
+
+### Decision Steps (CRITICAL — automatic fail if wrong)
+- [ ] Every step that routes conditionally uses \`stepType: "decision"\` (NOT "code")
+- [ ] Connection \`condition\` values are plain values (e.g., \`"pass"\`, \`"approved"\`), NOT JavaScript expressions
+- [ ] NO conditions like \`"output.result.verdict === 'approved'"\` — these MUST be just \`"approved"\`
+- [ ] If a code step has multiple connections with conditions, it is WRONG — code steps execute ALL connections
+
+### Manual Review Steps (CRITICAL)
+- [ ] Every manual step is preceded by a code step that generates a review document
+- [ ] The code step returns \`{ result: { title: "...", content: "# markdown...", summary: "..." } }\`
+- [ ] No agent step output goes directly to a manual step without a formatting code step in between
+- [ ] Manual steps are followed by a decision step using \`decisionField: "reviewDecision"\`
 
 ### Foreach / Join
 - [ ] Every foreach has itemsPath
@@ -736,43 +813,188 @@ function buildWorkflow(promptDocIds) {
         id: 'prepare-review',
         name: 'Prepare Review Summary',
         stepType: 'code',
-        description: 'Assemble a clean summary of the entire workflow creation process for human review.',
+        description: 'Assemble a rich markdown review document with mermaid diagram, links, and phase results.',
         codeConfig: {
           code: `
-            // Walk the step log to build a review summary
             const log = _stepLog || [];
-            const summary = { phases: [], createdArtifacts: {}, testResults: {} };
+            const workflowName = (trigger && trigger.workflowName) || 'Unknown';
+            const originalIdea = (trigger && trigger.idea) || 'Unknown';
+            const constraints = (trigger && trigger.constraints) || '';
 
-            // Extract key data from each phase
+            // Extract phase data from step log
+            const phases = [];
+            let createdWorkflowId = null;
+            let createdWorkflowName = null;
+            let testResults = null;
+
             for (const entry of log) {
               const out = entry.outputSummary || {};
+              const result = out.result || {};
               if (entry.stepId === 'design-workflow') {
-                summary.phases.push({ step: 'Design', status: out.status || 'unknown', summary: out.summary || out.rawOutput?.substring(0, 500) || 'No summary' });
+                phases.push({ step: 'Design Workflow', icon: '🎨', status: out.status || entry.status || 'unknown', summary: out.summary || 'Completed' });
               }
               if (entry.stepId === 'review-design') {
-                summary.phases.push({ step: 'Review', status: out.status || 'unknown', summary: out.summary || 'No summary', confidence: out.confidence });
+                phases.push({ step: 'Review Design', icon: '🔍', status: out.status || entry.status || 'unknown', summary: out.summary || 'Completed', confidence: out.confidence || result.confidence });
+              }
+              if (entry.stepId === 'edit-design') {
+                phases.push({ step: 'Edit Design (revision)', icon: '✏️', status: out.status || entry.status || 'unknown', summary: out.summary || 'Revised' });
               }
               if (entry.stepId === 'create-prompts') {
-                summary.phases.push({ step: 'Create Prompts', status: out.status || 'unknown', summary: out.summary || 'No summary' });
+                phases.push({ step: 'Create Prompt Documents', icon: '📝', status: out.status || entry.status || 'unknown', summary: out.summary || 'Completed' });
               }
               if (entry.stepId === 'create-workflow-api') {
-                summary.phases.push({ step: 'Create Workflow', status: out.status || 'unknown', summary: out.summary || 'No summary' });
-                // Try to extract the created workflow ID
-                const result = out.result || {};
-                if (result.workflowId) summary.createdArtifacts.workflowId = result.workflowId;
-                if (result.workflowName) summary.createdArtifacts.workflowName = result.workflowName;
+                phases.push({ step: 'Create & Validate Workflow', icon: '⚙️', status: out.status || entry.status || 'unknown', summary: out.summary || 'Completed' });
+                if (result.workflowId) createdWorkflowId = result.workflowId;
+                if (result.workflowName) createdWorkflowName = result.workflowName;
               }
               if (entry.stepId === 'e2e-test') {
-                summary.testResults = { status: out.status || 'unknown', summary: out.summary || 'No summary', confidence: out.confidence };
+                testResults = { status: out.status || entry.status || 'unknown', summary: out.summary || 'Completed', confidence: out.confidence || result.confidence };
+                phases.push({ step: 'E2E Testing', icon: '🧪', status: testResults.status, summary: testResults.summary });
               }
             }
 
-            // Include original idea from trigger
-            summary.originalIdea = (trigger && trigger.idea) || 'Unknown';
-            summary.workflowName = (trigger && trigger.workflowName) || 'Unknown';
+            // Fetch the created workflow to build a mermaid diagram
+            let mermaidDiagram = '';
+            let workflowSteps = [];
+            if (createdWorkflowId && typeof apiUrl === 'string' && typeof apiKey === 'string') {
+              try {
+                const res = await fetch(apiUrl + '/workflows/' + createdWorkflowId, {
+                  headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' }
+                });
+                if (res.ok) {
+                  const json = await res.json();
+                  const wf = json.data || json;
+                  workflowSteps = wf.steps || [];
 
-            return summary;
+                  if (workflowSteps.length > 0) {
+                    // Build mermaid flowchart
+                    const lines = ['flowchart TD'];
+                    const typeShapes = { agent: ['([', '])'], manual: ['{{', '}}'], code: ['[/', '/]'], decision: ['{', '}'], external: ['>', ']'], foreach: ['[[', ']]'] };
+                    for (const s of workflowSteps) {
+                      const shape = typeShapes[s.stepType] || ['[', ']'];
+                      const label = (s.name || s.id).replace(/"/g, "'");
+                      lines.push('    ' + s.id + shape[0] + '"' + label + '"' + shape[1]);
+                    }
+                    // Add connections
+                    for (const s of workflowSteps) {
+                      for (const c of (s.connections || [])) {
+                        const label = c.label || c.condition || '';
+                        if (label) {
+                          lines.push('    ' + s.id + ' -->|' + label + '| ' + c.targetStepId);
+                        } else {
+                          lines.push('    ' + s.id + ' --> ' + c.targetStepId);
+                        }
+                      }
+                    }
+                    mermaidDiagram = lines.join('\\n');
+                  }
+                }
+              } catch (e) {
+                console.warn('Failed to fetch workflow for diagram:', e.message);
+              }
+            }
+
+            // Build the base URL for frontend links (strip /api suffix if present)
+            const baseUrl = (typeof apiUrl === 'string' ? apiUrl : '').replace(/\\/api$/, '');
+
+            // Assemble markdown document
+            const md = [];
+            md.push('# Review: ' + (createdWorkflowName || workflowName));
+            md.push('');
+            md.push('## Original Request');
+            md.push('');
+            md.push('> ' + originalIdea.split('\\n').join('\\n> '));
+            if (constraints) {
+              md.push('');
+              md.push('**Constraints:** ' + constraints);
+            }
+            md.push('');
+
+            // Links
+            md.push('## Quick Links');
+            md.push('');
+            if (createdWorkflowId && baseUrl) {
+              md.push('- **Workflow:** [' + (createdWorkflowName || workflowName) + '](' + baseUrl + '/workflows/' + createdWorkflowId + ')');
+            }
+            if (_workflowRunId && baseUrl) {
+              md.push('- **This Run:** [Workflow Run](' + baseUrl + '/workflow-runs/' + _workflowRunId + ')');
+            }
+            md.push('');
+
+            // Mermaid diagram
+            if (mermaidDiagram) {
+              md.push('## Workflow Diagram');
+              md.push('');
+              md.push('\`\`\`mermaid');
+              md.push(mermaidDiagram);
+              md.push('\`\`\`');
+              md.push('');
+            }
+
+            // Step summary table
+            if (workflowSteps.length > 0) {
+              md.push('## Workflow Steps (' + workflowSteps.length + ')');
+              md.push('');
+              md.push('| # | Step | Type | Agent |');
+              md.push('|---|------|------|-------|');
+              workflowSteps.forEach((s, i) => {
+                const agent = s.defaultAssigneeId || '—';
+                md.push('| ' + (i + 1) + ' | ' + (s.name || s.id) + ' | ' + s.stepType + ' | ' + agent + ' |');
+              });
+              md.push('');
+            }
+
+            // Creation phases
+            md.push('## Creation Process');
+            md.push('');
+            for (const p of phases) {
+              const statusIcon = (p.status === 'completed' || p.status === 'SUCCESS') ? '✅' : (p.status === 'failed' || p.status === 'FAILED') ? '❌' : '⏳';
+              md.push('### ' + p.icon + ' ' + p.step + ' ' + statusIcon);
+              md.push('');
+              md.push(p.summary);
+              if (p.confidence !== undefined && p.confidence !== null) {
+                md.push('');
+                md.push('*Confidence: ' + (typeof p.confidence === 'number' ? (p.confidence * 100).toFixed(0) + '%' : p.confidence) + '*');
+              }
+              md.push('');
+            }
+
+            // E2E test results
+            if (testResults) {
+              md.push('## E2E Test Results');
+              md.push('');
+              const testIcon = (testResults.status === 'completed' || testResults.status === 'SUCCESS') ? '✅ Passed' : '❌ Failed';
+              md.push('**Status:** ' + testIcon);
+              if (testResults.confidence !== undefined && testResults.confidence !== null) {
+                md.push('  ');
+                md.push('**Confidence:** ' + (typeof testResults.confidence === 'number' ? (testResults.confidence * 100).toFixed(0) + '%' : testResults.confidence));
+              }
+              md.push('');
+            }
+
+            // Approval actions
+            md.push('---');
+            md.push('');
+            md.push('**Actions:** Approve to activate the workflow, add notes for adjustments, or request changes for revision.');
+
+            const content = md.join('\\n');
+            const summaryText = 'Review ' + (createdWorkflowName || workflowName) + ': ' + phases.length + ' phases completed' + (testResults ? ', E2E ' + testResults.status : '');
+
+            return {
+              result: {
+                title: 'Review: ' + (createdWorkflowName || workflowName),
+                content: content,
+                summary: summaryText,
+              },
+              workflowId: createdWorkflowId,
+              workflowName: createdWorkflowName,
+            };
           `,
+          packages: ['node-fetch'],
+          variables: [
+            { name: 'apiUrl', path: '_apiUrl' },
+            { name: 'apiKey', path: '_apiKey' },
+          ],
         },
         connections: [{ targetStepId: 'human-approval' }],
       },

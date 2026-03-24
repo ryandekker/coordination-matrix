@@ -1005,6 +1005,72 @@ class WorkflowExecutionService {
   }
 
   /**
+   * Extract produced assets from a completed task's output.
+   * Scans stepOutput.data, metadata.output, and metadata.output.result
+   * for linkable fields (workflowId, documentId, externalUrl, etc.).
+   * Returns a normalized array of { type, id, title, action } objects.
+   */
+  private extractProducedAssets(task: Task): Array<{ type: string; id: string; title: string; action: string }> {
+    const assets: Array<{ type: string; id: string; title: string; action: string }> = [];
+    const seen = new Set<string>();
+
+    const addAsset = (type: string, id: unknown, title: unknown, action: string) => {
+      if (!id || typeof id !== 'string') return;
+      const key = `${type}:${id}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      assets.push({ type, id, title: (typeof title === 'string' ? title : null) || id, action });
+    };
+
+    // Collect candidate data objects to scan
+    const sources: Array<Record<string, unknown>> = [];
+
+    // stepOutput.data (code steps, system steps)
+    if (task.stepOutput?.data && typeof task.stepOutput.data === 'object') {
+      sources.push(task.stepOutput.data as Record<string, unknown>);
+    }
+    // metadata.output (daemon-processed agent steps)
+    const metaOutput = task.metadata?.output;
+    if (metaOutput && typeof metaOutput === 'object') {
+      sources.push(metaOutput as Record<string, unknown>);
+    }
+
+    for (const src of sources) {
+      // Check both top-level and result nested path
+      const candidates = [src];
+      if (src.result && typeof src.result === 'object') {
+        candidates.push(src.result as Record<string, unknown>);
+      }
+
+      for (const obj of candidates) {
+        if (obj.workflowId) addAsset('workflow', obj.workflowId, obj.workflowName, 'Created');
+        if (obj.workflowRunId) addAsset('workflow-run', obj.workflowRunId, null, 'Triggered');
+        if (obj.documentId) addAsset('document', obj.documentId, obj.documentTitle, 'Created');
+        if (obj.externalUrl) addAsset('external', obj.externalUrl, obj.externalTitle, 'Created');
+      }
+
+      // documentOperations array
+      if (Array.isArray(src.documentOperations)) {
+        for (const op of src.documentOperations as Array<Record<string, unknown>>) {
+          if (op.success && op.documentId) {
+            addAsset('document', op.documentId, op.title, op.action === 'create' ? 'Created' : 'Updated');
+          }
+        }
+      }
+      // routingOperations array
+      if (Array.isArray(src.routingOperations)) {
+        for (const op of src.routingOperations as Array<Record<string, unknown>>) {
+          if (op.action === 'triggerWorkflow' && op.success && op.workflowRunId) {
+            addAsset('workflow-run', op.workflowRunId, null, 'Triggered');
+          }
+        }
+      }
+    }
+
+    return assets;
+  }
+
+  /**
    * Build an error chain by tracing the failure through nested tasks.
    * Most specific error first (the leaf task that actually failed).
    */
@@ -1152,6 +1218,15 @@ class WorkflowExecutionService {
     }
     if (step.description) {
       task.summary = step.description;
+    }
+    // For manual steps, prefer dynamic summary from previous step output
+    if (step.stepType === 'manual' && inputPayload) {
+      const outputResult = (inputPayload as Record<string, unknown>).output as Record<string, unknown> | undefined;
+      const result = outputResult?.result as Record<string, unknown> | undefined;
+      const dynamicSummary = result?.summary as string | undefined;
+      if (dynamicSummary) {
+        task.summary = dynamicSummary;
+      }
     }
 
     // Expand prompt library documents + additional instructions
@@ -3363,6 +3438,28 @@ class WorkflowExecutionService {
       timestamp: new Date(),
     });
 
+    // Extract and store produced assets for completed tasks (code steps, agent steps, etc.)
+    // This normalizes linkable fields at the system level so downstream steps
+    // and the frontend don't need to scan multiple nested paths.
+    if (task.status === 'completed') {
+      const assets = this.extractProducedAssets(task);
+      if (assets.length > 0) {
+        const updateFields: Record<string, unknown> = {};
+        if (task.stepOutput) {
+          updateFields['stepOutput.producedAssets'] = assets;
+        } else {
+          // For daemon-processed tasks, also store in metadata.output if not already set
+          const metaOutput = task.metadata?.output as Record<string, unknown> | undefined;
+          if (metaOutput && !metaOutput.producedAssets) {
+            updateFields['metadata.output.producedAssets'] = assets;
+          }
+        }
+        if (Object.keys(updateFields).length > 0) {
+          await this.tasks.updateOne({ _id: task._id }, { $set: updateFields });
+        }
+      }
+    }
+
     if (task.taskType === 'foreach' || task.parentId) {
       const parentTask = task.parentId ? await this.tasks.findOne({ _id: task.parentId }) : null;
 
@@ -3617,9 +3714,17 @@ class WorkflowExecutionService {
       outputData = taskMetadata.response || taskMetadata.output || {};
     }
 
+    // Include pre-extracted producedAssets so downstream steps (especially manual review)
+    // can access them directly via inputPayload.producedAssets
+    const producedAssets =
+      completedTask.stepOutput?.producedAssets
+      || (taskMetadata.output as Record<string, unknown> | undefined)?.producedAssets
+      || [];
+
     const outputPayload: Record<string, unknown> = {
       ...taskMetadata,
       output: outputData,
+      ...(Array.isArray(producedAssets) && producedAssets.length > 0 ? { producedAssets } : {}),
     };
 
     for (const nextStepId of nextStepIds) {
@@ -4080,17 +4185,21 @@ class WorkflowExecutionService {
           console.log(`[WorkflowExecutionService] Published task.status.changed for failed flow task ${run.triggerTaskId}`);
         }
       } else {
-        // Regular task trigger - just set workflowResult
+        // Regular task trigger (e.g., routing agent) — set workflowResult and mark failed
+        // if the task is in a waiting state (set by daemon after triggerWorkflow)
+        const triggerTask = await this.tasks.findOne({ _id: run.triggerTaskId });
+        const shouldFail = triggerTask?.status === 'waiting' || triggerTask?.status === 'in_progress';
         await this.tasks.updateOne(
           { _id: run.triggerTaskId },
           {
             $set: {
               workflowResult,
+              ...(shouldFail ? { status: 'failed' as TaskStatus } : {}),
               updatedAt: now,
             }
           }
         );
-        console.log(`[WorkflowExecutionService] Propagated failure result to trigger task ${run.triggerTaskId}`);
+        console.log(`[WorkflowExecutionService] Propagated failure result to trigger task ${run.triggerTaskId}${shouldFail ? ' (failed)' : ''}`);
       }
     }
 
@@ -4287,17 +4396,21 @@ class WorkflowExecutionService {
           console.log(`[WorkflowExecutionService] Published task.status.changed for flow task ${run.triggerTaskId}`);
         }
       } else {
-        // Regular task trigger - just set workflowResult
+        // Regular task trigger (e.g., routing agent) — set workflowResult and complete
+        // the task if it's in a waiting state (set by daemon after triggerWorkflow)
+        const triggerTask = await this.tasks.findOne({ _id: run.triggerTaskId });
+        const shouldComplete = triggerTask?.status === 'waiting' || triggerTask?.status === 'in_progress';
         await this.tasks.updateOne(
           { _id: run.triggerTaskId },
           {
             $set: {
               workflowResult,
+              ...(shouldComplete ? { status: 'completed' as TaskStatus } : {}),
               updatedAt: now,
             }
           }
         );
-        console.log(`[WorkflowExecutionService] Propagated success result to trigger task ${run.triggerTaskId}`);
+        console.log(`[WorkflowExecutionService] Propagated success result to trigger task ${run.triggerTaskId}${shouldComplete ? ' (completed)' : ''}`);
       }
     }
 

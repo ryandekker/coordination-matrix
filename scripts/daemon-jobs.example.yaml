@@ -155,26 +155,70 @@ jobs:
     # When true, ONLY these MCP servers are used (ignores ~/.claude.json, .mcp.json, etc.)
     strictMcpConfig: true
 
+  # ── Gemini Agent Jobs ─────────────────────────────────────────────────────
+  # Gemini CLI (gemini) is supported alongside Claude CLI. The daemon
+  # auto-detects "gemini" in the exec command and injects -p (headless)
+  # and --yolo (auto-approve tools).
+  #
+  # Model tiers: gemini-2.5-flash-lite (fast), gemini-2.5-flash (balanced),
+  #              gemini-2.5-pro (advanced)
+  # Newer: gemini-3-flash-preview, gemini-3-pro-preview (preview models)
+
+  # Gemini Flash Lite: Fast triage and classification (complexity 1)
+  gemini-flash-lite:
+    description: Fast Gemini agent for triage and simple tasks
+    viewId: YOUR_GEMINI_LITE_VIEW_ID
+    agentId: YOUR_GEMINI_FLASH_LITE_AGENT_ID
+    exec: "gemini -m gemini-2.5-flash-lite"
+    interval: 3000
+    timeout: 300000  # 5 minutes
+
+  # Gemini Flash: General-purpose balanced agent (complexity 2)
+  gemini-flash:
+    description: Balanced Gemini agent for general tasks
+    viewId: YOUR_GEMINI_FLASH_VIEW_ID
+    agentId: YOUR_GEMINI_FLASH_AGENT_ID
+    exec: "gemini -m gemini-2.5-flash"
+    interval: 5000
+
+  # Gemini Pro: Advanced reasoning and complex tasks (complexity 3)
+  gemini-pro:
+    description: Advanced Gemini agent for complex reasoning
+    viewId: YOUR_GEMINI_PRO_VIEW_ID
+    agentId: YOUR_GEMINI_PRO_AGENT_ID
+    exec: "gemini -m gemini-2.5-pro"
+    interval: 10000
+    timeout: 900000  # 15 minutes
+
+  # Example: Gemini with tool access
+  gemini-with-tools:
+    enabled: false
+    description: Gemini agent with tool access
+    viewId: YOUR_VIEW_ID
+    exec: "gemini -m gemini-2.5-flash --allowed-tools Bash"
+    interval: 10000
+
 # Tips:
 # - Create views in the UI that filter tasks by status, tags, or assignee
 # - Each job should target a specific view/queue of tasks
-# - Use different Claude models based on task complexity:
-#   - claude-haiku: Fast, simple tasks (triage, classification)
-#   - claude-sonnet: Balanced (most tasks)
-#   - claude-opus: Complex reasoning tasks
+# - Use different models based on task complexity:
+#   Claude:  claude-haiku (fast) / claude-sonnet (balanced) / claude-opus (complex)
+#   Gemini:  gemini-2.5-flash-lite (fast) / gemini-2.5-flash (balanced) / gemini-2.5-pro (complex)
 # - Custom exec commands can be any CLI that accepts prompts via stdin
 #
 # Tool Tips:
-# - --allowedTools "Bash" is the key to enabling real API calls via curl
-# - Without tools, Claude can only describe what it WOULD do (hallucination risk)
-# - With Bash enabled, Claude can execute real HTTP requests
+# - Claude: --allowedTools "Bash" enables real API calls via curl
+# - Gemini: --allowed-tools Bash enables real tool execution
+# - Without tools, agents can only describe what they WOULD do (hallucination risk)
+# - With Bash enabled, agents can execute real HTTP requests
 # - Conversation logs capture ALL tool calls for debugging/auditing
 # - View conversation history at /conversations in the UI
 #
 # MCP Tips:
 # - mcpServers at defaults level apply to ALL jobs; job-level overrides per server name
 # - Use strictMcpConfig: true to prevent the daemon from using project/user MCP configs
-# - Supports http, sse, and stdio transports (same format as Claude Code's .mcp.json)
-# - Environment variables in values are expanded by Claude CLI: ${VAR} or ${VAR:-default}
+# - Supports http, sse, and stdio transports
+# - Both Claude and Gemini CLI support --mcp-config for MCP server injection
+# - Environment variables in values are expanded by the CLI: ${VAR} or ${VAR:-default}
 # - Use --dry-run to verify MCP config is being passed correctly
 # - MCP servers are initialized per task execution (temp config file, cleaned up after)
