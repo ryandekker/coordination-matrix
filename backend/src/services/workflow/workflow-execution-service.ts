@@ -464,12 +464,13 @@ class WorkflowExecutionService {
       taskTitle = await resolveTitleTemplateWithPackages(workflow.rootTaskTitleTemplate, run.inputPayload, defaultTitle);
     }
 
-    // Root tasks always have no parent - they appear at the top level
-    // For subflows, the flow step task links to this root via spawnedRootTaskId
+    // When triggered by another task, nest the root task under the trigger task
+    // so the workflow appears as a child in the task hierarchy
+    const parentId = run.triggerTaskId ?? null;
     const task: Omit<Task, '_id'> = {
       title: taskTitle,
       status: 'in_progress',
-      parentId: null,
+      parentId,
       workflowId: workflow._id,
       workflowRunId: run._id,
       taskType: 'flow',

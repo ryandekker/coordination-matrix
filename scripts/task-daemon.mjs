@@ -785,6 +785,7 @@ ${COLORS.bold}CONFIG FILE FORMAT${COLORS.reset} (YAML)
     apiKey: cm_ak_live_xxxxx
     interval: 5000
     timeout: 600000    # 10 min command timeout
+    maxTimeoutRetries: 3  # escalate to on_hold after N timeouts (default: 3)
     exec: claude
     mcpServers:        # MCP servers for all jobs
       weather:
@@ -840,7 +841,7 @@ ${COLORS.bold}EXAMPLES${COLORS.reset}
   }
 
   // Build config from file + CLI overrides
-  let viewId, apiKey, apiUrl, interval, execCmd, maxPayloadSize, timeout;
+  let viewId, apiKey, apiUrl, interval, execCmd, maxPayloadSize, timeout, maxTimeoutRetries;
   let mcpServers = null;
   let strictMcpConfig = false;
   let agentId = null;
@@ -883,6 +884,7 @@ ${COLORS.bold}EXAMPLES${COLORS.reset}
     execCmd = values.exec || job.exec || defaults.exec || process.env.MATRIX_EXEC_CMD || 'claude';
     maxPayloadSize = parseInt(values['max-payload-size'] || job.maxPayloadSize || defaults.maxPayloadSize || '200000', 10);
     timeout = parseInt(values.timeout || job.timeout || defaults.timeout || '600000', 10);
+    maxTimeoutRetries = parseInt(job.maxTimeoutRetries ?? defaults.maxTimeoutRetries ?? '3', 10);
 
     // MCP servers: merge defaults + job-level (job overrides defaults for same server name)
     const defaultMcp = defaults.mcpServers || {};
@@ -902,6 +904,7 @@ ${COLORS.bold}EXAMPLES${COLORS.reset}
     execCmd = values.exec || process.env.MATRIX_EXEC_CMD || 'claude';
     maxPayloadSize = parseInt(values['max-payload-size'] || '200000', 10);
     timeout = parseInt(values.timeout || '600000', 10);
+    maxTimeoutRetries = 3;
   } else if (configData && !values.job) {
     // No job or view specified - start all enabled jobs as background processes
     return {
@@ -935,6 +938,7 @@ ${COLORS.bold}EXAMPLES${COLORS.reset}
     noUpdate: values['no-update'] || false,
     maxPayloadSize,
     timeout,
+    maxTimeoutRetries,
     mcpServers,
     strictMcpConfig,
     agentId,
@@ -3140,21 +3144,79 @@ async function processTask(config, task) {
     return;
   }
 
-  // Handle timeout - task should be retried, so we reset to pending and add comment
+  // Handle timeout - retry up to maxTimeoutRetries, then escalate
   if (result.timedOut) {
-    console.log(`\nCommand timed out after ${duration}s`);
-    log.warn('Task timed out - will be retried');
+    const timeoutCount = (task.metadata?.timeoutCount || 0) + 1;
+    const maxRetries = config.maxTimeoutRetries ?? 3;
+    const exceededRetries = timeoutCount >= maxRetries;
 
-    // Reset task to pending so it can be picked up again
-    await updateTask(config, task._id, {
-      status: 'pending',
-      metadata: {
-        ...(task.metadata || {}),
-        lastTimeoutAt: new Date().toISOString(),
-        timeoutCount: (task.metadata?.timeoutCount || 0) + 1,
-      },
-    });
-    await addTaskComment(config, task._id, `Daemon: Task timed out after ${Math.round(commandTimeout / 1000)}s. Will be retried.`);
+    console.log(`\nCommand timed out after ${duration}s (attempt ${timeoutCount}/${maxRetries})`);
+
+    // Build a progress summary from partial conversation data
+    let progressSummary = '';
+    if (result.conversation) {
+      const conv = result.conversation;
+      const turns = conv.numTurns || 0;
+      const toolCalls = conv.messages?.filter(m => m.type === 'tool_use').length || 0;
+      const assistantMsgs = conv.messages?.filter(m => m.type === 'assistant') || [];
+      const lastMsg = assistantMsgs.length > 0
+        ? assistantMsgs[assistantMsgs.length - 1].content?.substring(0, 500) || ''
+        : '';
+      const cost = conv.usage?.totalCostUsd ? `$${conv.usage.totalCostUsd.toFixed(4)}` : 'unknown';
+
+      progressSummary = `\n\nProgress before timeout: ${turns} turns, ${toolCalls} tool calls, cost: ${cost}`;
+      if (lastMsg) {
+        progressSummary += `\nLast assistant message: ${lastMsg}${lastMsg.length >= 500 ? '...' : ''}`;
+      }
+
+      // Queue conversation upload so the partial conversation is preserved
+      queueConversationUpload(
+        config,
+        task._id,
+        config.jobName,
+        config.exec,
+        { ...conv, exitCode: 124, stderr: result.stderr },
+        startTime
+      );
+    }
+
+    if (exceededRetries) {
+      // Exceeded max retries - escalate to on_hold
+      log.warn(`Task timed out ${timeoutCount} times (max: ${maxRetries}) - escalating to on_hold`);
+
+      await updateTask(config, task._id, {
+        status: 'on_hold',
+        assigneeId: null,
+        metadata: {
+          ...(task.metadata || {}),
+          lastTimeoutAt: new Date().toISOString(),
+          timeoutCount,
+          timeoutEscalatedAt: new Date().toISOString(),
+        },
+      });
+      await addTaskComment(config, task._id,
+        `Daemon: Task timed out after ${Math.round(commandTimeout / 1000)}s (attempt ${timeoutCount}/${maxRetries}). ` +
+        `Max timeout retries exceeded — escalating to on_hold for human review.${progressSummary}`
+      );
+    } else {
+      // Still under retry limit - reset to pending
+      log.warn(`Task timed out - will be retried (${timeoutCount}/${maxRetries})`);
+
+      await updateTask(config, task._id, {
+        status: 'pending',
+        metadata: {
+          ...(task.metadata || {}),
+          lastTimeoutAt: new Date().toISOString(),
+          timeoutCount,
+          ...(result.conversation?.sessionId && {
+            lastConversationSessionId: result.conversation.sessionId,
+          }),
+        },
+      });
+      await addTaskComment(config, task._id,
+        `Daemon: Task timed out after ${Math.round(commandTimeout / 1000)}s (attempt ${timeoutCount}/${maxRetries}). Will be retried.${progressSummary}`
+      );
+    }
     return;
   }
 
@@ -3239,14 +3301,15 @@ async function processTask(config, task) {
     const output = {
       timestamp,
       status: 'PARTIAL',
-      action: 'COMPLETE',
+      action: 'ESCALATE',
       parseError: parsedResponse.error,
       rawOutput: parsedResponse.raw?.substring(0, 5000) || '',
     };
 
-    // Still mark as completed but note the parsing failure
+    // Parse failure means the agent didn't produce a valid response — escalate for review
     await updateTask(config, task._id, {
-      status: 'completed',
+      status: 'on_hold',
+      assigneeId: null,
       metadata: {
         ...(task.metadata || {}),
         output,
@@ -3254,7 +3317,7 @@ async function processTask(config, task) {
     });
 
     // Add comment to activity feed
-    await addTaskComment(config, task._id, `Daemon completed but response parsing failed. Task marked as completed with partial output.`);
+    await addTaskComment(config, task._id, `Daemon: Agent exited successfully but response parsing failed. Task placed on hold for review.\nParse error: ${parsedResponse.error}`);
     return;
   }
 
