@@ -30,6 +30,7 @@ import {
 import { cn } from '@/lib/utils'
 import { authFetch, Group, Project, ProjectStatus } from '@/lib/api'
 import { Textarea } from '@/components/ui/textarea'
+import { useGroupContext } from '@/lib/group-context'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
@@ -122,6 +123,7 @@ const defaultProjectFormData: ProjectFormData = {
 
 export default function ProjectsSettingsPage() {
   const queryClient = useQueryClient()
+  const { refreshProjects } = useGroupContext()
   const [searchQuery, setSearchQuery] = useState('')
   const [filterGroupId, setFilterGroupId] = useState<string>('')
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -145,6 +147,7 @@ export default function ProjectsSettingsPage() {
     mutationFn: createProject,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
+      refreshProjects()
       closeModal()
     },
     onError: (error: Error) => {
@@ -156,6 +159,7 @@ export default function ProjectsSettingsPage() {
     mutationFn: ({ id, data }: { id: string; data: Partial<Project> }) => updateProject(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
+      refreshProjects()
       closeModal()
     },
     onError: (error: Error) => {
@@ -167,6 +171,7 @@ export default function ProjectsSettingsPage() {
     mutationFn: deleteProject,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
+      refreshProjects()
     },
   })
 

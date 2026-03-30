@@ -1827,7 +1827,8 @@ ${allowDecompose ? '- You may use DECOMPOSE if this step requires breaking into 
 
   // 1.8. DECOMPOSE guidance for capable agents outside workflows
   const agentComplexity = agent?.agentComplexity || 2;
-  const canDecompose = agentComplexity >= 3 || task.metadata?.allowDecompose === true;
+  const isRouter = agent?.agentTags?.includes('router') === true;
+  const canDecompose = agentComplexity >= 3 || isRouter || task.metadata?.allowDecompose === true;
   if (canDecompose && !isInWorkflow) {
     sections.push(`## Task Decomposition (DECOMPOSE)
 If this task is too complex for a single pass, you may use DECOMPOSE to break it into subtasks.
@@ -2975,12 +2976,13 @@ async function handleStageTransition(config, task, workflow, parsedResponse) {
     const subtasks = parsedResponse.data.subtasks || [];
     const isInWorkflow = !!task.workflowStage;
     const agentComplexity = agent?.agentComplexity || 2;
+    const isRouter = agent?.agentTags?.includes('router') === true;
     const allowDecompose = task.metadata?.allowDecompose === true;
 
-    // Guard: DECOMPOSE requires complexity 3 unless explicitly allowed
+    // Guard: DECOMPOSE requires complexity 3, router tag, or explicit allow
     // Also blocked inside workflows unless explicitly allowed
-    if (agentComplexity < 3 && !allowDecompose) {
-      console.log(`[DECOMPOSE] Blocked: agent complexity ${agentComplexity} < 3 and not explicitly allowed`);
+    if (agentComplexity < 3 && !isRouter && !allowDecompose) {
+      console.log(`[DECOMPOSE] Blocked: agent complexity ${agentComplexity} < 3, not a router, and not explicitly allowed`);
     } else if (isInWorkflow && !allowDecompose) {
       console.log(`[DECOMPOSE] Blocked: task is in a workflow and decompose not explicitly allowed`);
     } else if (subtasks.length === 0) {

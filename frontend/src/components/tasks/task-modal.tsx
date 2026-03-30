@@ -28,7 +28,7 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs'
-import { Task, FieldConfig, LookupValue, TaskType, WebhookConfig, isSystemUser, Group, authFetch } from '@/lib/api'
+import { Task, FieldConfig, LookupValue, TaskType, WebhookConfig, isSystemUser, Group, Project, authFetch, projectsApi } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { toast } from 'sonner'
 import { useCreateTask, useUpdateTask, useRerunTask, useRetryTask, useUsers, useWorkflows, useTasks, useTask, useTaskChildren, useTaskDocuments, useDetachDocument } from '@/hooks/use-tasks'
@@ -213,6 +213,34 @@ export function TaskModal({
     }
   }, [isOpen, isAdmin])
 
+  // Fetch projects for the form's selected group (handles stale context and admin group switching)
+  const [formProjects, setFormProjects] = useState<Project[]>([])
+  const [formProjectsGroupId, setFormProjectsGroupId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!isOpen) {
+      setFormProjects([])
+      setFormProjectsGroupId(null)
+      return
+    }
+    // Fetch projects for the current group on modal open
+    const groupId = currentGroup?._id || null
+    if (groupId && groupId !== formProjectsGroupId) {
+      setFormProjectsGroupId(groupId)
+      projectsApi.list({ groupId }).then(res => {
+        setFormProjects(res.data || [])
+      }).catch(console.error)
+    }
+  }, [isOpen, currentGroup?._id, formProjectsGroupId])
+
+  // Refetch projects when group changes in the form (for admins switching groups)
+  const fetchProjectsForGroup = useCallback((groupId: string) => {
+    if (groupId === formProjectsGroupId) return
+    setFormProjectsGroupId(groupId)
+    projectsApi.list({ groupId }).then(res => {
+      setFormProjects(res.data || [])
+    }).catch(console.error)
+  }, [formProjectsGroupId])
+
   // Use all groups for admins, otherwise use groups from context
   const availableGroups = isAdmin ? allGroups : groups
   const showGroupSelector = isAdmin || groups.length > 1
@@ -222,7 +250,9 @@ export function TaskModal({
   const defaultProjectId = currentProject?._id || (() => {
     const groupId = defaultGroupId
     if (!groupId) return null
-    const groupProjects = projects.filter(p => p.groupId === groupId)
+    // Use formProjects (freshly fetched) with fallback to context projects
+    const availableProjects = formProjects.length > 0 ? formProjects : projects
+    const groupProjects = availableProjects.filter(p => p.groupId === groupId)
     // Prefer the 'default' project, then first available
     return groupProjects.find(p => p.name === 'default')?._id || groupProjects[0]?._id || null
   })()
@@ -856,8 +886,9 @@ export function TaskModal({
                         onValueChange={(val) => {
                           const newGroupId = val === '_none' ? null : val
                           field.onChange(newGroupId)
-                          // Clear project when group changes
+                          // Clear project and fetch projects for new group
                           setValue('projectId', null)
+                          if (newGroupId) fetchProjectsForGroup(newGroupId)
                         }}
                       >
                         <SelectTrigger className="h-8 text-sm">
@@ -889,7 +920,9 @@ export function TaskModal({
               {(() => {
                 const selectedGroupId = watch('groupId') as string | null
                 if (!selectedGroupId) return null
-                const groupProjects = projects.filter(p => p.groupId === selectedGroupId)
+                // Use freshly fetched formProjects with fallback to context projects
+                const availableProjects = formProjects.length > 0 ? formProjects : projects
+                const groupProjects = availableProjects.filter(p => p.groupId === selectedGroupId)
                 if (groupProjects.length === 0) return null
                 return (
                   <div className="space-y-1">
