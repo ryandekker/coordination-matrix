@@ -1,2 +1,2 @@
 // Re-export task route utilities
-export { toObjectId, resolveUserPlaceholder, buildFilter } from './utils.js';
+export { toObjectId, safeActorId, resolveUserPlaceholder, buildFilter } from './utils.js';

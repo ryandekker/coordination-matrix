@@ -10,7 +10,7 @@ import { workflowExecutionService } from '../services/workflow-execution-service
 import { loadUserGroups, hasResourceAccess } from '../middleware/group-access.js';
 
 // Import helpers from tasks module
-import { toObjectId, buildFilter } from './tasks/index.js';
+import { toObjectId, safeActorId, buildFilter } from './tasks/index.js';
 
 export const tasksRouter = Router();
 
@@ -746,11 +746,7 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
     const triggerWorkflowId = taskData.triggerWorkflowId ? toObjectId(taskData.triggerWorkflowId) : null;
 
     // Resolve createdById: explicit > authenticated user > null
-    const createdById = taskData.createdById
-      ? toObjectId(taskData.createdById)
-      : req.user?.userId
-        ? toObjectId(req.user.userId)
-        : null;
+    const createdById = safeActorId(taskData.createdById || req.user?.userId);
 
     // Compute creatorType from the creator user's flags
     let creatorType: 'human' | 'agent' | 'system' = 'human';
@@ -896,12 +892,7 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     const updates = req.body;
     const silent = updates.silent === true;
     // Get actor from request body, or fall back to authenticated user
-    // Only convert to ObjectId if the value is a valid ObjectId (API keys without
-    // a linked user may have a non-ObjectId userId like 'api-key-user')
-    const rawActorId = updates.actorId || req.user?.userId || null;
-    const actorId = rawActorId && ObjectId.isValid(rawActorId)
-      ? toObjectId(rawActorId)
-      : null;
+    const actorId = safeActorId(updates.actorId || req.user?.userId);
     const actorType = updates.actorType || 'user';
     delete updates.silent;
     delete updates.actorId;
@@ -1147,11 +1138,7 @@ tasksRouter.put('/:id/move', async (req: Request, res: Response, next: NextFunct
     const taskId = toObjectId(req.params.id);
     const { newParentId, silent, actorId: actorIdStr } = req.body;
     // Get actor from request body, or fall back to authenticated user
-    const actorId = actorIdStr
-      ? toObjectId(actorIdStr)
-      : req.user?.userId
-        ? toObjectId(req.user.userId)
-        : null;
+    const actorId = safeActorId(actorIdStr || req.user?.userId);
 
     const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
     if (!task) {
@@ -1358,7 +1345,7 @@ tasksRouter.post('/:id/rerun', async (req: Request, res: Response, next: NextFun
     }
 
     const now = new Date();
-    const actorId = req.user?.userId ? toObjectId(req.user.userId) : null;
+    const actorId = safeActorId(req.user?.userId);
     const MAX_RESULT_HISTORY = 10;
 
     // Helper: Archive current taskResult to history
@@ -1714,7 +1701,7 @@ tasksRouter.post('/:id/retry', async (req: Request, res: Response, next: NextFun
   try {
     const taskId = toObjectId(req.params.id);
     const { clearError = true } = req.body;
-    const actorId = req.user?.userId ? toObjectId(req.user.userId) : undefined;
+    const actorId = safeActorId(req.user?.userId) ?? undefined;
 
     const result = await workflowExecutionService.retryFailedTask(taskId, {
       actorId,
@@ -1747,11 +1734,7 @@ tasksRouter.delete('/:id', async (req: Request, res: Response, next: NextFunctio
     const taskId = toObjectId(req.params.id);
     const { deleteChildren = 'true', silent = 'false', actorId: actorIdStr } = req.query;
     // Get actor from query params, or fall back to authenticated user
-    const actorId = actorIdStr
-      ? toObjectId(actorIdStr as string)
-      : req.user?.userId
-        ? toObjectId(req.user.userId)
-        : null;
+    const actorId = safeActorId((actorIdStr as string) || req.user?.userId);
 
     const task = await db.collection<Task>('tasks').findOne({ _id: taskId });
     if (!task) {
@@ -1852,7 +1835,7 @@ tasksRouter.post('/:id/force-decision', async (req: Request, res: Response, next
       { targetStepId, condition: null, label: undefined };
 
     const now = new Date();
-    const actorId = req.user?.userId ? toObjectId(req.user.userId) : null;
+    const actorId = safeActorId(req.user?.userId);
 
     // Update the decision task
     await db.collection('tasks').updateOne(
@@ -2397,7 +2380,7 @@ tasksRouter.post('/:id/answer-questions', async (req: Request, res: Response, ne
     }
 
     const now = new Date();
-    const actorId = req.user?.userId ? toObjectId(req.user.userId) : null;
+    const actorId = safeActorId(req.user?.userId);
 
     // Update the questions data with answers
     const updatedQuestionsData = {
