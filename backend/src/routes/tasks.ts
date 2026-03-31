@@ -896,11 +896,12 @@ tasksRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
     const updates = req.body;
     const silent = updates.silent === true;
     // Get actor from request body, or fall back to authenticated user
-    const actorId = updates.actorId
-      ? toObjectId(updates.actorId)
-      : req.user?.userId
-        ? toObjectId(req.user.userId)
-        : null;
+    // Only convert to ObjectId if the value is a valid ObjectId (API keys without
+    // a linked user may have a non-ObjectId userId like 'api-key-user')
+    const rawActorId = updates.actorId || req.user?.userId || null;
+    const actorId = rawActorId && ObjectId.isValid(rawActorId)
+      ? toObjectId(rawActorId)
+      : null;
     const actorType = updates.actorType || 'user';
     delete updates.silent;
     delete updates.actorId;

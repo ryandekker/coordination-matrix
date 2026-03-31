@@ -29,7 +29,8 @@ status_output=$(cd backend && npx tsx src/migrations/cli.ts status 2>&1) || {
 echo "$status_output"
 
 # Count pending migrations (marked with ○ in status output)
-pending_count=$(echo "$status_output" | grep -c '○' || echo "0")
+pending_count=$(echo "$status_output" | grep -c '○' 2>/dev/null || true)
+pending_count="${pending_count:-0}"
 
 if [[ "$pending_count" -eq 0 ]]; then
   duration=$(elapsed_seconds)
