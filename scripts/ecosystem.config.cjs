@@ -1,20 +1,19 @@
 /**
  * PM2 Ecosystem Configuration for Task Daemon
  *
- * This config reads daemon-jobs.yaml and creates PM2 app definitions
- * for each enabled job, providing automatic restart on failure.
+ * Runs the consolidated daemon as a single PM2 process.
+ * All enabled jobs from daemon-jobs.yaml are handled by one process
+ * with batch polling (single API call per tick).
  *
  * Usage:
- *   pm2 start scripts/ecosystem.config.cjs           # Start all enabled jobs
- *   pm2 start scripts/ecosystem.config.cjs --only daemon-haiku  # Start one job
- *   pm2 list                                         # Show running processes
- *   pm2 logs                                         # Tail all logs
- *   pm2 logs daemon-haiku                            # Tail specific job logs
- *   pm2 restart all                                  # Restart all
- *   pm2 stop all                                     # Stop all
- *   pm2 delete all                                   # Remove from pm2
- *   pm2 save                                         # Save process list for reboot
- *   pm2 startup                                      # Generate startup script
+ *   pm2 start scripts/ecosystem.config.cjs       # Start consolidated daemon
+ *   pm2 list                                      # Show running processes
+ *   pm2 logs daemon                               # Tail logs
+ *   pm2 restart daemon                            # Restart
+ *   pm2 stop daemon                               # Stop
+ *   pm2 delete daemon                             # Remove from pm2
+ *   pm2 save                                      # Save process list for reboot
+ *   pm2 startup                                   # Generate startup script
  *
  * Environment Variables:
  *   DAEMON_CONFIG_PATH  - Path to daemon-jobs.yaml (default: scripts/daemon-jobs.yaml)
@@ -54,25 +53,22 @@ if (!config.jobs || Object.keys(config.jobs).length === 0) {
   process.exit(1);
 }
 
-// Build PM2 apps array
-const apps = [];
+// Verify at least one enabled job exists
+const enabledJobs = Object.entries(config.jobs).filter(
+  ([, job]) => job.enabled !== false && job.viewId
+);
 
-for (const [jobName, job] of Object.entries(config.jobs)) {
-  // Skip disabled jobs
-  if (job.enabled === false) {
-    continue;
-  }
+if (enabledJobs.length === 0) {
+  console.error('No enabled jobs with viewId found in config');
+  process.exit(1);
+}
 
-  // Skip jobs without viewId
-  if (!job.viewId) {
-    console.warn(`Warning: Job "${jobName}" has no viewId, skipping`);
-    continue;
-  }
-
-  apps.push({
-    name: `daemon-${jobName}`,
+// Single consolidated daemon process — handles all jobs internally
+const apps = [
+  {
+    name: 'daemon',
     script: join(scriptDir, 'task-daemon.mjs'),
-    args: `--config ${configPath} --job ${jobName} --foreground`,
+    args: `--config ${configPath}`,
 
     // Interpreter for ESM
     interpreter: 'node',
@@ -83,37 +79,31 @@ for (const [jobName, job] of Object.entries(config.jobs)) {
 
     // Restart policy
     autorestart: true,
-    max_restarts: 50,           // Max restarts before stopping
-    min_uptime: '10s',          // Consider started after 10s
-    restart_delay: 5000,        // Wait 5s between restarts
+    max_restarts: 50,
+    min_uptime: '10s',
+    restart_delay: 5000,
 
     // Exponential backoff on repeated restarts
-    exp_backoff_restart_delay: 1000,  // Start with 1s, doubles each time
+    exp_backoff_restart_delay: 1000,
 
     // Resource limits
-    max_memory_restart: '500M', // Restart if memory exceeds 500MB
+    max_memory_restart: '500M',
 
     // Logging
     log_date_format: 'YYYY-MM-DD HH:mm:ss',
-    error_file: join(projectRoot, 'logs', `daemon-${jobName}-error.log`),
-    out_file: join(projectRoot, 'logs', `daemon-${jobName}-out.log`),
+    error_file: join(projectRoot, 'logs', 'daemon-error.log'),
+    out_file: join(projectRoot, 'logs', 'daemon-out.log'),
     merge_logs: true,
 
     // Environment
     env: {
       NODE_ENV: 'production',
-      // Pass through API key from environment if set
       MATRIX_API_KEY: process.env.MATRIX_API_KEY || '',
     },
 
     // Watch mode disabled (daemon handles its own polling)
     watch: false,
-  });
-}
-
-if (apps.length === 0) {
-  console.error('No enabled jobs with viewId found in config');
-  process.exit(1);
-}
+  },
+];
 
 module.exports = { apps };
