@@ -34,6 +34,15 @@ deploy_commit_full=$(git rev-parse HEAD)
 deploy_message=$(git log -1 --format='%s' HEAD)
 echo "Deploying commit: $deploy_commit ($deploy_message)"
 
+# Push current branch to origin first (so origin/main stays in sync)
+echo ""
+echo "--- Pushing $current_branch to origin ---"
+if git push origin "$current_branch" 2>/dev/null; then
+  echo "Pushed $current_branch to origin."
+else
+  echo "Warning: Could not push $current_branch to origin (may already be up to date)."
+fi
+
 # Merge main into prod
 echo ""
 echo "--- Merging into prod ---"
