@@ -497,7 +497,38 @@ Trigger steps are optional. The engine executes `workflow.steps[0]` directly. Do
 
 Workflow code step tests in `backend/src/services/workflow/workflow-deployment.test.ts`. When testing code steps with `_stepLog`, pass context mode: `{ input: {}, _stepLog: [...] }`.
 
-## Production Architecture (Quick Reference)
+## Deployment
+
+**To deploy, run:**
+```bash
+npm run deploy
+```
+
+This runs the full deploy pipeline: test, build, push main, merge to prod, deploy backend (Render), deploy frontend (Cloudflare Pages), run migrations, and verify. The script stops on first failure and tells you how to resume.
+
+**Prerequisites:** Copy `.deploy-secrets.example` to `.deploy-secrets` and fill in credentials (Cloudflare, Render, MongoDB Atlas, etc.). The `.deploy-secrets` file is gitignored.
+
+**Pipeline steps:**
+
+| Step | Command | What it does |
+|------|---------|--------------|
+| 1 | `npm run deploy:test` | Run backend + frontend tests |
+| 2 | `npm run deploy:build` | Build backend (tsc) + frontend (next build), generate build-info.json |
+| 3 | `npm run deploy:backend` | Push main to origin, merge main → prod, push prod (triggers Render auto-deploy) |
+| 4 | `npm run deploy:frontend` | Build with @cloudflare/next-on-pages, deploy via wrangler |
+| 5 | `npm run deploy:migrate` | Run pending MongoDB Atlas migrations |
+| 6 | `npm run deploy:verify` | Health checks, version match, API test, migration status |
+
+**Useful flags:**
+```bash
+npm run deploy -- --dry-run   # Preview steps without executing
+npm run deploy -- --from 4    # Resume from step 4 (e.g., after fixing a failure)
+npm run deploy -- --step 6    # Run only the verify step
+```
+
+> **Do NOT deploy by manually pushing to prod.** Always use `npm run deploy` so that main is pushed first, builds are verified, and versions are tracked.
+
+### Production Architecture
 
 | Component | Platform | URL |
 |-----------|----------|-----|
@@ -506,8 +537,6 @@ Workflow code step tests in `backend/src/services/workflow/workflow-deployment.t
 | Database | MongoDB Atlas | Internal connection string |
 
 **URL routing:** `cm.hcizero.com` is a Cloudflare Pages site. All root paths serve the frontend. Only `/api/*` is proxied to the Render backend.
-
-**Cloudflare Pages production branch:** `prod`. Frontend deploys via `wrangler pages deploy --branch prod`. Without `--branch prod`, deploys land as previews only.
 
 **Health & version endpoints (no auth required):**
 - `cm.hcizero.com/api/health` — backend liveness + deployed commit SHA
