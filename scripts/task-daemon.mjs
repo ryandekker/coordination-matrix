@@ -54,8 +54,9 @@ const __dirname = dirname(__filename);
 const DEFAULT_CONFIG_PATH = join(__dirname, 'daemon-jobs.yaml');
 const PID_DIR = join(homedir(), '.matrix-daemon');
 
-// Track active child process for graceful shutdown
-let activeChildProcess = null;
+// Track active child processes for graceful shutdown
+// In single-job mode, only one entry. In consolidated mode, one per active worker.
+const activeChildProcesses = new Map(); // jobName|'default' -> ChildProcess
 let shuttingDown = false;
 
 // ============================================================================
@@ -504,16 +505,64 @@ function formatTimeAgo(isoString) {
 }
 
 function showStatus(verbose = false) {
-  const running = getRunningJobs();
-
   console.log('\n' + COLORS.cyan + '╔' + '═'.repeat(68) + '╗' + COLORS.reset);
-  console.log(COLORS.cyan + '║' + COLORS.reset + '  Daemon Job Status' + ' '.repeat(49) + COLORS.cyan + '║' + COLORS.reset);
+  console.log(COLORS.cyan + '║' + COLORS.reset + '  Daemon Status' + ' '.repeat(53) + COLORS.cyan + '║' + COLORS.reset);
   console.log(COLORS.cyan + '╚' + '═'.repeat(68) + '╝' + COLORS.reset);
+
+  // Check for consolidated status first
+  const consolidatedStatus = readStatus('consolidated');
+  if (consolidatedStatus && consolidatedStatus.mode === 'consolidated') {
+    const uptime = consolidatedStatus.startedAt ? Date.now() - new Date(consolidatedStatus.startedAt).getTime() : 0;
+    console.log('');
+    console.log(`  ${COLORS.bold}Consolidated Daemon${COLORS.reset}`);
+    console.log(`  ${'─'.repeat(50)}`);
+    console.log(`    Mode:       consolidated (single process)`);
+    console.log(`    Uptime:     ${formatDuration(uptime)}`);
+    console.log(`    Interval:   ${consolidatedStatus.pollingInterval}ms`);
+
+    if (consolidatedStatus.circuitBreakerState && consolidatedStatus.circuitBreakerState !== 'CLOSED') {
+      const cbColor = consolidatedStatus.circuitBreakerState === 'OPEN' ? COLORS.red : COLORS.yellow;
+      console.log(`    ${cbColor}Circuit:    ${consolidatedStatus.circuitBreakerState}${COLORS.reset} (API failures: ${consolidatedStatus.consecutiveApiFailures || 0})`);
+    }
+
+    console.log(`  ${'─'.repeat(50)}`);
+    console.log(`  ${COLORS.bold}Workers (${Object.keys(consolidatedStatus.workers || {}).length})${COLORS.reset}`);
+
+    for (const [name, w] of Object.entries(consolidatedStatus.workers || {})) {
+      const indicator = w.busy ? COLORS.yellow + '⟳' : COLORS.green + '●';
+      const successRate = w.tasksProcessed > 0
+        ? ((w.tasksSucceeded / w.tasksProcessed) * 100).toFixed(0) + '%'
+        : 'N/A';
+
+      console.log('');
+      console.log(`  ${indicator}${COLORS.reset} ${COLORS.bold}${name}${COLORS.reset}  view:${w.viewId?.slice(-8) || '?'}`);
+      console.log(`    Tasks:      ${w.tasksProcessed} (${COLORS.green}${w.tasksSucceeded} ok${COLORS.reset}, ${COLORS.red}${w.tasksFailed} fail${COLORS.reset}) - ${successRate}`);
+      console.log(`    Last task:  ${w.lastTaskAt ? formatTimeAgo(w.lastTaskAt) : 'never'}`);
+
+      if (w.busy && w.currentTask) {
+        console.log(`    ${COLORS.yellow}Processing:${COLORS.reset} ${w.currentTask.slice(0, 40)}...`);
+      }
+
+      if (w.lastError && verbose) {
+        console.log(`    ${COLORS.red}Last error:${COLORS.reset} ${w.lastError.slice(0, 60)}...`);
+      }
+    }
+
+    console.log('');
+    console.log(`  ${COLORS.bold}Commands${COLORS.reset}`);
+    console.log(`    npm run daemon:stop      Stop the daemon`);
+    console.log(`    npm run daemon:logs      View logs`);
+    console.log(`    npm run daemon:restart   Restart`);
+    console.log('');
+    return;
+  }
+
+  // Fall back to per-job PID-based status
+  const running = getRunningJobs();
 
   if (running.length === 0) {
     console.log('\n  No daemon jobs are running.\n');
-    console.log(`  ${COLORS.dim}Start jobs:     node scripts/task-daemon.mjs${COLORS.reset}`);
-    console.log(`  ${COLORS.dim}Start one job:  node scripts/task-daemon.mjs --job <name>${COLORS.reset}`);
+    console.log(`  ${COLORS.dim}Start daemon:   npm run daemon:start${COLORS.reset}`);
     console.log(`  ${COLORS.dim}Logs directory: ${PID_DIR}${COLORS.reset}\n`);
     return;
   }
@@ -578,11 +627,9 @@ function showStatus(verbose = false) {
 
   console.log('');
   console.log(`  ${COLORS.bold}Quick Commands${COLORS.reset}`);
-  console.log(`    kill <PID>               Kill a specific job by PID`);
-  console.log(`    --logs <job>             Tail logs for a job`);
-  console.log(`    --stop                   Stop all jobs`);
-  console.log(`    --stop --job <name>      Stop a specific job`);
-  console.log(`    --restart                Restart all jobs`);
+  console.log(`    npm run daemon:stop      Stop the daemon`);
+  console.log(`    npm run daemon:logs      View logs`);
+  console.log(`    npm run daemon:restart   Restart`);
   console.log('');
 }
 
@@ -744,30 +791,29 @@ ${COLORS.cyan}╔═════════════════════
 ║  Task Daemon - AI-powered task processor                           ║
 ╚════════════════════════════════════════════════════════════════════╝${COLORS.reset}
 
-${COLORS.bold}QUICK REFERENCE${COLORS.reset}
-  ${COLORS.green}Start all jobs:${COLORS.reset}    npm run daemon
-  ${COLORS.green}Start one job:${COLORS.reset}     npm run daemon -- --job <name>
+${COLORS.bold}QUICK REFERENCE (PM2)${COLORS.reset}
+  ${COLORS.green}Start daemon:${COLORS.reset}      npm run daemon:start
   ${COLORS.green}Check status:${COLORS.reset}      npm run daemon:status
-  ${COLORS.green}View logs:${COLORS.reset}         npm run daemon -- --logs <job>
-  ${COLORS.green}Stop all:${COLORS.reset}          npm run daemon:stop
+  ${COLORS.green}View logs:${COLORS.reset}         npm run daemon:logs
+  ${COLORS.green}Stop daemon:${COLORS.reset}       npm run daemon:stop
+  ${COLORS.green}Restart:${COLORS.reset}           npm run daemon:restart
+  ${COLORS.green}Test once:${COLORS.reset}         npm run daemon:once
+  ${COLORS.green}Dry run:${COLORS.reset}           npm run daemon:dry-run
   ${COLORS.green}List jobs:${COLORS.reset}         npm run daemon -- --list
 
-${COLORS.bold}STARTING JOBS${COLORS.reset}
-  (no args)                      Start all enabled jobs from config (background)
+${COLORS.bold}CONSOLIDATED MODE${COLORS.reset} (default)
+  (no args)                      Run consolidated daemon (all jobs, single process)
+  --once, -o                     Run one batch poll and exit
+  --dry-run, -d                  Show what would run without executing
+
+${COLORS.bold}SINGLE JOB MODE${COLORS.reset}
   --job, -j <name>               Start a specific job (background by default)
   --job <name> --foreground, -f  Start a job in foreground (attached)
   --view, -v <id>                Start with view ID only (foreground, no config)
-  --once, -o                     Run once and exit (don't poll continuously)
-  --dry-run, -d                  Show prompts without executing
 
-${COLORS.bold}MANAGING JOBS${COLORS.reset}
-  --status                       Show all running jobs with PIDs and stats
+${COLORS.bold}MANAGEMENT${COLORS.reset}
+  --status                       Show daemon and worker stats
   --status --verbose, -V         Show verbose status with error details
-  --logs <job>                   Tail logs for a job (Ctrl+C to exit)
-  --stop                         Stop all running daemon jobs
-  --stop --job <name>            Stop a specific job
-  --restart                      Restart all running jobs
-  --restart --job <name>         Restart a specific job
   --list, -l                     List available jobs from config file
 
 ${COLORS.bold}CONFIGURATION${COLORS.reset}
@@ -809,20 +855,21 @@ ${COLORS.bold}CONFIG FILE FORMAT${COLORS.reset} (YAML)
       viewId: xyz789
 
 ${COLORS.bold}HOW IT WORKS${COLORS.reset}
-  1. Daemon polls a saved view for pending tasks
-  2. Assembles prompt: base + agent + workflow step + task context
-  3. Executes command (claude by default) with assembled prompt
-  4. Parses JSON response and updates task status:
+  1. Single daemon process batch-polls all views in one API call
+  2. Dispatches tasks to concurrent per-job workers
+  3. Each worker assembles prompt: base + agent + workflow step + task
+  4. Executes command (claude by default) with assembled prompt
+  5. Parses JSON response and updates task status:
      - COMPLETE → completed    - ESCALATE → on_hold
      - CONTINUE → completed + follow-up task
-  5. Stores output in task metadata
 
 ${COLORS.bold}EXAMPLES${COLORS.reset}
-  npm run daemon                              # Start all jobs
-  npm run daemon -- --job content-review      # Start one job
-  npm run daemon -- --job triage --once       # Run once and exit
-  npm run daemon -- --view abc123 --dry-run   # Test without executing
-  npm run daemon -- --logs content-review     # Tail job logs
+  npm run daemon:start                        # Start via PM2
+  npm run daemon:status                       # Check status
+  npm run daemon:logs                         # View logs
+  npm run daemon:stop                         # Stop daemon
+  npm run daemon:once                         # Run one poll cycle
+  npm run daemon:dry-run                      # Test without executing
 `);
     process.exit(0);
   }
@@ -907,12 +954,14 @@ ${COLORS.bold}EXAMPLES${COLORS.reset}
     timeout = parseInt(values.timeout || '600000', 10);
     maxTimeoutRetries = 3;
   } else if (configData && !values.job) {
-    // No job or view specified - start all enabled jobs as background processes
+    // No job or view specified - run consolidated daemon (single process, batch polling)
     return {
-      mode: 'start-all',
+      mode: 'consolidated',
       configData,
       configPath,
       once: values.once || false,
+      dryRun: values['dry-run'] || false,
+      noUpdate: values['no-update'] || false,
     };
   } else {
     // No config file and no view
@@ -1191,6 +1240,11 @@ async function updateTask(config, taskId, updates, retryOptions = {}) {
   if (config.noUpdate) {
     console.log(`[Skip update] Would update task ${taskId}:`, updates);
     return true;
+  }
+
+  // Always attribute daemon updates to the daemon actor type
+  if (!updates.actorType) {
+    updates.actorType = 'daemon';
   }
 
   // Truncate executionLog in metadata if too long (keep under 100KB)
@@ -2026,6 +2080,7 @@ function parseResponse(responseText) {
           metadata: parsed.metadata || {},
           documentOperations: parsed.documentOperations || [],
           routingOperations: parsed.routingOperations || [],
+          subtasks: parsed.subtasks || [],
           questions: parsed.questions || null,
           questionsContext: parsed.context || null,
           requestedCapabilities: parsed.requestedCapabilities || null,
@@ -2510,7 +2565,8 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
     }
 
     // Track the child process for graceful shutdown
-    activeChildProcess = child;
+    const childKey = config.jobName || 'default';
+    activeChildProcesses.set(childKey, child);
 
     let stdout = '';
     let stderr = '';
@@ -2530,7 +2586,7 @@ async function executeCommandWithConversation(cmd, prompt, timeout = 600000) {
         clearInterval(heartbeatId);
         heartbeatId = null;
       }
-      activeChildProcess = null;
+      activeChildProcesses.delete(childKey);
       if (tmpFile) {
         try { unlinkSync(tmpFile); } catch {}
       }
@@ -3852,23 +3908,19 @@ async function runDaemon(config) {
   // Handle graceful shutdown
   const handleShutdown = () => {
     if (shuttingDown) {
-      // Second signal - force kill child process
+      // Second signal - force kill all child processes
       log.warn('Force shutdown requested...');
-      if (activeChildProcess) {
-        try {
-          activeChildProcess.kill('SIGKILL');
-        } catch {}
+      for (const [name, child] of activeChildProcesses) {
+        try { child.kill('SIGKILL'); } catch {}
       }
       process.exit(1);
     }
     log.warn('Shutting down after current task... (press Ctrl+C again to force)');
     shuttingDown = true;
-    // Kill active child process to stop the current task immediately
-    if (activeChildProcess) {
-      log.warn('Terminating active command...');
-      try {
-        activeChildProcess.kill('SIGTERM');
-      } catch {}
+    // Kill active child processes to stop current tasks immediately
+    for (const [name, child] of activeChildProcesses) {
+      log.warn(`Terminating active command (${name})...`);
+      try { child.kill('SIGTERM'); } catch {}
     }
     if (config.jobName) {
       stats.currentTask = null;
@@ -3971,6 +4023,305 @@ async function runDaemon(config) {
 
     log.info('Shutdown complete.');
   }
+}
+
+// ============================================================================
+// Consolidated Daemon - Single process, batch polling, concurrent workers
+// ============================================================================
+
+async function fetchBatchPoll(apiUrl, apiKey, viewIds) {
+  const uniqueViewIds = [...new Set(viewIds)];
+  const url = `${apiUrl}/views/batch-poll`;
+  const response = await fetchWithTimeout(url, {
+    method: 'POST',
+    headers: getHeaders({ apiKey }),
+    body: JSON.stringify({
+      viewIds: uniqueViewIds,
+      limit: 1,
+      resolveReferences: true,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Batch poll failed: HTTP ${response.status} - ${text.slice(0, 200)}`);
+  }
+
+  return response.json();
+}
+
+async function runConsolidatedDaemon(config) {
+  const { configData, configPath, once, dryRun, noUpdate } = config;
+  const defaults = configData.defaults || {};
+  const apiUrl = defaults.apiUrl || process.env.MATRIX_API_URL || 'http://localhost:3001/api';
+  const apiKey = defaults.apiKey || process.env.MATRIX_API_KEY || '';
+
+  // Build workers from enabled jobs
+  const workers = new Map();
+  let minInterval = Infinity;
+
+  for (const [name, job] of Object.entries(configData.jobs || {})) {
+    if (job.enabled === false || !job.viewId) continue;
+
+    const interval = parseInt(job.interval || defaults.interval || '5000', 10);
+    minInterval = Math.min(minInterval, interval);
+
+    workers.set(name, {
+      name,
+      viewId: job.viewId,
+      exec: job.exec || defaults.exec || 'claude',
+      interval,
+      timeout: parseInt(job.timeout || defaults.timeout || '600000', 10),
+      maxTimeoutRetries: parseInt(job.maxTimeoutRetries ?? defaults.maxTimeoutRetries ?? '3', 10),
+      maxPayloadSize: parseInt(job.maxPayloadSize || defaults.maxPayloadSize || '200000', 10),
+      mcpServers: { ...(defaults.mcpServers || {}), ...(job.mcpServers || {}) },
+      strictMcpConfig: job.strictMcpConfig || false,
+      agentId: job.agentId || defaults.agentId || null,
+      busy: false,
+      currentTaskId: null,
+      currentTaskTitle: null,
+      stats: {
+        tasksProcessed: 0,
+        tasksSucceeded: 0,
+        tasksFailed: 0,
+        lastTaskAt: null,
+        lastError: null,
+      },
+    });
+  }
+
+  if (workers.size === 0) {
+    log.error('No enabled jobs with viewId found in config.');
+    process.exit(1);
+  }
+
+  if (minInterval === Infinity) minInterval = 5000;
+
+  const consolidatedLog = new Logger({ level: log.level <= 0 ? 'debug' : 'info', prefix: 'consolidated' });
+
+  consolidatedLog.header([
+    'Consolidated Daemon',
+    `Workers: ${workers.size} | Interval: ${minInterval}ms`,
+    `Config: ${configPath}`,
+  ]);
+
+  for (const [name, w] of workers) {
+    consolidatedLog.info(`  ${name} → view:${w.viewId.slice(-8)} exec:${w.exec}`);
+  }
+
+  // Health check using the first worker's view
+  consolidatedLog.info('Checking API connectivity...');
+  const firstWorker = workers.values().next().value;
+  const healthCheck = await checkApiHealth({ apiUrl, apiKey, viewId: firstWorker.viewId });
+  if (!healthCheck.healthy) {
+    consolidatedLog.error(`API health check failed: ${healthCheck.error}`);
+    process.exit(1);
+  }
+  consolidatedLog.info('API connection verified.');
+
+  // Shared resilience
+  const backoff = new ExponentialBackoff({ baseDelay: 2000, maxDelay: 300000 });
+  const circuitBreaker = new CircuitBreaker({ failureThreshold: 5, resetTimeout: 60000 });
+  let consecutiveFailures = 0;
+
+  // Status tracking
+  const consolidatedStartedAt = new Date().toISOString();
+
+  function saveConsolidatedStatus() {
+    ensurePidDir();
+    const workerStatus = {};
+    for (const [name, w] of workers) {
+      workerStatus[name] = {
+        viewId: w.viewId,
+        busy: w.busy,
+        currentTask: w.currentTaskTitle || null,
+        ...w.stats,
+      };
+    }
+    const status = {
+      mode: 'consolidated',
+      startedAt: consolidatedStartedAt,
+      pollingInterval: minInterval,
+      circuitBreakerState: circuitBreaker.getState(),
+      consecutiveApiFailures: consecutiveFailures,
+      workers: workerStatus,
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      writeFileSync(getStatusFile('consolidated'), JSON.stringify(status, null, 2));
+    } catch {}
+  }
+
+  // Graceful shutdown
+  const handleShutdown = () => {
+    if (shuttingDown) {
+      consolidatedLog.warn('Force shutdown requested...');
+      for (const [, child] of activeChildProcesses) {
+        try { child.kill('SIGKILL'); } catch {}
+      }
+      process.exit(1);
+    }
+    consolidatedLog.warn('Shutting down... (press Ctrl+C again to force)');
+    shuttingDown = true;
+    for (const [name, child] of activeChildProcesses) {
+      consolidatedLog.warn(`Terminating worker ${name}...`);
+      try { child.kill('SIGTERM'); } catch {}
+    }
+    saveConsolidatedStatus();
+  };
+  process.on('SIGINT', handleShutdown);
+  process.on('SIGTERM', handleShutdown);
+
+  // Helper to build a config object for processTask() from a worker
+  function workerToConfig(worker) {
+    return {
+      jobName: worker.name,
+      viewId: worker.viewId,
+      apiKey,
+      apiUrl,
+      exec: worker.exec,
+      interval: worker.interval,
+      timeout: worker.timeout,
+      maxTimeoutRetries: worker.maxTimeoutRetries,
+      maxPayloadSize: worker.maxPayloadSize,
+      mcpServers: Object.keys(worker.mcpServers).length > 0 ? worker.mcpServers : null,
+      strictMcpConfig: worker.strictMcpConfig,
+      agentId: worker.agentId,
+      noUpdate: noUpdate || false,
+      dryRun: dryRun || false,
+    };
+  }
+
+  // Process a single task for a worker
+  async function processWorkerTask(worker, task) {
+    // Set global log prefix to worker name for identifiable output
+    // (minor race if workers overlap, but cosmetic only)
+    log = new Logger({ level: log.level <= 0 ? 'debug' : 'info', prefix: worker.name });
+
+    const jobConfig = workerToConfig(worker);
+    try {
+      await processTask(jobConfig, task);
+      worker.stats.tasksProcessed++;
+      worker.stats.tasksSucceeded++;
+      worker.stats.lastTaskAt = new Date().toISOString();
+    } catch (err) {
+      worker.stats.tasksProcessed++;
+      worker.stats.tasksFailed++;
+      worker.stats.lastTaskAt = new Date().toISOString();
+      worker.stats.lastError = err.message || String(err);
+      log.error(`Task processing error: ${err.message}`);
+    } finally {
+      worker.busy = false;
+      worker.currentTaskId = null;
+      worker.currentTaskTitle = null;
+      log = consolidatedLog;
+      saveConsolidatedStatus();
+    }
+  }
+
+  // Main loop
+  while (!shuttingDown) {
+    // Collect idle workers' viewIds
+    const idleWorkers = [];
+    const viewIds = [];
+    for (const [, worker] of workers) {
+      if (!worker.busy) {
+        idleWorkers.push(worker);
+        viewIds.push(worker.viewId);
+      }
+    }
+
+    if (viewIds.length === 0) {
+      consolidatedLog.debug('All workers busy, waiting...');
+      await new Promise(r => setTimeout(r, minInterval));
+      continue;
+    }
+
+    // Check circuit breaker
+    if (!circuitBreaker.canAttempt()) {
+      const retryIn = Math.ceil(circuitBreaker.getTimeUntilRetry() / 1000);
+      consolidatedLog.warn(`Circuit breaker OPEN. Retry in ${retryIn}s`);
+      await new Promise(r => setTimeout(r, circuitBreaker.getTimeUntilRetry()));
+      continue;
+    }
+
+    // Batch poll all idle workers
+    let batchResult;
+    try {
+      batchResult = await fetchBatchPoll(apiUrl, apiKey, viewIds);
+      circuitBreaker.recordSuccess();
+      backoff.recordSuccess();
+      consecutiveFailures = 0;
+    } catch (err) {
+      circuitBreaker.recordFailure();
+      consecutiveFailures++;
+      const backoffDelay = backoff.recordFailure();
+
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        consolidatedLog.error(`Exceeded ${MAX_CONSECUTIVE_FAILURES} consecutive API failures. Exiting.`);
+        process.exit(1);
+      }
+
+      consolidatedLog.warn(`Batch poll failed (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}). ` +
+        `Backing off ${Math.ceil(backoffDelay / 1000)}s: ${err.message}`);
+      await new Promise(r => setTimeout(r, backoffDelay));
+      continue;
+    }
+
+    // Dispatch tasks to idle workers
+    let dispatched = 0;
+    for (const worker of idleWorkers) {
+      const viewResult = batchResult.results?.[worker.viewId];
+      if (!viewResult || viewResult.error || !viewResult.tasks || viewResult.tasks.length === 0) continue;
+
+      const task = viewResult.tasks[0];
+      worker.busy = true;
+      worker.currentTaskId = task._id;
+      worker.currentTaskTitle = task.title;
+      dispatched++;
+
+      // Fire-and-forget — the worker runs async
+      processWorkerTask(worker, task);
+    }
+
+    if (dispatched > 0) {
+      consolidatedLog.info(`Dispatched ${dispatched} task(s)`);
+    }
+
+    saveConsolidatedStatus();
+
+    if (once) {
+      // Wait for all dispatched workers to finish
+      const busyCheck = () => [...workers.values()].some(w => w.busy);
+      while (busyCheck()) {
+        await new Promise(r => setTimeout(r, 500));
+      }
+      break;
+    }
+
+    await new Promise(r => setTimeout(r, minInterval));
+  }
+
+  // Drain — wait for active workers
+  const busyWorkers = [...workers.values()].filter(w => w.busy);
+  if (busyWorkers.length > 0) {
+    consolidatedLog.info(`Waiting for ${busyWorkers.length} active worker(s)...`);
+    const deadline = Date.now() + 30000;
+    while (busyWorkers.some(w => w.busy) && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
+
+  // Drain conversation queue
+  if (conversationQueue.length > 0) {
+    consolidatedLog.info(`Waiting for ${conversationQueue.length} pending conversation upload(s)...`);
+    const startWait = Date.now();
+    while (conversationQueue.length > 0 && Date.now() - startWait < 30000) {
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
+
+  consolidatedLog.info('Shutdown complete.');
 }
 
 // ============================================================================
@@ -4117,6 +4468,8 @@ if (config.mode === 'exit') {
   // Just wait - tail -f runs until SIGINT, restart spawns new process
 } else if (config.mode === 'start-job') {
   startSingleJob(config);
+} else if (config.mode === 'consolidated') {
+  runConsolidatedDaemon(config);
 } else if (config.mode === 'start-all') {
   startAllJobs(config);
 } else {

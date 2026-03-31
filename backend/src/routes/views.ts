@@ -8,6 +8,129 @@ import { loadUserGroups, buildGroupAccessFilter } from '../middleware/group-acce
 
 export const viewsRouter = Router();
 
+// ============================================================================
+// Helper: Query tasks for a view (shared by GET /:id/tasks and POST /batch-poll)
+// ============================================================================
+
+async function queryViewTasks(
+  viewId: ObjectId,
+  req: Request,
+  options: { limit?: number; page?: number; resolveReferences?: boolean }
+): Promise<{ tasks: unknown[]; total: number; viewName: string }> {
+  const db = getDb();
+
+  const view = await db.collection<View>('views').findOne({ _id: viewId });
+  if (!view) {
+    throw createError('View not found', 404);
+  }
+
+  if (view.collectionName !== 'tasks') {
+    throw createError('This endpoint only supports task views', 400);
+  }
+
+  const pageNum = Math.max(1, options.page || 1);
+  const limitNum = Math.min(200, Math.max(1, options.limit || 50));
+  const skip = (pageNum - 1) * limitNum;
+
+  // Build filter from view's saved filters
+  let filter: Filter<Task> = {};
+
+  if (view.filters) {
+    for (const [key, value] of Object.entries(view.filters)) {
+      if (value === undefined || value === null || value === '') continue;
+
+      if (value === '__unassigned__' || (Array.isArray(value) && value.includes('__unassigned__'))) {
+        (filter as Record<string, unknown>)[key] = { $eq: null };
+        continue;
+      }
+
+      if (Array.isArray(value)) {
+        if (key.endsWith('Id')) {
+          (filter as Record<string, unknown>)[key] = {
+            $in: value.map((v: string) => ObjectId.isValid(v) ? new ObjectId(v) : v)
+          };
+        } else {
+          (filter as Record<string, unknown>)[key] = { $in: value };
+        }
+      } else if (key.endsWith('Id') && typeof value === 'string' && ObjectId.isValid(value)) {
+        (filter as Record<string, unknown>)[key] = new ObjectId(value);
+      } else {
+        (filter as Record<string, unknown>)[key] = value;
+      }
+    }
+  }
+
+  filter = buildGroupAccessFilter(req, filter) as Filter<Task>;
+
+  const sortSpec: Record<string, 1 | -1> = {};
+  if (view.sorting && view.sorting.length > 0) {
+    for (const s of view.sorting) {
+      sortSpec[s.field] = s.direction === 'asc' ? 1 : -1;
+    }
+  } else {
+    sortSpec.createdAt = -1;
+  }
+  const sort: Sort = sortSpec;
+
+  const [tasks, total] = await Promise.all([
+    db.collection<Task>('tasks').find(filter).sort(sort).skip(skip).limit(limitNum).toArray(),
+    db.collection<Task>('tasks').countDocuments(filter),
+  ]);
+
+  let resolvedTasks = tasks;
+  if (options.resolveReferences !== false) {
+    const resolver = new ReferenceResolver();
+    await resolver.loadFieldConfigs('tasks');
+    resolvedTasks = await resolver.resolveDocuments(tasks);
+  }
+
+  return { tasks: resolvedTasks, total, viewName: view.name };
+}
+
+// ============================================================================
+// POST /api/views/batch-poll - Batch poll tasks from multiple views
+// ============================================================================
+
+viewsRouter.post('/batch-poll', loadUserGroups(), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { viewIds, limit = 1, resolveReferences = true } = req.body;
+
+    if (!Array.isArray(viewIds) || viewIds.length === 0) {
+      throw createError('viewIds array is required', 400);
+    }
+    if (viewIds.length > 20) {
+      throw createError('Maximum 20 viewIds per batch', 400);
+    }
+
+    const limitNum = Math.min(10, Math.max(1, Number(limit) || 1));
+    const resolve = resolveReferences !== false;
+
+    const results: Record<string, { tasks: unknown[]; total: number; viewName?: string; error?: string }> = {};
+
+    await Promise.all(viewIds.map(async (vid: string) => {
+      try {
+        if (!ObjectId.isValid(vid)) {
+          results[vid] = { tasks: [], total: 0, error: 'Invalid ObjectId' };
+          return;
+        }
+        const result = await queryViewTasks(new ObjectId(vid), req, {
+          limit: limitNum,
+          page: 1,
+          resolveReferences: resolve,
+        });
+        results[vid] = { tasks: result.tasks, total: result.total, viewName: result.viewName };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        results[vid] = { tasks: [], total: 0, error: message };
+      }
+    }));
+
+    res.json({ results });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/views - Get all views
 viewsRouter.get('/', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -71,7 +194,6 @@ viewsRouter.get('/', async (req: Request, res: Response, next: NextFunction): Pr
 // GET /api/views/:id/tasks - Get tasks matching a saved search/view's filters
 viewsRouter.get('/:id/tasks', loadUserGroups(), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const db = getDb();
     const viewId = new ObjectId(req.params.id);
     const {
       page = 1,
@@ -79,93 +201,26 @@ viewsRouter.get('/:id/tasks', loadUserGroups(), async (req: Request, res: Respon
       resolveReferences = 'true',
     } = req.query;
 
-    // Get the view
-    const view = await db.collection<View>('views').findOne({ _id: viewId });
-    if (!view) {
-      throw createError('View not found', 404);
-    }
-
-    // Only allow task views
-    if (view.collectionName !== 'tasks') {
-      throw createError('This endpoint only supports task views', 400);
-    }
-
     const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
     const limitNum = Math.min(200, Math.max(1, parseInt(limit as string, 10) || 50));
-    const skip = (pageNum - 1) * limitNum;
 
-    // Build filter from view's saved filters
-    let filter: Filter<Task> = {};
-
-    if (view.filters) {
-      for (const [key, value] of Object.entries(view.filters)) {
-        if (value === undefined || value === null || value === '') continue;
-
-        // Handle special __unassigned__ marker for null values
-        // This is used to filter for tasks with null values (e.g., unassigned tasks)
-        if (value === '__unassigned__' || (Array.isArray(value) && value.includes('__unassigned__'))) {
-          (filter as Record<string, unknown>)[key] = { $eq: null };
-          continue;
-        }
-
-        // Handle array values (for $in queries)
-        if (Array.isArray(value)) {
-          if (key.endsWith('Id')) {
-            // Convert string IDs to ObjectIds
-            (filter as Record<string, unknown>)[key] = {
-              $in: value.map((v: string) => ObjectId.isValid(v) ? new ObjectId(v) : v)
-            };
-          } else {
-            (filter as Record<string, unknown>)[key] = { $in: value };
-          }
-        } else if (key.endsWith('Id') && typeof value === 'string' && ObjectId.isValid(value)) {
-          // Convert single ID strings to ObjectId
-          (filter as Record<string, unknown>)[key] = new ObjectId(value);
-        } else {
-          (filter as Record<string, unknown>)[key] = value;
-        }
-      }
-    }
-
-    // Apply group access filtering - only return tasks the user has access to
-    filter = buildGroupAccessFilter(req, filter) as Filter<Task>;
-
-    // Build sort from view's sorting config
-    const sortSpec: Record<string, 1 | -1> = {};
-    if (view.sorting && view.sorting.length > 0) {
-      for (const s of view.sorting) {
-        sortSpec[s.field] = s.direction === 'asc' ? 1 : -1;
-      }
-    } else {
-      sortSpec.createdAt = -1; // Default sort
-    }
-    const sort: Sort = sortSpec;
-
-    // Execute query
-    const [tasks, total] = await Promise.all([
-      db.collection<Task>('tasks').find(filter).sort(sort).skip(skip).limit(limitNum).toArray(),
-      db.collection<Task>('tasks').countDocuments(filter),
-    ]);
-
-    // Resolve references if requested
-    let resolvedTasks = tasks;
-    if (resolveReferences === 'true') {
-      const resolver = new ReferenceResolver();
-      await resolver.loadFieldConfigs('tasks');
-      resolvedTasks = await resolver.resolveDocuments(tasks);
-    }
+    const result = await queryViewTasks(viewId, req, {
+      limit: limitNum,
+      page: pageNum,
+      resolveReferences: resolveReferences === 'true',
+    });
 
     res.json({
-      data: resolvedTasks,
+      data: result.tasks,
       pagination: {
         page: pageNum,
         limit: limitNum,
-        total,
-        totalPages: Math.ceil(total / limitNum),
+        total: result.total,
+        totalPages: Math.ceil(result.total / limitNum),
       },
       savedSearch: {
-        id: view._id,
-        name: view.name,
+        id: viewId,
+        name: result.viewName,
       },
     });
   } catch (error) {

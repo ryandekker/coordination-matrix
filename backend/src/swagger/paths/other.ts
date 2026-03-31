@@ -247,6 +247,56 @@ export const userPaths = {
 };
 
 export const viewPaths = {
+  '/api/views/batch-poll': {
+    post: {
+      tags: ['Views'],
+      summary: 'Batch poll tasks from multiple views',
+      description: 'Fetches tasks from multiple saved views in a single request. Designed for consolidated daemon polling to reduce API calls.',
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['viewIds'],
+              properties: {
+                viewIds: { type: 'array', items: { type: 'string' }, maxItems: 20, description: 'Array of view ObjectId strings' },
+                limit: { type: 'integer', default: 1, maximum: 10, description: 'Max tasks per view' },
+                resolveReferences: { type: 'boolean', default: true },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        200: {
+          description: 'Results per view',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  results: {
+                    type: 'object',
+                    additionalProperties: {
+                      type: 'object',
+                      properties: {
+                        tasks: { type: 'array', items: { type: 'object' } },
+                        total: { type: 'integer' },
+                        viewName: { type: 'string' },
+                        error: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        400: { description: 'Invalid input' },
+      },
+    },
+  },
   '/api/views': {
     get: {
       tags: ['Views'],
