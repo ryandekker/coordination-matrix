@@ -2022,6 +2022,7 @@ function parseResponse(responseText) {
           metadata: parsed.metadata || {},
           documentOperations: parsed.documentOperations || [],
           routingOperations: parsed.routingOperations || [],
+          subtasks: parsed.subtasks || [],
           questions: parsed.questions || null,
           questionsContext: parsed.context || null,
           requestedCapabilities: parsed.requestedCapabilities || null,
