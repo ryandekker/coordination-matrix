@@ -120,11 +120,12 @@ activityLogsRouter.post(
       }
 
       // Get actor from request body, or fall back to authenticated user
-      const actorId = actorIdStr
-        ? toObjectId(actorIdStr)
-        : req.user?.userId
-          ? toObjectId(req.user.userId)
-          : null;
+      // Only convert to ObjectId if valid (API keys without a linked user may
+      // have a non-ObjectId userId like 'api-key-user')
+      const rawActorId = actorIdStr || req.user?.userId || null;
+      const actorId = rawActorId && ObjectId.isValid(rawActorId)
+        ? toObjectId(rawActorId)
+        : null;
 
       const entry = await activityLogService.addComment(
         taskId,

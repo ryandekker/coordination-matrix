@@ -12,6 +12,13 @@ export function toObjectId(id: string): ObjectId {
   return new ObjectId(id);
 }
 
+// Helper to safely convert a userId that may be a non-ObjectId placeholder
+// (e.g. 'api-key-user' from system API keys) to ObjectId or null
+export function safeActorId(id: string | null | undefined): ObjectId | null {
+  if (!id || !ObjectId.isValid(id)) return null;
+  return new ObjectId(id);
+}
+
 // Helper to resolve {{currentUserId}} placeholder
 export function resolveUserPlaceholder(value: string, currentUserId?: string): string {
   if (value === '{{currentUserId}}' && currentUserId) {
