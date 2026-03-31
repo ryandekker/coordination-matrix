@@ -1241,6 +1241,11 @@ async function updateTask(config, taskId, updates, retryOptions = {}) {
     return true;
   }
 
+  // Always attribute daemon updates to the daemon actor type
+  if (!updates.actorType) {
+    updates.actorType = 'daemon';
+  }
+
   // Truncate executionLog in metadata if too long (keep under 100KB)
   if (updates.metadata?.executionLog && updates.metadata.executionLog.length > 100000) {
     console.log(`[DEBUG] Truncating executionLog from ${updates.metadata.executionLog.length} to 100000 chars`);
@@ -4185,9 +4190,9 @@ async function runConsolidatedDaemon(config) {
 
   // Process a single task for a worker
   async function processWorkerTask(worker, task) {
-    const workerLog = new Logger({ level: log.level <= 0 ? 'debug' : 'info', prefix: worker.name });
-    const prevLog = log;
-    log = workerLog;
+    // Set global log prefix to worker name for identifiable output
+    // (minor race if workers overlap, but cosmetic only)
+    log = new Logger({ level: log.level <= 0 ? 'debug' : 'info', prefix: worker.name });
 
     const jobConfig = workerToConfig(worker);
     try {
@@ -4200,12 +4205,12 @@ async function runConsolidatedDaemon(config) {
       worker.stats.tasksFailed++;
       worker.stats.lastTaskAt = new Date().toISOString();
       worker.stats.lastError = err.message || String(err);
-      workerLog.error(`Task processing error: ${err.message}`);
+      log.error(`Task processing error: ${err.message}`);
     } finally {
       worker.busy = false;
       worker.currentTaskId = null;
       worker.currentTaskTitle = null;
-      log = prevLog;
+      log = consolidatedLog;
       saveConsolidatedStatus();
     }
   }
