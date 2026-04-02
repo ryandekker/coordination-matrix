@@ -3031,8 +3031,10 @@ async function handleStageTransition(config, task, workflow, parsedResponse) {
   if (nextAction === 'DECOMPOSE') {
     const subtasks = parsedResponse.data.subtasks || [];
     const isInWorkflow = !!task.workflowStage;
-    const agentComplexity = agent?.agentComplexity || 2;
-    const isRouter = agent?.agentTags?.includes('router') === true;
+    // Resolve agent from task assignee for decompose guards
+    const decomposeAgent = await fetchUser(config, task.assigneeId || config.agentId);
+    const agentComplexity = decomposeAgent?.agentComplexity || 2;
+    const isRouter = decomposeAgent?.agentTags?.includes('router') === true;
     const allowDecompose = task.metadata?.allowDecompose === true;
 
     // Guard: DECOMPOSE requires complexity 3, router tag, or explicit allow

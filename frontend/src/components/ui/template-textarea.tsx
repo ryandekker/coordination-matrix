@@ -199,7 +199,7 @@ export function TemplateInput({
       parts.push(
         <span
           key={`token-${match.index}`}
-          className="bg-violet-500/20 text-violet-700 dark:text-violet-300 rounded px-0.5"
+          className="bg-violet-500/20 text-violet-700 dark:text-violet-300 rounded"
         >
           {match[1]}
         </span>
