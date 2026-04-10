@@ -1324,7 +1324,7 @@ class WorkflowExecutionService {
 
       const now = new Date();
 
-      // Create the document with review status
+      // Create the document with review status, inheriting group from task
       const newDocument: Omit<Document, '_id'> = {
         title,
         content,
@@ -1332,6 +1332,8 @@ class WorkflowExecutionService {
         type: 'output',
         status: 'review',
         tags: [],
+        groupId: task.groupId || null,
+        projectId: task.projectId || null,
         createdById: null, // System-generated
         lastModifiedById: null,
         relatedTaskIds: [task._id],
