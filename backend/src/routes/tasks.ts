@@ -7,7 +7,7 @@ import { Task, TaskWithChildren, PaginatedResponse, Document as AppDocument, Chi
 import { publishTaskEvent, computeChanges, getSpecificEventTypes } from '../services/event-bus.js';
 import { activityLogService } from '../services/activity-log.js';
 import { workflowExecutionService } from '../services/workflow-execution-service.js';
-import { loadUserGroups, hasResourceAccess } from '../middleware/group-access.js';
+import { loadUserGroups, hasResourceAccess, resolveRequiredGroupId } from '../middleware/group-access.js';
 
 // Import helpers from tasks module
 import { toObjectId, safeActorId, buildFilter } from './tasks/index.js';
@@ -720,9 +720,9 @@ tasksRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       projectId = toObjectId(taskData.projectId);
     }
 
-    // Fallback: ensure groupId and projectId are always set
-    if (!groupId && req.userGroupIds && req.userGroupIds.length > 0) {
-      groupId = req.userGroupIds[0];
+    // Require groupId — resolve from body, API key, or sole membership
+    if (!groupId) {
+      groupId = await resolveRequiredGroupId(req);
     }
     if (!projectId && groupId) {
       const defaultProject = await db.collection<Project>('projects').findOne(
@@ -2193,6 +2193,9 @@ tasksRouter.post('/:id/documents', async (req: Request, res: Response, next: Nex
       const now = new Date();
       const userId = req.user?.userId ? new ObjectId(req.user.userId) : null;
 
+      // Inherit groupId from parent task — tasks always have a group
+      const docGroupId = task.groupId || await resolveRequiredGroupId(req);
+
       const newDocument: Omit<AppDocument, '_id'> = {
         title,
         content,
@@ -2200,6 +2203,8 @@ tasksRouter.post('/:id/documents', async (req: Request, res: Response, next: Nex
         type: type as AppDocument['type'],
         status: status as AppDocument['status'],
         tags: tags || [],
+        groupId: docGroupId,
+        projectId: task.projectId || null,
         createdById: userId,
         lastModifiedById: userId,
         relatedTaskIds: [taskId],

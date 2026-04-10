@@ -3,6 +3,7 @@ import { ObjectId } from 'mongodb';
 import { groupService } from '../services/group-service.js';
 import { GroupRole, GROUP_ROLE_HIERARCHY, GroupMember } from '../types/index.js';
 import { isAdmin } from './authorize.js';
+import { createError } from './error-handler.js';
 
 // Extend Express Request to include group context
 declare global {
@@ -334,4 +335,59 @@ export function requireGroupIdInBody(minRole: GroupRole = 'member') {
       next(error);
     }
   };
+}
+
+/**
+ * Resolve a required groupId for resource creation.
+ * Resolution priority:
+ *   1. Explicit groupId from request body
+ *   2. API key's scoped groupId
+ *   3. User's sole group membership (if exactly one)
+ *
+ * Throws an informative 400 error if no groupId can be resolved.
+ * Also validates that the user has access to the resolved group.
+ *
+ * @param req - Express request with user/auth info and loaded userGroupIds
+ * @returns Resolved ObjectId for the group
+ */
+export async function resolveRequiredGroupId(req: Request): Promise<ObjectId> {
+  const bodyGroupId = req.body?.groupId;
+
+  // 1. Explicit groupId from body
+  if (bodyGroupId && ObjectId.isValid(bodyGroupId)) {
+    const groupId = new ObjectId(bodyGroupId);
+    const hasAccess = await hasResourceAccess(req, groupId);
+    if (!hasAccess) {
+      throw createError('You do not have access to this group', 403);
+    }
+    return groupId;
+  }
+
+  // 2. API key scoped to a group
+  if (req.apiKey?.groupId) {
+    return new ObjectId(req.apiKey.groupId.toString());
+  }
+
+  // 3. User belongs to exactly one group
+  const userGroups = req.userGroupIds
+    || (req.user ? await groupService.getUserGroupIds(req.user.userId) : []);
+  if (userGroups.length === 1) {
+    return new ObjectId(userGroups[0].toString());
+  }
+
+  // Build informative error message
+  const hints: string[] = [
+    'Provide groupId in the request body',
+  ];
+  if (req.apiKey && !req.apiKey.groupId) {
+    hints.push('scope your API key to a group');
+  }
+  if (userGroups.length > 1) {
+    hints.push(`your account belongs to ${userGroups.length} groups — specify which one`);
+  }
+
+  throw createError(
+    `groupId is required. ${hints.join(', or ')}.`,
+    400
+  );
 }

@@ -21,8 +21,14 @@ echo ""
 require_cmd curl
 require_cmd jq
 
-# The commit we just deployed (set by 03-deploy-backend.sh or read from git)
-EXPECTED_COMMIT=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD)
+# Read expected commit from the build-info.json that step 04 generated.
+# This is the main branch commit baked into the frontend build, which is what
+# the live site will report (not the prod merge commit, which is created after).
+if [[ -f "$PROJECT_ROOT/frontend/public/build-info.json" ]]; then
+  EXPECTED_COMMIT=$(jq -r '.commitSha' "$PROJECT_ROOT/frontend/public/build-info.json" 2>/dev/null)
+else
+  EXPECTED_COMMIT=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD)
+fi
 echo "Expected commit: $EXPECTED_COMMIT"
 echo ""
 

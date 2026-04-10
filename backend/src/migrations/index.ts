@@ -33,6 +33,7 @@ import { migration as addCreatorTypeAndProjectColumn } from './2026-02-25-002-ad
 import { migration as addSystemSavedViews } from './2026-02-25-003-add-system-saved-views.js';
 import { migration as addVariableSensitivity } from './2026-03-15-001-add-variable-sensitivity.js';
 import { migration as addAgentTagsIndex } from './2026-03-16-001-add-agent-tags-index.js';
+import { migration as addDocumentTextSearchIndex } from './2026-04-10-001-add-document-text-search-index.js';
 
 // Register all migrations in order
 export const migrations: Migration[] = [
@@ -61,4 +62,5 @@ export const migrations: Migration[] = [
   addSystemSavedViews,
   addVariableSensitivity,
   addAgentTagsIndex,
+  addDocumentTextSearchIndex,
 ];

@@ -4,7 +4,7 @@ import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
 import { View, UserPreference, Task } from '../types/index.js';
 import { ReferenceResolver } from '../services/reference-resolver.js';
-import { loadUserGroups, buildGroupAccessFilter } from '../middleware/group-access.js';
+import { loadUserGroups, buildGroupAccessFilter, resolveRequiredGroupId } from '../middleware/group-access.js';
 
 export const viewsRouter = Router();
 
@@ -270,7 +270,7 @@ viewsRouter.get('/:id', async (req: Request, res: Response, next: NextFunction):
 });
 
 // POST /api/views - Create a new view
-viewsRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
+viewsRouter.post('/', loadUserGroups(), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
     const viewData = req.body;
@@ -278,6 +278,9 @@ viewsRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
     if (!viewData.name || !viewData.collectionName) {
       throw createError('name and collectionName are required', 400);
     }
+
+    // Resolve groupId — required for all view creation
+    const resolvedGroupId = await resolveRequiredGroupId(req);
 
     const now = new Date();
     const newView: Omit<View, '_id'> = {
@@ -290,7 +293,7 @@ viewsRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
       visibleColumns: viewData.visibleColumns || [],
       columnWidths: viewData.columnWidths,
       folderId: viewData.folderId ? new ObjectId(viewData.folderId) : null,
-      groupId: viewData.groupId ? new ObjectId(viewData.groupId) : null,
+      groupId: resolvedGroupId,
       projectId: viewData.projectId ? new ObjectId(viewData.projectId) : null,
       createdById: viewData.createdById ? new ObjectId(viewData.createdById) : null,
       createdAt: now,

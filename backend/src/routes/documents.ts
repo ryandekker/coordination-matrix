@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { ObjectId } from 'mongodb';
 import { getDb } from '../db/connection.js';
 import { createError } from '../middleware/error-handler.js';
-import { loadUserGroups } from '../middleware/group-access.js';
+import { loadUserGroups, resolveRequiredGroupId } from '../middleware/group-access.js';
 import { isAdmin } from '../middleware/authorize.js';
 import { groupService } from '../services/group-service.js';
 import {
@@ -296,7 +296,6 @@ documentsRouter.post('/', loadUserGroups(), async (req: Request, res: Response, 
       parentDocumentId,
       workflowRunId,
       metadata,
-      groupId,
       projectId,
     } = req.body;
 
@@ -319,14 +318,8 @@ documentsRouter.post('/', loadUserGroups(), async (req: Request, res: Response, 
     const now = new Date();
     const userId = req.user?.userId && ObjectId.isValid(req.user.userId) ? new ObjectId(req.user.userId) : null;
 
-    // Determine groupId - use provided, or fall back to user's primary group
-    let resolvedGroupId: ObjectId | null = null;
-    if (groupId && ObjectId.isValid(groupId)) {
-      resolvedGroupId = new ObjectId(groupId);
-    } else if (req.userGroupIds && req.userGroupIds.length > 0) {
-      // Use user's first (primary) group
-      resolvedGroupId = req.userGroupIds[0];
-    }
+    // Resolve groupId — required for all document creation
+    const resolvedGroupId = await resolveRequiredGroupId(req);
 
     // Build the document object, only including fields that have values
     // This prevents undefined values from being sent to MongoDB which would fail validation

@@ -8,9 +8,8 @@ import { aiPromptRoutes } from './ai-prompts.js';
 import { executeCode } from '../../services/workflow/code-executor.js';
 import { validateWorkflow } from '../../services/workflow/workflow-validator.js';
 import { simulateWorkflow } from '../../services/workflow/workflow-simulator.js';
-import { loadUserGroups, hasResourceAccess } from '../../middleware/group-access.js';
+import { loadUserGroups, hasResourceAccess, resolveRequiredGroupId } from '../../middleware/group-access.js';
 import { isAdmin } from '../../middleware/authorize.js';
-import { groupService } from '../../services/group-service.js';
 
 export const workflowsRouter = Router();
 
@@ -335,36 +334,14 @@ function ensureStepIds(steps: WorkflowStep[]): WorkflowStep[] {
 workflowsRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { name, description, steps, mermaidDiagram, isActive, folderId, color, groupId, inputSchema, samplePayload, rootTaskTitleTemplate } = req.body;
+    const { name, description, steps, mermaidDiagram, isActive, folderId, color, inputSchema, samplePayload, rootTaskTitleTemplate } = req.body;
 
     if (!name) {
       throw createError('name is required', 400);
     }
 
-    // Resolve groupId: explicit body > API key scope > user's single group > error
-    // For admins, userGroupIds is undefined (meaning "all"), so we look up their actual memberships
-    let resolvedGroupId = groupId || req.apiKey?.groupId?.toString() || null;
-    if (!resolvedGroupId) {
-      const userGroups = req.userGroupIds
-        || (req.user ? await groupService.getUserGroupIds(req.user.userId) : []);
-      if (userGroups.length === 1) {
-        resolvedGroupId = userGroups[0].toString();
-      }
-    }
-
-    let workflowGroupId: ObjectId;
-    if (resolvedGroupId) {
-      workflowGroupId = new ObjectId(resolvedGroupId);
-      const hasAccess = await hasResourceAccess(req, workflowGroupId);
-      if (!hasAccess) {
-        throw createError('You do not have access to this group', 403);
-      }
-    } else {
-      throw createError(
-        'groupId is required. Provide it in the request body, scope your API key to a group, or ensure the user belongs to exactly one group.',
-        400
-      );
-    }
+    // Resolve groupId — required for all workflow creation
+    const workflowGroupId = await resolveRequiredGroupId(req);
 
     const now = new Date();
     const newWorkflow: Omit<Workflow, '_id'> = {
