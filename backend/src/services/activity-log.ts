@@ -12,9 +12,23 @@ import { TaskEvent, ActivityLogEntry, FieldChange } from '../types/index.js';
 class ActivityLogService {
   private initialized = false;
 
+  // Fields in activity log changes that contain user IDs and should be
+  // resolved to display names for the frontend
+  private static readonly USER_ID_FIELDS = new Set([
+    'assigneeId', 'assignee', 'creatorId', 'defaultAssigneeId',
+  ]);
+
   /**
-   * Resolve actor information for activity log entries
-   * Populates the `actor` field with displayName and email from the users collection
+   * Check if a value looks like a MongoDB ObjectId (24-char hex string)
+   */
+  private static looksLikeObjectId(value: unknown): value is string {
+    return typeof value === 'string' && /^[a-f0-9]{24}$/.test(value);
+  }
+
+  /**
+   * Resolve actor information for activity log entries.
+   * Populates the `actor` field with displayName and email from the users collection.
+   * Also resolves user IDs in field changes (e.g., assigneeId) to display names.
    */
   private async populateActors(
     entries: ActivityLogEntry[]
@@ -23,16 +37,30 @@ class ActivityLogService {
 
     const db = getDb();
 
-    // Collect unique actorIds that need resolution
-    const actorIds = new Set<string>();
+    // Collect all user IDs that need resolution: actors + IDs in field changes
+    const allUserIds = new Set<string>();
+
     for (const entry of entries) {
       if (entry.actorId && entry.actorType === 'user') {
-        actorIds.add(entry.actorId.toString());
+        allUserIds.add(entry.actorId.toString());
+      }
+      // Collect user IDs from changes for known user-reference fields
+      if (entry.changes) {
+        for (const change of entry.changes) {
+          if (ActivityLogService.USER_ID_FIELDS.has(change.field)) {
+            if (ActivityLogService.looksLikeObjectId(change.oldValue)) {
+              allUserIds.add(change.oldValue);
+            }
+            if (ActivityLogService.looksLikeObjectId(change.newValue)) {
+              allUserIds.add(change.newValue);
+            }
+          }
+        }
       }
     }
 
-    if (actorIds.size === 0) {
-      // No user actors to resolve, just set actor based on actorType
+    if (allUserIds.size === 0) {
+      // No user IDs to resolve, just set actor based on actorType
       return entries.map((entry) => ({
         ...entry,
         actor:
@@ -44,8 +72,8 @@ class ActivityLogService {
       }));
     }
 
-    // Fetch users in bulk
-    const userObjectIds = Array.from(actorIds).map((id) => new ObjectId(id));
+    // Fetch all referenced users in bulk
+    const userObjectIds = Array.from(allUserIds).map((id) => new ObjectId(id));
     const users = await db
       .collection('users')
       .find(
@@ -66,19 +94,42 @@ class ActivityLogService {
       });
     }
 
-    // Populate actor field
+    // Helper to resolve a user ID to a display name
+    const resolveUserValue = (value: unknown): unknown => {
+      if (ActivityLogService.looksLikeObjectId(value)) {
+        const user = userMap.get(value);
+        if (user) return user.displayName;
+      }
+      return value;
+    };
+
+    // Populate actor field and resolve user IDs in changes
     return entries.map((entry) => {
+      let actor: { displayName: string; email?: string } | null = null;
       if (entry.actorType === 'system') {
-        return { ...entry, actor: { displayName: 'System' } };
+        actor = { displayName: 'System' };
+      } else if (entry.actorType === 'daemon') {
+        actor = { displayName: 'Automation Daemon' };
+      } else if (entry.actorId) {
+        actor = userMap.get(entry.actorId.toString()) || { displayName: 'Unknown User' };
       }
-      if (entry.actorType === 'daemon') {
-        return { ...entry, actor: { displayName: 'Automation Daemon' } };
+
+      // Resolve user IDs in field changes to display names
+      let resolvedChanges = entry.changes;
+      if (entry.changes) {
+        resolvedChanges = entry.changes.map((change) => {
+          if (ActivityLogService.USER_ID_FIELDS.has(change.field)) {
+            return {
+              ...change,
+              oldValue: resolveUserValue(change.oldValue),
+              newValue: resolveUserValue(change.newValue),
+            };
+          }
+          return change;
+        });
       }
-      if (entry.actorId) {
-        const actor = userMap.get(entry.actorId.toString());
-        return { ...entry, actor: actor || { displayName: 'Unknown User' } };
-      }
-      return { ...entry, actor: null };
+
+      return { ...entry, actor, changes: resolvedChanges };
     });
   }
 

@@ -1117,6 +1117,55 @@ async function fetchUser(config, userId) {
   }
 }
 
+/**
+ * Resolve a {{agent.*}} template to a user ID using the agents API.
+ * Supports patterns: {{agent.complexity.N}}, {{agent.tag.TAG}}, {{agent.name.NAME}}
+ * Returns the resolved user ID string, or null if no match.
+ */
+async function resolveAgentTemplate(config, template) {
+  if (!template || !template.startsWith('{{agent.')) return null;
+
+  const match = template.match(/^\{\{agent\.(.+)\}\}$/);
+  if (!match) return null;
+
+  const path = match[1]; // e.g., "complexity.3", "tag.api-integration", "name.Claude Opus"
+  const dotIdx = path.indexOf('.');
+  if (dotIdx === -1) return null;
+
+  const type = path.substring(0, dotIdx);   // "complexity", "tag", "name"
+  const value = path.substring(dotIdx + 1); // "3", "api-integration", "Claude Opus"
+
+  try {
+    const params = new URLSearchParams({ isAgent: 'true' });
+    if (type === 'complexity') params.set('agentComplexity', value);
+    if (type === 'tag') params.set('agentTag', value);
+
+    const response = await fetchWithTimeout(`${config.apiUrl}/users?${params}`, {
+      headers: getHeaders(config),
+    });
+    if (!response.ok) return null;
+
+    const result = await response.json();
+    const agents = (result.data || []).filter(u => u.isActive && u.isAgent);
+
+    if (agents.length === 0) return null;
+
+    // Match by type
+    let matched = null;
+    if (type === 'complexity') {
+      matched = agents.find(a => String(a.agentComplexity) === value);
+    } else if (type === 'tag') {
+      matched = agents.find(a => a.agentTags?.includes(value));
+    } else if (type === 'name') {
+      matched = agents.find(a => a.displayName?.toLowerCase() === value.toLowerCase());
+    }
+
+    return matched?._id || null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchAgentUsers(config) {
   try {
     const response = await fetchWithTimeout(`${config.apiUrl}/users?isAgent=true`, {
@@ -1993,6 +2042,26 @@ To update a linked document, include it in your documentOperations array:
     sections.push(`## Previous Questions Answered\nYou previously asked questions and the human has provided answers. Use these answers to continue the task.\n\`\`\`json\n${JSON.stringify(answeredSection, null, 2)}\n\`\`\`\n\n**IMPORTANT:** Do NOT ask the same questions again. Use the provided answers to complete the task.`);
   }
 
+  // 7.6. Parse retry context — if the previous attempt produced truncated JSON,
+  // include the truncated output so the agent can produce a complete response
+  if (task.metadata?.parseRetryCount > 0 && task.metadata?.truncatedOutput) {
+    const truncated = task.metadata.truncatedOutput;
+    // Include last 3000 chars to give context without overwhelming the prompt
+    const tail = truncated.length > 3000 ? truncated.slice(-3000) : truncated;
+    sections.push(`## CRITICAL: Previous Response Was Truncated
+Your previous response was cut off and could not be parsed as valid JSON.
+Parse error: ${task.metadata.lastParseError || 'unknown'}
+
+Here is the end of your truncated output (last ${tail.length} characters):
+---
+${tail}
+---
+
+You MUST output ONLY the complete JSON response object this time. No prose or explanation before or after the JSON.
+If your response is very large, prioritize the required fields (status, summary, output, nextAction).
+Keep the "output" field concise — summarize rather than including every detail if it would make the response too long.`);
+  }
+
   // 8. Response format reminder (placed last to override any conflicting instructions in extraPrompt)
   sections.push(`## IMPORTANT: Response Format
 Your response MUST be a JSON object with this exact structure:
@@ -2014,6 +2083,155 @@ Respond with ONLY this JSON object, no markdown code blocks, no explanation.`);
 // ============================================================================
 // Response Parsing
 // ============================================================================
+
+/**
+ * Attempt to repair truncated JSON by closing open strings, arrays, and objects.
+ * When Claude hits token limits, the JSON output gets cut off mid-stream. This
+ * function walks the JSON character-by-character, tracking nesting state, and
+ * appends the minimal closing characters to produce parseable (though incomplete) JSON.
+ *
+ * Returns the repaired string, or null if the input doesn't look like JSON.
+ */
+function repairTruncatedJson(text) {
+  if (!text || text[0] !== '{') return null;
+
+  // State tracking
+  let inString = false;
+  let escape = false;
+  const stack = []; // Track nesting: '{' or '['
+  let lastSignificantPos = 0; // Last position that had meaningful JSON content
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (ch === '\\' && inString) {
+      escape = true;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = !inString;
+      lastSignificantPos = i;
+      continue;
+    }
+
+    if (inString) continue;
+
+    // Outside strings
+    if (ch === '{') {
+      stack.push('{');
+      lastSignificantPos = i;
+    } else if (ch === '[') {
+      stack.push('[');
+      lastSignificantPos = i;
+    } else if (ch === '}') {
+      if (stack.length > 0 && stack[stack.length - 1] === '{') stack.pop();
+      lastSignificantPos = i;
+    } else if (ch === ']') {
+      if (stack.length > 0 && stack[stack.length - 1] === '[') stack.pop();
+      lastSignificantPos = i;
+    } else if (ch !== ' ' && ch !== '\t' && ch !== '\n' && ch !== '\r') {
+      lastSignificantPos = i;
+    }
+  }
+
+  // If balanced already, no repair needed (other strategies would have caught it)
+  if (stack.length === 0 && !inString) return null;
+
+  // Build the repair suffix
+  let repaired = text;
+
+  // If we're in a string, we need to close it. Truncate back to the last
+  // complete escape sequence / character boundary, then close the string.
+  if (inString) {
+    // Find where this string value started so we can cleanly truncate
+    // Just close the string at the current position
+    if (escape) {
+      // Ended mid-escape sequence, remove the trailing backslash
+      repaired = repaired.slice(0, -1);
+    }
+    repaired += '"';
+  }
+
+  // Now close any trailing incomplete key-value pair artifacts.
+  // After closing a string, we might have something like: ..."key": "val", "trunc
+  // which after string close becomes: ..."key": "val", "trunc"
+  // We need to handle the case where we closed a key (not a value).
+  // Try to strip trailing partial tokens that would make JSON invalid.
+  // A simple heuristic: if the last non-whitespace before our closing chars
+  // is a colon or comma, remove that trailing bit.
+  const beforeClosing = repaired.trimEnd();
+  const lastChar = beforeClosing[beforeClosing.length - 1];
+  if (lastChar === ':') {
+    // Closed a key but no value — add null
+    repaired = beforeClosing + ' null';
+  } else if (lastChar === ',') {
+    // Trailing comma — remove it
+    repaired = beforeClosing.slice(0, -1);
+  }
+
+  // Close all open brackets/braces in reverse order
+  for (let i = stack.length - 1; i >= 0; i--) {
+    repaired += stack[i] === '{' ? '}' : ']';
+  }
+
+  // Sanity check: try to parse it
+  try {
+    JSON.parse(repaired);
+    console.log(`[DEBUG] repairTruncatedJson: repaired by closing ${inString ? 'string + ' : ''}${stack.length} bracket(s)`);
+    return repaired;
+  } catch (e) {
+    // Repair attempt didn't produce valid JSON. Try a more aggressive approach:
+    // Walk backwards from the end, stripping characters until we find a point
+    // where we can close brackets and get valid JSON.
+    for (let cutback = 1; cutback < Math.min(500, text.length); cutback++) {
+      const truncated = text.substring(0, text.length - cutback);
+      // Re-scan for state at this position
+      let s_inString = false;
+      let s_escape = false;
+      const s_stack = [];
+      for (let i = 0; i < truncated.length; i++) {
+        const c = truncated[i];
+        if (s_escape) { s_escape = false; continue; }
+        if (c === '\\' && s_inString) { s_escape = true; continue; }
+        if (c === '"') { s_inString = !s_inString; continue; }
+        if (s_inString) continue;
+        if (c === '{') s_stack.push('{');
+        else if (c === '[') s_stack.push('[');
+        else if (c === '}' && s_stack.length > 0 && s_stack[s_stack.length - 1] === '{') s_stack.pop();
+        else if (c === ']' && s_stack.length > 0 && s_stack[s_stack.length - 1] === '[') s_stack.pop();
+      }
+
+      let candidate = truncated;
+      if (s_inString) candidate += '"';
+
+      const cTrimmed = candidate.trimEnd();
+      const cLast = cTrimmed[cTrimmed.length - 1];
+      if (cLast === ':') candidate = cTrimmed + ' null';
+      else if (cLast === ',') candidate = cTrimmed.slice(0, -1);
+
+      for (let j = s_stack.length - 1; j >= 0; j--) {
+        candidate += s_stack[j] === '{' ? '}' : ']';
+      }
+
+      try {
+        JSON.parse(candidate);
+        console.log(`[DEBUG] repairTruncatedJson: repaired by cutting back ${cutback} chars and closing ${s_stack.length} bracket(s)`);
+        return candidate;
+      } catch {
+        // Continue cutting back
+      }
+    }
+
+    console.log(`[DEBUG] repairTruncatedJson: repair failed after aggressive cutback`);
+    return null;
+  }
+}
 
 function parseResponse(responseText) {
   // Try multiple strategies to extract valid JSON from agent output
@@ -2058,25 +2276,48 @@ function parseResponse(responseText) {
     }
   }
 
+  // Strategy 5: JSON repair for truncated output
+  // When Claude hits token limits, JSON gets cut off mid-stream. This strategy
+  // walks the JSON from the first '{', tracks state (strings, nesting), and
+  // appends the minimal closing characters to make it parseable.
+  if (firstBrace !== -1) {
+    const repaired = repairTruncatedJson(trimmed.substring(firstBrace));
+    if (repaired) {
+      strategies.push({ name: 'repair', text: repaired });
+    }
+  }
+
   let lastError = null;
   for (const { name, text } of strategies) {
     try {
       const parsed = JSON.parse(text);
 
-      // Validate required fields
-      if (!parsed.status || !parsed.nextAction) {
-        continue; // Try next strategy — this JSON doesn't have the right shape
+      // Validate required fields — relax for 'repair' strategy since
+      // truncated JSON likely won't have all fields present
+      if (name === 'repair') {
+        if (!parsed.status) continue; // Need at least status
+      } else {
+        if (!parsed.status || !parsed.nextAction) {
+          continue; // Try next strategy — this JSON doesn't have the right shape
+        }
       }
+
+      // For repaired responses, default nextAction to COMPLETE since the agent
+      // was likely in the middle of writing its output when truncated
+      const nextAction = parsed.nextAction || (name === 'repair' ? 'COMPLETE' : undefined);
+      if (!nextAction) continue;
 
       console.log(`[DEBUG] parseResponse: strategy '${name}' succeeded`);
       return {
         success: true,
+        strategy: name,
+        repaired: name === 'repair',
         data: {
           status: parsed.status,
           summary: parsed.summary || '',
           output: parsed.output || '',
-          nextAction: parsed.nextAction,
-          nextActionReason: parsed.nextActionReason || '',
+          nextAction,
+          nextActionReason: parsed.nextActionReason || (name === 'repair' ? 'Response was truncated and auto-repaired' : ''),
           metadata: parsed.metadata || {},
           documentOperations: parsed.documentOperations || [],
           routingOperations: parsed.routingOperations || [],
@@ -3206,6 +3447,23 @@ async function processTask(config, task) {
   log.info(`Processing: ${task.title}`);
   log.debug(`Task ID: ${task._id}`, { status: task.status, workflow: task.workflowId || 'none', stage: task.workflowStage || 'none' });
 
+  // Re-resolve assignee if task has none but has a defaultAssigneeId template
+  // This handles the case where a task was unassigned during escalation and then
+  // manually retried — the workflow's agent template needs to be re-resolved.
+  if (!task.assigneeId && task.stepConfig?.defaultAssigneeId) {
+    const template = task.stepConfig.defaultAssigneeId;
+    if (template.startsWith('{{agent.')) {
+      const resolvedId = await resolveAgentTemplate(config, template);
+      if (resolvedId) {
+        log.info(`Re-resolved assignee from template ${template} → ${resolvedId}`);
+        task.assigneeId = resolvedId;
+        await updateTask(config, task._id, { assigneeId: resolvedId });
+      } else {
+        log.warn(`Could not resolve agent template: ${template}`);
+      }
+    }
+  }
+
   // Fetch agent (assignee) if exists, fall back to job's configured agentId
   const agent = await fetchUser(config, task.assigneeId || config.agentId);
   const agentComplexity = agent?.agentComplexity || 2; // Default to intermediate
@@ -3622,7 +3880,49 @@ async function processTask(config, task) {
   const parsedResponse = parseResponse(result.stdout);
 
   if (!parsedResponse.success) {
-    console.log(`[WARN] Failed to parse JSON response: ${parsedResponse.error}`);
+    // Check if we should retry with a continuation prompt before escalating
+    const parseRetryCount = (task.metadata?.parseRetryCount || 0);
+    const maxParseRetries = config.maxParseRetries ?? 1;
+
+    if (parseRetryCount < maxParseRetries) {
+      console.log(`[INFO] Parse failed — attempting continuation retry (${parseRetryCount + 1}/${maxParseRetries})`);
+
+      // Extract the last portion of the truncated output to give the agent context
+      const rawTail = parsedResponse.raw?.slice(-2000) || '';
+
+      const continuationPrompt = [
+        'Your previous response was truncated and could not be parsed as valid JSON.',
+        'Here is the end of your truncated output:',
+        '---',
+        rawTail,
+        '---',
+        '',
+        'Please output ONLY the complete, valid JSON response object. Do not include any text before or after the JSON.',
+        'Start with { and end with }. The JSON must include at minimum: "status", "summary", "output", and "nextAction" fields.',
+      ].join('\n');
+
+      // Update task metadata with retry count, then re-queue
+      await updateTask(config, task._id, {
+        status: 'pending',
+        metadata: {
+          ...(task.metadata || {}),
+          parseRetryCount: parseRetryCount + 1,
+          lastParseError: parsedResponse.error,
+          lastParseRetryAt: new Date().toISOString(),
+          // Store the truncated output so the continuation has context
+          truncatedOutput: parsedResponse.raw?.substring(0, 50000) || '',
+        },
+      });
+
+      await addTaskComment(
+        config,
+        task._id,
+        `Daemon: Response parsing failed (${parsedResponse.error}). Retrying with continuation prompt (attempt ${parseRetryCount + 1}/${maxParseRetries}).`
+      );
+      return;
+    }
+
+    console.log(`[WARN] Failed to parse JSON response after ${parseRetryCount} retries: ${parsedResponse.error}`);
     console.log(`[WARN] Raw response saved to metadata.output`);
 
     const output = {
@@ -3633,19 +3933,33 @@ async function processTask(config, task) {
       rawOutput: parsedResponse.raw?.substring(0, 5000) || '',
     };
 
-    // Parse failure means the agent didn't produce a valid response — escalate for review
+    // Parse failure after retries exhausted — escalate for review
     await updateTask(config, task._id, {
       status: 'on_hold',
       assigneeId: null,
       metadata: {
         ...(task.metadata || {}),
         output,
+        parseRetryCount,
       },
     });
 
     // Add comment to activity feed
-    await addTaskComment(config, task._id, `Daemon: Agent exited successfully but response parsing failed. Task placed on hold for review.\nParse error: ${parsedResponse.error}`);
+    await addTaskComment(config, task._id, `Daemon: Agent response parsing failed after ${parseRetryCount} retry attempt(s). Task placed on hold for review.\nParse error: ${parsedResponse.error}`);
     return;
+  }
+
+  // Log repair status if JSON was recovered from truncated output
+  if (parsedResponse.repaired) {
+    console.log(`[INFO] Response JSON was truncated but successfully repaired (strategy: ${parsedResponse.strategy})`);
+    // Add a comment so the user knows the output may be incomplete
+    await addTaskComment(config, task._id, `Daemon: Agent response was truncated but JSON was repaired automatically. Output may be incomplete.`);
+  }
+
+  // Clean up parse retry metadata on successful parse
+  if (task.metadata?.parseRetryCount > 0) {
+    console.log(`[INFO] Parse succeeded after ${task.metadata.parseRetryCount} retry attempt(s)`);
+    // The truncatedOutput and retry fields will be overwritten by the new output below
   }
 
   console.log(`[DEBUG] Parsed response:`);
@@ -3830,6 +4144,11 @@ async function processTask(config, task) {
     // Clear requestedCapabilities after task completion (they've been used)
     requestedCapabilities: undefined,
     lastRequestedAt: undefined,
+    // Clear parse retry fields after successful parse
+    parseRetryCount: undefined,
+    lastParseError: undefined,
+    lastParseRetryAt: undefined,
+    truncatedOutput: undefined,
   };
 
   // Enrich escalation metadata when ESCALATE is used

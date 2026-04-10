@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { Check, RotateCcw, MessageSquare, ChevronDown, ChevronRight, Loader2, ExternalLink } from 'lucide-react'
+import { Check, RotateCcw, Undo2, MessageSquare, ChevronDown, ChevronRight, Loader2, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Task, ManualReviewDecision, Document } from '@/lib/api'
@@ -225,32 +225,53 @@ export function ManualReviewPanel({
           Approve with Notes
         </Button>
 
-        {/* Request Changes / Rollback */}
-        {onRollback && (
+        {/* Request Changes — completes the task with reviewDecision and lets
+            the workflow's decision step route it (e.g., to an apply-feedback step) */}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handleRequestChanges}
+          disabled={isSubmitting}
+          className="gap-1.5 text-amber-600 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-800 dark:hover:bg-amber-950/50"
+        >
+          {isSubmitting && selectedAction === 'request_changes' ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <RotateCcw className="h-3.5 w-3.5" />
+          )}
+          Request Changes
+        </Button>
+      </div>
+
+      {/* Rollback — secondary escape hatch to send back to previous step directly */}
+      {onRollback && (
+        <div className="flex items-center gap-2 pt-1 border-t border-border/50">
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             size="sm"
             onClick={handleRollback}
             disabled={isSubmitting}
-            className="gap-1.5 text-amber-600 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-800 dark:hover:bg-amber-950/50"
+            className="gap-1.5 text-xs text-muted-foreground hover:text-foreground h-7"
           >
             {isSubmitting && selectedAction === 'rollback' ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Loader2 className="h-3 w-3 animate-spin" />
             ) : (
-              <RotateCcw className="h-3.5 w-3.5" />
+              <Undo2 className="h-3 w-3" />
             )}
-            Request Changes
+            Rollback to previous step
           </Button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Help Text */}
       <div className="text-xs text-muted-foreground space-y-1">
         <p><strong>Approve:</strong> Complete this step and advance to the next step</p>
         <p><strong>Approve with Notes:</strong> Approve and pass your notes to the next step</p>
+        <p><strong>Request Changes:</strong> Request revisions — routes through the workflow&apos;s decision step</p>
         {onRollback && (
-          <p><strong>Request Changes:</strong> Send back to the previous step for revision</p>
+          <p><strong>Rollback:</strong> Send back to the previous step directly (bypasses workflow routing)</p>
         )}
       </div>
     </div>
