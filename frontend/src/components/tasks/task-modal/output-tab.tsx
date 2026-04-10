@@ -180,9 +180,9 @@ export function OutputTab({ task, childTasks, attachedDocuments, onRollback, onR
           reviewDecision: decision,
           reviewComment: comment || undefined,
           reviewedAt: new Date().toISOString(),
-          // Mark as completed for 'approved' or 'approved_with_notes'
-          // 'request_changes' will be handled by rollback
-          status: decision === 'request_changes' ? 'on_hold' : 'completed',
+          // All decisions complete the task so the workflow engine advances
+          // to the next step (typically a decision step that routes on reviewDecision)
+          status: 'completed',
           // Add review notes to metadata for the next step
           metadata: {
             ...task.metadata,
