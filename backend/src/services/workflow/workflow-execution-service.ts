@@ -1071,6 +1071,71 @@ class WorkflowExecutionService {
   }
 
   /**
+   * Discover documents created during an agent task's execution window.
+   * Queries the documents collection for docs created by the task's assignee
+   * within the task's lifetime, then links them to the task and returns them
+   * as produced assets. This ensures documents created via direct API calls
+   * (rather than documentOperations) are still tracked.
+   */
+  private async discoverCreatedDocuments(
+    task: Task,
+    existingAssetIds: Set<string>
+  ): Promise<Array<{ type: string; id: string; title: string; action: string }>> {
+    if (!task.assigneeId || !task.createdAt) return [];
+
+    try {
+      const query: Record<string, unknown> = {
+        createdById: new ObjectId(task.assigneeId),
+        createdAt: { $gte: task.createdAt },
+      };
+      // Scope to same group if available
+      if (task.groupId) {
+        query.groupId = new ObjectId(task.groupId);
+      }
+
+      const docs = await this.documents.find(query, {
+        projection: { _id: 1, title: 1, relatedTaskIds: 1 },
+      }).toArray();
+
+      const discovered: Array<{ type: string; id: string; title: string; action: string }> = [];
+
+      for (const doc of docs) {
+        const docId = doc._id.toString();
+        if (existingAssetIds.has(docId)) continue;
+
+        discovered.push({
+          type: 'document',
+          id: docId,
+          title: doc.title || docId,
+          action: 'Created',
+        });
+
+        // Link document to this task if not already linked
+        const alreadyLinked = doc.relatedTaskIds?.some(
+          (id: ObjectId) => id.toString() === task._id.toString()
+        );
+        if (!alreadyLinked) {
+          await this.documents.updateOne(
+            { _id: doc._id },
+            { $addToSet: { relatedTaskIds: task._id } }
+          );
+        }
+      }
+
+      if (discovered.length > 0) {
+        console.log(
+          `[WorkflowExecutionService] Discovered ${discovered.length} document(s) created by agent during task ${task._id}`
+        );
+      }
+
+      return discovered;
+    } catch (error) {
+      console.error('[WorkflowExecutionService] Error discovering created documents:', error);
+      return [];
+    }
+  }
+
+  /**
    * Build an error chain by tracing the failure through nested tasks.
    * Most specific error first (the leaf task that actually failed).
    */
@@ -3443,6 +3508,16 @@ class WorkflowExecutionService {
     // and the frontend don't need to scan multiple nested paths.
     if (task.status === 'completed') {
       const assets = this.extractProducedAssets(task);
+
+      // For agent tasks, also discover documents created via direct API calls
+      // (not reported through documentOperations). This queries the documents
+      // collection for docs created by the agent during the task's execution window.
+      if (task.taskType === 'agent') {
+        const existingIds = new Set(assets.map(a => a.id));
+        const discovered = await this.discoverCreatedDocuments(task, existingIds);
+        assets.push(...discovered);
+      }
+
       if (assets.length > 0) {
         const updateFields: Record<string, unknown> = {};
         if (task.stepOutput) {

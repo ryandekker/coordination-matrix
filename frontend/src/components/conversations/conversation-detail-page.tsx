@@ -235,6 +235,9 @@ export function ConversationDetailPage({ id }: ConversationDetailPageProps) {
   const statusConfig = STATUS_CONFIG[record.status] || STATUS_CONFIG.completed
   const StatusIcon = statusConfig.icon
   const toolCalls = record.messages?.filter(m => m.type === 'tool_use').length || 0
+  const toolResultErrors = record.messages?.filter(m => m.type === 'tool_result' && m.isError) || []
+  const permissionDenials = record.permissionDenials || []
+  const totalErrors = permissionDenials.length + toolResultErrors.length
 
   return (
     <div className="flex flex-col gap-4">
@@ -326,6 +329,12 @@ export function ConversationDetailPage({ id }: ConversationDetailPageProps) {
           <Wrench className="h-3 w-3" />
           <strong className="text-foreground">{toolCalls}</strong> tool calls
         </span>
+        {totalErrors > 0 && (
+          <span className="flex items-center gap-1 text-red-600 dark:text-red-400">
+            <XCircle className="h-3 w-3" />
+            <strong>{totalErrors}</strong> error{totalErrors !== 1 ? 's' : ''}
+          </span>
+        )}
         {record.usage && (
           <>
             <span>
@@ -355,26 +364,52 @@ export function ConversationDetailPage({ id }: ConversationDetailPageProps) {
         </div>
       )}
 
-      {/* Permission denials */}
-      {record.permissionDenials && record.permissionDenials.length > 0 && (
-        <Card className="border-yellow-500/30">
+      {/* Errors summary: permission denials + tool result errors */}
+      {totalErrors > 0 && (
+        <Card className="border-red-500/30">
           <CardHeader className="p-3 pb-2">
-            <CardTitle className="text-xs flex items-center gap-2 text-yellow-600 dark:text-yellow-400">
-              <AlertTriangle className="h-4 w-4" />
-              Permission Denials ({record.permissionDenials.length})
+            <CardTitle className="text-xs flex items-center gap-2 text-red-600 dark:text-red-400">
+              <XCircle className="h-4 w-4" />
+              Errors ({totalErrors})
             </CardTitle>
           </CardHeader>
-          <CardContent className="p-3 pt-0">
-            <div className="space-y-2">
-              {record.permissionDenials.map((denial, i) => (
-                <div key={i} className="text-xs bg-yellow-500/10 p-2 rounded">
-                  <span className="font-medium">{denial.toolName}</span>
-                  <pre className="mt-1 text-[10px] text-muted-foreground overflow-x-auto">
-                    {JSON.stringify(denial.toolInput, null, 2)}
-                  </pre>
+          <CardContent className="p-3 pt-0 space-y-3">
+            {permissionDenials.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-[10px] uppercase font-medium text-yellow-600 dark:text-yellow-400 flex items-center gap-1">
+                  <AlertTriangle className="h-3 w-3" />
+                  Permission Denials ({permissionDenials.length})
                 </div>
-              ))}
-            </div>
+                {permissionDenials.map((denial, i) => (
+                  <div key={`denial-${i}`} className="text-xs bg-yellow-500/10 p-2 rounded">
+                    <span className="font-medium">{denial.toolName}</span>
+                    <pre className="mt-1 text-[10px] text-muted-foreground overflow-x-auto">
+                      {JSON.stringify(denial.toolInput, null, 2)}
+                    </pre>
+                  </div>
+                ))}
+              </div>
+            )}
+            {toolResultErrors.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-[10px] uppercase font-medium text-red-600 dark:text-red-400">
+                  Tool Errors ({toolResultErrors.length})
+                </div>
+                {toolResultErrors.map((msg, i) => {
+                  const errorText = typeof msg.toolResult === 'string'
+                    ? msg.toolResult
+                    : JSON.stringify(msg.toolResult, null, 2)
+                  return (
+                    <div key={`toolerr-${i}`} className="text-xs bg-red-500/10 p-2 rounded">
+                      <span className="font-medium font-mono text-[10px]">{msg.toolUseId || `#${i + 1}`}</span>
+                      <pre className="mt-1 text-[10px] text-red-600 dark:text-red-400 overflow-x-auto whitespace-pre-wrap max-h-24 overflow-y-auto">
+                        {errorText}
+                      </pre>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
