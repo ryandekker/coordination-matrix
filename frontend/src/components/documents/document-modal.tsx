@@ -28,8 +28,9 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { Save, History, Loader2, X } from 'lucide-react'
+import { Save, History, Loader2, X, Sparkles } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
+import { AiAssistantPanel } from '@/components/ai/ai-assistant-panel'
 
 // Dynamic import for ByteMD editor to avoid SSR issues
 const Editor = dynamic(
@@ -86,6 +87,7 @@ export function DocumentModal({
   const [status, setStatus] = useState<DocumentStatus>('draft')
   const [tags, setTags] = useState('')
   const [showHistory, setShowHistory] = useState(false)
+  const [showAiAssistant, setShowAiAssistant] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
   // Capability-specific fields
@@ -353,7 +355,45 @@ export function DocumentModal({
           </div>
 
           {/* Sidebar */}
-          <div className="w-72 flex-shrink-0 p-6 space-y-6 overflow-auto">
+          <div className="w-72 flex-shrink-0 flex flex-col overflow-hidden">
+            {/* AI Assistant toggle (only for existing documents) */}
+            {document && (
+              <div className="px-6 pt-4 pb-2 flex gap-2">
+                <Button
+                  variant={showAiAssistant ? 'default' : 'outline'}
+                  size="sm"
+                  className="flex-1 justify-start gap-2"
+                  onClick={() => setShowAiAssistant(!showAiAssistant)}
+                >
+                  <Sparkles className="h-4 w-4" />
+                  AI
+                </Button>
+                <Button
+                  variant={showHistory ? 'default' : 'outline'}
+                  size="sm"
+                  className="flex-1 justify-start gap-2"
+                  onClick={() => { setShowHistory(!showHistory); setShowAiAssistant(false) }}
+                >
+                  <History className="h-4 w-4" />
+                  History
+                </Button>
+              </div>
+            )}
+
+            {/* AI Assistant Panel */}
+            {showAiAssistant && document ? (
+              <AiAssistantPanel
+                contextType="document"
+                contextId={document._id}
+                className="flex-1 min-h-0"
+                onContentUpdated={() => {
+                  // Refetch document to update the editor content
+                  // The hook invalidates the cache, but we also update local state
+                  // by re-reading from the cache after invalidation
+                }}
+              />
+            ) : (
+            <div className="flex-1 p-6 space-y-6 overflow-auto">
             <div className="space-y-2">
               <Label>Type</Label>
               <Select value={type} onValueChange={(v) => setType(v as DocumentType)}>
@@ -454,33 +494,24 @@ export function DocumentModal({
             </div>
 
             {document && (
-              <div className="space-y-4 pt-4 border-t">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full justify-start gap-2"
-                  onClick={() => setShowHistory(!showHistory)}
-                >
-                  <History className="h-4 w-4" />
-                  {showHistory ? 'Back to Editor' : `History (${versions.length})`}
-                </Button>
-                <div className="space-y-2">
-                  <div className="text-sm">
-                    <span className="text-muted-foreground">Created: </span>
-                    {formatDistanceToNow(new Date(document.createdAt), { addSuffix: true })}
-                  </div>
-                  <div className="text-sm">
-                    <span className="text-muted-foreground">Updated: </span>
-                    {formatDistanceToNow(new Date(document.updatedAt), { addSuffix: true })}
-                  </div>
-                  {document._resolved?.createdBy && (
-                    <div className="text-sm">
-                      <span className="text-muted-foreground">Author: </span>
-                      {document._resolved.createdBy.displayName}
-                    </div>
-                  )}
+              <div className="space-y-2 pt-4 border-t">
+                <div className="text-sm">
+                  <span className="text-muted-foreground">Created: </span>
+                  {formatDistanceToNow(new Date(document.createdAt), { addSuffix: true })}
                 </div>
+                <div className="text-sm">
+                  <span className="text-muted-foreground">Updated: </span>
+                  {formatDistanceToNow(new Date(document.updatedAt), { addSuffix: true })}
+                </div>
+                {document._resolved?.createdBy && (
+                  <div className="text-sm">
+                    <span className="text-muted-foreground">Author: </span>
+                    {document._resolved.createdBy.displayName}
+                  </div>
+                )}
               </div>
+            )}
+            </div>
             )}
           </div>
         </div>

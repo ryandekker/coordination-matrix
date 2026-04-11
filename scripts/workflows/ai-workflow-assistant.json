@@ -1,0 +1,92 @@
+{
+  "name": "AI Workflow Assistant",
+  "description": "Answer questions about a workflow definition or edit its steps, configuration, and structure using AI. Routes between Q&A (fast) and editing (thorough) based on the user's instruction.",
+  "isActive": true,
+  "color": "#6366f1",
+  "rootTaskTitleTemplate": "AI: {{input.instruction}}",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workflowId": { "type": "string", "description": "ID of the workflow to query or edit" },
+      "instruction": { "type": "string", "description": "Natural language instruction — question or edit request" }
+    },
+    "required": ["workflowId", "instruction"]
+  },
+  "samplePayload": "{\"workflowId\":\"000000000000000000000000\",\"instruction\":\"Add a manual review step after the draft creation step\"}",
+  "steps": [
+    {
+      "id": "fetch-workflow",
+      "name": "Fetch Workflow",
+      "description": "Retrieve the target workflow definition via API",
+      "stepType": "code",
+      "codeConfig": {
+        "code": "const wfId = input.workflowId;\nif (!wfId) return { error: 'No workflowId provided' };\nconst res = await fetch(apiUrl + '/workflows/' + wfId, {\n  headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' }\n});\nif (!res.ok) {\n  const err = await res.text();\n  return { error: 'Failed to fetch workflow: ' + res.status + ' ' + err };\n}\nconst data = await res.json();\nconst wf = data.data || data;\nreturn {\n  workflowId: String(wf._id),\n  name: wf.name,\n  description: wf.description,\n  isActive: wf.isActive,\n  steps: wf.steps,\n  stepCount: (wf.steps || []).length,\n  inputSchema: wf.inputSchema || null,\n  samplePayload: wf.samplePayload || null,\n  rootTaskTitleTemplate: wf.rootTaskTitleTemplate || null,\n  color: wf.color || null\n};",
+        "packages": ["node-fetch"],
+        "variables": [
+          { "name": "apiUrl", "path": "_apiUrl" },
+          { "name": "apiKey", "path": "_apiKey" }
+        ]
+      },
+      "connections": [
+        { "targetStepId": "classify-intent" }
+      ]
+    },
+    {
+      "id": "classify-intent",
+      "name": "Classify Intent",
+      "description": "Determine whether the user wants to ask a question or edit the workflow",
+      "stepType": "code",
+      "codeConfig": {
+        "code": "const instruction = (trigger && trigger.instruction) || '';\nconst lower = instruction.toLowerCase().trim();\n\nconst questionPatterns = /^(what|why|how|when|where|who|which|is |are |does |do |can |could |would |should |tell me|explain|describe|summarize|list |show me)/;\nconst hasQuestionMark = lower.includes('?');\nconst editPatterns = /\\b(change|update|add|remove|delete|edit|rewrite|fix|improve|replace|insert|append|move|rename|modify|restructure|refactor|reorder|connect|disconnect|configure|set |enable|disable)\\b/;\n\nlet intent = 'question';\nlet complexity = 'simple';\n\nif (editPatterns.test(lower)) {\n  intent = 'edit';\n  complexity = lower.length > 200 ? 'complex' : 'moderate';\n} else if (questionPatterns.test(lower) || hasQuestionMark) {\n  intent = 'question';\n  complexity = 'simple';\n} else {\n  intent = lower.length > 100 ? 'edit' : 'question';\n  complexity = intent === 'edit' ? 'moderate' : 'simple';\n}\n\nreturn { intent, complexity };"
+      },
+      "connections": [
+        { "targetStepId": "route-intent" }
+      ]
+    },
+    {
+      "id": "route-intent",
+      "name": "Route: Q&A or Edit",
+      "description": "Route to question answering or workflow editing based on classification",
+      "stepType": "decision",
+      "decisionField": "output.intent",
+      "connections": [
+        { "targetStepId": "answer-question", "condition": "question", "label": "Answer Question" },
+        { "targetStepId": "apply-edit", "condition": "edit", "label": "Edit Workflow" }
+      ],
+      "defaultConnection": "answer-question"
+    },
+    {
+      "id": "answer-question",
+      "name": "Answer Question",
+      "description": "Answer the user's question about the workflow",
+      "stepType": "agent",
+      "defaultAssigneeId": "{{agent.complexity.1}}",
+      "additionalInstructions": "You are answering a question about a workflow definition.\n\nThe workflow definition is available in your input payload from the fetch-workflow step, including its steps array, connections, inputSchema, and configuration.\n\nBe concise and direct. Explain the workflow's structure, step types, data flow, or specific configuration as asked. If describing step connections, trace the execution path clearly.\n\nReturn your answer in the output.result field:\n```json\n{\n  \"answer\": \"Your answer here\",\n  \"referencedSteps\": [\"step-ids that are relevant to the answer\"]\n}\n```"
+    },
+    {
+      "id": "apply-edit",
+      "name": "Edit Workflow",
+      "description": "Generate the updated workflow definition based on the user's instruction",
+      "stepType": "agent",
+      "defaultAssigneeId": "{{agent.complexity.3}}",
+      "additionalInstructions": "You are editing a workflow definition based on the user's instruction.\n\nThe current workflow definition is available in your input payload from the fetch-workflow step, including the full steps array.\n\nIMPORTANT RULES FOR WORKFLOW EDITING:\n1. Preserve all existing steps, connections, and configuration that the user did not ask to change\n2. Each step must have: id (kebab-case), name, description, stepType\n3. Valid step types: trigger, agent, manual, decision, foreach, join, flow, external, webhook, code, findDocument\n4. Agent steps need defaultAssigneeId using {{agent.complexity.N}} (1=haiku, 2=sonnet, 3=opus)\n5. Decision steps need decisionField and connections with conditions\n6. Use explicit connections arrays for non-linear flows\n7. Step IDs must be unique\n\nReturn the COMPLETE updated workflow definition in your output:\n```json\n{\n  \"updatedWorkflow\": {\n    \"name\": \"...\",\n    \"description\": \"...\",\n    \"steps\": [ /* complete steps array */ ],\n    \"inputSchema\": { /* if changed */ },\n    \"samplePayload\": \"...\",\n    \"rootTaskTitleTemplate\": \"...\"\n  },\n  \"editSummary\": \"What was changed\",\n  \"stepsAdded\": [\"new-step-id\"],\n  \"stepsModified\": [\"modified-step-id\"],\n  \"stepsRemoved\": [\"removed-step-id\"]\n}\n```",
+      "connections": [
+        { "targetStepId": "save-workflow" }
+      ]
+    },
+    {
+      "id": "save-workflow",
+      "name": "Save Workflow",
+      "description": "Apply the edited workflow definition via API",
+      "stepType": "code",
+      "codeConfig": {
+        "code": "const wfId = (trigger && trigger.workflowId) || (input && input.workflowId);\nif (!wfId) return { error: 'No workflowId to save' };\n\nconst output = input.output || input;\nconst updated = output.result && output.result.updatedWorkflow ? output.result.updatedWorkflow : (output.updatedWorkflow || null);\nif (!updated) return { error: 'No updatedWorkflow found in agent output', availableKeys: Object.keys(output) };\n\nconst patchBody = {};\nif (updated.name) patchBody.name = updated.name;\nif (updated.description) patchBody.description = updated.description;\nif (updated.steps) patchBody.steps = updated.steps;\nif (updated.inputSchema) patchBody.inputSchema = updated.inputSchema;\nif (updated.samplePayload) patchBody.samplePayload = updated.samplePayload;\nif (updated.rootTaskTitleTemplate) patchBody.rootTaskTitleTemplate = updated.rootTaskTitleTemplate;\n\nconst res = await fetch(apiUrl + '/workflows/' + wfId, {\n  method: 'PATCH',\n  headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },\n  body: JSON.stringify(patchBody)\n});\n\nif (!res.ok) {\n  const err = await res.text();\n  return { error: 'Failed to save workflow: ' + res.status + ' ' + err };\n}\n\nconst data = await res.json();\nreturn {\n  success: true,\n  workflowId: wfId,\n  editSummary: (output.result && output.result.editSummary) || 'Workflow updated'\n};",
+        "packages": ["node-fetch"],
+        "variables": [
+          { "name": "apiUrl", "path": "_apiUrl" },
+          { "name": "apiKey", "path": "_apiKey" }
+        ]
+      }
+    }
+  ]
+}

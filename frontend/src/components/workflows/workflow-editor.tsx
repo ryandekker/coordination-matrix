@@ -93,6 +93,7 @@ import { detectLoopScopes } from './editor/utils'
 import { StepConfigPanel } from './step-config-panel'
 import { SimulationPanel } from './simulation-panel'
 import { InputSchemaBuilder } from './input-schema-builder'
+import { AiAssistantPanel } from '@/components/ai/ai-assistant-panel'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
 
@@ -548,6 +549,12 @@ export function WorkflowEditor({
                     <Beaker className="h-4 w-4" />
                     Test
                   </TabsTrigger>
+                  {workflow?._id && (
+                    <TabsTrigger value="ai" className="gap-1.5 h-7">
+                      <Sparkles className="h-4 w-4" />
+                      AI
+                    </TabsTrigger>
+                  )}
                 </TabsList>
               </div>
 
@@ -1280,6 +1287,16 @@ export function WorkflowEditor({
               </div>
               </div>
             </TabsContent>
+
+            {workflow?._id && (
+              <TabsContent value="ai" className="flex-1 overflow-hidden mt-0 min-h-0">
+                <AiAssistantPanel
+                  contextType="workflow"
+                  contextId={workflow._id}
+                  className="h-full"
+                />
+              </TabsContent>
+            )}
 
             <TabsContent value="test" className="flex-1 overflow-hidden mt-0 min-h-0">
               <SimulationPanel
