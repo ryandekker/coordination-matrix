@@ -10,6 +10,8 @@ import { validateWorkflow } from '../../services/workflow/workflow-validator.js'
 import { simulateWorkflow } from '../../services/workflow/workflow-simulator.js';
 import { loadUserGroups, hasResourceAccess, resolveRequiredGroupId } from '../../middleware/group-access.js';
 import { isAdmin } from '../../middleware/authorize.js';
+import { searchDocuments } from '../../services/embedding-service.js';
+import type { DocumentSearchQuery } from '../../types/index.js';
 
 export const workflowsRouter = Router();
 
@@ -1100,6 +1102,158 @@ workflowsRouter.post('/:workflowId/steps/:stepId/test-execute', async (req: Requ
                   body: resolvedBody,
                 },
               },
+              executionTimeMs: Date.now() - startTime,
+              stepType,
+            },
+          });
+        }
+        break;
+      }
+
+      case 'findDocument': {
+        const findDocConfig = step.findDocumentConfig;
+        if (!findDocConfig) {
+          res.json({
+            data: {
+              success: false,
+              error: 'FindDocument step has no findDocumentConfig',
+              executionTimeMs: Date.now() - startTime,
+              stepType,
+            },
+          });
+          break;
+        }
+
+        const findDocMode = findDocConfig.mode || 'dynamic';
+        const storeAs = findDocConfig.storeAs || 'document';
+
+        if (findDocMode === 'static' && findDocConfig.documentId) {
+          // Static mode: fetch a specific document by ID
+          if (!ObjectId.isValid(findDocConfig.documentId)) {
+            res.json({
+              data: {
+                success: false,
+                error: `Invalid document ID: ${findDocConfig.documentId}`,
+                executionTimeMs: Date.now() - startTime,
+                stepType,
+              },
+            });
+            break;
+          }
+
+          const document = await db.collection('documents').findOne({
+            _id: new ObjectId(findDocConfig.documentId),
+          });
+
+          if (!document) {
+            res.json({
+              data: {
+                success: findDocConfig.failIfNotFound ? false : true,
+                output: {
+                  [storeAs]: null,
+                  mode: 'static',
+                  documentId: findDocConfig.documentId,
+                  resultCount: 0,
+                },
+                error: findDocConfig.failIfNotFound ? `Document ${findDocConfig.documentId} not found` : undefined,
+                executionTimeMs: Date.now() - startTime,
+                stepType,
+              },
+            });
+            break;
+          }
+
+          const { embedding: _emb, ...docWithoutEmbedding } = document as Record<string, unknown>;
+          res.json({
+            data: {
+              success: true,
+              output: {
+                [storeAs]: { document: docWithoutEmbedding },
+                mode: 'static',
+                documentId: findDocConfig.documentId,
+                resultCount: 1,
+              },
+              executionTimeMs: Date.now() - startTime,
+              stepType,
+            },
+          });
+        } else {
+          // Dynamic mode: semantic search
+          let searchPrompt = findDocConfig.searchPrompt || '';
+
+          // Resolve template variables from inputPayload
+          if (searchPrompt && inputPayload) {
+            searchPrompt = searchPrompt.replace(/\{\{([^}]+)\}\}/g, (_match: string, path: string) => {
+              const trimmedPath = path.trim();
+              const value = getNestedValue(inputPayload, trimmedPath)
+                ?? getNestedValue(inputPayload, trimmedPath.replace(/^input\./, ''));
+              if (value === undefined || value === null) return '';
+              if (typeof value === 'object') return JSON.stringify(value);
+              return String(value);
+            });
+          }
+
+          if (!searchPrompt) {
+            res.json({
+              data: {
+                success: false,
+                error: `Search prompt resolved to empty. Template: "${findDocConfig.searchPrompt || ''}"`,
+                output: {
+                  mode: 'dynamic',
+                  searchPromptTemplate: findDocConfig.searchPrompt,
+                  resolvedPrompt: '',
+                },
+                executionTimeMs: Date.now() - startTime,
+                stepType,
+              },
+            });
+            break;
+          }
+
+          const searchResults = await searchDocuments({
+            prompt: searchPrompt,
+            type: findDocConfig.documentTypes as DocumentSearchQuery['type'],
+            status: (findDocConfig.documentStatus || ['approved']) as DocumentSearchQuery['status'],
+            tags: findDocConfig.tags,
+            limit: findDocConfig.limit || 1,
+            minScore: findDocConfig.minScore || 0.5,
+          });
+
+          const documentResult = findDocConfig.limit === 1 && searchResults.length > 0
+            ? {
+                document: searchResults[0].document,
+                score: searchResults[0].score,
+                highlights: searchResults[0].highlights,
+              }
+            : searchResults.map(r => ({
+                document: r.document,
+                score: r.score,
+                highlights: r.highlights,
+              }));
+
+          res.json({
+            data: {
+              success: searchResults.length > 0 || !findDocConfig.failIfNotFound,
+              output: {
+                [storeAs]: searchResults.length > 0 ? documentResult : null,
+                mode: 'dynamic',
+                searchPrompt,
+                searchConfig: {
+                  documentTypes: findDocConfig.documentTypes,
+                  documentStatus: findDocConfig.documentStatus || ['approved'],
+                  tags: findDocConfig.tags,
+                  minScore: findDocConfig.minScore || 0.5,
+                },
+                resultCount: searchResults.length,
+                results: searchResults.map(r => ({
+                  id: String(r.document._id || ''),
+                  title: String(r.document.title || ''),
+                  type: String(r.document.type || ''),
+                  score: r.score,
+                })),
+              },
+              error: searchResults.length === 0 && findDocConfig.failIfNotFound
+                ? 'No documents found matching search criteria' : undefined,
               executionTimeMs: Date.now() - startTime,
               stepType,
             },

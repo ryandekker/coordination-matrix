@@ -14,6 +14,8 @@
  *   node scripts/workflows/deploy-workflows.mjs --env local --workflow dc  # Only Document Creation
  *   node scripts/workflows/deploy-workflows.mjs --env local --workflow tc  # Only Text Competition
  *   node scripts/workflows/deploy-workflows.mjs --env local --workflow mr  # Only Message Refinement
+ *   node scripts/workflows/deploy-workflows.mjs --env local --workflow da  # Only AI Document Assistant
+ *   node scripts/workflows/deploy-workflows.mjs --env local --workflow wa  # Only AI Workflow Assistant
  */
 
 const args = process.argv.slice(2);
@@ -1168,6 +1170,8 @@ async function main() {
   const shouldDeployDC = !workflowFilter || workflowFilter === 'dc';
   const shouldDeployTC = !workflowFilter || workflowFilter === 'tc';
   const shouldDeployMR = !workflowFilter || workflowFilter === 'mr';
+  const shouldDeployDA = !workflowFilter || workflowFilter === 'da';
+  const shouldDeployWA = !workflowFilter || workflowFilter === 'wa';
 
   // ==========================================================================
   // Workflow 1: Workflow Creation
@@ -1241,6 +1245,26 @@ async function main() {
     const mr = loadJsonWorkflow('message-refinement.json');
     const createdMR = await createWorkflow(mr);
     console.log(`  MR Workflow ID: ${createdMR._id}\n`);
+  }
+
+  // ==========================================================================
+  // Workflow 6: AI Document Assistant (JSON-based)
+  // ==========================================================================
+  if (shouldDeployDA) {
+    console.log('=== Deploying Workflow 6: AI Document Assistant ===\n');
+    const da = loadJsonWorkflow('ai-document-assistant.json');
+    const createdDA = await createWorkflow(da);
+    console.log(`  DA Workflow ID: ${createdDA._id}\n`);
+  }
+
+  // ==========================================================================
+  // Workflow 7: AI Workflow Assistant (JSON-based)
+  // ==========================================================================
+  if (shouldDeployWA) {
+    console.log('=== Deploying Workflow 7: AI Workflow Assistant ===\n');
+    const wa = loadJsonWorkflow('ai-workflow-assistant.json');
+    const createdWA = await createWorkflow(wa);
+    console.log(`  WA Workflow ID: ${createdWA._id}\n`);
   }
 
   console.log('=== Deployment Complete ===\n');
