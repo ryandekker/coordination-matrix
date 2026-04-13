@@ -62,7 +62,8 @@
       "description": "Answer the user's question about the workflow",
       "stepType": "agent",
       "defaultAssigneeId": "{{agent.complexity.1}}",
-      "additionalInstructions": "You are answering a question about a workflow definition.\n\nThe workflow definition is available in your input payload from the fetch-workflow step, including its steps array, connections, inputSchema, and configuration.\n\nBe concise and direct. Explain the workflow's structure, step types, data flow, or specific configuration as asked. If describing step connections, trace the execution path clearly.\n\nReturn your answer in the output.result field:\n```json\n{\n  \"answer\": \"Your answer here\",\n  \"referencedSteps\": [\"step-ids that are relevant to the answer\"]\n}\n```"
+      "additionalInstructions": "You are answering a question about a workflow definition.\n\nThe workflow definition is available in your input payload from the fetch-workflow step, including its steps array, connections, inputSchema, and configuration.\n\nBe concise and direct. Explain the workflow's structure, step types, data flow, or specific configuration as asked. If describing step connections, trace the execution path clearly.\n\nReturn your answer in the output.result field:\n```json\n{\n  \"answer\": \"Your answer here\",\n  \"referencedSteps\": [\"step-ids that are relevant to the answer\"]\n}\n```",
+      "connections": []
     },
     {
       "id": "apply-edit",
