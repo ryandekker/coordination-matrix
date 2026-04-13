@@ -8,12 +8,15 @@ import {
   Trash2,
   ExternalLink,
   AlertCircle,
+  MessageSquare,
+  Pencil,
+  RotateCcw,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { MarkdownContent } from '@/components/ui/markdown-content'
-import { useAiAssistant, AiMessage } from '@/hooks/use-ai-assistant'
+import { useAiAssistant, AiMessage, AiIntentMode } from '@/hooks/use-ai-assistant'
 import { cn } from '@/lib/utils'
 
 interface AiAssistantPanelProps {
@@ -35,6 +38,7 @@ export function AiAssistantPanel({
     error,
     activeTaskId,
     sendMessage,
+    retryWithMode,
     clearMessages,
   } = useAiAssistant(contextType, contextId)
 
@@ -111,8 +115,42 @@ export function AiAssistantPanel({
             </div>
           )}
 
-          {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
+          {messages.map((msg, idx) => (
+            <MessageBubble key={msg.id} message={msg}>
+              {/* Show retry buttons after the last assistant message when idle */}
+              {msg.role === 'assistant'
+                && !isProcessing
+                && idx === messages.length - 1
+                && msg.taskId
+                && !msg.content.startsWith('Retrying as') && (
+                <div className="mt-2 pt-2 border-t border-border/50">
+                  <p className="text-xs text-muted-foreground mb-1.5 flex items-center gap-1">
+                    <RotateCcw className="h-3 w-3" />
+                    Not what you expected?
+                  </p>
+                  <div className="flex gap-1.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 text-xs gap-1 px-2"
+                      onClick={() => retryWithMode('question')}
+                    >
+                      <MessageSquare className="h-3 w-3" />
+                      Retry as question
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 text-xs gap-1 px-2"
+                      onClick={() => retryWithMode('edit')}
+                    >
+                      <Pencil className="h-3 w-3" />
+                      Retry as edit
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </MessageBubble>
           ))}
 
           {isProcessing && (
@@ -179,7 +217,7 @@ export function AiAssistantPanel({
   )
 }
 
-function MessageBubble({ message }: { message: AiMessage }) {
+function MessageBubble({ message, children }: { message: AiMessage; children?: React.ReactNode }) {
   const isUser = message.role === 'user'
 
   return (
@@ -216,6 +254,7 @@ function MessageBubble({ message }: { message: AiMessage }) {
             View task <ExternalLink className="h-3 w-3" />
           </a>
         )}
+        {children}
       </div>
     </div>
   )

@@ -8,7 +8,8 @@
     "type": "object",
     "properties": {
       "workflowId": { "type": "string", "description": "ID of the workflow to query or edit" },
-      "instruction": { "type": "string", "description": "Natural language instruction — question or edit request" }
+      "instruction": { "type": "string", "description": "Natural language instruction — question or edit request" },
+      "mode": { "type": "string", "enum": ["question", "edit"], "description": "Optional override to bypass automatic intent classification" }
     },
     "required": ["workflowId", "instruction"]
   },
@@ -37,7 +38,7 @@
       "description": "Determine whether the user wants to ask a question or edit the workflow",
       "stepType": "code",
       "codeConfig": {
-        "code": "const instruction = (trigger && trigger.instruction) || '';\nconst lower = instruction.toLowerCase().trim();\n\nconst questionPatterns = /^(what|why|how|when|where|who|which|is |are |does |do |can |could |would |should |tell me|explain|describe|summarize|list |show me)/;\nconst hasQuestionMark = lower.includes('?');\nconst editPatterns = /\\b(change|update|add|remove|delete|edit|rewrite|fix|improve|replace|insert|append|move|rename|modify|restructure|refactor|reorder|connect|disconnect|configure|set |enable|disable)\\b/;\n\nlet intent = 'question';\nlet complexity = 'simple';\n\nif (editPatterns.test(lower)) {\n  intent = 'edit';\n  complexity = lower.length > 200 ? 'complex' : 'moderate';\n} else if (questionPatterns.test(lower) || hasQuestionMark) {\n  intent = 'question';\n  complexity = 'simple';\n} else {\n  intent = lower.length > 100 ? 'edit' : 'question';\n  complexity = intent === 'edit' ? 'moderate' : 'simple';\n}\n\nreturn { intent, complexity };"
+        "code": "const modeOverride = (trigger && trigger.mode) || '';\nif (modeOverride === 'question' || modeOverride === 'edit') {\n  return { intent: modeOverride, complexity: modeOverride === 'edit' ? 'moderate' : 'simple', override: true };\n}\n\nconst instruction = (trigger && trigger.instruction) || '';\nconst lower = instruction.toLowerCase().trim();\n\nconst questionPatterns = /^(what|why|how|when|where|who|which|is |are |does |do |can |could |would |should |tell me|explain|describe|summarize|list |show me)/;\nconst hasQuestionMark = lower.includes('?');\nconst editPatterns = /\\b(change|update|add|remove|delete|edit|rewrite|fix|improve|replace|insert|append|move|rename|modify|restructure|refactor|reorder|connect|disconnect|configure|enable|disable)\\b/;\n\nlet intent = 'question';\nlet complexity = 'simple';\n\nif (questionPatterns.test(lower) || hasQuestionMark) {\n  intent = 'question';\n  complexity = 'simple';\n} else if (editPatterns.test(lower)) {\n  intent = 'edit';\n  complexity = lower.length > 200 ? 'complex' : 'moderate';\n} else {\n  intent = lower.length > 100 ? 'edit' : 'question';\n  complexity = intent === 'edit' ? 'moderate' : 'simple';\n}\n\nreturn { intent, complexity };"
       },
       "connections": [
         { "targetStepId": "route-intent" }
