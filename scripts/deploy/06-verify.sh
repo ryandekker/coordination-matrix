@@ -90,10 +90,10 @@ else
   run_check "Frontend accessible" "HTTP $fe_code" "false"
 fi
 
-# Check 3: Frontend version via /build-info.json (static file)
+# Check 3: Frontend version via /build-info.json (static file on Pages)
 echo "--- Checking frontend version (/build-info.json) ---"
 fe_version_response=$(curl -s -o /dev/stdout -w "\n%{http_code}" \
-  --max-time 10 "$PROD_BACKEND_URL/build-info.json" 2>/dev/null) || true
+  --max-time 10 "$PROD_FRONTEND_URL/build-info.json" 2>/dev/null) || true
 fe_version_code=$(echo "$fe_version_response" | tail -1)
 fe_version_body=$(echo "$fe_version_response" | sed '$d')
 
