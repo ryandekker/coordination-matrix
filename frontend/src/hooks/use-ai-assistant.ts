@@ -55,6 +55,8 @@ export function useAiAssistant(contextType: 'document' | 'workflow', contextId: 
   // Cache the workflow ID after first lookup
   const workflowIdRef = useRef<string | null>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Guard against processing completion multiple times
+  const completionHandledRef = useRef(false)
   // Use ref to avoid stale closures in the polling callback
   const contextTypeRef = useRef(contextType)
   const contextIdRef = useRef(contextId)
@@ -79,6 +81,8 @@ export function useAiAssistant(contextType: 'document' | 'workflow', contextId: 
 
   // Unified completion check + result extraction — uses refs to avoid stale closures
   const checkAndHandleCompletion = useCallback(async (flowTaskId: string) => {
+    // Guard: only process completion once per flow task
+    if (completionHandledRef.current) return
     try {
       // Check flow status directly — this is the most reliable method
       const flowStatus = await tasksApi.getFlowStatus(flowTaskId)
@@ -89,7 +93,8 @@ export function useAiAssistant(contextType: 'document' | 'workflow', contextId: 
         return // Still running
       }
 
-      // Workflow is done — stop polling first
+      // Workflow is done — mark as handled and stop polling
+      completionHandledRef.current = true
       stopPolling()
 
       const workflowStatus = status.spawnedWorkflowStatus
@@ -247,12 +252,15 @@ export function useAiAssistant(contextType: 'document' | 'workflow', contextId: 
       inputPayload.mode = mode
     }
 
-    // Create a flow task that auto-triggers the workflow
+    // Create a flow task that auto-triggers the workflow.
+    // Status 'waiting' prevents the daemon from picking up this task and
+    // processing it as a regular agent task (which would cause duplicate execution).
     const modeLabel = mode ? ` [${mode}]` : ''
     const result = await tasksApi.create({
       title: `AI${modeLabel}: ${instruction.slice(0, 80)}${instruction.length > 80 ? '...' : ''}`,
       summary: instruction,
       humanInstruction: instruction,
+      status: 'waiting',
       triggerWorkflowId: workflowId,
       groupId: currentGroupId || undefined,
       metadata: {
@@ -269,6 +277,7 @@ export function useAiAssistant(contextType: 'document' | 'workflow', contextId: 
       throw new Error('Failed to create AI task')
     }
 
+    completionHandledRef.current = false
     setState(prev => ({ ...prev, activeTaskId: flowTaskId }))
 
     // Start polling as a fallback (SSE might miss events)
