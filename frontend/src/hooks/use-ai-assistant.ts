@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { tasksApi, workflowsApi, Task, Workflow } from '@/lib/api'
 import { useGroupContext } from '@/lib/group-context'
 import { useEventStream } from './use-event-stream'
+import { parseRichAnswer, type RichAnswerData } from '@/components/ai/rich-answer-panel'
 
 export type AiIntentMode = 'question' | 'edit'
 
@@ -17,6 +18,8 @@ export interface AiMessage {
   editSummary?: string
   /** The original instruction text, stored on assistant messages so retry can re-use it */
   originalInstruction?: string
+  /** Structured rich answer (markdown + follow-ups). Set on assistant messages when available. */
+  richAnswer?: RichAnswerData
 }
 
 interface AiAssistantState {
@@ -102,6 +105,7 @@ export function useAiAssistant(contextType: 'document' | 'workflow', contextId: 
 
       let content = ''
       let editSummary = ''
+      let richAnswer: RichAnswerData | undefined
 
       if (workflowStatus === 'failed') {
         content = 'The AI assistant encountered an error processing your request. Please try again.'
@@ -115,6 +119,17 @@ export function useAiAssistant(contextType: 'document' | 'workflow', contextId: 
         })
         const workflowTasks = tasksResult?.data || []
 
+        // Prefer the format-answer code task — it carries the full richAnswer payload
+        // including documentId and follow-ups.
+        const formatTask = workflowTasks.find((t: Task) => {
+          const out = getOutput(t)
+          return t.status === 'completed' && t.workflowStage && out?.richAnswer
+        })
+        if (formatTask) {
+          const out = getOutput(formatTask)!
+          richAnswer = parseRichAnswer(out.richAnswer) || undefined
+        }
+
         // Find the agent task that has a structured result (skip the flow task itself)
         const agentTask = workflowTasks.find((t: Task) =>
           t.status === 'completed' &&
@@ -125,6 +140,14 @@ export function useAiAssistant(contextType: 'document' | 'workflow', contextId: 
         if (agentTask) {
           const result = getResult(agentTask)!
           const output = getOutput(agentTask)!
+          // Fallback richAnswer derived from the agent output if format-answer wasn't found
+          if (!richAnswer) {
+            richAnswer = parseRichAnswer(output) || undefined
+            if (richAnswer && !richAnswer.sourceContext) {
+              richAnswer.sourceContext = contextTypeRef.current
+              richAnswer.sourceTargetId = contextIdRef.current
+            }
+          }
           if (result.answer) {
             content = String(result.answer)
           } else if (result.editSummary) {
@@ -164,6 +187,7 @@ export function useAiAssistant(contextType: 'document' | 'workflow', contextId: 
         timestamp: new Date(),
         taskId: flowTaskId,
         editSummary,
+        richAnswer,
       }
 
       setState(prev => ({

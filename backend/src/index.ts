@@ -50,6 +50,7 @@ import groupsRouter from './routes/groups.js';
 import projectsRouter from './routes/projects.js';
 import { conversationRecordsRouter } from './routes/conversation-records.js';
 import { dashboardRouter } from './routes/dashboard.js';
+import { aiAssistantRouter } from './routes/ai-assistant.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { requireAuth } from './middleware/auth.js';
 import { requireScope, SCOPES } from './middleware/authorize.js';
@@ -316,6 +317,9 @@ app.use('/api/projects', projectsRouter);  // Auth handled within router
 
 // Conversation records - daemon execution logs
 app.use('/api/conversation-records', requireAuth, requireScope(SCOPES.TASKS_READ), conversationRecordsRouter);
+
+// AI Assistant - follow-up endpoint that triggers stock assistant workflows
+app.use('/api/ai-assistant', requireAuth, requireScope(SCOPES.WORKFLOWS_EXECUTE), aiAssistantRouter);
 
 // Error handling
 app.use(errorHandler);

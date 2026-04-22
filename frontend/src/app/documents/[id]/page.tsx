@@ -25,6 +25,7 @@ import { formatDistanceToNow, format } from 'date-fns'
 import { DocumentModal } from '@/components/documents/document-modal'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { RichAnswerPanel, parseRichAnswer } from '@/components/ai/rich-answer-panel'
 
 const DOCUMENT_TYPES: Record<DocumentType, string> = {
   sop: 'SOP',
@@ -176,11 +177,23 @@ export default function DocumentViewPage({
         </div>
 
         <TabsContent value="content" className="flex-1 m-0 overflow-auto p-6">
-          <article className="max-w-4xl mx-auto prose prose-sm dark:prose-invert">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {document.content}
-            </ReactMarkdown>
-          </article>
+          {(() => {
+            const richAnswer = parseRichAnswer(document.metadata?.richAnswer)
+            if (richAnswer) {
+              return (
+                <div className="max-w-4xl mx-auto">
+                  <RichAnswerPanel data={richAnswer} hideDocumentLink />
+                </div>
+              )
+            }
+            return (
+              <article className="max-w-4xl mx-auto prose prose-sm dark:prose-invert">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {document.content}
+                </ReactMarkdown>
+              </article>
+            )
+          })()}
         </TabsContent>
 
         <TabsContent value="history" className="flex-1 m-0 overflow-auto p-6">

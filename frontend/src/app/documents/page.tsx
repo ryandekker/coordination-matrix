@@ -138,6 +138,7 @@ export default function DocumentsPage() {
   const [typeFilter, setTypeFilter] = useState<DocumentType | 'all'>('all')
   const [statusFilter, setStatusFilter] = useState<DocumentStatus | 'all'>('all')
   const [includeArchived, setIncludeArchived] = useState(false)
+  const [showOutputs, setShowOutputs] = useState(false)
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
@@ -171,6 +172,7 @@ export default function DocumentsPage() {
   const { data, isLoading, error } = useDocuments({
     search: search || undefined,
     type: typeFilter !== 'all' ? typeFilter : undefined,
+    excludeType: typeFilter === 'all' && !showOutputs ? 'output' : undefined,
     status: statusFilter !== 'all' ? statusFilter : undefined,
     includeArchived,
     resolveReferences: true,
@@ -357,6 +359,16 @@ export default function DocumentsPage() {
             className="rounded border-gray-300"
           />
           Include archived
+        </label>
+
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={showOutputs}
+            onChange={(e) => setShowOutputs(e.target.checked)}
+            className="rounded border-gray-300"
+          />
+          Show generated outputs
         </label>
       </div>
 

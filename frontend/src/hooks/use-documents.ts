@@ -26,6 +26,7 @@ interface UseDocumentsOptions {
   sortOrder?: 'asc' | 'desc'
   search?: string
   type?: DocumentType | DocumentType[]
+  excludeType?: DocumentType | DocumentType[]
   status?: DocumentStatus | DocumentStatus[]
   tags?: string[]
   includeArchived?: boolean
@@ -35,6 +36,8 @@ interface UseDocumentsOptions {
   resolveReferences?: boolean
   groupId?: string
   projectId?: string
+  richAnswerContext?: 'workflow' | 'document'
+  richAnswerTargetId?: string
   enabled?: boolean
 }
 

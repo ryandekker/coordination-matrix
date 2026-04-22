@@ -8,6 +8,7 @@ import { Task, ManualReviewDecision, Document } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { JsonViewer } from '@/components/ui/json-viewer'
 import { MarkdownContent } from '@/components/ui/markdown-content'
+import { RichAnswerPanel, parseRichAnswer } from '@/components/ai/rich-answer-panel'
 import Link from 'next/link'
 
 interface ManualReviewPanelProps {
@@ -115,29 +116,36 @@ export function ManualReviewPanel({
         </span>
       </div>
 
-      {/* Review Documents (rendered as markdown) */}
-      {hasReviewDocuments && reviewDocuments.map(doc => (
-        <div key={doc._id} className="border rounded-lg overflow-hidden">
-          <div className="px-3 py-2 flex items-center justify-between text-sm bg-muted/30">
-            <span className="font-medium">{doc.title}</span>
-            <Link
-              href={`/documents/${doc._id}`}
-              target="_blank"
-              className="text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-            </Link>
-          </div>
-          {doc.summary && (
-            <div className="px-3 py-2 text-sm text-muted-foreground border-b bg-muted/10">
-              {doc.summary}
+      {/* Review Documents (rendered as markdown, or as a rich-answer panel when applicable) */}
+      {hasReviewDocuments && reviewDocuments.map(doc => {
+        const richAnswer = parseRichAnswer(doc.metadata?.richAnswer)
+        return (
+          <div key={doc._id} className="border rounded-lg overflow-hidden">
+            <div className="px-3 py-2 flex items-center justify-between text-sm bg-muted/30">
+              <span className="font-medium">{doc.title}</span>
+              <Link
+                href={`/documents/${doc._id}`}
+                target="_blank"
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </Link>
             </div>
-          )}
-          <div className="p-4 bg-background max-h-[500px] overflow-auto">
-            <MarkdownContent content={doc.content} />
+            {doc.summary && (
+              <div className="px-3 py-2 text-sm text-muted-foreground border-b bg-muted/10">
+                {doc.summary}
+              </div>
+            )}
+            <div className="p-4 bg-background max-h-[500px] overflow-auto">
+              {richAnswer ? (
+                <RichAnswerPanel data={richAnswer} hideDocumentLink />
+              ) : (
+                <MarkdownContent content={doc.content} />
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
 
       {/* Raw Previous Step Output (collapsible, shown as fallback) */}
       {outputToShow && (
