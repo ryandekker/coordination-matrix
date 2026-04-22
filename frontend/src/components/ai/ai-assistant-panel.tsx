@@ -16,6 +16,8 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { MarkdownContent } from '@/components/ui/markdown-content'
+import { RichAnswerPanel } from '@/components/ai/rich-answer-panel'
+import { AssistantHistory } from '@/components/ai/assistant-history'
 import { useAiAssistant, AiMessage, AiIntentMode } from '@/hooks/use-ai-assistant'
 import { cn } from '@/lib/utils'
 
@@ -99,6 +101,13 @@ export function AiAssistantPanel({
           </Button>
         )}
       </div>
+
+      {/* History — past rich-answer documents for this target. Collapses once a chat is active. */}
+      <AssistantHistory
+        contextType={contextType}
+        contextId={contextId}
+        defaultCollapsed={messages.length > 0}
+      />
 
       {/* Messages area */}
       <ScrollArea className="flex-1 min-h-0" ref={scrollRef}>
@@ -232,6 +241,8 @@ function MessageBubble({ message, children }: { message: AiMessage; children?: R
       >
         {isUser ? (
           <p className="whitespace-pre-wrap">{message.content}</p>
+        ) : message.richAnswer ? (
+          <RichAnswerPanel data={message.richAnswer} />
         ) : (
           <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
             <MarkdownContent content={message.content} />

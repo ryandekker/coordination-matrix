@@ -98,7 +98,7 @@ async function resolveDocumentReferences(doc: Document): Promise<DocumentWithRes
 // Build filter from query params
 function buildFilter(query: Record<string, unknown>): Record<string, unknown> {
   const filter: Record<string, unknown> = {};
-  const { search, type, status, tags, includeArchived, createdById, workflowRunId, parentDocumentId, groupId, projectId, relatedTaskId, filters } = query;
+  const { search, type, excludeType, status, tags, includeArchived, createdById, workflowRunId, parentDocumentId, groupId, projectId, relatedTaskId, richAnswerContext, richAnswerTargetId, filters } = query;
 
   // Group filter
   if (groupId && typeof groupId === 'string' && ObjectId.isValid(groupId)) {
@@ -121,6 +121,13 @@ function buildFilter(query: Record<string, unknown>): Record<string, unknown> {
       filter.type = { $in: type.filter((t: string) => VALID_TYPES.includes(t as DocumentType)) };
     } else if (VALID_TYPES.includes(type as DocumentType)) {
       filter.type = type;
+    }
+  } else if (excludeType) {
+    // Exclude one or more types unless an explicit type filter is set
+    const excluded = (Array.isArray(excludeType) ? excludeType : [excludeType])
+      .filter((t): t is string => typeof t === 'string' && VALID_TYPES.includes(t as DocumentType));
+    if (excluded.length > 0) {
+      filter.type = { $nin: excluded };
     }
   }
 
@@ -162,6 +169,15 @@ function buildFilter(query: Record<string, unknown>): Record<string, unknown> {
     filter.parentDocumentId = null;
   } else if (parentDocumentId && typeof parentDocumentId === 'string' && ObjectId.isValid(parentDocumentId)) {
     filter.parentDocumentId = new ObjectId(parentDocumentId);
+  }
+
+  // Rich-answer history filters — match the metadata shape written by the AI assistant format-answer step
+  if (richAnswerContext === 'workflow' || richAnswerContext === 'document') {
+    filter['metadata.richAnswer.sourceContext'] = richAnswerContext;
+  }
+  if (richAnswerTargetId && typeof richAnswerTargetId === 'string') {
+    // Stored as a string — do not coerce to ObjectId
+    filter['metadata.richAnswer.sourceTargetId'] = richAnswerTargetId;
   }
 
   // Generic filters object

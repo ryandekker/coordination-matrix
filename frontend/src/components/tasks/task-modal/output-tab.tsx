@@ -17,6 +17,7 @@ import { DocumentOperationsPanel, type DocumentOperationResult } from './documen
 import { RoutingOperationsPanel, type RoutingOperationResult } from './routing-operations-panel'
 import { ExecutionSummarySection } from './execution-summary-section'
 import { ProducedAssetsPanel } from './produced-assets-panel'
+import { RichAnswerPanel, parseRichAnswer, type RichAnswerData } from '@/components/ai/rich-answer-panel'
 import { useUpdateTask } from '@/hooks/use-tasks'
 import { toast } from 'sonner'
 import { useQueryClient } from '@tanstack/react-query'
@@ -216,6 +217,33 @@ export function OutputTab({ task, childTasks, attachedDocuments, onRollback, onR
     return outputData?.conversationSessionId as string | undefined
   }, [metadata])
 
+  // Detect rich-answer-shaped output and enrich with task trigger info if needed
+  const richAnswer = useMemo<RichAnswerData | null>(() => {
+    const outputData = metadata?.output as Record<string, unknown> | undefined
+    const fromOutput = parseRichAnswer(outputData)
+    const fromStepOutput = parseRichAnswer(task.stepOutput?.data as unknown)
+    const parsed = fromOutput || fromStepOutput
+    if (!parsed) return null
+
+    // Enrich with source context from task input/trigger if missing
+    if (!parsed.sourceContext || !parsed.sourceTargetId) {
+      const taskInput = (metadata?.input || metadata?.trigger) as Record<string, unknown> | undefined
+      const workflowId = taskInput?.workflowId
+      const documentId = taskInput?.documentId
+      if (typeof workflowId === 'string') {
+        parsed.sourceContext = parsed.sourceContext || 'workflow'
+        parsed.sourceTargetId = parsed.sourceTargetId || workflowId
+      } else if (typeof documentId === 'string') {
+        parsed.sourceContext = parsed.sourceContext || 'document'
+        parsed.sourceTargetId = parsed.sourceTargetId || documentId
+      }
+      if (!parsed.sourceInstruction && typeof taskInput?.instruction === 'string') {
+        parsed.sourceInstruction = taskInput.instruction
+      }
+    }
+    return parsed
+  }, [metadata, task.stepOutput])
+
   // Produced assets banner — rolls up assets from this task and its children
   const producedAssetsBanner = (
     <div className="p-4 pb-0">
@@ -394,9 +422,14 @@ export function OutputTab({ task, childTasks, attachedDocuments, onRollback, onR
           <RoutingOperationsPanel operations={routingOpsResults} />
         </div>
       )}
+      {richAnswer && (
+        <div className="p-4 pb-0">
+          <RichAnswerPanel data={richAnswer} title="Answer" />
+        </div>
+      )}
       <div className="p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium">Task Output</h3>
+          <h3 className="text-sm font-medium">{richAnswer ? 'Raw Output' : 'Task Output'}</h3>
           <div className="flex items-center gap-2">
             {conversationSessionId && (
               <Link

@@ -2297,6 +2297,7 @@ export const documentsApi = {
     sortOrder?: 'asc' | 'desc'
     search?: string
     type?: DocumentType | DocumentType[]
+    excludeType?: DocumentType | DocumentType[]
     status?: DocumentStatus | DocumentStatus[]
     tags?: string[]
     includeArchived?: boolean
@@ -2306,6 +2307,8 @@ export const documentsApi = {
     resolveReferences?: boolean
     groupId?: string
     projectId?: string
+    richAnswerContext?: 'workflow' | 'document'
+    richAnswerTargetId?: string
   }): Promise<PaginatedResponse<Document>> => {
     const searchParams = new URLSearchParams()
     if (params?.page) searchParams.append('page', String(params.page))
@@ -2316,6 +2319,10 @@ export const documentsApi = {
     if (params?.type) {
       const types = Array.isArray(params.type) ? params.type : [params.type]
       types.forEach(t => searchParams.append('type', t))
+    }
+    if (params?.excludeType) {
+      const excluded = Array.isArray(params.excludeType) ? params.excludeType : [params.excludeType]
+      excluded.forEach(t => searchParams.append('excludeType', t))
     }
     if (params?.status) {
       const statuses = Array.isArray(params.status) ? params.status : [params.status]
@@ -2333,6 +2340,8 @@ export const documentsApi = {
     if (params?.resolveReferences) searchParams.append('resolveReferences', 'true')
     if (params?.groupId) searchParams.append('groupId', params.groupId)
     if (params?.projectId) searchParams.append('projectId', params.projectId)
+    if (params?.richAnswerContext) searchParams.append('richAnswerContext', params.richAnswerContext)
+    if (params?.richAnswerTargetId) searchParams.append('richAnswerTargetId', params.richAnswerTargetId)
     const response = await authFetch(`${API_BASE}/documents?${searchParams}`)
     return handleResponse(response)
   },
@@ -2699,6 +2708,30 @@ export const conversationRecordsApi = {
   delete: async (id: string): Promise<ApiResponse<void>> => {
     const response = await authFetch(`${API_BASE}/conversation-records/${id}`, {
       method: 'DELETE',
+    })
+    return handleResponse(response)
+  },
+}
+
+// AI Assistant follow-up — triggers stock AI assistant workflows by name
+export interface AiAssistantFollowUpResponse {
+  run: { _id: string }
+  rootTask: { _id: string }
+  assistantWorkflowId: string
+  assistantWorkflowName: string
+}
+
+export const aiAssistantApi = {
+  followUp: async (params: {
+    context: 'workflow' | 'document'
+    targetId: string
+    instruction: string
+    mode?: 'question' | 'edit'
+  }): Promise<AiAssistantFollowUpResponse> => {
+    const response = await authFetch(`${API_BASE}/ai-assistant/follow-up`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
     })
     return handleResponse(response)
   },
