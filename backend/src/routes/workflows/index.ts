@@ -24,17 +24,22 @@ workflowsRouter.use(aiPromptRoutes);
 // GET /api/workflows - List all workflows
 // Query params:
 //   - includeInactive: 'true' to include inactive workflows
+//   - includeArchived: 'true' to include archived workflows (hidden by default)
 //   - brief: 'true' to return step counts instead of full steps array (for faster list views)
 //   - folderId: filter by folder (use 'null' for unfiled workflows)
 //   - groupId: filter by specific group
 workflowsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const { includeInactive, brief, folderId, groupId } = req.query;
+    const { includeInactive, includeArchived, brief, folderId, groupId } = req.query;
 
     const filter: Record<string, unknown> = {};
     if (includeInactive !== 'true') {
       filter.isActive = true;
+    }
+    if (includeArchived !== 'true') {
+      // Exclude archived unless explicitly requested. Matches docs where field is missing OR null.
+      filter.archivedAt = { $in: [null, undefined] };
     }
 
     // Filter by folder
@@ -448,6 +453,80 @@ workflowsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
       : undefined;
 
     res.json({ data: result, ...(validation && { validation }) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/workflows/:id/archive - Archive a workflow (idempotent)
+// Archived workflows are hidden from list views by default; use ?includeArchived=true to see them.
+// Preserves the workflow and all history. Archiving also deactivates (sets isActive: false).
+workflowsRouter.post('/:id/archive', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const workflowId = new ObjectId(req.params.id);
+
+    const workflow = await db.collection<Workflow>('workflows').findOne({ _id: workflowId });
+    if (!workflow) {
+      throw createError('Workflow not found', 404);
+    }
+
+    const hasAccess = await hasResourceAccess(req, workflow.groupId);
+    if (!hasAccess) {
+      throw createError('You do not have access to this workflow', 403);
+    }
+
+    const actorId =
+      req.user?.userId && ObjectId.isValid(req.user.userId)
+        ? new ObjectId(req.user.userId)
+        : null;
+
+    const now = new Date();
+    const result = await db.collection<Workflow>('workflows').findOneAndUpdate(
+      { _id: workflowId },
+      {
+        $set: {
+          archivedAt: workflow.archivedAt || now,
+          archivedById: workflow.archivedAt ? (workflow.archivedById ?? null) : actorId,
+          isActive: false,
+          updatedAt: now,
+        },
+      },
+      { returnDocument: 'after' }
+    );
+
+    res.json({ data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/workflows/:id/unarchive - Unarchive a workflow (idempotent)
+// Does not automatically reactivate — caller must PATCH isActive: true separately if desired.
+workflowsRouter.post('/:id/unarchive', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const workflowId = new ObjectId(req.params.id);
+
+    const workflow = await db.collection<Workflow>('workflows').findOne({ _id: workflowId });
+    if (!workflow) {
+      throw createError('Workflow not found', 404);
+    }
+
+    const hasAccess = await hasResourceAccess(req, workflow.groupId);
+    if (!hasAccess) {
+      throw createError('You do not have access to this workflow', 403);
+    }
+
+    const result = await db.collection<Workflow>('workflows').findOneAndUpdate(
+      { _id: workflowId },
+      {
+        $set: { archivedAt: null, archivedById: null, updatedAt: new Date() },
+      },
+      { returnDocument: 'after' }
+    );
+
+    res.json({ data: result });
   } catch (error) {
     next(error);
   }

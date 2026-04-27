@@ -1380,6 +1380,10 @@ export interface Workflow {
   createdAt: Date;
   updatedAt: Date;
   createdById?: ObjectId | null;
+  // Archive state — retired but preserved. Hidden from list views by default.
+  // Distinct from isActive (which controls live triggers).
+  archivedAt?: Date | null;
+  archivedById?: ObjectId | null;
 }
 
 // Step-level execution log entry for workflow run tracing

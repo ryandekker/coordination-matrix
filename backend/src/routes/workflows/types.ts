@@ -175,6 +175,10 @@ export interface Workflow {
   createdAt: Date;
   updatedAt: Date;
   createdById?: ObjectId | null;
+  // Archive state — when set, the workflow is retired but preserved.
+  // Distinct from isActive (which controls live triggers). Archived workflows are hidden from list views by default.
+  archivedAt?: Date | null;
+  archivedById?: ObjectId | null;
 }
 
 // Valid step types for normalization

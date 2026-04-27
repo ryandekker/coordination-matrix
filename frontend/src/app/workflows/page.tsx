@@ -41,6 +41,8 @@ import {
   Folder,
   FolderOpen,
   Circle,
+  Archive,
+  ArchiveRestore,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -192,6 +194,8 @@ interface WorkflowData {
   samplePayload?: string
   createdAt: string
   updatedAt?: string
+  archivedAt?: string | null
+  archivedById?: string | null
 }
 
 // Brief workflow data (without full steps array)
@@ -209,6 +213,8 @@ interface BriefWorkflowData {
   samplePayload?: string
   createdAt: string
   updatedAt?: string
+  archivedAt?: string | null
+  archivedById?: string | null
 }
 
 // Pastel color palette for workflows
@@ -238,11 +244,14 @@ interface WorkflowListItem extends BriefWorkflowData {
   steps?: WorkflowStep[]
 }
 
-async function fetchWorkflows(groupId?: string): Promise<{ data: BriefWorkflowData[] }> {
+async function fetchWorkflows(groupId?: string, includeArchived?: boolean): Promise<{ data: BriefWorkflowData[] }> {
   // Use brief=true to get step counts instead of full steps array
   const params = new URLSearchParams({ includeInactive: 'true', brief: 'true' })
   if (groupId) {
     params.set('groupId', groupId)
+  }
+  if (includeArchived) {
+    params.set('includeArchived', 'true')
   }
   const response = await authFetch(`${API_BASE}/workflows?${params.toString()}`)
   if (!response.ok) {
@@ -334,6 +343,22 @@ async function duplicateWorkflow(id: string): Promise<{ data: WorkflowData }> {
     method: 'POST',
   })
   if (!response.ok) throw new Error('Failed to duplicate workflow')
+  return response.json()
+}
+
+async function archiveWorkflow(id: string): Promise<{ data: WorkflowData }> {
+  const response = await authFetch(`${API_BASE}/workflows/${id}/archive`, {
+    method: 'POST',
+  })
+  if (!response.ok) throw new Error('Failed to archive workflow')
+  return response.json()
+}
+
+async function unarchiveWorkflow(id: string): Promise<{ data: WorkflowData }> {
+  const response = await authFetch(`${API_BASE}/workflows/${id}/unarchive`, {
+    method: 'POST',
+  })
+  if (!response.ok) throw new Error('Failed to unarchive workflow')
   return response.json()
 }
 
@@ -440,6 +465,8 @@ export default function WorkflowsPage() {
   const [editingWorkflow, setEditingWorkflow] = useState<WorkflowData | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<WorkflowData | null>(null)
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false)
+  const [archiveConfirm, setArchiveConfirm] = useState<WorkflowData | null>(null)
+  const [includeArchived, setIncludeArchived] = useState(false)
   const [isApiDocsOpen, setIsApiDocsOpen] = useState(false)
   const [runDialog, setRunDialog] = useState<{ open: boolean; workflow: WorkflowData | null }>({
     open: false,
@@ -498,8 +525,8 @@ export default function WorkflowsPage() {
   }, [workflowIdFromUrl]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: workflowsData, isLoading, error } = useQuery({
-    queryKey: ['workflows', currentGroupId],
-    queryFn: () => fetchWorkflows(currentGroupId || undefined),
+    queryKey: ['workflows', currentGroupId, includeArchived],
+    queryFn: () => fetchWorkflows(currentGroupId || undefined, includeArchived),
   })
 
   const { data: foldersData } = useQuery({
@@ -551,6 +578,21 @@ export default function WorkflowsPage() {
 
   const duplicateMutation = useMutation({
     mutationFn: duplicateWorkflow,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflows'] })
+    },
+  })
+
+  const archiveMutation = useMutation({
+    mutationFn: archiveWorkflow,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflows'] })
+      setArchiveConfirm(null)
+    },
+  })
+
+  const unarchiveMutation = useMutation({
+    mutationFn: unarchiveWorkflow,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workflows'] })
     },
@@ -998,6 +1040,12 @@ export default function WorkflowsPage() {
           >
             {row.original.name}
           </button>
+          {row.original.archivedAt && (
+            <Badge variant="outline" className="gap-1 text-xs text-muted-foreground border-muted-foreground/50">
+              <Archive className="h-3 w-3" />
+              Archived
+            </Badge>
+          )}
         </div>
       ),
     },
@@ -1157,6 +1205,17 @@ export default function WorkflowsPage() {
                 )}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
+              {row.original.archivedAt ? (
+                <DropdownMenuItem onClick={() => unarchiveMutation.mutate(row.original._id)}>
+                  <ArchiveRestore className="mr-2 h-4 w-4" />
+                  Unarchive
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem onClick={() => setArchiveConfirm(row.original)}>
+                  <Archive className="mr-2 h-4 w-4" />
+                  Archive
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 className="text-destructive"
                 onClick={() => setDeleteConfirm(row.original)}
@@ -1169,7 +1228,7 @@ export default function WorkflowsPage() {
         </div>
       ),
     },
-  ], [handleToggleActive, openEditEditor, duplicateMutation, expandedRows, toggleRowExpanded, loadingSteps])
+  ], [handleToggleActive, openEditEditor, duplicateMutation, unarchiveMutation, expandedRows, toggleRowExpanded, loadingSteps])
 
   const table = useReactTable({
     data: workflows,
@@ -1244,6 +1303,15 @@ export default function WorkflowsPage() {
             </SelectItem>
           </SelectContent>
         </Select>
+
+        {/* Show archived */}
+        <label className="flex items-center gap-1.5 text-sm whitespace-nowrap">
+          <Checkbox
+            checked={includeArchived}
+            onCheckedChange={(v) => setIncludeArchived(v === true)}
+          />
+          Show archived
+        </label>
 
         {/* Folder filter */}
         <Select value={selectedFolderId || 'all'} onValueChange={(v) => setSelectedFolderId(v === 'all' ? null : v)}>
@@ -1657,6 +1725,29 @@ export default function WorkflowsPage() {
         onClose={closeEditor}
         onSave={handleSave}
       />
+
+      {/* Archive Confirmation Dialog */}
+      <AlertDialog open={!!archiveConfirm} onOpenChange={() => setArchiveConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Archive Workflow</AlertDialogTitle>
+            <AlertDialogDescription>
+              Archive &ldquo;{archiveConfirm?.name}&rdquo;? It will be deactivated and hidden
+              from the list. You can unarchive it later via &ldquo;Show archived&rdquo;. History
+              and runs are preserved.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => archiveConfirm && archiveMutation.mutate(archiveConfirm._id)}
+              disabled={archiveMutation.isPending}
+            >
+              Archive
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
